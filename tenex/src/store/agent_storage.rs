@@ -32,7 +32,7 @@
 use anyhow::{anyhow, Context, Result};
 use indexmap::IndexMap;
 use nostr_sdk::nips::nip19::FromBech32;
-use nostr_sdk::{Keys, PublicKey, SecretKey};
+use nostr_sdk::{Keys, SecretKey};
 use serde_json::Value;
 
 use crate::store::atomic;
@@ -165,6 +165,40 @@ impl AgentDoc {
     pub fn use_criteria(&self) -> Option<&str> {
         self.raw.get("useCriteria").and_then(Value::as_str)
     }
+
+    /// Read the agent's `telegram` config block as a typed projection.
+    /// Returns `None` when the field is absent or has been collapsed-empty
+    /// by [`sanitize_telegram_inplace`]. Mirrors
+    /// `agent.telegram` accessor at `AgentStorage.ts:74-88` +
+    /// `TelegramAgentConfig` (`storage.ts:4-15`).
+    pub fn telegram_config(&self) -> Option<TelegramAgentConfig> {
+        let obj = self.raw.get("telegram").and_then(Value::as_object)?;
+        let bot_token = obj.get("botToken").and_then(Value::as_str)?.to_owned();
+        Some(TelegramAgentConfig {
+            bot_token,
+            allow_dms: obj.get("allowDMs").and_then(Value::as_bool),
+            api_base_url: obj
+                .get("apiBaseUrl")
+                .and_then(Value::as_str)
+                .map(str::to_owned),
+            publish_reasoning_to_telegram: obj
+                .get("publishReasoningToTelegram")
+                .and_then(Value::as_bool),
+            publish_conversation_to_telegram: obj
+                .get("publishConversationToTelegram")
+                .and_then(Value::as_bool),
+        })
+    }
+}
+
+/// Mirror of `TelegramAgentConfig` (`storage.ts:4-15`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TelegramAgentConfig {
+    pub bot_token: String,
+    pub allow_dms: Option<bool>,
+    pub api_base_url: Option<String>,
+    pub publish_reasoning_to_telegram: Option<bool>,
+    pub publish_conversation_to_telegram: Option<bool>,
 }
 
 // ───────────────────────── index file ─────────────────────────────────────
@@ -1096,6 +1130,55 @@ impl AgentStorage {
         Ok(true)
     }
 
+    /// Mirror `updateAgentTelegramConfig` (`AgentStorage.ts:996-1012`).
+    ///
+    /// `Some(config)` → write a sanitized telegram block; `None` → drop
+    /// the block entirely (i.e. disable the per-agent bot). Either way
+    /// runs through `save_agent` so the persistence sanitiser collapses
+    /// empties + reapplies index updates. Returns `Ok(false)` when the
+    /// agent file is missing — matches TS `if (!agent) return false`.
+    pub fn update_agent_telegram_config(
+        &mut self,
+        pubkey: &str,
+        config: Option<&TelegramAgentConfig>,
+    ) -> Result<bool> {
+        let Some(mut agent) = AgentDoc::load(&self.base_dir, pubkey)? else {
+            return Ok(false);
+        };
+        match config {
+            None => {
+                agent.raw_mut().shift_remove("telegram");
+            }
+            Some(c) => {
+                let mut block = serde_json::Map::new();
+                block.insert("botToken".into(), Value::String(c.bot_token.clone()));
+                if let Some(b) = c.allow_dms {
+                    block.insert("allowDMs".into(), Value::Bool(b));
+                }
+                if let Some(u) = &c.api_base_url {
+                    block.insert("apiBaseUrl".into(), Value::String(u.clone()));
+                }
+                if let Some(b) = c.publish_reasoning_to_telegram {
+                    block.insert(
+                        "publishReasoningToTelegram".into(),
+                        Value::Bool(b),
+                    );
+                }
+                if let Some(b) = c.publish_conversation_to_telegram {
+                    block.insert(
+                        "publishConversationToTelegram".into(),
+                        Value::Bool(b),
+                    );
+                }
+                agent
+                    .raw_mut()
+                    .insert("telegram".into(), Value::Object(block));
+            }
+        }
+        self.save_agent(&agent)?;
+        Ok(true)
+    }
+
     /// `rebuildIndex` (`AgentStorage.ts:374-422`).
     ///
     /// Rebuilds `bySlug` and `byEventId` by scanning every agent file.
@@ -1602,6 +1685,91 @@ mod tests {
         assert_eq!(doc.description(), Some("small philosopher"));
         assert_eq!(doc.instructions(), Some("be careful"));
         assert_eq!(doc.use_criteria(), Some("always"));
+        std::fs::remove_dir_all(&base).ok();
+    }
+
+    #[test]
+    fn agent_telegram_config_accessor_extracts_typed_block() {
+        let base = unique_temp();
+        let pubkey = "tgagent";
+        let canonical = br#"{
+  "nsec": "nsec1foo",
+  "slug": "alpha",
+  "name": "Alpha",
+  "role": "thinker",
+  "telegram": {
+    "botToken": "1234:abcd",
+    "allowDMs": true,
+    "apiBaseUrl": "https://api.test"
+  }
+}"#;
+        write_file(&agent_file_path(&base, pubkey), canonical);
+        let doc = AgentDoc::load(&base, pubkey).unwrap().unwrap();
+        let tg = doc.telegram_config().unwrap();
+        assert_eq!(tg.bot_token, "1234:abcd");
+        assert_eq!(tg.allow_dms, Some(true));
+        assert_eq!(tg.api_base_url.as_deref(), Some("https://api.test"));
+        assert!(tg.publish_reasoning_to_telegram.is_none());
+        std::fs::remove_dir_all(&base).ok();
+    }
+
+    #[test]
+    fn agent_telegram_config_returns_none_when_block_absent() {
+        let base = unique_temp();
+        let pubkey = "no-tg";
+        let canonical = br#"{
+  "nsec": "nsec1foo",
+  "slug": "alpha",
+  "name": "Alpha",
+  "role": "thinker"
+}"#;
+        write_file(&agent_file_path(&base, pubkey), canonical);
+        let doc = AgentDoc::load(&base, pubkey).unwrap().unwrap();
+        assert!(doc.telegram_config().is_none());
+        std::fs::remove_dir_all(&base).ok();
+    }
+
+    #[test]
+    fn update_agent_telegram_config_writes_and_clears() {
+        // Use a real agent so storage's slug ownership invariants hold.
+        let base = unique_temp();
+        let mut storage = AgentStorage::open(&base).unwrap();
+        let nsec = generate_nsec_bech32().unwrap();
+        let mut raw = IndexMap::<String, Value>::new();
+        raw.insert("nsec".into(), Value::String(nsec));
+        raw.insert("slug".into(), Value::String("alpha".into()));
+        raw.insert("name".into(), Value::String("Alpha".into()));
+        raw.insert("role".into(), Value::String("thinker".into()));
+        let pk = storage.save_agent(&AgentDoc::from_raw(raw)).unwrap();
+
+        // Set a config.
+        let cfg = TelegramAgentConfig {
+            bot_token: "tok".into(),
+            allow_dms: Some(true),
+            api_base_url: None,
+            publish_reasoning_to_telegram: None,
+            publish_conversation_to_telegram: None,
+        };
+        let written = storage.update_agent_telegram_config(&pk, Some(&cfg)).unwrap();
+        assert!(written);
+        let agent = AgentDoc::load(&base, &pk).unwrap().unwrap();
+        assert_eq!(agent.telegram_config().unwrap().bot_token, "tok");
+
+        // Clear it.
+        let cleared = storage.update_agent_telegram_config(&pk, None).unwrap();
+        assert!(cleared);
+        let agent = AgentDoc::load(&base, &pk).unwrap().unwrap();
+        assert!(agent.telegram_config().is_none());
+
+        std::fs::remove_dir_all(&base).ok();
+    }
+
+    #[test]
+    fn update_agent_telegram_config_returns_false_for_missing_agent() {
+        let base = unique_temp();
+        let mut storage = AgentStorage::open(&base).unwrap();
+        let result = storage.update_agent_telegram_config("notfound", None).unwrap();
+        assert!(!result);
         std::fs::remove_dir_all(&base).ok();
     }
 

@@ -10,6 +10,7 @@ mod runtime_cmd;
 mod store;
 mod tui;
 mod types;
+mod utils;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};

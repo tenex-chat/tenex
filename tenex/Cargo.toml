@@ -28,6 +28,7 @@ crossterm = "0.25"
 chrono = "0.4"
 uuid = { version = "1", features = ["v4"] }
 dirs-next = "2"
+sha2 = "0.10"
 tenex-whitelist = { path = "../whitelist" }
 tenex-llm-config = { path = "../crates/tenex-llm-config" }
 tenex-identity = { path = "../crates/tenex-identity" }
