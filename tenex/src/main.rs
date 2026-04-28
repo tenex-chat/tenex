@@ -1,8 +1,10 @@
 mod agent_cmd;
 mod config_cmd;
+mod cron_cmd;
 mod daemon;
 mod doctor;
 mod mcp_cmd;
+mod nostr_pub;
 mod onboard;
 mod store;
 mod tui;
@@ -36,6 +38,9 @@ enum Command {
     /// Manage project-level MCP servers (.mcp.json).
     Mcp(mcp_cmd::McpArgs),
 
+    /// Browse, add, and remove scheduled tasks across all projects.
+    Cron(cron_cmd::CronArgs),
+
     /// Run the project supervisor: subscribe to Nostr, boot a per-project
     /// runtime (`tenex-boot`) for each project that receives a kind:1 or
     /// kind:24000 trigger from a whitelisted pubkey, restart on crash.
@@ -53,6 +58,7 @@ async fn main() -> Result<()> {
         Command::Doctor(args) => doctor::run(args).await,
         Command::Agent(args) => agent_cmd::run(args).await,
         Command::Mcp(args) => mcp_cmd::run(args).await,
+        Command::Cron(args) => cron_cmd::run(args).await,
         Command::Daemon(args) => daemon::run(args).await,
     }
 }
