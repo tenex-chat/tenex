@@ -1,5 +1,6 @@
 mod config;
 mod emit;
+mod home;
 mod hook;
 mod prompt;
 mod tools;
@@ -15,6 +16,8 @@ use std::sync::{Arc, Mutex};
 use tenex_conversations::{AgentContextState, ConversationStore};
 use tenex_project::Project;
 use tenex_rag::{EmbedConfig, RagStore};
+use tenex_supervision::heuristics::default_supervisor;
+use tenex_supervision::types::AgentCategory as SupervisionCategory;
 use tenex_protocol::{
     nostr::{read_one_from_stdin, NostrChannel},
     sink::StdoutNdjsonSink,
@@ -29,21 +32,29 @@ use tools::{
 /// Build and run the agent with all tools attached.
 /// The macro avoids duplicating tool registration across provider branches
 /// while still returning different concrete types per provider.
+/// $delegate is Option<DelegateTool> — None for categories that cannot delegate.
 macro_rules! run_agent {
-    ($client:expr, $model:expr, $system:expr, $message:expr, $wd:expr, $todos:expr, $hook:expr, $delegate:expr, $rag_index:expr, $rag_search:expr) => {{
-        $client
+    ($client:expr, $model:expr, $system:expr, $message:expr, $wd:expr, $env:expr, $todos:expr, $hook:expr, $delegate:expr, $rag_index:expr, $rag_search:expr) => {{
+        let __base = $client
             .agent($model)
             .preamble($system)
             .max_tokens(16384)
             .default_max_turns(25)
-            .tool(ShellTool::new($wd.clone()))
+            .tool(ShellTool::new($wd.clone(), $env.clone()))
             .tool(FsReadTool::new($wd.clone()))
             .tool(FsWriteTool::new($wd.clone()))
             .tool(FsEditTool::new($wd.clone()))
             .tool(FsGlobTool::new($wd.clone()))
             .tool(FsGrepTool::new($wd.clone()))
-            .tool(TodoWriteTool::new($todos.clone()))
-            .tool($delegate)
+            .tool(TodoWriteTool::new($todos.clone()));
+
+        let __base = if let Some(__d) = $delegate {
+            __base.tool(__d)
+        } else {
+            __base
+        };
+
+        __base
             .tool($rag_index)
             .tool($rag_search)
             .build()
@@ -230,6 +241,36 @@ async fn main() -> Result<()> {
     let teams_fragment =
         tenex_project::render_teams_context(&member_teams, envelope.metadata.team.as_deref());
 
+    // Set up agent home directory.
+    let agent_home = home::agent_home_dir(&base_dir, &pubkey_hex);
+    home::ensure_agent_home_dir(&agent_home);
+    if let Err(e) = home::write_agent_env_file(&agent_home, &agent_config.nsec, &pubkey_hex) {
+        eprintln!("[tenex-agent] Failed to write agent .env file: {e}");
+    }
+
+    // Build env vars for shell commands: parse agent .env + inject computed vars.
+    let mut shell_env: Vec<(String, String)> =
+        home::parse_dotenv(&agent_home.join(".env"))
+            .into_iter()
+            .filter(|(k, _)| k != "HOME")  // never override the real HOME
+            .collect();
+    shell_env.push(("AGENT_HOME".to_string(), agent_home.display().to_string()));
+    shell_env.push(("PUBKEY".to_string(), pubkey_hex.clone()));
+    shell_env.push(("TENEX_BASE_DIR".to_string(), base_dir.display().to_string()));
+    if let Ok(user_home) = std::env::var("HOME") {
+        shell_env.push(("USER_HOME".to_string(), user_home));
+    }
+    shell_env.push(("PROJECT_BASE".to_string(), working_dir.clone()));
+    shell_env.push(("PROJECT_ID".to_string(), project_id.clone()));
+
+    let injected_files = home::get_injected_files(&agent_home);
+    let file_count = home::count_home_files(&agent_home);
+    let home_info = prompt::HomeDirectoryInfo {
+        home_dir: &agent_home.display().to_string(),
+        file_count: &file_count,
+        injected_files: &injected_files,
+    };
+
     // Build system prompt
     let mut system_prompt = prompt::build_system_prompt(
         &agent_config,
@@ -238,6 +279,7 @@ async fn main() -> Result<()> {
         Some(&project_meta),
         &project_agents,
         &teams_fragment,
+        &home_info,
     );
 
     // Load persisted todos and inject them as a system reminder into the user message.
@@ -273,8 +315,23 @@ async fn main() -> Result<()> {
         meta: Arc::new(Mutex::new(AgentMeta::new())),
     });
 
-    let hook = EmitHook::new(emit_state.clone());
-    let delegate_tool = DelegateTool::new(emit_state.clone(), project_agents, teams);
+    let category = agent_config.resolved_category();
+    let supervision_category = category.map(|c| match c {
+        config::AgentCategory::Orchestrator => SupervisionCategory::Orchestrator,
+        config::AgentCategory::Worker => SupervisionCategory::Worker,
+        config::AgentCategory::DomainExpert => SupervisionCategory::DomainExpert,
+        config::AgentCategory::Reviewer => SupervisionCategory::Reviewer,
+        config::AgentCategory::Principal => SupervisionCategory::Orchestrator,
+        config::AgentCategory::Generalist => SupervisionCategory::Worker,
+    });
+    let supervisor = Arc::new(Mutex::new(default_supervisor()));
+    let hook = EmitHook::new(emit_state.clone(), supervisor, todos.clone(), supervision_category);
+    let delegate_tool: Option<DelegateTool> =
+        if category.map(|c| c.allows_delegation()).unwrap_or(true) {
+            Some(DelegateTool::new(emit_state.clone(), project_agents, teams))
+        } else {
+            None
+        };
 
     // Initialize RAG store for the embedding tools. If embedding is not configured
     // or initialization fails, the tools remain available but return an error message.
@@ -344,6 +401,7 @@ async fn main() -> Result<()> {
                 &system_prompt,
                 &user_message,
                 working_dir,
+                shell_env,
                 todos,
                 hook.clone(),
                 delegate_tool.clone(),
@@ -362,6 +420,7 @@ async fn main() -> Result<()> {
                 &system_prompt,
                 &user_message,
                 working_dir,
+                shell_env,
                 todos,
                 hook.clone(),
                 delegate_tool.clone(),
@@ -381,6 +440,7 @@ async fn main() -> Result<()> {
                 &system_prompt,
                 &user_message,
                 working_dir,
+                shell_env,
                 todos,
                 hook.clone(),
                 delegate_tool.clone(),
@@ -404,6 +464,7 @@ async fn main() -> Result<()> {
                 &system_prompt,
                 &user_message,
                 working_dir,
+                shell_env,
                 todos,
                 hook,
                 delegate_tool,

@@ -1,5 +1,97 @@
-use crate::config::AgentConfig;
+use std::path::Path;
+
+use crate::config::{AgentCategory, AgentConfig};
+use crate::home::InjectedFile;
 use tenex_project::{Agent, ProjectMetadata};
+
+pub struct HomeDirectoryInfo<'a> {
+    pub home_dir: &'a str,
+    pub file_count: &'a str,
+    pub injected_files: &'a [InjectedFile],
+}
+
+fn render_home_directory(info: &HomeDirectoryInfo) -> String {
+    let mut parts = vec![
+        "<home-directory>".to_string(),
+        format!(
+            "You have a personal home directory at: `{}`. This is *your* space to use as you see fit. The contents of this directory are persistent and private to you.",
+            info.home_dir
+        ),
+        String::new(),
+        format!("**Current contents:** {}", info.file_count),
+        String::new(),
+        "Use this space for notes, helper scripts, temporary files, or any personal workspace needs. Use descriptive names for your files so you can easily find them later.".to_string(),
+        String::new(),
+        "**Shell env files:** Shell sessions automatically load environment variables from `.env` files with precedence `agent > project > global`. Your nsec is in your home directory's `.env` file as `NSEC`. `.env` contents are NOT injected into your prompt. Reference them in shell commands with normal shell expansion such as `$NSEC` or `$OPENAI_API_KEY`.".to_string(),
+        String::new(),
+        "**Note on ~:** The shell `~` expands to the user's real home directory (via `$HOME`), NOT your agent home. To access your agent home directory in shell commands, use `$AGENT_HOME`.".to_string(),
+        String::new(),
+        "**Auto-injected files:** Files starting with `+` (e.g., `+NOTES.md`) are automatically injected into your system prompt on every execution. Keep `+` files **lean and poignant** — only include things you genuinely need at *every* execution (standing rules, critical reminders, active constraints). Do NOT use `+` files for: status reports, task logs, one-off findings, transient state, or detailed reference material. Instead, write that content in a regular (non-`+`) file and add a brief reference to it from your `+` file so you can read it when relevant. Keep each `+` file under **100 lines** — if it exceeds that, extract the detail into a non-`+` file and replace it with a pointer.".to_string(),
+    ];
+
+    if !info.injected_files.is_empty() {
+        parts.push(String::new());
+        parts.push("<memorized-files>".to_string());
+        for file in info.injected_files {
+            let truncated_attr = if file.truncated { " truncated=\"true\"" } else { "" };
+            parts.push(format!(
+                "  <file name=\"{}\"{}>{}</file>",
+                file.filename, truncated_attr, file.content
+            ));
+        }
+        parts.push("</memorized-files>".to_string());
+    }
+
+    parts.push("</home-directory>".to_string());
+    parts.join("\n")
+}
+
+const ORCHESTRATOR_GUIDANCE: &str = "## Orchestrator Guidance
+
+You are an orchestrator. When the user says \"do X\", they are assigning responsibility for getting X done, not telling you that you personally must execute every step.
+
+- Your first job is to evaluate who should handle the work.
+- Prefer delegating execution to the most appropriate agent when another agent is better suited for the task.
+- Treat yourself as the coordinator responsible for routing, sequencing, and quality control.
+- Only do the work yourself when the task is genuinely orchestration work, delegation would add unnecessary overhead, or no better delegate exists.";
+
+const DOMAIN_EXPERT_GUIDANCE: &str = "## Domain Expert Guidance
+
+You are a domain expert. You do all work yourself — no exceptions.
+
+- **NEVER delegate.** You have no delegation capability. Do the work directly using your own knowledge and available tools.
+- **Refuse out-of-domain requests entirely.** If a request falls outside your domain of expertise, respond with exactly: \"I can't help with that — this is outside my domain of expertise.\" Do not attempt a partial answer, do not suggest who might help, do not pass it on. Just refuse.
+- Your job is to answer questions and complete tasks within your domain. Nothing else.";
+
+const DELEGATION_TIPS: &str = "## Delegation Tips
+
+Delegate what needs to be done, not how — provide context but trust the delegatee's expertise. Delegation is async: you are automatically re-invoked when the delegatee completes; `delegate_followup` is for additional context or clarifying questions only.";
+
+const TODO_BEFORE_DELEGATION: &str = "## Todo List
+
+When delegating tasks, a todo list helps you track progress and stay organized.
+
+- Use `todo_write()` to outline your workflow plan before or after delegating
+- Include anticipated delegations so progress is visible
+- Mark your current task as in_progress when delegating";
+
+const AGENT_DIRECTED_MONITORING: &str = "## Monitoring Delegated Work
+
+When you delegate tasks to other agents, you can monitor their progress using existing tools:
+
+1. **Check Progress**: Use `conversation_get` with the delegation conversation ID. Optionally pass a `prompt` parameter to have the tool summarize the delegatee's progress.
+
+2. **Wait Between Checks**: Use `shell()` with `sleep <seconds>` to wait between progress checks. Choose intervals based on task complexity:
+   - Quick tasks (< 2 min expected): Check every 30 seconds
+   - Medium tasks (2-10 min): Check every 1-2 minutes
+   - Long tasks (> 10 min): Check every 3-5 minutes
+
+3. **When to Monitor**: You decide whether active monitoring is needed based on:
+   - Task criticality and deadline pressure
+   - Whether you need intermediate results
+   - The delegatee's reliability for the task type
+
+Most delegations complete and return results automatically. Active monitoring is optional and primarily useful for long-running tasks where you want progress visibility.";
 
 pub fn build_system_prompt(
     config: &AgentConfig,
@@ -8,7 +100,9 @@ pub fn build_system_prompt(
     project_meta: Option<&ProjectMetadata>,
     agents: &[Agent],
     teams_fragment: &str,
+    home: &HomeDirectoryInfo,
 ) -> String {
+    let category = config.resolved_category();
     let mut parts: Vec<String> = Vec::new();
 
     // Fragment 01: Agent identity
@@ -24,13 +118,20 @@ pub fn build_system_prompt(
             .unwrap_or_default(),
     ));
 
+    // Fragment 02: Home directory
+    parts.push(render_home_directory(home));
+
     // Fragment 03: System reminders explanation
     parts.push(
-        "<system-reminders-explanation>\
-Messages may include <system-reminder> tags. These are system-injected informational \
-context — not user speech. They contain dynamic state such as your current todo list, \
-behavioral guidance, or context updates. Absorb them silently; do not acknowledge or \
-respond to them directly.\
+        "<system-reminders-explanation>\n\
+System messages may include `<system-reminders>` blocks, and tool results or user messages \
+may include `<system-reminder>` tags. These are system-injected informational context — not \
+user speech. They contain dynamic information such as behavioral guidance, context updates, \
+and state notifications. They bear no direct relation to the surrounding message unless the \
+reminder content says otherwise.\n\n\
+System reminders are background context for you to absorb silently. Do not acknowledge, \
+reference, or respond to them as if the user said something. Incorporate relevant information \
+into your behavior naturally, but never surface the reminder itself in your response.\n\
 </system-reminders-explanation>"
             .to_string(),
     );
@@ -41,7 +142,21 @@ respond to them directly.\
         ));
     }
 
-    // Fragment 08: Workspace + project context
+    // Fragment 07: Environment variables (skipped for orchestrators — adds noise)
+    if category != Some(AgentCategory::Orchestrator) {
+        parts.push(
+            "<environment-variables>\n\
+These variables are available in shell commands and file tool path arguments.\n\
+- $USER_HOME, $AGENT_HOME, $PUBKEY, $NPUB\n\
+- $PROJECT_BASE, $PROJECT_ID\n\
+- $TENEX_BASE_DIR — TENEX data directory (agents, projects, teams, built-in skills)\n\n\
+Your nsec and other secrets are in $AGENT_HOME/.env (auto-loaded in shell sessions).\n\
+</environment-variables>"
+                .to_string(),
+        );
+    }
+
+    // Fragment 08: Workspace + project context (with AGENTS.md if present and small)
     let mut project_lines = vec![format!("    cwd: {working_dir}")];
     if let Some(meta) = project_meta {
         if let Some(title) = &meta.title {
@@ -51,10 +166,16 @@ respond to them directly.\
             project_lines.push(format!("    owner: {}", &owner[..8.min(owner.len())]));
         }
     }
-    parts.push(format!(
-        "<project-context>\n  <workspace>\n{}\n  </workspace>\n</project-context>",
+    let agents_md = read_agents_md(working_dir);
+    let mut project_ctx = format!(
+        "<project-context>\n  <workspace>\n{}\n  </workspace>",
         project_lines.join("\n")
-    ));
+    );
+    if let Some(content) = agents_md {
+        project_ctx.push_str(&format!("\n\n  <agents.md>\n{content}\n  </agents.md>"));
+    }
+    project_ctx.push_str("\n</project-context>");
+    parts.push(project_ctx);
 
     // Available agents fragment
     if !agents.is_empty() {
@@ -109,5 +230,29 @@ Creating a todo list helps you stay organized, shows your progress to observers,
         "When tools have a `description` parameter, write 5-10 words in active voice describing *what* and *why* (e.g. \"Index API docs for onboarding guide\").".to_string(),
     );
 
+    // Category-specific guidance fragments
+    if category == Some(AgentCategory::Orchestrator) {
+        parts.push(ORCHESTRATOR_GUIDANCE.to_string());
+    }
+
+    if category == Some(AgentCategory::DomainExpert) {
+        parts.push(DOMAIN_EXPERT_GUIDANCE.to_string());
+    }
+
+    if !matches!(category, Some(AgentCategory::DomainExpert) | Some(AgentCategory::Worker)) {
+        parts.push(DELEGATION_TIPS.to_string());
+        parts.push(TODO_BEFORE_DELEGATION.to_string());
+    }
+
+    // Fragment 28: Monitoring delegated work
+    if !matches!(category, Some(AgentCategory::DomainExpert) | Some(AgentCategory::Worker)) {
+        parts.push(AGENT_DIRECTED_MONITORING.to_string());
+    }
+
     parts.join("\n\n")
+}
+
+fn read_agents_md(working_dir: &str) -> Option<String> {
+    let content = std::fs::read_to_string(Path::new(working_dir).join("AGENTS.md")).ok()?;
+    if content.len() > 2000 { None } else { Some(content) }
 }
