@@ -135,19 +135,11 @@ mod tests {
         p
     }
 
-    #[test]
-    fn resolve_path_expands_tilde_slash_when_home_set() {
-        std::env::set_var("HOME", "/tmp/fakehome");
-        let p = resolve_path("~/foo");
-        assert_eq!(p, PathBuf::from("/tmp/fakehome/foo"));
-    }
-
-    #[test]
-    fn resolve_path_expands_bare_tilde() {
-        std::env::set_var("HOME", "/tmp/fakehome2");
-        let p = resolve_path("~");
-        assert_eq!(p, PathBuf::from("/tmp/fakehome2"));
-    }
+    // The `~`-expansion variants of `resolve_path` are tested in
+    // `crate::utils::path_expand::tests` with proper $HOME serialisation
+    // via a process-wide mutex (`with_home`). Don't duplicate them here:
+    // direct $HOME mutation in this module would race with those tests
+    // under cargo's parallel test runner.
 
     #[test]
     fn resolve_path_passes_absolute_paths_through() {

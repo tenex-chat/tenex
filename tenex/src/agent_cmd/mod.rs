@@ -22,6 +22,7 @@ use clap::{Parser, Subcommand};
 pub mod categorize;
 pub mod manager_actions;
 pub mod manager_logic;
+pub mod openclaw_distiller;
 pub mod openclaw_home;
 pub mod openclaw_preview;
 pub mod openclaw_reader;
