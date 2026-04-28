@@ -1,7 +1,6 @@
 ---
 name: agent-management
-description: Create and update agent configurations and current project metadata
+description: Create and update agent configurations
 tools:
   - agents_write
-  - modify_project
 ---

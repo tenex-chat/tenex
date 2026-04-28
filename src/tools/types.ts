@@ -32,7 +32,6 @@ export type ToolName =
     | "lesson_learn"
     | "shell"
     | "agents_write"
-    | "modify_project"
     | "delegate"
     | "delegate_followup"
     | "self_delegate"
