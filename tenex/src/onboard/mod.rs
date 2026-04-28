@@ -208,10 +208,12 @@ pub async fn run(args: OnboardArgs) -> Result<()> {
         if !json_mode {
             display::step(5, 7, "Model Roles");
         }
-        let outcome = role_assignment::run(
-            &base_dir,
-            &auto_select_roles::EmptyModelInfoSource,
-        )?;
+        // Try the on-disk models.dev cache; fall back to the empty
+        // source when missing/unparseable. When TS has been run
+        // recently the cache is populated and Step 5's auto-pick will
+        // produce real assignments instead of a no-op.
+        let model_info = auto_select_roles::load_or_empty(&base_dir);
+        let outcome = role_assignment::run(&base_dir, model_info.as_ref())?;
         match outcome {
             role_assignment::RoleAssignmentResult::Configured => {
                 role_assignment_done = true;

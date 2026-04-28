@@ -45,7 +45,7 @@ pub mod telemetry;
 use anyhow::Result;
 use clap::Parser;
 
-use crate::onboard::auto_select_roles::EmptyModelInfoSource;
+use crate::onboard::auto_select_roles;
 use crate::store::providers::ProvidersDoc;
 use crate::tui::custom_prompts::section_menu_prompt::{
     section_menu_prompt, MenuEntry, MenuSection, SectionMenuResult,
@@ -121,7 +121,11 @@ fn run_llm_submenu(base_dir: &std::path::Path) -> Result<()> {
 }
 
 fn run_roles_submenu(base_dir: &std::path::Path) -> Result<()> {
-    let _ = crate::onboard::role_assignment::run(base_dir, &EmptyModelInfoSource)?;
+    // Use the on-disk models.dev cache when available (best-effort
+    // read; falls back to an empty source when the cache file is
+    // missing or unparseable — see auto_select_roles::load_or_empty).
+    let model_info = auto_select_roles::load_or_empty(base_dir);
+    let _ = crate::onboard::role_assignment::run(base_dir, model_info.as_ref())?;
     Ok(())
 }
 

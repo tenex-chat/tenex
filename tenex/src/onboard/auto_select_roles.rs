@@ -95,6 +95,48 @@ impl ModelInfoSource for ModelsDevSource<'_> {
     }
 }
 
+/// Owned variant of [`ModelsDevSource`] — holds a `CacheData` so it can
+/// be passed across function boundaries without lifetime gymnastics.
+/// Re-resolves on each `info()` call against the inner cache.
+pub struct OwnedModelsDevSource {
+    cache: crate::store::models_dev::CacheData,
+}
+
+impl OwnedModelsDevSource {
+    pub fn new(cache: crate::store::models_dev::CacheData) -> Self {
+        Self { cache }
+    }
+}
+
+impl ModelInfoSource for OwnedModelsDevSource {
+    fn info(&self, provider: &str, model: &str) -> Option<ModelInfo> {
+        ModelsDevSource::new(&self.cache.data).info(provider, model)
+    }
+}
+
+/// Best-effort builder: try `<base_dir>/cache/models-dev.json`; on
+/// missing-file or parse error, fall back to [`EmptyModelInfoSource`].
+///
+/// The HTTP refresh path that populates the cache lives in TS at
+/// `models-dev-cache.ts:148-216` (`refreshInBackground`,
+/// `ensureCacheLoaded`) — pending in the Rust port until an HTTP client
+/// substrate lands. Until then this reader still returns useful data
+/// when the user has run TS recently and the cache file is present on
+/// disk.
+pub fn load_or_empty(base_dir: &std::path::Path) -> Box<dyn ModelInfoSource + '_> {
+    match crate::store::models_dev::load_from_disk(base_dir) {
+        Ok(Some(cache)) => Box::new(OwnedModelsDevSource::new(cache)),
+        Ok(None) => Box::new(EmptyModelInfoSource),
+        Err(e) => {
+            tracing::warn!(
+                error = %e,
+                "models.dev cache file present but unparseable; falling back to empty source"
+            );
+            Box::new(EmptyModelInfoSource)
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 struct ScoredConfig {
     name: String,
@@ -506,6 +548,77 @@ mod tests {
 
         let source = ModelsDevSource::new(&cache);
         assert!(source.info("anthropic", "no-cost").is_none());
+    }
+
+    #[test]
+    fn owned_models_dev_source_re_resolves_against_inner_cache() {
+        use crate::store::models_dev::{
+            CacheData, ModelCost, ModelLimits, ModelsDevModel, ModelsDevResponse, ProviderModels,
+        };
+        use std::collections::BTreeMap;
+
+        let mut response: ModelsDevResponse = BTreeMap::new();
+        let mut models = BTreeMap::new();
+        models.insert(
+            "claude-x".into(),
+            ModelsDevModel {
+                id: "claude-x".into(),
+                name: "Claude X".into(),
+                cost: Some(ModelCost { input: 1.5, output: 5.0 }),
+                limit: Some(ModelLimits { context: 100_000, output: 4096 }),
+                last_updated: None,
+            },
+        );
+        response.insert("anthropic".into(), ProviderModels { models });
+
+        let cache = CacheData { fetched_at: 0, data: response };
+        let owned = OwnedModelsDevSource::new(cache);
+        let info = owned.info("anthropic", "claude-x").unwrap();
+        assert_eq!(info.input_cost, 1.5);
+        assert_eq!(info.context_window, 100_000);
+        // And missing lookups still return None.
+        assert!(owned.info("anthropic", "missing").is_none());
+    }
+
+    #[test]
+    fn load_or_empty_returns_empty_source_when_cache_file_missing() {
+        // No cache file at <base>/cache/models-dev.json → empty source.
+        // Verify by checking that any lookup returns None.
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+        let base = std::env::temp_dir().join(format!(
+            "tenex-load-or-empty-{}-{n}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&base).unwrap();
+        let source = load_or_empty(&base);
+        assert!(source.info("anthropic", "claude-x").is_none());
+        std::fs::remove_dir_all(&base).ok();
+    }
+
+    #[test]
+    fn load_or_empty_returns_owned_source_when_cache_file_parses() {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+        let base = std::env::temp_dir().join(format!(
+            "tenex-load-or-empty-{}-{n}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(base.join("cache")).unwrap();
+        let payload = br#"{"fetchedAt":0,"data":{"anthropic":{"models":{"claude-x":{"id":"claude-x","name":"Claude X","cost":{"input":2.0,"output":10.0},"limit":{"context":150000,"output":4096}}}}}}"#;
+        std::fs::write(
+            base.join("cache").join("models-dev.json"),
+            payload,
+        )
+        .unwrap();
+
+        let source = load_or_empty(&base);
+        let info = source.info("anthropic", "claude-x").unwrap();
+        assert_eq!(info.input_cost, 2.0);
+        assert_eq!(info.context_window, 150_000);
+        std::fs::remove_dir_all(&base).ok();
     }
 
     #[test]

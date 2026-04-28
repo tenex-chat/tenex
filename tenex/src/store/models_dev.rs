@@ -134,6 +134,43 @@ pub fn parse_cache_bytes(bytes: &[u8]) -> serde_json::Result<CacheData> {
     serde_json::from_slice(bytes)
 }
 
+/// Mirror `getCacheFilePath` (`models-dev-cache.ts:85-87`).
+///
+/// Returns `<base_dir>/cache/models-dev.json`. The TS source resolves
+/// the `cache` subdirectory via `config.getConfigPath("cache")` —
+/// equivalent to joining `cache` onto the TENEX base dir
+/// (`ConfigService.ts:96-99`).
+pub fn cache_file_path(base_dir: &std::path::Path) -> std::path::PathBuf {
+    base_dir.join("cache").join(CACHE_FILE_NAME)
+}
+
+/// Mirror `loadFromDisk` (`models-dev-cache.ts:112-118`).
+///
+/// Reads `<base_dir>/cache/models-dev.json` and parses it. Three return
+/// shapes:
+///
+/// - `Ok(Some(cache))` — file exists and parsed cleanly
+/// - `Ok(None)` — file does not exist (TS `fileExists` false branch)
+/// - `Err(_)` — file exists but read or parse failed
+///
+/// Note the TS source returns `null` for both "missing" and "malformed"
+/// cases (the `readJsonFile` helper logs and returns `null`). The Rust
+/// port distinguishes them so the caller can surface a parse error
+/// loudly instead of silently fetching from the network.
+pub fn load_from_disk(
+    base_dir: &std::path::Path,
+) -> std::io::Result<Option<CacheData>> {
+    let path = cache_file_path(base_dir);
+    let bytes = match std::fs::read(&path) {
+        Ok(b) => b,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(e),
+    };
+    parse_cache_bytes(&bytes)
+        .map(Some)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+}
+
 /// Mirror `resolveModelData` (`models-dev-cache.ts:240-271`).
 ///
 /// Three-step lookup against a parsed [`ModelsDevResponse`]:
@@ -514,5 +551,82 @@ mod tests {
         no_limit.limit = None;
         let cache = build_cache(&[("anthropic", "claude-x", no_limit)]);
         assert_eq!(context_window(&cache, "anthropic", "claude-x"), None);
+    }
+
+    // ── cache_file_path + load_from_disk ────────────────────────────────
+
+    fn unique_temp() -> std::path::PathBuf {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+        let p = std::env::temp_dir().join(format!(
+            "tenex-models-dev-{}-{}-{n}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        std::fs::create_dir_all(&p).unwrap();
+        p
+    }
+
+    #[test]
+    fn cache_file_path_joins_base_with_cache_subdir() {
+        let base = std::path::Path::new("/tmp/whatever");
+        assert_eq!(
+            cache_file_path(base),
+            std::path::PathBuf::from("/tmp/whatever/cache/models-dev.json")
+        );
+    }
+
+    #[test]
+    fn load_from_disk_returns_none_when_cache_dir_missing() {
+        let base = unique_temp();
+        // No cache subdir created; load returns Ok(None).
+        let result = load_from_disk(&base).unwrap();
+        assert!(result.is_none());
+        std::fs::remove_dir_all(&base).ok();
+    }
+
+    #[test]
+    fn load_from_disk_returns_none_when_cache_file_missing_but_dir_exists() {
+        let base = unique_temp();
+        std::fs::create_dir_all(base.join("cache")).unwrap();
+        let result = load_from_disk(&base).unwrap();
+        assert!(result.is_none());
+        std::fs::remove_dir_all(&base).ok();
+    }
+
+    #[test]
+    fn load_from_disk_returns_some_when_cache_file_parses() {
+        let base = unique_temp();
+        std::fs::create_dir_all(base.join("cache")).unwrap();
+        let payload = br#"{"fetchedAt":1234567,"data":{"anthropic":{"models":{"claude-x":{"id":"claude-x","name":"Claude X"}}}}}"#;
+        std::fs::write(base.join("cache").join(CACHE_FILE_NAME), payload).unwrap();
+
+        let cache = load_from_disk(&base).unwrap().unwrap();
+        assert_eq!(cache.fetched_at, 1_234_567);
+        assert_eq!(
+            cache.data.get("anthropic")
+                .and_then(|p| p.models.get("claude-x"))
+                .map(|m| m.name.as_str()),
+            Some("Claude X"),
+        );
+        std::fs::remove_dir_all(&base).ok();
+    }
+
+    #[test]
+    fn load_from_disk_returns_err_when_cache_file_is_malformed() {
+        // TS's `readJsonFile` logs+returns null on malformed input; the
+        // Rust port surfaces the parse error loudly so callers don't
+        // silently miss the cache and hit the network.
+        let base = unique_temp();
+        std::fs::create_dir_all(base.join("cache")).unwrap();
+        std::fs::write(base.join("cache").join(CACHE_FILE_NAME), b"{ not json").unwrap();
+
+        let err = load_from_disk(&base).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+        std::fs::remove_dir_all(&base).ok();
     }
 }
