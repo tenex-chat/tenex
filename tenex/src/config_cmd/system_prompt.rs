@@ -101,7 +101,12 @@ fn run_edit(base_dir: &Path) -> Result<()> {
         "{}",
         amber_bold.apply_to("Opening editor to configure global system prompt...")
     );
-    println!("{}\n", gray.apply_to(format!("(Using editor: {editor})")));
+    // TS at system-prompt.ts:163 puts the trailing `\n` INSIDE the gray
+    // wrap: `chalk.gray(`(Using editor: ${getEditor()})\n`)`. console.log
+    // adds another newline after, producing one styled line + one blank
+    // line. Mirror byte-for-byte by embedding the `\n` in the styled
+    // string before console.log's auto-newline.
+    println!("{}", gray.apply_to(format!("(Using editor: {editor})\n")));
 
     let doc = TenexConfigDoc::load(base_dir)?;
     let existing_content = doc.global_system_prompt_content().unwrap_or_default();
