@@ -38,7 +38,7 @@ pub async fn run(args: RuntimeArgs) -> Result<()> {
         .with_context(|| format!("opening project '{}'", args.project_id))?;
     let meta = project.metadata()?.with_context(|| {
         format!(
-            "project '{}' has no metadata — run 'tenex doctor migrate'",
+            "project '{}' has no event.json — has it been received from a relay?",
             args.project_id
         )
     })?;
@@ -228,10 +228,7 @@ async fn run_agent(
     store: &Mutex<ConversationStore>,
 ) -> Result<()> {
     if !agent_json.exists() {
-        anyhow::bail!(
-            "agent JSON not found: {} — run 'tenex doctor migrate'",
-            agent_json.display()
-        );
+        anyhow::bail!("agent JSON not found: {}", agent_json.display());
     }
 
     let conv_id = conversation_id_from_event(event);

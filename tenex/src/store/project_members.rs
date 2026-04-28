@@ -171,6 +171,30 @@ impl ProjectVisibility {
     }
 }
 
+/// `listAssignableProjectDTags` — local-only variant.
+///
+/// Mirrors `ProjectMembershipPublishService.listAssignableProjectDTags`
+/// (`src/services/agents/ProjectMembershipPublishService.ts:44-73`).
+/// The TS source merges (a) every kind:31933 event from whitelisted
+/// authors fetched from relays and (b) every locally-known project dTag
+/// whose visibility !== "deleted", deduped + alphabetical.
+///
+/// The Rust port uses (b) only — the on-disk `event.json` is the
+/// canonical source maintained by the daemon, so the relay-fetch step
+/// would just redundantly re-discover what's already on disk. Sort is
+/// `String::cmp` which equals `localeCompare` against ASCII.
+pub fn list_assignable_project_dtags(base_dir: &std::path::Path) -> Result<Vec<String>> {
+    let dtags = list_project_dtags_on_disk(base_dir)?;
+    let mut out: Vec<String> = Vec::with_capacity(dtags.len());
+    for dtag in dtags {
+        if get_project_visibility(base_dir, &dtag)? != ProjectVisibility::Deleted {
+            out.push(dtag);
+        }
+    }
+    out.sort();
+    Ok(out)
+}
+
 /// `getProjectVisibility` — local read-only variant. The TS source goes
 /// through NDK `fetchLatestProjectEvent({ includeDeleted: true })`; our
 /// canonical store is the on-disk `event.json`, which is what the daemon
@@ -410,6 +434,44 @@ mod tests {
             get_project_visibility(&base, "rip").unwrap(),
             ProjectVisibility::Deleted
         );
+        std::fs::remove_dir_all(&base).ok();
+    }
+
+    #[test]
+    fn list_assignable_drops_deleted_projects_and_sorts() {
+        let base = unique_temp();
+        write_event(&base, "zebra", r#"{"tags":[["d","zebra"]]}"#);
+        write_event(&base, "alpha", r#"{"tags":[["d","alpha"]]}"#);
+        write_event(
+            &base,
+            "rip",
+            r#"{"tags":[["d","rip"],["deleted",""]]}"#,
+        );
+        write_event(&base, "mango", r#"{"tags":[["d","mango"]]}"#);
+        let assignable = list_assignable_project_dtags(&base).unwrap();
+        assert_eq!(
+            assignable,
+            vec!["alpha".to_string(), "mango".into(), "zebra".into()],
+            "deleted project dropped, others alphabetical"
+        );
+        std::fs::remove_dir_all(&base).ok();
+    }
+
+    #[test]
+    fn list_assignable_returns_empty_when_no_projects_directory() {
+        let base = unique_temp();
+        let assignable = list_assignable_project_dtags(&base).unwrap();
+        assert!(assignable.is_empty());
+        std::fs::remove_dir_all(&base).ok();
+    }
+
+    #[test]
+    fn list_assignable_skips_dirs_without_event_json() {
+        let base = unique_temp();
+        write_event(&base, "real", r#"{"tags":[]}"#);
+        std::fs::create_dir_all(projects_base_path(&base).join("ghost")).unwrap();
+        let assignable = list_assignable_project_dtags(&base).unwrap();
+        assert_eq!(assignable, vec!["real".to_string()]);
         std::fs::remove_dir_all(&base).ok();
     }
 

@@ -232,6 +232,104 @@ pub async fn publish_project_mutation(
     }
 }
 
+/// Result of [`sync_project_membership`]: pairs the project dTag with
+/// the publish outcome. Mirrors the TS `ProjectMembershipSyncResult` shape
+/// at `ProjectMembershipPublishService.ts:18-21`.
+#[derive(Debug, Clone)]
+pub struct ProjectMembershipSyncResult {
+    pub project_dtag: String,
+    pub outcome: PublishOutcome,
+    pub reason: Option<String>,
+}
+
+/// Re-publish a project's kind:31933 event with its **current local
+/// p-tag membership** as `retain_agent_pubkeys`. Mirrors
+/// `ProjectMembershipPublishService.syncProjectMembership`
+/// (`:87-118`).
+///
+/// Looks up the latest persisted event to recover the project owner's
+/// pubkey, then calls [`publish_project_mutation`] with the local agent
+/// pubkeys (read from the same event's `p` tags via
+/// [`crate::store::project_members::read_project_agent_pubkeys`]) as the
+/// retain set. The mutation is purely a "retain → re-sign" — net effect
+/// is that any agents the local AgentStorage has just removed will be
+/// dropped from the relay-side project event too.
+///
+/// Trigger string is `"agent_manager_31933"` verbatim (`:110`).
+pub async fn sync_project_membership(
+    base_dir: &std::path::Path,
+    keys: &Keys,
+    project_dtag: &str,
+) -> Result<ProjectMembershipSyncResult> {
+    use crate::store::project_members::read_project_agent_pubkeys;
+
+    let parsed = match read_persisted_project_event(base_dir, project_dtag)? {
+        Some(p) => p,
+        None => {
+            return Ok(ProjectMembershipSyncResult {
+                project_dtag: project_dtag.to_owned(),
+                outcome: PublishOutcome::ProjectNotFound,
+                reason: None,
+            });
+        }
+    };
+    if is_deleted_project_event(&parsed) {
+        return Ok(ProjectMembershipSyncResult {
+            project_dtag: project_dtag.to_owned(),
+            outcome: PublishOutcome::ProjectNotFound,
+            reason: None,
+        });
+    }
+
+    let owner_pubkey = match parsed.get("pubkey").and_then(Value::as_str) {
+        Some(p) => p.to_owned(),
+        None => {
+            return Ok(ProjectMembershipSyncResult {
+                project_dtag: project_dtag.to_owned(),
+                outcome: PublishOutcome::ProjectNotFound,
+                reason: Some("event.json missing pubkey".to_owned()),
+            });
+        }
+    };
+
+    let assigned_pubkeys = read_project_agent_pubkeys(base_dir, project_dtag)?;
+    let params = PublishProjectMutationParams {
+        owner_pubkey,
+        project_dtag: project_dtag.to_owned(),
+        trigger: "agent_manager_31933".to_owned(),
+        retain_agent_pubkeys: assigned_pubkeys,
+        ..Default::default()
+    };
+
+    let result = publish_project_mutation(base_dir, keys, &params).await?;
+    Ok(ProjectMembershipSyncResult {
+        project_dtag: project_dtag.to_owned(),
+        outcome: result.outcome,
+        reason: result.reason,
+    })
+}
+
+/// Re-publish multiple projects' kind:31933 events. Dedupes the input
+/// preserving first-occurrence order. Mirrors
+/// `syncManyProjectMemberships` (`ProjectMembershipPublishService.ts:120-132`).
+pub async fn sync_many_project_memberships(
+    base_dir: &std::path::Path,
+    keys: &Keys,
+    project_dtags: &[String],
+) -> Result<Vec<ProjectMembershipSyncResult>> {
+    let mut seen: indexmap::IndexSet<String> = indexmap::IndexSet::new();
+    for d in project_dtags {
+        if !d.is_empty() {
+            seen.insert(d.clone());
+        }
+    }
+    let mut out = Vec::with_capacity(seen.len());
+    for dtag in seen {
+        out.push(sync_project_membership(base_dir, keys, &dtag).await?);
+    }
+    Ok(out)
+}
+
 /// Pull `tags` out of a parsed event JSON value as `Vec<Vec<String>>`.
 /// Skips non-array entries and non-string members — matches the
 /// permissive TS `Array.isArray(parsed.tags)` handling.
@@ -404,5 +502,97 @@ mod tests {
     fn extract_tags_returns_empty_when_tags_missing() {
         let v: Value = serde_json::from_str(r#"{}"#).unwrap();
         assert!(extract_tags(&v).is_empty());
+    }
+
+    // ─────────── sync_project_membership ───────────
+
+    #[tokio::test]
+    async fn sync_returns_project_not_found_when_event_missing() {
+        let base = unique_temp();
+        let keys = Keys::generate();
+        let result = sync_project_membership(&base, &keys, "ghost").await.unwrap();
+        assert_eq!(result.outcome, PublishOutcome::ProjectNotFound);
+        assert_eq!(result.project_dtag, "ghost");
+        std::fs::remove_dir_all(&base).ok();
+    }
+
+    #[tokio::test]
+    async fn sync_returns_project_not_found_when_event_marked_deleted() {
+        let base = unique_temp();
+        let keys = Keys::generate();
+        let pk_hex = keys.public_key().to_hex();
+        write_project_event(&base, "rip", &pk_hex, &[], "", true);
+        let result = sync_project_membership(&base, &keys, "rip").await.unwrap();
+        assert_eq!(result.outcome, PublishOutcome::ProjectNotFound);
+        std::fs::remove_dir_all(&base).ok();
+    }
+
+    #[tokio::test]
+    async fn sync_returns_no_changes_when_local_matches_event() {
+        // Event already has alice as a `p` tag; local read returns alice;
+        // retain set = [alice]; mutation is a no-op → NoChanges.
+        let base = unique_temp();
+        let keys = Keys::generate();
+        let owner = keys.public_key().to_hex();
+        let alice = "a".repeat(64);
+        write_project_event(&base, "stable", &owner, &[&alice], "", false);
+        let result = sync_project_membership(&base, &keys, "stable").await.unwrap();
+        assert_eq!(result.outcome, PublishOutcome::NoChanges);
+        std::fs::remove_dir_all(&base).ok();
+    }
+
+    // (Signer-mismatch error path is covered at the publish layer by
+    // `signer_mismatch_returns_signing_failed_with_verbatim_reason`. The
+    // sync layer reads its retain set from the same event.json that
+    // supplies the owner pubkey, so a same-event setup never reaches the
+    // mismatch branch — it returns NoChanges first. Layered correctly.)
+
+    #[tokio::test]
+    async fn sync_many_dedupes_input_preserving_order() {
+        let base = unique_temp();
+        let keys = Keys::generate();
+        // No events on disk → every sync returns ProjectNotFound, but
+        // we get one result per unique input dTag, in input order.
+        let inputs = vec![
+            "z".to_string(),
+            "a".to_string(),
+            "z".to_string(),
+            "m".to_string(),
+            "a".to_string(),
+        ];
+        let results = sync_many_project_memberships(&base, &keys, &inputs)
+            .await
+            .unwrap();
+        let dtags: Vec<&str> =
+            results.iter().map(|r| r.project_dtag.as_str()).collect();
+        assert_eq!(dtags, vec!["z", "a", "m"]);
+        for r in &results {
+            assert_eq!(r.outcome, PublishOutcome::ProjectNotFound);
+        }
+        std::fs::remove_dir_all(&base).ok();
+    }
+
+    #[tokio::test]
+    async fn sync_many_filters_empty_strings() {
+        let base = unique_temp();
+        let keys = Keys::generate();
+        let inputs = vec!["".to_string(), "real".to_string(), "".to_string()];
+        let results = sync_many_project_memberships(&base, &keys, &inputs)
+            .await
+            .unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].project_dtag, "real");
+        std::fs::remove_dir_all(&base).ok();
+    }
+
+    #[tokio::test]
+    async fn sync_many_empty_input_returns_empty() {
+        let base = unique_temp();
+        let keys = Keys::generate();
+        let results = sync_many_project_memberships(&base, &keys, &[])
+            .await
+            .unwrap();
+        assert!(results.is_empty());
+        std::fs::remove_dir_all(&base).ok();
     }
 }

@@ -23,7 +23,7 @@ pub mod validators;
 pub use theme::theme;
 
 use inquire::validator::Validation;
-use inquire::{Confirm, CustomUserError, Password, Select, Text};
+use inquire::{Confirm, CustomUserError, MultiSelect, Password, Select, Text};
 
 /// Build a [`Text`] prompt with the TENEX theme already applied. Caller may
 /// chain `.with_default()`, `.with_validator()`, `.with_help_message()` etc.
@@ -50,6 +50,19 @@ pub fn select<'a, T: std::fmt::Display>(message: &'a str, options: Vec<T>) -> Se
 /// Build a [`Confirm`] (y/n) prompt with the TENEX theme.
 pub fn confirm<'a>(message: &'a str) -> Confirm<'a> {
     Confirm::new(message).with_render_config(theme())
+}
+
+/// Build a [`MultiSelect`] (checkbox list) prompt with the TENEX theme.
+/// Mirrors `inquirer.prompt({ type: "checkbox", … })` call sites in the
+/// TS source (e.g. `assignAgentToProjects` at
+/// `src/commands/agent/AgentManager.ts:417-424`). Caller chains
+/// `.with_default(&indices)` to pre-check items and
+/// `.with_page_size(n)` for visible-window control.
+pub fn multi_select<'a, T: std::fmt::Display>(
+    message: &'a str,
+    options: Vec<T>,
+) -> MultiSelect<'a, T> {
+    MultiSelect::new(message, options).with_render_config(theme())
 }
 
 /// Adapt a `Fn(&str) -> Result<(), &'static str>` (the shape of

@@ -33,9 +33,16 @@ use crate::store::project_members::{
 
 /// Mirror of `type ManagedAgent` (`AgentManager.ts:23-27`):
 /// loaded stored-agent + derived pubkey + visible projects.
+///
+/// `name` is read from the stored-agent JSON's `name` field (the agent's
+/// human-readable display name, distinct from `slug`). Defaults to the
+/// empty string when missing — TS uses the same fallback through
+/// `entry.storedAgent.name` since the underlying schema marks `name` as
+/// always present (`storage.ts:35`).
 #[derive(Clone, Debug)]
 pub struct ManagedAgent {
     pub slug: String,
+    pub name: String,
     /// `"active"`, `"inactive"`, or `None` (treated as active).
     pub status: Option<String>,
     pub role: String,
@@ -194,6 +201,7 @@ pub fn load_agents(base_dir: &std::path::Path) -> Result<Vec<ManagedAgent>> {
             .ok_or_else(|| anyhow!("stored agent missing slug"))?
             .to_owned();
         let role = agent.role().unwrap_or("").to_owned();
+        let name = agent.name().unwrap_or("").to_owned();
         let status = agent.status().map(str::to_owned);
 
         let projects = list_projects_for_agent(base_dir, &pubkey)?;
@@ -215,6 +223,7 @@ pub fn load_agents(base_dir: &std::path::Path) -> Result<Vec<ManagedAgent>> {
 
         managed.push(ManagedAgent {
             slug,
+            name,
             status,
             role,
             pubkey,
@@ -233,6 +242,7 @@ mod tests {
     fn agent(slug: &str, status: Option<&str>, projects: Vec<&str>) -> ManagedAgent {
         ManagedAgent {
             slug: slug.to_owned(),
+            name: format!("{slug}-name"),
             status: status.map(str::to_owned),
             role: "thinker".into(),
             pubkey: format!("pk-of-{slug}"),

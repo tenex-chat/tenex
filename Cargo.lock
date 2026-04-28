@@ -2974,10 +2974,8 @@ dependencies = [
 name = "tenex-project"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "dirs-next",
  "nostr",
- "rusqlite",
  "serde",
  "serde_json",
  "tempfile",

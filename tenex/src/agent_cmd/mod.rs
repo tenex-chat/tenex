@@ -19,9 +19,9 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 
-use crate::store::agent_storage::AgentStorage;
-
+pub mod manager_actions;
 pub mod manager_logic;
+pub mod provisioning;
 
 #[derive(Parser, Clone)]
 pub struct AgentArgs {
@@ -98,29 +98,19 @@ async fn run_manage() -> Result<()> {
 /// any NIP-42 challenge.
 async fn run_delete(pubkey: &str) -> Result<()> {
     let base_dir = crate::store::resolve_base_dir(None);
-    let mut storage = AgentStorage::open(&base_dir)?;
+    let deleted = provisioning::delete_stored_agent(
+        &base_dir,
+        pubkey,
+        provisioning::DeleteOptions::new(),
+    )
+    .await?;
 
-    let deleted = storage.delete_agent(pubkey)?;
     if !deleted {
         let red = console::Style::new().red();
         eprintln!("{}", red.apply_to(format!("Error: agent {pubkey} not found")));
         // Mirror TS `process.exit(1)` (`commands/agent/index.ts:79-80`)
         // which exits silently — no anyhow wrapper line on stderr.
         std::process::exit(1);
-    }
-
-    if let Err(e) =
-        crate::nostr_pub::installed_agents::publish_installed_agents_inventory(&base_dir).await
-    {
-        // Mirror TS: warn-and-continue on publish failure
-        // (`AgentProvisioningService.ts:28-32`).
-        let yellow = console::Style::new().yellow();
-        eprintln!(
-            "{}",
-            yellow.apply_to(format!(
-                "Warning: failed to publish installed-agent inventory: {e}"
-            ))
-        );
     }
 
     let green = console::Style::new().green();
