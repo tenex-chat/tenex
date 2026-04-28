@@ -118,16 +118,20 @@ impl<M: CompletionModel> PromptHook<M> for NostrHook {
             }
         };
 
+        let is_delegate = tool_name == "delegate";
         let signer = self.signer.clone();
         let root_id = self.root_id.clone();
         let reply_id = self.reply_id.clone();
         let name = tool_name.to_string();
         let args = args.to_string();
         async move {
-            if let Err(e) =
-                signer.emit_tool_use(&name, &args, &root_id, reply_id.as_deref(), &llm)
-            {
-                eprintln!("[tenex-agent] warn: failed to emit tool-use event: {e}");
+            // DelegateTool emits its own tool-use event (with a q-tag) after the call.
+            if !is_delegate {
+                if let Err(e) =
+                    signer.emit_tool_use(&name, &args, &root_id, reply_id.as_deref(), &llm, &[])
+                {
+                    eprintln!("[tenex-agent] warn: failed to emit tool-use event: {e}");
+                }
             }
             ToolCallHookAction::cont()
         }

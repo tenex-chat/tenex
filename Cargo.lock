@@ -2640,6 +2640,7 @@ dependencies = [
  "rig-core",
  "serde",
  "serde_json",
+ "tenex-project",
  "thiserror 2.0.18",
  "tokio",
  "walkdir",

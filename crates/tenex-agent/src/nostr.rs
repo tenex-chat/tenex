@@ -177,17 +177,42 @@ impl AgentSigner {
         root_id: &str,
         reply_id: Option<&str>,
         llm: &LlmTags,
+        q_tags: &[String],
     ) -> Result<()> {
         let builder = EventBuilder::new(Kind::TextNote, "");
         let builder = add_thread_tags(builder, root_id, reply_id)?;
-        let builder = builder
+        let mut builder = builder
             .tag(Tag::parse(["tool", tool_name]).context("Failed to build tool tag")?)
             .tag(Tag::parse(["tool-args", args]).context("Failed to build tool-args tag")?);
+        for q_id in q_tags {
+            builder =
+                builder.tag(Tag::parse(["q", q_id]).context("Failed to build q-tag")?);
+        }
         let builder = llm.apply(builder)?;
         let event = builder
             .sign_with_keys(&self.keys)
             .context("Failed to sign tool-use event")?;
         println!("{}", event.as_json());
         Ok(())
+    }
+
+    /// Emit a delegation event (kind:1, p-tagged to recipient, no thread e-tags) to stdout.
+    /// Returns the signed event ID so callers can q-tag it.
+    pub fn emit_delegation(
+        &self,
+        target_pubkey: &str,
+        content: &str,
+        llm: &LlmTags,
+    ) -> Result<String> {
+        let builder = EventBuilder::new(Kind::TextNote, content);
+        let builder = builder
+            .tag(Tag::parse(["p", target_pubkey]).context("Failed to build p-tag")?);
+        let builder = llm.apply(builder)?;
+        let event = builder
+            .sign_with_keys(&self.keys)
+            .context("Failed to sign delegation event")?;
+        let id = event.id.to_hex();
+        println!("{}", event.as_json());
+        Ok(id)
     }
 }

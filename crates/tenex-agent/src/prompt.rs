@@ -1,6 +1,13 @@
 use crate::config::AgentConfig;
+use tenex_project::{Agent, ProjectMetadata};
 
-pub fn build_system_prompt(config: &AgentConfig, pubkey_hex: &str, working_dir: &str) -> String {
+pub fn build_system_prompt(
+    config: &AgentConfig,
+    pubkey_hex: &str,
+    working_dir: &str,
+    project_meta: Option<&ProjectMetadata>,
+    agents: &[Agent],
+) -> String {
     let mut parts: Vec<String> = Vec::new();
 
     // Fragment 01: Agent identity
@@ -22,10 +29,43 @@ pub fn build_system_prompt(config: &AgentConfig, pubkey_hex: &str, working_dir: 
         ));
     }
 
-    // Fragment 08: Workspace context
+    // Fragment 08: Workspace + project context
+    let mut project_lines = vec![format!("    cwd: {working_dir}")];
+    if let Some(meta) = project_meta {
+        if let Some(title) = &meta.title {
+            project_lines.push(format!("    project: {title}"));
+        }
+        if let Some(owner) = &meta.owner_pubkey {
+            project_lines.push(format!("    owner: {}", &owner[..8.min(owner.len())]));
+        }
+    }
     parts.push(format!(
-        "<project-context>\n  <workspace>\n    cwd: {working_dir}\n  </workspace>\n</project-context>"
+        "<project-context>\n  <workspace>\n{}\n  </workspace>\n</project-context>",
+        project_lines.join("\n")
     ));
+
+    // Available agents fragment
+    if !agents.is_empty() {
+        let agent_lines: Vec<String> = agents
+            .iter()
+            .map(|a| {
+                let mut line = format!("  - {} ({})", a.slug, a.name);
+                if let Some(desc) = &a.description {
+                    line.push_str(&format!(": {desc}"));
+                } else if let Some(role) = &a.role {
+                    line.push_str(&format!(": {role}"));
+                }
+                if let Some(criteria) = &a.use_criteria {
+                    line.push_str(&format!("\n    Use when: {criteria}"));
+                }
+                line
+            })
+            .collect();
+        parts.push(format!(
+            "<available-agents>\n{}\n</available-agents>",
+            agent_lines.join("\n")
+        ));
+    }
 
     // Fragment 06: Todo guidance
     parts.push(

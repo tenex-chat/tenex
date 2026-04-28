@@ -13,16 +13,17 @@ use rig::completion::Prompt;
 use rig::providers::{anthropic, ollama, openai, openrouter};
 use std::io::{self, Read};
 use std::sync::{Arc, Mutex};
+use tenex_project::Project;
 use tools::{
-    FsEditTool, FsGlobTool, FsGrepTool, FsReadTool, FsWriteTool, ShellTool, TodoItem,
-    TodoWriteTool,
+    DelegateTool, FsEditTool, FsGlobTool, FsGrepTool, FsReadTool, FsWriteTool, ShellTool,
+    TodoItem, TodoWriteTool,
 };
 
 /// Build and run the agent with all tools attached.
 /// The macro avoids duplicating tool registration across provider branches
 /// while still returning different concrete types per provider.
 macro_rules! run_agent {
-    ($client:expr, $model:expr, $system:expr, $message:expr, $wd:expr, $todos:expr, $hook:expr) => {{
+    ($client:expr, $model:expr, $system:expr, $message:expr, $wd:expr, $todos:expr, $hook:expr, $delegate:expr) => {{
         $client
             .agent($model)
             .preamble($system)
@@ -35,6 +36,7 @@ macro_rules! run_agent {
             .tool(FsGlobTool::new($wd.clone()))
             .tool(FsGrepTool::new($wd.clone()))
             .tool(TodoWriteTool::new($todos.clone()))
+            .tool($delegate)
             .build()
             .prompt($message)
             .with_hook($hook)
@@ -50,6 +52,10 @@ async fn main() -> Result<()> {
             "Usage: tenex-agent <agent.json>\n\nExample:\n  cargo run -p tenex-agent -- ~/.tenex/agents/<pubkey>.json < event.json"
         );
     }
+
+    // Mandatory project context — the daemon sets this before spawning the agent.
+    let project_id = std::env::var("TENEX_PROJECT_ID")
+        .context("TENEX_PROJECT_ID environment variable is required")?;
 
     let agent_config = config::AgentConfig::load(&args[1])?;
 
@@ -77,6 +83,12 @@ async fn main() -> Result<()> {
                 .map(|p| p.display().to_string())
                 .unwrap_or_else(|_| ".".to_string())
         });
+
+    // Open project DB and load context used for prompts + delegate tool.
+    let project = Project::open_default(&project_id)
+        .with_context(|| format!("Failed to open project DB for '{project_id}'"))?;
+    let project_meta = project.metadata().context("Failed to read project metadata")?;
+    let project_agents = Arc::new(project.agents().context("Failed to read project agents")?);
 
     // Load TENEX configuration files for model/key resolution
     let llms = LlmsConfig::load();
@@ -106,7 +118,13 @@ async fn main() -> Result<()> {
     );
 
     // Build system prompt
-    let system_prompt = prompt::build_system_prompt(&agent_config, &pubkey_hex, &working_dir);
+    let system_prompt = prompt::build_system_prompt(
+        &agent_config,
+        &pubkey_hex,
+        &working_dir,
+        project_meta.as_ref(),
+        &project_agents,
+    );
 
     // Shared todo state across tool calls
     let todos: Arc<Mutex<Vec<TodoItem>>> = Arc::new(Mutex::new(Vec::new()));
@@ -115,7 +133,15 @@ async fn main() -> Result<()> {
     let reply_id = input_event.reply_event_id().map(String::from);
     let model_string = format!("{}:{}", resolved.provider, resolved.model);
     let (hook, agent_meta) =
-        NostrHook::new(signer.clone(), root_id, reply_id, model_string.clone());
+        NostrHook::new(signer.clone(), root_id.clone(), reply_id.clone(), model_string.clone());
+    let delegate_tool = DelegateTool::new(
+        signer.clone(),
+        root_id,
+        reply_id,
+        model_string.clone(),
+        agent_meta.clone(),
+        project_agents,
+    );
 
     eprintln!("[tenex-agent] Running agent...");
 
@@ -132,7 +158,8 @@ async fn main() -> Result<()> {
                 &input_event.content,
                 working_dir,
                 todos,
-                hook.clone()
+                hook.clone(),
+                delegate_tool.clone()
             )
         }
         "openai" => {
@@ -149,7 +176,8 @@ async fn main() -> Result<()> {
                 &input_event.content,
                 working_dir,
                 todos,
-                hook.clone()
+                hook.clone(),
+                delegate_tool.clone()
             )
         }
         "ollama" => {
@@ -165,7 +193,8 @@ async fn main() -> Result<()> {
                 &input_event.content,
                 working_dir,
                 todos,
-                hook.clone()
+                hook.clone(),
+                delegate_tool.clone()
             )
         }
         _ => {
@@ -185,7 +214,8 @@ async fn main() -> Result<()> {
                 &input_event.content,
                 working_dir,
                 todos,
-                hook
+                hook,
+                delegate_tool
             )
         }
     };
