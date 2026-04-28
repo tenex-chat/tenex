@@ -142,7 +142,7 @@ async fn main() -> Result<()> {
     );
 
     // Build system prompt
-    let system_prompt = prompt::build_system_prompt(
+    let mut system_prompt = prompt::build_system_prompt(
         &agent_config,
         &pubkey_hex,
         &working_dir,
@@ -189,7 +189,43 @@ async fn main() -> Result<()> {
     })();
 
     let rag_index = RagIndexTool::new(rag_store.clone(), project_id.clone(), pubkey_hex.clone());
-    let rag_search = RagSearchTool::new(rag_store, project_id.clone(), pubkey_hex.clone());
+    let rag_search = RagSearchTool::new(rag_store.clone(), project_id.clone(), pubkey_hex.clone());
+
+    // Proactive context: search RAG before the LLM call so relevant past
+    // knowledge appears in the system prompt without the agent needing to ask.
+    if let Some(store) = &rag_store {
+        let collections = [
+            "conversations".to_string(),
+            format!("project_{project_id}"),
+            format!("agent_{pubkey_hex}"),
+        ];
+        let refs: Vec<&str> = collections.iter().map(|s| s.as_str()).collect();
+        match store.search(&envelope.content, &refs, 5).await {
+            Ok(results) => {
+                let relevant: Vec<_> =
+                    results.into_iter().filter(|r| r.score >= 0.65).collect();
+                if !relevant.is_empty() {
+                    let mut block = String::from("\n\n<proactive-context>\nPotentially relevant information retrieved based on your task:\n");
+                    for (i, r) in relevant.iter().enumerate() {
+                        let snippet: String = r.content.chars().take(300).collect();
+                        let ellipsis = if r.content.len() > 300 { "…" } else { "" };
+                        block.push_str(&format!(
+                            "\n[{}] score:{:.2} collection:{}{}\n{}{}\n",
+                            i + 1,
+                            r.score,
+                            r.collection,
+                            r.title.as_deref().map(|t| format!(" title:{t}")).unwrap_or_default(),
+                            snippet,
+                            ellipsis,
+                        ));
+                    }
+                    block.push_str("</proactive-context>");
+                    system_prompt.push_str(&block);
+                }
+            }
+            Err(e) => eprintln!("[tenex-agent] Proactive context search failed: {e}"),
+        }
+    }
 
     eprintln!("[tenex-agent] Running agent...");
 
