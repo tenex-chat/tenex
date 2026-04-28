@@ -19,6 +19,8 @@ use tenex_conversations::{AgentContextState, ConversationStore};
 use tenex_project::Project;
 use tenex_rag::{EmbedConfig, RagStore};
 use tenex_supervision::heuristics::default_supervisor;
+use tenex_supervision::supervisor::PostCompletionOutcome;
+use tenex_supervision::types::{TodoEntry as SupTodoEntry, TodoStatus as SupTodoStatus};
 use tenex_protocol::{
     nostr::{read_one_from_stdin, NostrChannel},
     sink::StdoutNdjsonSink,
@@ -34,7 +36,7 @@ use tools::{
     HomeFsEditTool, HomeFsGlobTool, HomeFsGrepTool, HomeFsReadTool, HomeFsWriteTool,
     KillTool, LearnTool, ProjectListTool, RagAddDocumentsTool,
     RagSearchTool, ScheduleTaskTool, SelfDelegateTool, ShellTool,
-    SkillListTool, SkillsSetTool, TodoItem, TodoWriteTool,
+    SkillListTool, SkillsSetTool, TodoItem, TodoStatus, TodoWriteTool,
 };
 
 /// Convert a `tenex_context::Message` to `rig::completion::Message` for passing
@@ -579,6 +581,7 @@ async fn main() -> Result<()> {
     let sup_category: Option<tenex_supervision::types::AgentCategory> =
         agent_config.category.as_deref().and_then(|s| s.parse().ok());
     let supervisor = Arc::new(Mutex::new(default_supervisor()));
+    let supervisor_ref = supervisor.clone();
     let hook = EmitHook::new(emit_state.clone(), supervisor, todos.clone(), sup_category);
     let allows_delegation = sup_category.map(|c| c.allows_delegation()).unwrap_or(true);
     let delegate_tool: Option<DelegateTool> = if allows_delegation {
@@ -686,7 +689,8 @@ async fn main() -> Result<()> {
         })
         .unwrap_or_default();
 
-    eprintln!("[tenex-agent] Running agent (history: {} messages)...", history.len());
+    let initial_history = history;
+    eprintln!("[tenex-agent] Running agent (history: {} messages)...", initial_history.len());
 
     let agent_home_str = agent_home.display().to_string();
 
@@ -718,169 +722,222 @@ async fn main() -> Result<()> {
     // after the stream ends, even after `hook` is moved into the agent builder.
     let hook_handle = hook.clone();
 
-    let final_response = match resolved.provider.as_str() {
-        "openrouter" => {
-            let key = resolved
-                .api_key
-                .context("No OpenRouter API key found. Set OPENROUTER_API_KEY or add it to ~/.tenex/providers.json")?;
-            let client = openrouter::Client::new(&key)?;
-            run_agent!(
-                client,
-                &resolved.model,
-                &system_prompt,
-                &user_message,
-                history,
-                working_dir,
-                shell_env,
-                todos,
-                hook.clone(),
-                delegate_tool.clone(),
-                rag_add_documents.clone(),
-                rag_search.clone(),
-                skill_list_tool.clone(),
-                skills_set_tool.clone(),
-                build_fs_tools(&granted_tools, &working_dir, &agent_home_str),
-                build_extra_tools(&extra_tools_input)
-            )
-        }
-        "openai" => {
-            let key = resolved
-                .api_key
-                .context("No OpenAI API key found. Set OPENAI_API_KEY or add it to ~/.tenex/providers.json")?;
-            let client = openai::CompletionsClient::builder().api_key(&key).build()?;
-            run_agent!(
-                client,
-                &resolved.model,
-                &system_prompt,
-                &user_message,
-                history,
-                working_dir,
-                shell_env,
-                todos,
-                hook.clone(),
-                delegate_tool.clone(),
-                rag_add_documents.clone(),
-                rag_search.clone(),
-                skill_list_tool.clone(),
-                skills_set_tool.clone(),
-                build_fs_tools(&granted_tools, &working_dir, &agent_home_str),
-                build_extra_tools(&extra_tools_input)
-            )
-        }
-        "ollama" => {
-            let mut builder = ollama::Client::builder().api_key(Nothing);
-            if let Some(url) = &resolved.base_url {
-                builder = builder.base_url(url);
-            }
-            let client = builder.build()?;
-            run_agent!(
-                client,
-                &resolved.model,
-                &system_prompt,
-                &user_message,
-                history,
-                working_dir,
-                shell_env,
-                todos,
-                hook.clone(),
-                delegate_tool.clone(),
-                rag_add_documents.clone(),
-                rag_search.clone(),
-                skill_list_tool.clone(),
-                skills_set_tool.clone(),
-                build_fs_tools(&granted_tools, &working_dir, &agent_home_str),
-                build_extra_tools(&extra_tools_input)
-            )
-        }
-        _ => {
-            // Default: anthropic
-            let key = resolved.api_key.with_context(|| {
-                format!(
-                    "No API key found for provider '{}'. Set {}_API_KEY or add it to ~/.tenex/providers.json",
-                    resolved.provider,
-                    resolved.provider.to_uppercase().replace('-', "_")
+    // current_message starts as the inbound user prompt; supervision may replace it with a
+    // re-engagement prompt after each turn if pending todos remain.
+    let mut current_message = user_message;
+    // extra history accumulated from re-engagement turns (user + assistant pairs).
+    let mut re_engage_history: Vec<RigMessage> = Vec::new();
+
+    'agent_loop: loop {
+        let current_history: Vec<RigMessage> = {
+            let mut h = initial_history.clone();
+            h.extend(re_engage_history.iter().cloned());
+            h
+        };
+
+        let final_response = match resolved.provider.as_str() {
+            "openrouter" => {
+                let key = resolved
+                    .api_key
+                    .clone()
+                    .context("No OpenRouter API key found. Set OPENROUTER_API_KEY or add it to ~/.tenex/providers.json")?;
+                let client = openrouter::Client::new(&key)?;
+                run_agent!(
+                    client,
+                    &resolved.model,
+                    &system_prompt,
+                    &current_message,
+                    current_history,
+                    working_dir,
+                    shell_env,
+                    todos,
+                    hook.clone(),
+                    delegate_tool.clone(),
+                    rag_add_documents.clone(),
+                    rag_search.clone(),
+                    skill_list_tool.clone(),
+                    skills_set_tool.clone(),
+                    build_fs_tools(&granted_tools, &working_dir, &agent_home_str),
+                    build_extra_tools(&extra_tools_input)
                 )
-            })?;
-            let client = anthropic::Client::new(&key)?;
-            run_agent!(
-                client,
-                &resolved.model,
-                &system_prompt,
-                &user_message,
-                history,
-                working_dir,
-                shell_env,
-                todos,
-                hook,
-                delegate_tool,
-                rag_add_documents,
-                rag_search,
-                skill_list_tool,
-                skills_set_tool,
-                build_fs_tools(&granted_tools, &working_dir, &agent_home_str),
-                build_extra_tools(&extra_tools_input)
-            )
+            }
+            "openai" => {
+                let key = resolved
+                    .api_key
+                    .clone()
+                    .context("No OpenAI API key found. Set OPENAI_API_KEY or add it to ~/.tenex/providers.json")?;
+                let client = openai::CompletionsClient::builder().api_key(&key).build()?;
+                run_agent!(
+                    client,
+                    &resolved.model,
+                    &system_prompt,
+                    &current_message,
+                    current_history,
+                    working_dir,
+                    shell_env,
+                    todos,
+                    hook.clone(),
+                    delegate_tool.clone(),
+                    rag_add_documents.clone(),
+                    rag_search.clone(),
+                    skill_list_tool.clone(),
+                    skills_set_tool.clone(),
+                    build_fs_tools(&granted_tools, &working_dir, &agent_home_str),
+                    build_extra_tools(&extra_tools_input)
+                )
+            }
+            "ollama" => {
+                let mut builder = ollama::Client::builder().api_key(Nothing);
+                if let Some(url) = &resolved.base_url {
+                    builder = builder.base_url(url);
+                }
+                let client = builder.build()?;
+                run_agent!(
+                    client,
+                    &resolved.model,
+                    &system_prompt,
+                    &current_message,
+                    current_history,
+                    working_dir,
+                    shell_env,
+                    todos,
+                    hook.clone(),
+                    delegate_tool.clone(),
+                    rag_add_documents.clone(),
+                    rag_search.clone(),
+                    skill_list_tool.clone(),
+                    skills_set_tool.clone(),
+                    build_fs_tools(&granted_tools, &working_dir, &agent_home_str),
+                    build_extra_tools(&extra_tools_input)
+                )
+            }
+            _ => {
+                // Default: anthropic
+                let key = resolved.api_key.clone().with_context(|| {
+                    format!(
+                        "No API key found for provider '{}'. Set {}_API_KEY or add it to ~/.tenex/providers.json",
+                        resolved.provider,
+                        resolved.provider.to_uppercase().replace('-', "_")
+                    )
+                })?;
+                let client = anthropic::Client::new(&key)?;
+                run_agent!(
+                    client,
+                    &resolved.model,
+                    &system_prompt,
+                    &current_message,
+                    current_history,
+                    working_dir,
+                    shell_env,
+                    todos,
+                    hook.clone(),
+                    delegate_tool.clone(),
+                    rag_add_documents.clone(),
+                    rag_search.clone(),
+                    skill_list_tool.clone(),
+                    skills_set_tool.clone(),
+                    build_fs_tools(&granted_tools, &working_dir, &agent_home_str),
+                    build_extra_tools(&extra_tools_input)
+                )
+            }
+        };
+
+        // Persist final todos and self-applied skills back to the conversation store.
+        if let Some(ref store) = conv_store {
+            let final_todos = todos.lock().unwrap();
+            let final_skills = self_applied_skills.lock().unwrap();
+            save_context_state(
+                store,
+                &conversation_id,
+                &pubkey_hex,
+                &final_todos,
+                &final_skills,
+            );
         }
-    };
 
-    // Persist final todos and self-applied skills back to the conversation store.
-    if let Some(ref store) = conv_store {
-        let final_todos = todos.lock().unwrap();
-        let final_skills = self_applied_skills.lock().unwrap();
-        save_context_state(
-            store,
-            &conversation_id,
-            &pubkey_hex,
-            &final_todos,
-            &final_skills,
-        );
-    }
-
-    // Record this turn's messages into the conversation store for future history projection.
-    if let Some(ref store) = conv_store {
-        let stream_usage = final_response.usage();
-        let turn = TurnRecord {
-            messages_visible: vec![
-                CtxMessage::User { content: envelope.content.clone() },
-                CtxMessage::Assistant {
-                    content: final_response.response().to_string(),
-                    tool_calls: Vec::new(),
+        // Record this turn's messages into the conversation store for future history projection.
+        if let Some(ref store) = conv_store {
+            let stream_usage = final_response.usage();
+            let turn = TurnRecord {
+                messages_visible: vec![
+                    CtxMessage::User { content: current_message.clone() },
+                    CtxMessage::Assistant {
+                        content: final_response.response().to_string(),
+                        tool_calls: Vec::new(),
+                    },
+                ],
+                reminders_applied: Vec::new(),
+                compaction_decisions: Vec::new(),
+                cache_observed: CacheObservation {
+                    hit_tokens: stream_usage.cached_input_tokens as u64,
+                    miss_tokens: 0,
+                    written_tokens: 0,
                 },
-            ],
-            reminders_applied: Vec::new(),
-            compaction_decisions: Vec::new(),
-            cache_observed: CacheObservation {
-                hit_tokens: stream_usage.cached_input_tokens as u64,
-                miss_tokens: 0,
-                written_tokens: 0,
-            },
-        };
-        if let Err(e) = tenex_context::record_turn(store, &conversation_id, &pubkey_hex, turn) {
-            eprintln!("[tenex-agent] Failed to record turn: {e}");
+            };
+            if let Err(e) = tenex_context::record_turn(store, &conversation_id, &pubkey_hex, turn) {
+                eprintln!("[tenex-agent] Failed to record turn: {e}");
+            }
         }
-    }
 
-    eprintln!("[tenex-agent] Agent completed.");
+        eprintln!("[tenex-agent] Agent completed.");
 
-    let stream_usage = final_response.usage();
-    if let Some((final_content, final_ral)) = hook_handle.take_pending() {
-        let final_ctx = emit_state.build_ctx(final_ral);
-        let intent = ConversationIntent {
-            content: final_content,
-            is_reasoning: false,
-            usage: Some(LlmUsage {
-                input_tokens: Some(stream_usage.input_tokens),
-                output_tokens: Some(stream_usage.output_tokens),
-                total_tokens: Some(stream_usage.total_tokens),
-                cached_input_tokens: Some(stream_usage.cached_input_tokens),
-                ..Default::default()
-            }),
-            metadata: None,
+        let stream_usage = final_response.usage();
+        if let Some((final_content, final_ral)) = hook_handle.take_pending() {
+            let final_ctx = emit_state.build_ctx(final_ral);
+            let intent = ConversationIntent {
+                content: final_content,
+                is_reasoning: false,
+                usage: Some(LlmUsage {
+                    input_tokens: Some(stream_usage.input_tokens),
+                    output_tokens: Some(stream_usage.output_tokens),
+                    total_tokens: Some(stream_usage.total_tokens),
+                    cached_input_tokens: Some(stream_usage.cached_input_tokens),
+                    ..Default::default()
+                }),
+                metadata: None,
+            };
+            channel
+                .send(Intent::Conversation(intent), &final_ctx)
+                .await
+                .context("Failed to emit final conversation event")?;
+        }
+
+        // Post-completion supervision: check if pending todos warrant re-engagement.
+        let todos_snap: Vec<SupTodoEntry> = {
+            let lock = todos.lock().unwrap();
+            lock.iter()
+                .map(|t| SupTodoEntry {
+                    id: t.id.clone(),
+                    status: match t.status {
+                        TodoStatus::Pending => SupTodoStatus::Pending,
+                        TodoStatus::InProgress => SupTodoStatus::InProgress,
+                        TodoStatus::Done => SupTodoStatus::Done,
+                        TodoStatus::Skipped => SupTodoStatus::Skipped,
+                    },
+                })
+                .collect()
         };
-        channel
-            .send(Intent::Conversation(intent), &final_ctx)
-            .await
-            .context("Failed to emit final conversation event")?;
+        let outcome = {
+            let mut sup = supervisor_ref.lock().unwrap();
+            sup.check_post_completion(todos_snap, 0, envelope.content.clone())
+        };
+        match outcome {
+            PostCompletionOutcome::Accept => break 'agent_loop,
+            PostCompletionOutcome::ReEngage { message } => {
+                use rig::completion::message::Text;
+                re_engage_history.push(RigMessage::User {
+                    content: OneOrMany::one(UserContent::Text(Text { text: current_message })),
+                });
+                re_engage_history.push(RigMessage::Assistant {
+                    id: None,
+                    content: OneOrMany::one(AssistantContent::Text(Text {
+                        text: final_response.response().to_string(),
+                    })),
+                });
+                current_message = message;
+                eprintln!("[tenex-agent] Supervision: pending todos — re-engaging...");
+            }
+        }
     }
 
     Ok(())
