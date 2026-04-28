@@ -5,7 +5,7 @@ mod prompt;
 mod tools;
 
 use anyhow::{Context, Result};
-use config::{LlmsConfig, ProvidersConfig, ResolvedModel};
+use config::{LlmsConfig, ResolvedModel};
 use emit::{AgentMeta, EmitState};
 use hook::EmitHook;
 use rig::client::{CompletionClient, Nothing};
@@ -13,6 +13,7 @@ use rig::completion::Prompt;
 use rig::providers::{anthropic, ollama, openai, openrouter};
 use std::sync::{Arc, Mutex};
 use tenex_project::Project;
+use tenex_rag::{EmbedConfig, RagStore};
 use tenex_protocol::{
     nostr::{read_one_from_stdin, NostrChannel},
     sink::StdoutNdjsonSink,
@@ -20,15 +21,15 @@ use tenex_protocol::{
     ProjectRef,
 };
 use tools::{
-    DelegateTool, FsEditTool, FsGlobTool, FsGrepTool, FsReadTool, FsWriteTool, ShellTool,
-    TodoItem, TodoWriteTool,
+    DelegateTool, FsEditTool, FsGlobTool, FsGrepTool, FsReadTool, FsWriteTool, RagIndexTool,
+    RagSearchTool, ShellTool, TodoItem, TodoWriteTool,
 };
 
 /// Build and run the agent with all tools attached.
 /// The macro avoids duplicating tool registration across provider branches
 /// while still returning different concrete types per provider.
 macro_rules! run_agent {
-    ($client:expr, $model:expr, $system:expr, $message:expr, $wd:expr, $todos:expr, $hook:expr, $delegate:expr) => {{
+    ($client:expr, $model:expr, $system:expr, $message:expr, $wd:expr, $todos:expr, $hook:expr, $delegate:expr, $rag_index:expr, $rag_search:expr) => {{
         $client
             .agent($model)
             .preamble($system)
@@ -42,6 +43,8 @@ macro_rules! run_agent {
             .tool(FsGrepTool::new($wd.clone()))
             .tool(TodoWriteTool::new($todos.clone()))
             .tool($delegate)
+            .tool($rag_index)
+            .tool($rag_search)
             .build()
             .prompt($message)
             .with_hook($hook)
@@ -110,7 +113,7 @@ async fn main() -> Result<()> {
 
     // Load TENEX configuration files for model/key resolution
     let llms = LlmsConfig::load();
-    let providers = ProvidersConfig::load();
+    let providers = config::load_providers_config();
 
     // Resolve provider + model + API key
     let resolved =
@@ -170,6 +173,24 @@ async fn main() -> Result<()> {
     let hook = EmitHook::new(emit_state.clone());
     let delegate_tool = DelegateTool::new(emit_state.clone(), project_agents);
 
+    // Initialize RAG store for the embedding tools. If embedding is not configured
+    // or initialization fails, the tools remain available but return an error message.
+    let rag_store: Option<Arc<RagStore>> = (|| -> Option<Arc<RagStore>> {
+        let embed_config = EmbedConfig::load()?;
+        let base_dir = dirs_next::home_dir()?.join(".tenex");
+        let db_path = base_dir.join("projects").join(&project_id).join("embeddings.db");
+        match RagStore::open(&db_path, &embed_config) {
+            Ok(store) => Some(Arc::new(store)),
+            Err(e) => {
+                eprintln!("[tenex-agent] RAG store unavailable: {e}");
+                None
+            }
+        }
+    })();
+
+    let rag_index = RagIndexTool::new(rag_store.clone(), project_id.clone(), pubkey_hex.clone());
+    let rag_search = RagSearchTool::new(rag_store, project_id.clone(), pubkey_hex.clone());
+
     eprintln!("[tenex-agent] Running agent...");
 
     let response: String = match resolved.provider.as_str() {
@@ -186,7 +207,9 @@ async fn main() -> Result<()> {
                 working_dir,
                 todos,
                 hook.clone(),
-                delegate_tool.clone()
+                delegate_tool.clone(),
+                rag_index.clone(),
+                rag_search.clone()
             )
         }
         "openai" => {
@@ -202,7 +225,9 @@ async fn main() -> Result<()> {
                 working_dir,
                 todos,
                 hook.clone(),
-                delegate_tool.clone()
+                delegate_tool.clone(),
+                rag_index.clone(),
+                rag_search.clone()
             )
         }
         "ollama" => {
@@ -219,7 +244,9 @@ async fn main() -> Result<()> {
                 working_dir,
                 todos,
                 hook.clone(),
-                delegate_tool.clone()
+                delegate_tool.clone(),
+                rag_index.clone(),
+                rag_search.clone()
             )
         }
         _ => {
@@ -240,7 +267,9 @@ async fn main() -> Result<()> {
                 working_dir,
                 todos,
                 hook,
-                delegate_tool
+                delegate_tool,
+                rag_index,
+                rag_search
             )
         }
     };

@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use serde::Deserialize;
 use std::fs;
+use tenex_llm_config::resolver::{load_providers, ProviderDocs};
 
 #[derive(Debug, Deserialize)]
 pub struct AgentDefault {
@@ -66,74 +67,9 @@ impl LlmsConfig {
 
 // ─── Providers config ─────────────────────────────────────────────────────────
 
-#[derive(Debug, Deserialize)]
-#[serde(untagged)]
-enum ApiKeyValue {
-    Single(String),
-    List(Vec<String>),
-}
-
-impl ApiKeyValue {
-    fn first(&self) -> &str {
-        match self {
-            ApiKeyValue::Single(s) => s.split_whitespace().next().unwrap_or(s),
-            ApiKeyValue::List(v) => v
-                .first()
-                .map(|s| s.split_whitespace().next().unwrap_or(s))
-                .unwrap_or(""),
-        }
-    }
-}
-
-#[derive(Debug, Deserialize)]
-struct ProviderEntry {
-    #[serde(rename = "apiKey")]
-    api_key: Option<ApiKeyValue>,
-    #[serde(rename = "baseUrl")]
-    base_url: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct ProvidersMap {
-    providers: std::collections::HashMap<String, ProviderEntry>,
-}
-
-pub struct ProvidersConfig {
-    inner: ProvidersMap,
-}
-
-impl ProvidersConfig {
-    pub fn load() -> Option<Self> {
-        let path = dirs_next::home_dir()?.join(".tenex/providers.json");
-        let content = fs::read_to_string(path).ok()?;
-        let inner = serde_json::from_str(&content).ok()?;
-        Some(Self { inner })
-    }
-
-    pub fn api_key(&self, provider: &str) -> Option<String> {
-        let entry = self.inner.providers.get(provider)?;
-        let key = entry.api_key.as_ref()?.first();
-        if key.is_empty() || key == "none" || key == "local" {
-            None
-        } else {
-            Some(key.to_string())
-        }
-    }
-
-    // For ollama, TypeScript repurposes `apiKey` as the base URL.
-    // We also honor an explicit `baseUrl` field if present.
-    pub fn ollama_base_url(&self) -> Option<String> {
-        let entry = self.inner.providers.get("ollama")?;
-        if let Some(url) = &entry.base_url {
-            return Some(url.clone());
-        }
-        let key = entry.api_key.as_ref()?.first();
-        if key.is_empty() || key == "none" || key == "local" {
-            None
-        } else {
-            Some(key.to_string())
-        }
-    }
+pub fn load_providers_config() -> Option<ProviderDocs> {
+    let base_dir = dirs_next::home_dir()?.join(".tenex");
+    load_providers(&base_dir).ok()
 }
 
 // ─── Model resolution ─────────────────────────────────────────────────────────
@@ -160,7 +96,7 @@ impl ResolvedModel {
     pub fn resolve(
         raw_model: Option<&str>,
         llms: Option<&LlmsConfig>,
-        providers: Option<&ProvidersConfig>,
+        providers: Option<&ProviderDocs>,
     ) -> Self {
         let (provider, model) = resolve_provider_model(raw_model, llms);
         let (api_key, base_url) = resolve_credentials(&provider, providers);
@@ -174,7 +110,6 @@ fn resolve_provider_model(
 ) -> (String, String) {
     let raw = match raw_model {
         None | Some("default") | Some("") => {
-            // No model set: use llms.json default
             let default_key = llms
                 .and_then(|l| l.default.as_deref())
                 .unwrap_or("anthropic/claude-sonnet-4-6");
@@ -201,9 +136,6 @@ fn resolve_from_string(raw: &str, llms: Option<&LlmsConfig>) -> (String, String)
 
     // 3. Inline "provider/model" format
     if let Some((provider, model)) = raw.split_once('/') {
-        // Distinguish "anthropic/claude-haiku" (provider/model) from "openai/gpt-4o" (which
-        // IS the OpenRouter model name). Heuristic: if the left side is a known provider name,
-        // treat as provider/model; otherwise treat as the full model name for openrouter.
         let known_providers = ["anthropic", "openai", "openrouter", "ollama", "groq", "mistral"];
         if known_providers.contains(&provider) {
             return (provider.to_string(), model.to_string());
@@ -216,23 +148,42 @@ fn resolve_from_string(raw: &str, llms: Option<&LlmsConfig>) -> (String, String)
 
 fn resolve_credentials(
     provider: &str,
-    providers: Option<&ProvidersConfig>,
+    providers: Option<&ProviderDocs>,
 ) -> (Option<String>, Option<String>) {
     if provider == "ollama" {
-        // Ollama needs no API key; resolve base URL instead.
         let base_url = std::env::var("OLLAMA_API_BASE_URL")
             .ok()
             .filter(|s| !s.is_empty())
-            .or_else(|| providers.and_then(|p| p.ollama_base_url()));
+            .or_else(|| ollama_base_url(providers));
         return (None, base_url);
     }
 
-    // Env var takes priority for API key
     let env_var = format!("{}_API_KEY", provider.to_uppercase().replace('-', "_"));
     let api_key = std::env::var(&env_var)
         .ok()
         .filter(|s| !s.is_empty())
-        .or_else(|| providers.and_then(|p| p.api_key(provider)));
+        .or_else(|| {
+            providers?
+                .providers
+                .get(provider)?
+                .api_keys
+                .first()
+                .map(|k| k.key.clone())
+        });
 
     (api_key, None)
+}
+
+fn ollama_base_url(providers: Option<&ProviderDocs>) -> Option<String> {
+    let entry = providers?.providers.get("ollama")?;
+    // Prefer explicit baseUrl; fall back to apiKey field (TypeScript convention).
+    let url = entry
+        .base_url
+        .clone()
+        .or_else(|| entry.api_keys.first().map(|k| k.key.clone()))?;
+    if url.is_empty() || url == "none" || url == "local" {
+        None
+    } else {
+        Some(url)
+    }
 }

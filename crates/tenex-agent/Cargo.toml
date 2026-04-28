@@ -10,6 +10,8 @@ path = "src/main.rs"
 [dependencies]
 tenex-project = { path = "../tenex-project" }
 tenex-protocol = { path = "../tenex-protocol", default-features = false }
+tenex-llm-config = { path = "../tenex-llm-config" }
+tenex-rag = { path = "../tenex-rag" }
 rig-core = "0.35"
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }
