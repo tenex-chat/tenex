@@ -47,7 +47,7 @@ function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promi
 }
 
 /**
- * Singleton service that manages NIP-46 remote signing for kind 14199 events.
+ * Singleton service that manages NIP-46 remote signing.
  *
  * Responsibilities:
  * - Lazy initialization of NDKNip46Signer per owner pubkey

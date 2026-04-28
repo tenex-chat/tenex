@@ -15,7 +15,6 @@ interface AgentPubkeyCarrier {
 const NEVER_ROUTE_EVENT_KINDS = [
     NDKKind.Metadata, // kind:0 - user profile metadata
     NDKKind.Contacts, // kind:3 - contact list
-    NDKKind.ProjectAgentSnapshot,
     NDKKind.TenexProjectStatus,
     NDKKind.TenexInstalledAgentList,
     NDKKind.TenexOperationsStatus,

@@ -40,7 +40,7 @@ export class NDKAgentLesson extends NDKEvent {
 
     /**
      * Set the agent that this lesson belongs to.
-     * @param agentEvent The NDKAgentDefinition event to reference
+     * @param agentDefinitionId The agent definition event ID to reference
      */
     set agentDefinitionId(agentDefinitionId: string) {
         this.removeTag("e");

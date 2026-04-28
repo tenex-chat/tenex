@@ -5,7 +5,6 @@ import * as AgentProfilePublisherModule from "../AgentProfilePublisher";
 import * as ndkClientModule from "../ndkClient";
 import { getNDK } from "../ndkClient";
 import { config } from "@/services/ConfigService";
-import * as ProjectMembersReader from "@/services/projects/ProjectMembersReader";
 import { logger } from "@/utils/logger";
 
 describe("AgentProfilePublisher - Agent Metadata in Kind:0", () => {
@@ -16,7 +15,6 @@ describe("AgentProfilePublisher - Agent Metadata in Kind:0", () => {
     let getConfigSpy: ReturnType<typeof spyOn>;
     let getWhitelistedPubkeysSpy: ReturnType<typeof spyOn>;
     let ensureBackendPrivateKeySpy: ReturnType<typeof spyOn>;
-    let readProjectAgentPubkeysSpy: ReturnType<typeof spyOn>;
     let capturedEvents: NDKEvent[] = [];
 
     beforeEach(() => {
@@ -46,7 +44,6 @@ describe("AgentProfilePublisher - Agent Metadata in Kind:0", () => {
                 extend: mock((_msg: string) => ({ mock: true })),
             },
         } as any);
-        readProjectAgentPubkeysSpy = spyOn(ProjectMembersReader, "readProjectAgentPubkeys").mockResolvedValue([]);
         spyOn(agentStorage, "loadAgent").mockResolvedValue(null);
         spyOn(agentStorage, "getAgentBySlugForProject").mockResolvedValue(null);
         spyOn(logger, "debug").mockImplementation(() => undefined);
@@ -67,38 +64,8 @@ describe("AgentProfilePublisher - Agent Metadata in Kind:0", () => {
     // Helper to get the kind:0 event from captured events
     const getKind0Event = (): NDKEvent | undefined => capturedEvents.find(e => e.kind === 0);
 
-    describe("publishProjectAgentSnapshot", () => {
-        it("skips kind:14199 publishing entirely when NIP-46 is disabled", async () => {
-            getConfigSpy.mockReturnValue({
-                nip46: {
-                    enabled: false,
-                },
-            } as any);
-            readProjectAgentPubkeysSpy.mockResolvedValue(["a".repeat(64)]);
-
-            const setTimeoutSpy = spyOn(globalThis, "setTimeout").mockImplementation(((callback: Parameters<typeof setTimeout>[0]) => {
-                if (typeof callback === "function") {
-                    callback();
-                }
-                return 0 as ReturnType<typeof setTimeout>;
-            }) as typeof setTimeout);
-
-            try {
-                AgentProfilePublisherModule.publishProjectAgentSnapshot("project-1");
-                await Promise.resolve();
-                await Promise.resolve();
-            } finally {
-                setTimeoutSpy.mockRestore();
-            }
-
-            expect(mockSign).not.toHaveBeenCalled();
-            expect(mockPublish).not.toHaveBeenCalled();
-            expect(capturedEvents).toHaveLength(0);
-        });
-    });
-
     describe("publishAgentProfile", () => {
-        it("should include metadata tags for agents without NDKAgentDefinition event ID", async () => {
+        it("should include metadata tags for agents without agent definition event ID", async () => {
             const signer = NDKPrivateKeySigner.generate();
             const projectEvent = new NDKProject(getNDK());
             projectEvent.tagValue = mock(() => "Test Project");
@@ -116,7 +83,7 @@ describe("AgentProfilePublisher - Agent Metadata in Kind:0", () => {
                 "Tester",
                 "Test Project",
                 projectEvent,
-                undefined, // No NDKAgentDefinition event ID
+                undefined, // No agent definition event ID
                 agentMetadata,
                 [] // No whitelisted pubkeys for this test
             );
@@ -163,7 +130,7 @@ describe("AgentProfilePublisher - Agent Metadata in Kind:0", () => {
             }
         });
 
-        it("should NOT include metadata tags for agents WITH NDKAgentDefinition event ID", async () => {
+        it("should NOT include metadata tags for agents WITH agent definition event ID", async () => {
             const signer = NDKPrivateKeySigner.generate();
             const projectEvent = new NDKProject(getNDK());
             projectEvent.tagValue = mock(() => "Test Project");
@@ -183,7 +150,7 @@ describe("AgentProfilePublisher - Agent Metadata in Kind:0", () => {
                 "Tester",
                 "Test Project",
                 projectEvent,
-                ndkAgentEventId, // Has NDKAgentDefinition event ID
+                ndkAgentEventId, // Has agent definition event ID
                 agentMetadata,
                 [] // No whitelisted pubkeys for this test
             );
@@ -201,7 +168,7 @@ describe("AgentProfilePublisher - Agent Metadata in Kind:0", () => {
                 // Verify metadata tags are NOT included
                 const tags = capturedEvent.tags;
 
-                // Should have e-tag for the NDKAgentDefinition
+                // Should have e-tag for the agent definition
                 const eTag = tags.find((tag) => tag[0] === "e");
                 expect(eTag).toBeDefined();
                 expect(eTag?.[1]).toBe(ndkAgentEventId);
@@ -220,7 +187,7 @@ describe("AgentProfilePublisher - Agent Metadata in Kind:0", () => {
                 const phaseTags = tags.filter((tag) => tag[0] === "phase" && tag.length === 3);
                 expect(phaseTags.length).toBe(0);
 
-                // Check bot and tenex tags are still present even with NDKAgentDefinition
+                // Check bot and tenex tags are still present even with an agent definition event ID
                 const botTag = tags.find((tag) => tag[0] === "bot" && tag.length === 1);
                 expect(botTag).toBeDefined();
 
@@ -530,7 +497,7 @@ describe("AgentProfilePublisher - Agent Metadata in Kind:0", () => {
                 "Tester",
                 "Test Project",
                 projectEvent,
-                undefined, // No NDKAgentDefinition event ID
+                undefined, // No agent definition event ID
                 agentMetadata,
                 [] // No whitelisted pubkeys for this test
             );

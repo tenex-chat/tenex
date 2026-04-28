@@ -3,13 +3,13 @@
  *
  * Compiles agent lessons with user comments into Effective Agent Instructions.
  * Uses LLM to intelligently merge:
- * - Base Agent Instructions (from agent.instructions in Kind 4199 event)
+ * - Base Agent Instructions (from agent.instructions)
  * - Lessons (synchronized from ProjectContext by the runtime registry)
  * - Comments on Lesson Events
  * - Optional additionalSystemPrompt
  *
  * Terminology:
- * - Base Agent Instructions: Raw instructions stored in the agent definition Nostr event (Kind 4199)
+ * - Base Agent Instructions: Raw instructions stored in the agent definition
  * - Effective Agent Instructions: Final compiled instructions = Base + Lessons + Comments
  *
  * Key behaviors:

@@ -148,7 +148,7 @@ export async function publishAgentProfile(
                 );
             }
 
-            // Add metadata tags for agents without a valid NDKAgentDefinition event ID
+            // Add metadata tags as fallback when no agent definition event ID is available
             if (agentMetadata) {
                 if (agentMetadata.description) {
                     profileEvent.tags.push(["description", agentMetadata.description]);

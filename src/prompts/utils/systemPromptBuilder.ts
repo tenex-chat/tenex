@@ -166,7 +166,7 @@ export async function buildSystemPromptMessages(
  * Effective Agent Instructions. The result is then used when building fragments.
  *
  * IMPORTANT: The Effective Agent Instructions should contain ONLY:
- * - Base Agent Instructions (from agent.instructions in Kind 4199 event)
+ * - Base Agent Instructions (from agent.instructions)
  * - Lessons learned and lesson comments (merged by LLM)
  *
  * Fragments (project context, worktrees, available agents, etc.) are added AFTER compilation.
