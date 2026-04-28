@@ -100,25 +100,25 @@ struct TaskEntry {
 
 // ─── Storage helpers ────────────────────────────────────────────────────────
 
-fn base_dir() -> PathBuf {
+fn base_dir() -> Result<PathBuf> {
     if let Ok(custom) = std::env::var("TENEX_BASE_DIR") {
-        return PathBuf::from(custom);
+        return Ok(PathBuf::from(custom));
     }
     dirs_next::home_dir()
         .map(|h| h.join(".tenex"))
-        .unwrap_or_else(|| PathBuf::from(".tenex"))
+        .ok_or_else(|| anyhow!("cannot determine home directory"))
 }
 
-fn projects_dir() -> PathBuf {
-    base_dir().join("projects")
+fn projects_dir() -> Result<PathBuf> {
+    Ok(base_dir()?.join("projects"))
 }
 
-fn schedules_path(d_tag: &str) -> PathBuf {
-    projects_dir().join(d_tag).join("schedules.json")
+fn schedules_path(d_tag: &str) -> Result<PathBuf> {
+    Ok(projects_dir()?.join(d_tag).join("schedules.json"))
 }
 
 fn load_all_tasks() -> Result<Vec<TaskEntry>> {
-    let dir = projects_dir();
+    let dir = projects_dir()?;
     if !dir.exists() {
         return Ok(Vec::new());
     }
@@ -131,7 +131,7 @@ fn load_all_tasks() -> Result<Vec<TaskEntry>> {
             continue;
         }
         let d_tag = entry.file_name().to_string_lossy().into_owned();
-        let path = schedules_path(&d_tag);
+        let path = schedules_path(&d_tag)?;
         if !path.exists() {
             continue;
         }
@@ -147,7 +147,7 @@ fn load_all_tasks() -> Result<Vec<TaskEntry>> {
 }
 
 fn save_tasks(d_tag: &str, tasks: &[ScheduledTask]) -> Result<()> {
-    let path = schedules_path(d_tag);
+    let path = schedules_path(d_tag)?;
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
             .with_context(|| format!("create {}", parent.display()))?;
@@ -161,7 +161,7 @@ fn save_tasks(d_tag: &str, tasks: &[ScheduledTask]) -> Result<()> {
 }
 
 fn remove_task_from_project(d_tag: &str, task_id: &str) -> Result<()> {
-    let path = schedules_path(d_tag);
+    let path = schedules_path(d_tag)?;
     if !path.exists() {
         return Ok(());
     }
@@ -174,10 +174,12 @@ fn remove_task_from_project(d_tag: &str, task_id: &str) -> Result<()> {
 }
 
 fn add_task_to_project(d_tag: &str, task: ScheduledTask) -> Result<()> {
-    let path = schedules_path(d_tag);
+    let path = schedules_path(d_tag)?;
     let mut file = if path.exists() {
-        let bytes = fs::read(&path)?;
-        serde_json::from_slice::<SchedulesFile>(&bytes).unwrap_or_default()
+        let bytes = fs::read(&path)
+            .with_context(|| format!("read {}", path.display()))?;
+        serde_json::from_slice::<SchedulesFile>(&bytes)
+            .with_context(|| format!("parse {}", path.display()))?
     } else {
         SchedulesFile::default()
     };

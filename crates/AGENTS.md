@@ -100,6 +100,14 @@ If all three answers point to "yes, new crate," update both
   backwards-compatibility shims past a single bounded cutover. If the
   right fix is hard, do the hard thing; if it is unclear, investigate
   until clear. Speed is not a value here. Coherence is.
+- **No fallbacks that mask failures.** Sentinel values (`"unknown"`,
+  `String::new()`, `0`, `""`) must never be used to paper over absent
+  or unresolvable data. `unwrap_or(None)` on a `Result<Option<T>>` is
+  always wrong — it silently converts I/O and parse errors into "not
+  found". If a value is absent, represent that with `Option`; if
+  retrieval failed, propagate the error or log-and-bail. A warning
+  that lets execution continue with a bad value is as harmful as
+  silently swallowing the error.
 - **Boy Scout Rule.** Leave every file better than you found it. Touch
   a file → fix the obvious nearby thing: a stale comment, a misplaced
   import, an off-pattern name. Don't widen scope to a refactor PR, but

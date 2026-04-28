@@ -9,9 +9,10 @@ pub struct PendingIntervention {
     pub completed_at: u64,
     pub agent_pubkey: String,
     pub user_pubkey: String,
-    pub project_id: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub retry_count: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<String>,
+    #[serde(default)]
+    pub retry_count: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

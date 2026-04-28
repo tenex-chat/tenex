@@ -130,7 +130,6 @@ pub async fn run(cfg: Config) -> Result<()> {
                     Arc::clone(&publisher),
                     Arc::clone(&whitelisted),
                     &agent_slug,
-                    timeout_ms,
                     trigger_tx.clone(),
                 ).await;
             }
@@ -187,7 +186,9 @@ async fn handle_event(
                 if let Some(h) = guard.timers.remove(&conv_id) {
                     h.abort();
                 }
-                save_state_for_project(&guard, &pending.project_id);
+                if let Some(ref pid) = pending.project_id {
+                    save_state_for_project(&guard, pid);
+                }
                 info!(
                     conversation_id = %conv_id,
                     user_pubkey = %author_hex,
@@ -203,8 +204,23 @@ async fn handle_event(
             let completed_at_ms = event.created_at.as_secs() * 1000;
             let agent_pubkey = author_hex;
 
+            // Intervention is project-scoped; skip events with no project a-tag.
+            let project_id = match detector::project_id_from_event(&event) {
+                Some(pid) => pid,
+                None => {
+                    debug!(conversation_id = %conv_id, "no project a-tag, skipping");
+                    return;
+                }
+            };
+
             // Skip if the completing agent IS the intervention agent.
-            let intervention_agent_pk = resolver::resolve_slug(agent_slug).unwrap_or(None);
+            let intervention_agent_pk = match resolver::resolve_slug(agent_slug) {
+                Ok(pk) => pk,
+                Err(e) => {
+                    error!(error = %e, slug = agent_slug, "failed to resolve intervention agent slug");
+                    return;
+                }
+            };
             if let Some(ref pk) = intervention_agent_pk {
                 if pk == &agent_pubkey {
                     debug!(
@@ -232,23 +248,17 @@ async fn handle_event(
                 h.abort();
             }
 
-            let project_id = detector::project_id_from_event(&event).unwrap_or_default();
-
             let pending = PendingIntervention {
                 conversation_id: conv_id.clone(),
                 completed_at: completed_at_ms,
                 agent_pubkey,
                 user_pubkey,
-                project_id: project_id.clone(),
-                retry_count: Some(0),
+                project_id: Some(project_id.clone()),
+                retry_count: 0,
             };
 
             guard.pending.insert(conv_id.clone(), pending.clone());
-            if !project_id.is_empty() {
-                save_state_for_project(&guard, &project_id);
-            } else {
-                warn!(conversation_id = %conv_id, "no project a-tag on completion event, state not persisted");
-            }
+            save_state_for_project(&guard, &project_id);
 
             // Arm timer.
             let elapsed_ms = state::now_ms().saturating_sub(completed_at_ms);
@@ -277,7 +287,6 @@ async fn handle_trigger(
     publisher: Arc<Publisher>,
     _whitelisted: Arc<Vec<String>>,
     agent_slug: &str,
-    _timeout_ms: u64,
     trigger_tx: tokio::sync::mpsc::Sender<PendingIntervention>,
 ) {
     let conv_id = pending.conversation_id.clone();
@@ -296,69 +305,82 @@ async fn handle_trigger(
         }
     }
 
-    let intervention_agent_pk = resolver::resolve_slug(agent_slug).unwrap_or(None);
+    let Some(ref project_id) = pending.project_id else {
+        warn!(conversation_id = %conv_id, "pending intervention has no project_id, dropping");
+        let mut guard = ds.lock().await;
+        guard.pending.remove(&conv_id);
+        guard.timers.remove(&conv_id);
+        return;
+    };
 
-    match intervention_agent_pk {
-        None => {
-            warn!(slug = agent_slug, "intervention agent slug not found, dropping trigger");
+    let intervention_agent_pk = match resolver::resolve_slug(agent_slug) {
+        Ok(pk) => pk,
+        Err(e) => {
+            error!(error = %e, slug = agent_slug, "failed to resolve intervention agent slug");
+            return;
+        }
+    };
+
+    let Some(ref pk) = intervention_agent_pk else {
+        warn!(slug = agent_slug, "intervention agent slug not found, dropping trigger");
+        let mut guard = ds.lock().await;
+        guard.pending.remove(&conv_id);
+        guard.timers.remove(&conv_id);
+        if let Some(ref pid) = pending.project_id {
+            save_state_for_project(&guard, pid);
+        }
+        return;
+    };
+
+    match publisher
+        .publish_review_request(pk, project_id, &conv_id, None, None)
+        .await
+    {
+        Ok(_) => {
+            let now_ms = state::now_ms();
             let mut guard = ds.lock().await;
             guard.pending.remove(&conv_id);
             guard.timers.remove(&conv_id);
-            save_state_for_project(&guard, &pending.project_id);
-            return;
+            guard.notified.insert(conv_id.clone(), now_ms);
+            save_state_for_project(&guard, project_id);
+            info!(conversation_id = %conv_id, "intervention review request sent");
         }
-        Some(ref pk) => {
-            match publisher
-                .publish_review_request(pk, &conv_id, None, None)
-                .await
-            {
-                Ok(_) => {
-                    let now_ms = state::now_ms();
-                    let mut guard = ds.lock().await;
-                    guard.pending.remove(&conv_id);
-                    guard.timers.remove(&conv_id);
-                    guard.notified.insert(conv_id.clone(), now_ms);
-                    save_state_for_project(&guard, &pending.project_id);
-                    info!(conversation_id = %conv_id, "intervention review request sent");
-                }
-                Err(e) => {
-                    let retry = pending.retry_count.unwrap_or(0);
-                    if retry >= MAX_RETRY_ATTEMPTS {
-                        error!(
-                            conversation_id = %conv_id,
-                            "max retries reached for intervention, dropping"
-                        );
-                        let mut guard = ds.lock().await;
-                        guard.pending.remove(&conv_id);
-                        guard.timers.remove(&conv_id);
-                        save_state_for_project(&guard, &pending.project_id);
-                        return;
-                    }
-
-                    let backoff_ms = RETRY_BASE_MS * (2u64.pow(retry));
-                    warn!(
-                        conversation_id = %conv_id,
-                        retry,
-                        backoff_ms,
-                        error = %e,
-                        "publish failed, scheduling retry"
-                    );
-
-                    pending.retry_count = Some(retry + 1);
-                    {
-                        let mut guard = ds.lock().await;
-                        guard.pending.insert(conv_id.clone(), pending.clone());
-                        save_state_for_project(&guard, &pending.project_id);
-                    }
-
-                    let p = pending.clone();
-                    let tx = trigger_tx.clone();
-                    tokio::spawn(async move {
-                        tokio::time::sleep(Duration::from_millis(backoff_ms)).await;
-                        tx.send(p).await.ok();
-                    });
-                }
+        Err(e) => {
+            let retry = pending.retry_count;
+            if retry >= MAX_RETRY_ATTEMPTS {
+                error!(
+                    conversation_id = %conv_id,
+                    "max retries reached for intervention, dropping"
+                );
+                let mut guard = ds.lock().await;
+                guard.pending.remove(&conv_id);
+                guard.timers.remove(&conv_id);
+                save_state_for_project(&guard, project_id);
+                return;
             }
+
+            let backoff_ms = RETRY_BASE_MS * (2u64.pow(retry));
+            warn!(
+                conversation_id = %conv_id,
+                retry,
+                backoff_ms,
+                error = %e,
+                "publish failed, scheduling retry"
+            );
+
+            pending.retry_count = retry + 1;
+            {
+                let mut guard = ds.lock().await;
+                guard.pending.insert(conv_id.clone(), pending.clone());
+                save_state_for_project(&guard, project_id);
+            }
+
+            let p = pending.clone();
+            let tx = trigger_tx.clone();
+            tokio::spawn(async move {
+                tokio::time::sleep(Duration::from_millis(backoff_ms)).await;
+                tx.send(p).await.ok();
+            });
         }
     }
 }
@@ -435,7 +457,7 @@ fn save_state_for_project(guard: &DaemonState, project_id: &str) {
     let pending: Vec<PendingIntervention> = guard
         .pending
         .values()
-        .filter(|p| p.project_id == project_id)
+        .filter(|p| p.project_id.as_deref() == Some(project_id))
         .cloned()
         .collect();
 

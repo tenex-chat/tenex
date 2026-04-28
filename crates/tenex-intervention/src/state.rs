@@ -78,8 +78,8 @@ fn prune_notified(mut state: InterventionState) -> InterventionState {
 
 fn migrate_pending(mut state: InterventionState, project_id: &str) -> InterventionState {
     for p in &mut state.pending {
-        if p.project_id.is_empty() {
-            p.project_id = project_id.to_string();
+        if p.project_id.is_none() {
+            p.project_id = Some(project_id.to_string());
         }
     }
     state

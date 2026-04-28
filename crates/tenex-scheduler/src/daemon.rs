@@ -191,8 +191,13 @@ async fn catch_up_and_arm(
         }
     }
 
-    let target_pubkey = resolver::resolve_slug(&task.target_agent_slug)
-        .unwrap_or(None);
+    let target_pubkey = match resolver::resolve_slug(&task.target_agent_slug) {
+        Ok(pk) => pk,
+        Err(e) => {
+            error!(task_id = %task.id, error = %e, "failed to resolve agent slug");
+            return;
+        }
+    };
 
     // Catch-up: fire missed cron occurrences within the last 24h.
     if task.is_cron() {
@@ -276,7 +281,7 @@ async fn run_cron_loop(
 
         let delay = (next - Utc::now())
             .to_std()
-            .unwrap_or(Duration::from_secs(1));
+            .unwrap_or(Duration::ZERO);
 
         tokio::select! {
             _ = tokio::time::sleep(delay) => {}
@@ -287,7 +292,13 @@ async fn run_cron_loop(
             return;
         }
 
-        let target_pubkey = resolver::resolve_slug(&task.target_agent_slug).unwrap_or(None);
+        let target_pubkey = match resolver::resolve_slug(&task.target_agent_slug) {
+            Ok(pk) => pk,
+            Err(e) => {
+                error!(task_id = %task.id, error = %e, "failed to resolve agent slug");
+                return;
+            }
+        };
         if let Err(e) = publisher.publish_task(&task, target_pubkey.as_deref()).await {
             error!(task_id = %task.id, error = %e, "publish failed");
         } else {
@@ -321,7 +332,7 @@ async fn run_oneoff_loop(
         }
         let delay = (execute_at - now)
             .to_std()
-            .unwrap_or(Duration::from_secs(1))
+            .unwrap_or(Duration::ZERO)
             .min(Duration::from_secs(ONEOFF_RECHECK_SECS));
 
         tokio::select! {
@@ -334,7 +345,13 @@ async fn run_oneoff_loop(
         }
     }
 
-    let target_pubkey = resolver::resolve_slug(&task.target_agent_slug).unwrap_or(None);
+    let target_pubkey = match resolver::resolve_slug(&task.target_agent_slug) {
+        Ok(pk) => pk,
+        Err(e) => {
+            error!(task_id = %task.id, error = %e, "failed to resolve agent slug");
+            return;
+        }
+    };
     if let Err(e) = publisher.publish_task(&task, target_pubkey.as_deref()).await {
         error!(task_id = %task.id, error = %e, "one-off publish failed");
     } else {
