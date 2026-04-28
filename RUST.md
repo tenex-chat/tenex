@@ -119,6 +119,12 @@ The `tenex` binary now includes:
 - **Identifier utils** (`utils/identifiers.rs`): `shorten_event_id`, `shorten_pubkey` — mirrors `conversation-id.ts`
 - **Owner signer** (`nostr_pub/owner_signer.rs`): resolves nsec from env → config → interactive prompt
 - **Project mutation publisher** (`nostr_pub/project_mutation.rs`): ports `ProjectEventPublishService.publishMutation`
+- **Status events** (`nostr_pub/project_status.rs` + `operations_status.rs`): kind:24010 (project inventory) + kind:24133 (per-conversation active-agent); emitted from `tenex runtime` on 30s heartbeat + pre/post dispatch
+- **24011 inventory loop** in `tenex daemon`: spawns 30s heartbeat for installed-agent inventory (was missing)
+- **Doctor categorize preview** (`doctor/mod.rs`): scans agents, shows categorised/uncategorised count, surfaces LLM substrate hint
+- **Onboard LLM test substrate**: `llm_test_request.rs` (prompt/timeout/spinner constants) + `llm_test_hints.rs` (error→hint mapper)
+- **Claude Code model aliases** (`onboard/claude_code_models.rs`): three aliases for `claude-code` provider
+- **models.dev types** (`store/models_dev.rs`): `CacheData`, `ModelsDevModel`, `is_stale` — pure types; HTTP fetch substrate pending
 
 ---
 
@@ -133,17 +139,24 @@ The `tenex` binary now includes:
 
 ## Compilation Status
 
-**As of 2026-04-28 (sixth debt check pass): workspace compiles clean — zero errors.**
+**As of 2026-04-28 (seventh debt check pass): workspace compiles clean — zero errors.**
 
 Resolved this pass (no compilation errors, all new work committed):
+- Status events: kind:24010 project inventory + kind:24133 per-conversation active-agent wired into `tenex runtime`
+- 24011 inventory heartbeat loop added to `tenex daemon` (was missing)
+- Doctor categorize preview wired (scans agents, surfaces LLM gate)
+- Telegram agent config flow fully wired (was a stub)
+- Onboard LLM test substrate: request constants + error-hint mapper
+- Claude Code model aliases ported
+- models.dev pure types ported (HTTP fetch substrate still pending)
+
+Resolved in sixth pass:
 - Skills system (`skills.rs`, `tools/skill_list.rs`, `tools/skills_set.rs`) — discover + apply per-conversation skills
 - Skills persistence: `save_context_state` unified write for todos + self-applied skills
 - Telegram config helpers (`telegram_config.rs`) + full `tenex config telegram` wiring
-- Telegram identifiers utils (`utils/telegram_identifiers.rs`)
 - Conversation disk reader (`store/conversation_disk_reader.rs`) for `tenex doctor`
 - Identifier utils (`utils/identifiers.rs`) — `shorten_event_id` extracted from inline code
 - OpenClaw import dispatch wired in `agent_cmd/mod.rs` (was a stub)
-- `manager_actions.rs` lazy owner-signer fix in `show_agent_detail`
 
 ---
 
@@ -151,16 +164,19 @@ Resolved this pass (no compilation errors, all new work committed):
 
 ```
 tenex daemon (Rust)
-    └── whitelist (Rust, supervised)
-    └── tenex-identity (Rust, supervised)
-    └── tenex-llm-config IPC (Rust, in-process)
-    └── tenex-summarizer (Rust, supervised)
-    └── tenex-scheduler (Rust, supervised)
-    └── tenex-intervention (Rust, supervised)
+    ├── whitelist (Rust, supervised)
+    ├── tenex-identity (Rust, supervised)
+    ├── tenex-llm-config IPC (Rust, in-process)
+    ├── tenex-summarizer (Rust, supervised)
+    ├── tenex-scheduler (Rust, supervised)
+    ├── tenex-intervention (Rust, supervised)
+    ├── 24011 installed-agent inventory heartbeat (30s loop, in-process)
     └── tenex runtime <d-tag>  (Rust, per project — DEFAULT)
+            ├── 24010 project status heartbeat (30s loop, in-process)
             └── tenex-agent (Rust, spawned per conversation turn)
-                    └── skills system (built-in + agent + project + shared scopes)
-                    └── RAG tools (optional)
+                    ├── 24133 operations status (pre/post dispatch)
+                    ├── skills system (built-in + agent + project + shared scopes)
+                    ├── RAG tools (optional)
                     └── delegate tool
 ```
 
