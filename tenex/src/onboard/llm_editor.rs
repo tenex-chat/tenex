@@ -96,10 +96,12 @@ pub fn route(base_dir: &std::path::Path, value: &str) -> Result<bool> {
             Ok(true)
         }
         v if v.starts_with("config:") => {
-            let _name = &v["config:".len()..];
-            display::hint(
-                "Editing a configuration is pending port (see `tenex config llm`).",
-            );
+            // TS behaviour: pressing Enter on a config item produces
+            // `config:<name>` as the action, but `showMainMenu` matches
+            // only against `delete:`, `add`, `addMultiModal`, and `done`.
+            // No handler matches `config:` — the function falls through
+            // and the menu re-renders. Match that exactly: silent recurse.
+            // (`LLMConfigEditor.ts:221-232`).
             Ok(true)
         }
         _ => {
@@ -339,11 +341,16 @@ mod tests {
     }
 
     #[test]
-    fn route_config_prefix_is_pending_and_continues() {
+    fn route_config_prefix_is_silent_noop_and_continues() {
+        // TS `LLMConfigEditor.ts:221-232` only handles `delete:`, `add`,
+        // `addMultiModal`, and `done`. Selecting a config (Enter on a
+        // config row) emits `config:<name>` which matches none of those
+        // — the function falls through and the menu re-renders. Match
+        // that exactly: route returns continue=true, no side effects.
         let base = fresh_temp();
-        // Editing a config is documented as pending; route returns
-        // continue=true.
         assert!(route(&base, "config:Whatever").unwrap());
+        // No llms.json should be written (silent noop).
+        assert!(!base.join("llms.json").exists());
         std::fs::remove_dir_all(&base).ok();
     }
 }
