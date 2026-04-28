@@ -65,13 +65,13 @@ Wired and supervised. Generates kind:513 metadata events. TS in-process summariz
 
 ### `tenex-agent` binary
 Spawned by `tenex runtime` per conversation turn via `tenex-agent <agent.json>` with the triggering Nostr event on stdin. Currently includes:
-- All filesystem tools (read, write, edit, glob, grep)
+- **Streaming LLM output**: `stream_prompt` via rig-core, accumulating text deltas; final `ConversationIntent` emitted with real token usage from `FinalResponse`
+- **FS tools (permission-gated)**: full-project tools (`fs_read`, `fs_write`, `fs_edit`, `fs_glob`, `fs_grep`) when granted; otherwise home-sandboxed variants (`HomeFsReadTool` etc.) restricted to `~/.tenex/home/<pubkey8>/` with path traversal guard
 - Shell tool
 - Delegate tool (reads project DB, emits delegation intents)
 - RAG index + search tools (via `tenex-rag`, optional — disabled if embed not configured)
 - **Skills tools**: `skill_list` (discover skills by scope) + `skills_set` (apply/remove per-conversation)
 - Provider dispatch: Anthropic, OpenAI, OpenRouter, Ollama (via `rig-core`)
-- Completion event emission over Nostr (stdout NDJSON)
 - LLM config resolution from `~/.tenex/llms.json` + `~/.tenex/providers.json`
 - Teams support: loads `teams.json`, renders `<teams-context>` fragment, routes delegation by team name
 - Agent home directory: per-agent `~/.tenex/home/<pubkey8>/` with `.env` auto-loading and `+filename` injection
@@ -122,9 +122,12 @@ The `tenex` binary now includes:
 - **Status events** (`nostr_pub/project_status.rs` + `operations_status.rs`): kind:24010 (project inventory) + kind:24133 (per-conversation active-agent); emitted from `tenex runtime` on 30s heartbeat + pre/post dispatch
 - **24011 inventory loop** in `tenex daemon`: spawns 30s heartbeat for installed-agent inventory (was missing)
 - **Doctor categorize preview** (`doctor/mod.rs`): scans agents, shows categorised/uncategorised count, surfaces LLM substrate hint
-- **Onboard LLM test substrate**: `llm_test_request.rs` (prompt/timeout/spinner constants) + `llm_test_hints.rs` (error→hint mapper)
+- **Onboard LLM test substrate**: `llm_test_request.rs` (prompt/timeout/spinner constants) + `llm_test_hints.rs` (error→hint mapper, `is_meaningful_ai_message`, `format_stream_error`)
 - **Claude Code model aliases** (`onboard/claude_code_models.rs`): three aliases for `claude-code` provider
 - **models.dev types** (`store/models_dev.rs`): `CacheData`, `ModelsDevModel`, `is_stale` — pure types; HTTP fetch substrate pending
+- **Provider ID constants** (`store/provider_ids.rs`): canonical string IDs for all 7 providers — eliminates magic strings
+- **Codex LLM config options** (`store/llm_config_options.rs`): effort/summary/personality/approvalPolicy/sandboxPolicy enums
+- **Utils library ports**: `utils/error_formatter.rs` (ToolError + format_tool_error), `utils/parse_dotenv.rs` (strict .env parser), `utils/time.rs` (format_time_ago, format_relative_time_short, format_uptime_ms)
 
 ---
 
@@ -139,9 +142,16 @@ The `tenex` binary now includes:
 
 ## Compilation Status
 
-**As of 2026-04-28 (seventh debt check pass): workspace compiles clean — zero errors.**
+**As of 2026-04-28 (eighth debt check pass): workspace compiles clean — zero errors.**
 
 Resolved this pass (no compilation errors, all new work committed):
+- **Streaming LLM responses**: `stream_prompt` + `StreamExt` loop in `run_agent!` macro; real token usage from `FinalResponse`
+- **Home-sandboxed FS tools**: five `HomeFsXxxTool` variants with path traversal guard; `build_fs_tools()` dispatches per `granted_tools`
+- **Skills bug fixes**: char-boundary truncation, atomic snapshot/restore on remove+add failure
+- Provider ID constants and Codex LLM config option enums ported
+- Utils library: error_formatter, parse_dotenv, time — mirrors src/lib/
+
+Resolved in seventh pass:
 - Status events: kind:24010 project inventory + kind:24133 per-conversation active-agent wired into `tenex runtime`
 - 24011 inventory heartbeat loop added to `tenex daemon` (was missing)
 - Doctor categorize preview wired (scans agents, surfaces LLM gate)
