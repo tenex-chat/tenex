@@ -75,6 +75,7 @@ Spawned by `tenex runtime` per conversation turn via `tenex-agent <agent.json>` 
 - Teams support: loads `teams.json`, renders `<teams-context>` fragment, routes delegation by team name
 - Agent home directory: per-agent `~/.tenex/home/<pubkey8>/` with `.env` auto-loading and `+filename` injection
 - Supervision heuristics: `tenex-supervision` drives post-completion re-engagement, todo nudging, delegation gating by category
+- **Todo persistence via `tenex-conversations`**: tenex-agent opens the conversation store directly, loads persisted todos on startup, and saves final todo state on completion
 
 ### `tenex-protocol`
 Fully used. Defines `Intent`, `Channel`, `ConversationRef`, `ProjectRef`, Nostr encoder/decoder, stdin source, stdout NDJSON sink. Used by `tenex-agent`, `tenex-intervention`, `tenex-scheduler`, `tenex-summarizer`.
@@ -94,7 +95,12 @@ Library built. Provides `RagStore` (SQLite + vector search) + `EmbedConfig` load
 - Pipes the raw Nostr event JSON to `tenex-agent` stdin, relays signed event output back to the relay
 - Has a per-project lockfile to prevent duplicate instances (`projects/<dTag>/runtime.lock`)
 
-**`tenex daemon` now defaults to `tenex runtime` as its boot command** — the TypeScript boot layer is no longer the primary path. The Rust runtime is live. Missing pieces before full TS retirement: RAL, conversation persistence, context management (see roadmap).
+**`tenex daemon` now defaults to `tenex runtime` as its boot command** — the TypeScript boot layer is no longer the primary path. The Rust runtime is live. Missing pieces before full TS retirement: context management (see roadmap).
+
+---
+
+### `tenex-conversations`
+Wired into both `tenex runtime` and `tenex-agent`. `tenex-agent` opens the store directly: loads persisted todo state on startup, saves updated todo state on completion. **Conversation history (LLM message turns) is NOT loaded** — each invocation is stateless from the LLM's perspective.
 
 ---
 
@@ -104,7 +110,6 @@ Library built. Provides `RagStore` (SQLite + vector search) + `EmbedConfig` load
 |-------|--------|-------|
 | `tenex-context` | Built, not integrated | Projection + compaction/decay strategies exist. Not yet used by `tenex-agent` — agent builds messages ad-hoc. |
 | `tenex-system-prompt` | Built, not integrated | Pure system-prompt assembly. `tenex-agent` has its own `prompt.rs`. Should migrate. |
-| `tenex-conversations` | **Now wired into `tenex runtime`** | `tenex runtime` opens the conversation store and passes it to the agent runner. `tenex-agent` itself still doesn't persist history (stateless per-invocation). |
 
 ---
 

@@ -218,44 +218,61 @@ Execute a shell command in the working directory. Shell sessions auto-load the a
 Returns stdout + stderr on success. Returns a structured error string on failure.
 
 ### `fs_read`
-Read a file's contents. Path relative to working directory.
+Read a file's contents, or list a directory. Lines are numbered; output defaults to 250 lines. Pass `offset`/`limit` to paginate large files.
 
 | Param | Type | Description |
 |-------|------|-------------|
-| `path` | string | File path |
+| `path` | string | File or directory path (relative to working directory) |
+| `description` | string | Brief reason for this read |
+| `offset` | integer? | 1-based line number to start from (default 1) |
+| `limit` | integer? | Maximum lines to return (default 250) |
 
 ### `fs_write`
-Write content to a file (creates or overwrites).
+Write content to a file (creates parent dirs automatically, overwrites existing).
 
 | Param | Type | Description |
 |-------|------|-------------|
 | `path` | string | File path |
 | `content` | string | File content |
+| `description` | string | Brief reason for this write |
 
 ### `fs_edit`
-Find-and-replace in a file. Fails if old_string not found or found multiple times.
+Find-and-replace in a file. When `replace_all` is false (default), `old_string` must appear exactly once; fails if not found or ambiguous.
 
 | Param | Type | Description |
 |-------|------|-------------|
 | `path` | string | File path |
+| `description` | string | Brief reason for this edit |
 | `old_string` | string | Exact text to replace |
 | `new_string` | string | Replacement text |
+| `replace_all` | bool? | Replace every occurrence instead of requiring a unique match (default false) |
 
 ### `fs_glob`
-Find files matching a glob pattern.
+Find files matching a glob pattern. Returns matching paths relative to working directory, sorted, up to `head_limit` results.
 
 | Param | Type | Description |
 |-------|------|-------------|
 | `pattern` | string | Glob pattern (e.g. `src/**/*.rs`) |
+| `description` | string | Brief reason for this search |
+| `head_limit` | integer? | Maximum results; 0 for unlimited (default 100) |
+| `offset` | integer? | Skip the first N results (default 0) |
 
 ### `fs_grep`
-Search for a string or regex in files.
+Search file contents using ripgrep (falls back to grep). Pattern is always treated as a regex. Supports three output modes: `files_with_matches` (default), `content` (with line numbers), and `count`.
 
 | Param | Type | Description |
 |-------|------|-------------|
-| `pattern` | string | Search pattern (literal string or regex) |
+| `pattern` | string | Regex pattern to search for |
+| `description` | string | Brief reason for this search |
 | `path` | string? | File or directory to search (defaults to cwd) |
-| `use_regex` | bool? | Treat pattern as regex (default false) |
+| `output_mode` | string? | `files_with_matches` \| `content` \| `count` (default: `files_with_matches`) |
+| `glob` | string? | Glob filter for files (e.g. `*.ts`) |
+| `-i` | bool? | Case-insensitive search |
+| `-A` | integer? | Lines of trailing context (content mode) |
+| `-B` | integer? | Lines of leading context (content mode) |
+| `-C` | integer? | Lines of surrounding context (content mode) |
+| `head_limit` | integer? | Maximum results; 0 for unlimited (default 100) |
+| `offset` | integer? | Skip the first N results (default 0) |
 
 ### `todo_write`
 Replace the agent's in-memory todo list. Full state replacement on every call.
@@ -283,24 +300,23 @@ Delegate a task to another agent by slug, or to a whole team by team name. **Onl
 Emits a `DelegationIntent` event on stdout, then a `ToolUseIntent` event referencing it. Returns a message instructing the agent to stop for the turn. Team names are resolved case-insensitively to the team lead agent.
 
 ### `rag_index`
-Index content into the RAG vector store.
+Index content into the RAG vector store. The `audience` field determines which collection to store in: `"self"` → `agent_{pubkey}` (personal notes); `"project"` → `project_{id}` (shared project knowledge).
 
 | Param | Type | Description |
 |-------|------|-------------|
 | `content` | string | Text to embed and store |
-| `collection` | string | Collection name |
+| `audience` | string | `"self"` (personal agent knowledge) \| `"project"` (shared project knowledge) |
 | `title` | string? | Optional document title |
 
 Disabled (returns error message) when embedding is not configured (`~/.tenex/embed.json` absent).
 
 ### `rag_search`
-Search the RAG vector store for relevant content.
+Search the RAG vector store for relevant content. Always searches across all three fixed collections: `conversations`, `project_{id}`, and `agent_{pubkey}`.
 
 | Param | Type | Description |
 |-------|------|-------------|
 | `query` | string | Natural-language search query |
-| `collections` | string[]? | Collections to search (defaults to project + agent collections) |
-| `limit` | integer? | Max results (default 5) |
+| `limit` | integer? | Max results (default 10) |
 
 Disabled (returns error message) when embedding is not configured.
 
@@ -351,9 +367,8 @@ API keys are resolved from environment (`ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY
 | `tokio` | Async runtime |
 | `serde` + `serde_json` | JSON handling |
 | `anyhow` + `thiserror` | Error handling |
-| `glob` | File glob patterns |
-| `walkdir` | Directory traversal for grep |
-| `regex` | Regex support for grep |
+| `glob` | File glob patterns (`fs_glob`) |
+| `regex` | Regex for parsing ripgrep/grep output line format |
 | `dirs_next` | Home directory resolution |
 | `tenex-protocol` | `Intent`, `Channel`, Nostr encoder, stdin source, stdout NDJSON sink |
 | `tenex-project` | Project SQLite DB (agents, metadata, teams) |
