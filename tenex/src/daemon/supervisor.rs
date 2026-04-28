@@ -1,7 +1,8 @@
 //! Process supervision for project runtimes and host-level companion daemons.
 //!
 //! `boot(d_tag)` / `boot_binary(key, path)` are idempotent: if a supervised
-//! task for that key already exists the call is a no-op. Children run in their
+//! task for that key already exists the call is a no-op.  The d_tag is
+//! appended as a positional argument to the boot argv.  Children run in their
 //! own process group (setsid via `process_group(0)`), so a SIGTERM to the
 //! group reaches every descendant on shutdown.
 
@@ -53,7 +54,6 @@ impl Supervisor {
         }
 
         let mut argv: Vec<String> = (*self.boot_argv).to_vec();
-        argv.push("--boot".into());
         argv.push(d_tag.clone());
 
         let base_dir = self.base_dir.clone();

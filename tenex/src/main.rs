@@ -42,9 +42,9 @@ enum Command {
     /// Browse, add, and remove scheduled tasks across all projects.
     Cron(cron_cmd::CronArgs),
 
-    /// Run the project supervisor: subscribe to Nostr, boot a per-project
-    /// runtime (`tenex-boot`) for each project that receives a kind:1 or
-    /// kind:24000 trigger from a whitelisted pubkey, restart on crash.
+    /// Run the project supervisor: subscribe to Nostr, spawn `tenex runtime
+    /// <d-tag>` for each project that receives a kind:1 or kind:24000 trigger
+    /// from a whitelisted pubkey, restart on crash.
     Daemon(daemon::DaemonArgs),
 
     /// Run a per-project Nostr orchestrator: subscribe, dispatch inbound

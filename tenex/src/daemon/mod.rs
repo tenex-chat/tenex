@@ -1,6 +1,6 @@
 //! Project supervisor: subscribe to Nostr, boot per-project runtimes
-//! (`tenex-boot`) when whitelisted authors send kind:1 / kind:24000 events
-//! a-tagging a known project, restart on crash.
+//! (`tenex runtime <d-tag>`) when whitelisted authors send kind:1 / kind:24000
+//! events a-tagging a known project, restart on crash.
 
 pub mod config;
 pub mod lockfile;
@@ -20,16 +20,10 @@ pub struct DaemonArgs {
     #[arg(long, value_name = "PATH")]
     pub base_dir: Option<PathBuf>,
 
-    /// Boot command prefix. The supervisor appends `--boot <d-tag>` per child.
-    /// Default: `bun run <repo-root>/src/boot.ts`.
+    /// Boot command for per-project runtimes. The d-tag is appended as a
+    /// positional argument. Default: `<current-exe> runtime`.
     #[arg(long, value_name = "CMD")]
     pub boot_command: Option<String>,
-
-    /// Repository root used to resolve the default boot script
-    /// (ignored when --boot-command is set). Defaults to the parent of the
-    /// `tenex` crate dir at compile time (i.e. the workspace root).
-    #[arg(long, value_name = "PATH")]
-    pub repo_root: Option<PathBuf>,
 
     /// Boot the project whose d-tag starts with this prefix as soon as it is
     /// discovered on Nostr, without waiting for a kind:1/24000 trigger.
@@ -91,20 +85,22 @@ pub async fn run(args: DaemonArgs) -> Result<()> {
     }
     info!("llm-config IPC server started");
 
-    let boot_command = match args.boot_command.clone() {
-        Some(cmd) => cmd,
+    let boot_argv = match args.boot_command {
+        Some(cmd) => {
+            info!(boot_command = %cmd, "boot command resolved");
+            let argv = shell_words::split(&cmd)
+                .with_context(|| format!("parsing --boot-command: {cmd}"))?;
+            if argv.is_empty() {
+                return Err(anyhow::anyhow!("--boot-command is empty"));
+            }
+            argv
+        }
         None => {
-            let repo_root = args.repo_root.clone().unwrap_or_else(default_repo_root);
-            format!("bun run {}", repo_root.join("src/boot.ts").display())
+            let argv = default_boot_argv();
+            info!(boot_command = %argv.join(" "), "boot command resolved");
+            argv
         }
     };
-    info!(boot_command, "boot command resolved");
-
-    let boot_argv = shell_words::split(&boot_command)
-        .with_context(|| format!("parsing --boot-command: {boot_command}"))?;
-    if boot_argv.is_empty() {
-        return Err(anyhow::anyhow!("--boot-command is empty"));
-    }
 
     let supervisor = supervisor::Supervisor::new(boot_argv, base_dir.clone());
 
@@ -165,12 +161,9 @@ async fn wait_for_signal() {
     }
 }
 
-fn default_repo_root() -> PathBuf {
-    // CARGO_MANIFEST_DIR is the tenex crate dir at compile time
-    // (e.g. <repo>/tenex). The repo root is its parent.
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    manifest_dir
-        .parent()
-        .map(|p| p.to_path_buf())
-        .unwrap_or(manifest_dir)
+fn default_boot_argv() -> Vec<String> {
+    let exe = std::env::current_exe()
+        .ok()
+        .unwrap_or_else(|| PathBuf::from("tenex"));
+    vec![exe.to_string_lossy().into_owned(), "runtime".to_string()]
 }
