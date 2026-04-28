@@ -91,6 +91,9 @@ export class Daemon {
     // Auto-boot patterns - projects whose d-tag contains any of these patterns will be auto-started
     private autoBootPatterns: string[] = [];
 
+    // Optional runtime boot allowlist for single-project boot wrappers
+    private runtimeBootAllowlist: Set<ProjectDTag> | null = null;
+
     // Agent definition auto-upgrade monitor
     private agentDefinitionMonitor: AgentDefinitionMonitor | null = null;
 
@@ -147,6 +150,17 @@ export class Daemon {
     setAutoBootPatterns(patterns: string[]): void {
         this.autoBootPatterns = patterns;
         logger.info("Auto-boot patterns configured", { patterns });
+    }
+
+    setRuntimeBootAllowlist(projectIds: readonly ProjectDTag[]): void {
+        this.runtimeBootAllowlist = new Set(projectIds);
+        logger.info("Runtime boot allowlist configured", {
+            projectIds: Array.from(this.runtimeBootAllowlist),
+        });
+    }
+
+    private isRuntimeBootAllowed(projectId: ProjectDTag): boolean {
+        return !this.runtimeBootAllowlist || this.runtimeBootAllowlist.has(projectId);
     }
 
     /**
@@ -699,6 +713,16 @@ export class Daemon {
         let runtime = this.runtimeLifecycle.getRuntime(projectId);
 
         if (!runtime) {
+            if (!this.isRuntimeBootAllowed(projectId)) {
+                addRoutingEvent(span, "dropped", { reason: "runtime_boot_restricted" });
+                await logDropped(
+                    this.routingLogger,
+                    event,
+                    `Runtime boot restricted for project: ${projectId}`
+                );
+                return;
+            }
+
             const canBootProject = event.kind === 1 || event.kind === 24000;
 
             if (!canBootProject) {
@@ -1028,6 +1052,10 @@ export class Daemon {
     async startRuntime(projectId: ProjectDTag): Promise<void> {
         if (!this.runtimeLifecycle) {
             throw new Error("RuntimeLifecycle not initialized");
+        }
+
+        if (!this.isRuntimeBootAllowed(projectId)) {
+            throw new Error(`Runtime boot restricted for project: ${projectId}`);
         }
 
         const project = this.knownProjects.get(projectId);
