@@ -168,6 +168,91 @@ pub const CUSTOM_OPENAI_COMPATIBLE_ROW: EmbeddingModelChoice = EmbeddingModelCho
     value: CUSTOM_MODEL_SENTINEL,
 };
 
+/// Mirror the custom-model row appended to Ollama's picker
+/// (`embed.ts:131`). Distinct label from the local + OpenAI-compatible
+/// custom rows — the TS source uses three different labels even though
+/// they all funnel to the same `"custom"` value.
+pub const CUSTOM_OLLAMA_ROW: EmbeddingModelChoice = EmbeddingModelChoice {
+    name: "Custom Ollama model",
+    value: CUSTOM_MODEL_SENTINEL,
+};
+
+/// Default Ollama model. Mirror `embed.ts:139` —
+/// `existing?.provider === provider ? existing?.model : "nomic-embed-text"`.
+/// When the user is switching providers (or no existing config), the
+/// picker pre-selects this row.
+pub const OLLAMA_DEFAULT_MODEL: &str = "nomic-embed-text";
+
+/// Default provider used when `existing?.provider` is absent. Mirror
+/// `embed.ts:119` — `existing?.provider || "local"`.
+pub const DEFAULT_PROVIDER: &str = "local";
+
+/// The non-OpenAI-compatible top-rows of the provider picker. Mirror
+/// `embed.ts:97-100` — exactly two entries in this order.
+pub const TOP_PROVIDER_ROWS: &[EmbeddingModelChoice] = &[
+    EmbeddingModelChoice {
+        name: "Ollama (local, recommended)",
+        value: "ollama",
+    },
+    EmbeddingModelChoice {
+        name: "Local Transformers (in-process)",
+        value: "local",
+    },
+];
+
+/// Format the row label used for an OpenAI-compatible provider that's
+/// already configured in `providers.json`. Mirror `embed.ts:104-108` —
+/// `"${displayName} (configured)"`. Returns `None` for providers that
+/// are NOT in `EMBEDDING_CAPABLE_PROVIDERS` (no display name → don't
+/// render the row).
+pub fn configured_provider_row_label(provider: &str) -> Option<String> {
+    let display = embed_provider_display_name(provider)?;
+    Some(format!("{display} (configured)"))
+}
+
+/// Verbatim prompt-message strings used by `tenex config embed`.
+/// Pinned as a single module so future audits can sweep them in one
+/// pass against the TS source.
+pub mod prompt_strings {
+    /// `embed.ts:90` — red error when no providers configured.
+    pub const NO_PROVIDERS_ERROR: &str =
+        "❌ No providers configured. Run `tenex config providers` before configuring embeddings.";
+
+    /// `embed.ts:117` — top-level provider picker.
+    pub const SELECT_PROVIDER_MESSAGE: &str = "Select embedding provider:";
+
+    /// `embed.ts:137` — Ollama branch model picker.
+    pub const SELECT_OLLAMA_MODEL_MESSAGE: &str = "Select Ollama embedding model:";
+
+    /// `embed.ts:175` — OpenAI-compatible branch model picker, with
+    /// the provider's display name interpolated. The full TS template
+    /// is `Select ${displayName} embedding model:` — this constant is
+    /// the wrapper without the interpolation; pair with
+    /// `embed_provider_display_name`.
+    pub const SELECT_PROVIDER_MODEL_PREFIX: &str = "Select ";
+    pub const SELECT_PROVIDER_MODEL_SUFFIX: &str = " embedding model:";
+
+    /// `embed.ts:203` — local-transformer branch model picker.
+    pub const SELECT_LOCAL_MODEL_MESSAGE: &str = "Select local embedding model:";
+
+    /// `embed.ts:149` — Ollama custom-model input.
+    pub const ENTER_OLLAMA_MODEL_MESSAGE: &str = "Enter Ollama model name:";
+
+    /// `embed.ts:187` — OpenAI-compatible custom-model input.
+    pub const ENTER_MODEL_ID_MESSAGE: &str = "Enter model ID:";
+
+    /// `embed.ts:233` — local-transformer custom-model input.
+    pub const ENTER_HF_MODEL_ID_MESSAGE: &str =
+        "Enter HuggingFace model ID (e.g., sentence-transformers/all-MiniLM-L6-v2):";
+
+    /// `embed.ts:152` — Ollama custom-model validator failure.
+    pub const VALIDATE_MODEL_NAME_EMPTY: &str = "Model name cannot be empty";
+
+    /// `embed.ts:190, 236` — OpenAI-compatible + local custom-model
+    /// validator failure. (Same message used in two branches.)
+    pub const VALIDATE_MODEL_ID_EMPTY: &str = "Model ID cannot be empty";
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -356,5 +441,114 @@ mod tests {
             .find(|m| m.value == CUSTOM_MODEL_SENTINEL)
             .unwrap();
         assert_ne!(CUSTOM_OPENAI_COMPATIBLE_ROW.name, local_custom.name);
+    }
+
+    // ── CUSTOM_OLLAMA_ROW ───────────────────────────────────────────────
+
+    #[test]
+    fn custom_ollama_row_has_distinct_label_from_other_custom_rows() {
+        assert_eq!(CUSTOM_OLLAMA_ROW.name, "Custom Ollama model");
+        assert_eq!(CUSTOM_OLLAMA_ROW.value, "custom");
+        // Distinct from the other two custom-row labels.
+        assert_ne!(CUSTOM_OLLAMA_ROW.name, CUSTOM_OPENAI_COMPATIBLE_ROW.name);
+        let local_custom = LOCAL_TRANSFORMER_MODELS
+            .iter()
+            .find(|m| m.value == CUSTOM_MODEL_SENTINEL)
+            .unwrap();
+        assert_ne!(CUSTOM_OLLAMA_ROW.name, local_custom.name);
+    }
+
+    // ── default constants ───────────────────────────────────────────────
+
+    #[test]
+    fn defaults_match_ts_source() {
+        // embed.ts:139 — Ollama default.
+        assert_eq!(OLLAMA_DEFAULT_MODEL, "nomic-embed-text");
+        // embed.ts:119 — provider default.
+        assert_eq!(DEFAULT_PROVIDER, "local");
+    }
+
+    // ── TOP_PROVIDER_ROWS ───────────────────────────────────────────────
+
+    #[test]
+    fn top_provider_rows_match_ts_in_order() {
+        // embed.ts:97-100 — exactly two entries, Ollama then Local
+        // Transformers.
+        assert_eq!(TOP_PROVIDER_ROWS.len(), 2);
+        assert_eq!(TOP_PROVIDER_ROWS[0].name, "Ollama (local, recommended)");
+        assert_eq!(TOP_PROVIDER_ROWS[0].value, "ollama");
+        assert_eq!(TOP_PROVIDER_ROWS[1].name, "Local Transformers (in-process)");
+        assert_eq!(TOP_PROVIDER_ROWS[1].value, "local");
+    }
+
+    // ── configured_provider_row_label ───────────────────────────────────
+
+    #[test]
+    fn configured_provider_row_label_uses_bare_display_name() {
+        // embed.ts:104-108 — `${displayName} (configured)`.
+        assert_eq!(
+            configured_provider_row_label("openai").as_deref(),
+            Some("OpenAI (configured)")
+        );
+        assert_eq!(
+            configured_provider_row_label("openrouter").as_deref(),
+            Some("OpenRouter (configured)")
+        );
+    }
+
+    #[test]
+    fn configured_provider_row_label_returns_none_for_non_capable_providers() {
+        // The TS for-loop iterates EMBEDDING_CAPABLE_PROVIDERS only —
+        // anthropic / codex / claude-code are never in that list, so
+        // they don't produce a row. Mirror with None so the caller
+        // skips them.
+        assert!(configured_provider_row_label("anthropic").is_none());
+        assert!(configured_provider_row_label("codex").is_none());
+        assert!(configured_provider_row_label("claude-code").is_none());
+        assert!(configured_provider_row_label("ollama").is_none());
+    }
+
+    // ── prompt_strings ─────────────────────────────────────────────────
+
+    #[test]
+    fn prompt_strings_match_ts_verbatim() {
+        use prompt_strings::*;
+        assert_eq!(
+            NO_PROVIDERS_ERROR,
+            "❌ No providers configured. Run `tenex config providers` before configuring embeddings."
+        );
+        assert_eq!(SELECT_PROVIDER_MESSAGE, "Select embedding provider:");
+        assert_eq!(SELECT_OLLAMA_MODEL_MESSAGE, "Select Ollama embedding model:");
+        assert_eq!(SELECT_LOCAL_MODEL_MESSAGE, "Select local embedding model:");
+        assert_eq!(ENTER_OLLAMA_MODEL_MESSAGE, "Enter Ollama model name:");
+        assert_eq!(ENTER_MODEL_ID_MESSAGE, "Enter model ID:");
+        assert_eq!(
+            ENTER_HF_MODEL_ID_MESSAGE,
+            "Enter HuggingFace model ID (e.g., sentence-transformers/all-MiniLM-L6-v2):"
+        );
+        assert_eq!(VALIDATE_MODEL_NAME_EMPTY, "Model name cannot be empty");
+        assert_eq!(VALIDATE_MODEL_ID_EMPTY, "Model ID cannot be empty");
+    }
+
+    #[test]
+    fn select_provider_model_prefix_suffix_compose_to_ts_template() {
+        // The TS template is `Select ${displayName} embedding model:`.
+        // The two halves should compose with the display name in
+        // between to produce that exact string.
+        use prompt_strings::*;
+        let composed =
+            format!("{SELECT_PROVIDER_MODEL_PREFIX}OpenAI{SELECT_PROVIDER_MODEL_SUFFIX}");
+        assert_eq!(composed, "Select OpenAI embedding model:");
+    }
+
+    #[test]
+    fn validators_use_ts_specific_phrasing_per_branch() {
+        // embed.ts uses TWO distinct validation messages: 'Model name'
+        // for Ollama, 'Model ID' for OpenAI-compatible + local. Pin
+        // the asymmetry so a future cleanup doesn't unify them.
+        use prompt_strings::*;
+        assert!(VALIDATE_MODEL_NAME_EMPTY.contains("name"));
+        assert!(VALIDATE_MODEL_ID_EMPTY.contains("ID"));
+        assert_ne!(VALIDATE_MODEL_NAME_EMPTY, VALIDATE_MODEL_ID_EMPTY);
     }
 }
