@@ -6,7 +6,6 @@ Domain orchestrators triggered by incoming Nostr events. Decode events, resolve 
 
 - `reply.ts` — Replies to existing conversations
 - `project.ts` — Project-level events
-- `agentDeletion.ts` — Agent deletion handling
 - `index.ts` — Main exports
 
 ## Rules

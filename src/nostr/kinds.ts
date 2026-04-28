@@ -25,7 +25,6 @@ export const NDKKind = {
     TenexProjectStatus: 24010 as BaseNDKKind,
     TenexInstalledAgentList: 24011 as BaseNDKKind, // Backend inventory of installed agents
     TenexAgentConfigUpdate: 24020 as BaseNDKKind,
-    TenexAgentDelete: 24030 as BaseNDKKind, // Agent deletion from projects or globally
     TenexOperationsStatus: 24133 as BaseNDKKind,
     TenexStopCommand: 24134 as BaseNDKKind,
     TenexStreamTextDelta: 24135 as BaseNDKKind,

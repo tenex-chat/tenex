@@ -29,10 +29,7 @@ export function buildStaticFilters(whitelistedPubkeys: Set<Hexpubkey>, since?: n
 
     // Operational events — bounded by since to avoid replaying history
     const opsFilter: NDKFilter = {
-        kinds: [
-            NDKKind.TenexAgentConfigUpdate,
-            NDKKind.TenexAgentDelete,
-        ],
+        kinds: [NDKKind.TenexAgentConfigUpdate],
         authors,
     };
     if (since !== undefined) {
