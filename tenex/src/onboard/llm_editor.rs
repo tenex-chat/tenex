@@ -141,16 +141,24 @@ pub fn build_items(doc: &LlmsDoc) -> Vec<ConfigItem> {
         .collect()
 }
 
+/// Detail-string formatter for the row label shown under each config.
+///
+/// Mirror TS `LLMConfigEditor.ts:192-200` exactly:
+/// - Meta config: `multi-modal, ${variantCount} variants`
+/// - Standard config: just `${model}` (no provider prefix — TS uses
+///   the bare model id; the row gets the provider context from the
+///   detail itself when the user opens the per-config edit screen).
+///
+/// Returns an empty string when the named config doesn't exist.
 fn detail_string_for(doc: &LlmsDoc, name: &str) -> String {
     let Some(entry) = doc.get(name) else {
         return String::new();
     };
     if entry.kind() == LlmConfigKind::Meta {
-        return "(multi-modal)".to_owned();
+        let variants = entry.variant_names().len();
+        return format!("multi-modal, {variants} variants");
     }
-    let provider = entry.provider().unwrap_or("");
-    let model = entry.model().unwrap_or("");
-    format!("{provider}/{model}")
+    entry.model().unwrap_or("").to_owned()
 }
 
 /// Compose `<name>  <dim detail>` with embedded ANSI dim escape codes so
@@ -233,14 +241,48 @@ mod tests {
     }
 
     #[test]
-    fn detail_string_renders_provider_slash_model_for_standard() {
+    fn detail_string_renders_just_model_for_standard() {
+        // TS LLMConfigEditor.ts:199 — `return ${cfg.model}` (no
+        // provider prefix).
         let mut doc = LlmsDoc::new();
         doc.set_standard_config("Sonnet", StandardConfig::new("anthropic", "claude-sonnet-4-6"));
-        assert_eq!(detail_string_for(&doc, "Sonnet"), "anthropic/claude-sonnet-4-6");
+        assert_eq!(detail_string_for(&doc, "Sonnet"), "claude-sonnet-4-6");
     }
 
     #[test]
-    fn detail_string_renders_multi_modal_for_meta() {
+    fn detail_string_renders_multi_modal_with_variant_count_for_meta() {
+        // TS LLMConfigEditor.ts:194 — `multi-modal, ${variantCount} variants`.
+        let mut doc = LlmsDoc::new();
+        doc.set_meta_config(
+            "Auto",
+            MetaConfig {
+                variants: vec![
+                    MetaVariant {
+                        name: "fast".into(),
+                        model: "Sonnet".into(),
+                        keywords: None,
+                        description: None,
+                        system_prompt: None,
+                    },
+                    MetaVariant {
+                        name: "deep".into(),
+                        model: "Opus".into(),
+                        keywords: None,
+                        description: None,
+                        system_prompt: None,
+                    },
+                ],
+                default: "fast".into(),
+            },
+        );
+        assert_eq!(detail_string_for(&doc, "Auto"), "multi-modal, 2 variants");
+    }
+
+    #[test]
+    fn detail_string_meta_with_one_variant_uses_singular_count_in_template() {
+        // The TS template is plural-naive: it always says 'variants'
+        // even when count is 1. Pin that behaviour so a future
+        // pluraliser doesn't sneak in.
         let mut doc = LlmsDoc::new();
         doc.set_meta_config(
             "Auto",
@@ -255,7 +297,7 @@ mod tests {
                 default: "fast".into(),
             },
         );
-        assert_eq!(detail_string_for(&doc, "Auto"), "(multi-modal)");
+        assert_eq!(detail_string_for(&doc, "Auto"), "multi-modal, 1 variants");
     }
 
     #[test]
