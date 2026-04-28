@@ -6,7 +6,7 @@
 //!
 //! - **Done** — exit cleanly.
 //! - **`delete:<name>`** — drop the config from `llms.json`, save, recurse.
-//! - **`add` / `add-multi` / `config:<name>`** — these branches require
+//! - **`add` / `addMultiModal` / `config:<name>`** — these branches require
 //!   the standard-config builder (`addConfiguration`,
 //!   `addMultiModalConfiguration`) and the per-config detail editor (the
 //!   inner select that asks for provider/model/effort/personality/etc.).
@@ -84,7 +84,7 @@ pub fn route(base_dir: &std::path::Path, value: &str) -> Result<bool> {
             );
             Ok(true)
         }
-        "add-multi" => {
+        "addMultiModal" => {
             display::hint(
                 "Adding a multi-modal configuration is pending port (see `tenex config llm`).",
             );
@@ -166,18 +166,25 @@ fn compose_display_name(name: &str, detail: &str) -> String {
     out
 }
 
-/// Two action buttons. Source: `LLMConfigEditor.ts:196-200`.
+/// Two action buttons. Source: `LLMConfigEditor.ts:209-212`.
+///
+/// TS template: `Add new configuration ${chalk.dim("(a)")}` (and the
+/// multi-modal variant). The `(a)`/`(m)` is rendered with `chalk.dim`
+/// so the keystroke hint is muted relative to the action label.
+/// Embed the dim ANSI codes inline so the picker renders the same
+/// muted suffix without needing a separate styling hook.
 pub fn action_items() -> Vec<ActionItem> {
     vec![
         ActionItem {
-            name: "Add a new configuration".to_owned(),
+            name: "Add new configuration \x1b[2m(a)\x1b[22m".to_owned(),
             key: 'a',
             value: "add".to_owned(),
         },
         ActionItem {
-            name: "Add a multi-modal configuration".to_owned(),
+            name: "Add multi-modal configuration \x1b[2m(m)\x1b[22m".to_owned(),
             key: 'm',
-            value: "add-multi".to_owned(),
+            // TS uses the camelCase token `addMultiModal` (LLMConfigEditor.ts:211).
+            value: "addMultiModal".to_owned(),
         },
     ]
 }
@@ -205,14 +212,24 @@ mod tests {
 
     #[test]
     fn action_items_match_ts_verbatim() {
+        // TS source: LLMConfigEditor.ts:209-212 —
+        //   { name: `Add new configuration ${chalk.dim("(a)")}`, value: "add", key: "a" },
+        //   { name: `Add multi-modal configuration ${chalk.dim("(m)")}`, value: "addMultiModal", key: "m" },
         let actions = action_items();
         assert_eq!(actions.len(), 2);
-        assert_eq!(actions[0].name, "Add a new configuration");
+        // The dim '(a)' / '(m)' suffix is rendered with embedded
+        // ANSI dim codes (\x1b[2m...\x1b[22m). Ensure both the
+        // base label AND the dim suffix are present in the
+        // rendered name.
+        assert!(actions[0].name.starts_with("Add new configuration "));
+        assert!(actions[0].name.ends_with("\x1b[2m(a)\x1b[22m"));
         assert_eq!(actions[0].key, 'a');
         assert_eq!(actions[0].value, "add");
-        assert_eq!(actions[1].name, "Add a multi-modal configuration");
+        assert!(actions[1].name.starts_with("Add multi-modal configuration "));
+        assert!(actions[1].name.ends_with("\x1b[2m(m)\x1b[22m"));
         assert_eq!(actions[1].key, 'm');
-        assert_eq!(actions[1].value, "add-multi");
+        // TS uses camelCase 'addMultiModal' (LLMConfigEditor.ts:211).
+        assert_eq!(actions[1].value, "addMultiModal");
     }
 
     #[test]

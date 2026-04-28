@@ -589,7 +589,7 @@ mod tests {
             ActionItem {
                 name: "Add multi-modal".into(),
                 key: 'm',
-                value: "add-multi".into(),
+                value: "addMultiModal".into(),
             },
         ]
     }
@@ -758,7 +758,7 @@ mod tests {
         let mut s = state();
         s.active = actions.len() + 1 + 2; // somewhere in items
         match handle_key(&mut s, &actions, &items, LlmMenuInput::Char('m')) {
-            LlmMenuOutcome::Selected { value } => assert_eq!(value, "add-multi"),
+            LlmMenuOutcome::Selected { value } => assert_eq!(value, "addMultiModal"),
             other => panic!("expected Selected, got {other:?}"),
         }
     }
