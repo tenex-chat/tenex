@@ -135,6 +135,8 @@ The `tenex` binary now includes:
 - **Utils library ports**: `utils/error_formatter.rs` (ToolError + format_tool_error), `utils/parse_dotenv.rs` (strict .env parser), `utils/time.rs` (format_time_ago, format_relative_time_short, format_uptime_ms)
 - **Store utilities**: `store/agent_home_env.rs` (agent home .env helpers), `store/agent_home_files.rs` (agent home file listing), `store/event_ids.rs` (event ID types + shortening), `store/path_safety.rs` (path traversal guard), `store/project_ids.rs` (project ID normalization/validation)
 - **Utils**: `utils/path_expand.rs` (tilde expansion, $AGENT_HOME resolution)
+- **categorizeAgent pure pieces** (`agent_cmd/categorize.rs`): `system_prompt()`, `parse_category()`, `build_user_prompt()` with full test coverage
+- **OpenClaw distiller pure pieces** (`agent_cmd/openclaw_distiller.rs`): `build_distillation_prompt()`, `build_user_context_prompt()` with full test coverage
 
 ---
 
@@ -171,12 +173,18 @@ All previously listed gaps have been closed. Remaining TS-only tools not yet por
 
 ## Compilation Status
 
-**As of 2026-04-28 (tenth debt check pass): workspace compiles clean — zero errors.**
+**As of 2026-04-28 (tenth/eleventh debt check pass): workspace compiles clean — zero errors.**
 
 Resolved between ninth and tenth passes:
 - **tenex-context wired**: `project()` called before each invocation; User+Assistant history passed to `stream_chat`; `record_turn()` persists each turn to the conversation store
 - **tenex-system-prompt wired**: full `prompt.rs` content migrated into the crate; `InjectedFile` moved there; `prompt.rs` deleted from `tenex-agent`
 - **stream_chat**: `run_agent!` macro switched from `stream_prompt` to `stream_chat` with history
+- **categorizeAgent pure pieces** (`categorize.rs`): `system_prompt()`, `parse_category()`, `build_user_prompt()` with 12 tests — LLM call still gated
+- **OpenClaw distiller pure pieces** (`openclaw_distiller.rs`): `build_distillation_prompt()`, `build_user_context_prompt()` with 13 tests — LLM call still gated
+- **Doctor migrate fix**: reads `config.version`, reports current/latest (v3), exits non-zero when behind, honest hint for missing substrates
+- **CLI description parity**: strip trailing periods to match TS Commander.js rendering; fix three doctor flag-help strings; align orphan purge counter
+- **OpenClaw import string fix**: "to import" (not "to consider")
+- **LLM editor silent noop**: removed misleading "edit pending" hint — TS falls through silently on config row enter
 
 Resolved between eighth and ninth passes (automated hourly check + committed):
 - **New tools**: `ask`, `delegate_crossproject`, `delegate_followup`, `learn`, `project_list`, `self_delegate`
@@ -227,9 +235,11 @@ tenex daemon (Rust)
             ├── 24010 project status heartbeat (30s loop, in-process)
             └── tenex-agent (Rust, spawned per conversation turn)
                     ├── 24133 operations status (pre/post dispatch)
+                    ├── conversation history (tenex-context projection, record_turn write-back)
+                    ├── system prompt (tenex-system-prompt::build_system_prompt)
                     ├── skills system (built-in + agent + project + shared scopes)
-                    ├── RAG tools (optional)
-                    └── delegate tool
+                    ├── full tool suite (fs, shell, delegate, rag, ask, learn, project_list, ...)
+                    └── RAG tools (optional, if embed configured)
 ```
 
 **TypeScript (`bun run src/boot.ts`) is still available via `--boot-command` but is no longer the default.**
