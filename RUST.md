@@ -1,6 +1,6 @@
 # TENEX Rust Adoption Status
 
-_Last updated: 2026-04-28 (fourth pass). Auto-maintained by scheduled debt check._
+_Last updated: 2026-04-28 (fifth pass). Auto-maintained by scheduled debt check._
 
 ---
 
@@ -110,13 +110,14 @@ Library built. Provides `RagStore` (SQLite + vector search) + `EmbedConfig` load
 
 ## Compilation Status
 
-**As of 2026-04-28 (fourth debt check pass): workspace compiles clean — zero errors.**
+**As of 2026-04-28 (fifth debt check pass): workspace compiles clean — zero errors.**
 
-Resolved this pass (no compilation errors found):
-- `tenex-project`: removed `legacy.rs` and `migrations.rs` (JSON-file project format fully gone)
-- `tenex` agent_cmd: ported `AgentManager` bulk delete/merge, `AgentProvisioningService` (delete + inventory publish), project membership helpers
-- `tenex runtime`: serializes agent dispatch naturally (`.await` in event loop = one agent at a time per project)
-- Drift check: no TS↔Rust drift found — identity, summarization, scheduling all correctly delegated
+Resolved this pass (no compilation errors):
+- `tenex agent manage` now fully interactive — `show_main_menu` wired, was a stub
+- OpenClaw import ported: `openclaw_home/preview/reader.rs`
+- Agent category backfill ported: `categorize.rs` + `role_categories.rs`
+- `agent_storage.rs` extended with category storage helpers
+- Drift check: no TS↔Rust drift found; OpenClaw and categorize exist in both (expected migration parallel state)
 
 ---
 
@@ -156,5 +157,6 @@ Still missing from `tenex runtime` before full TS retirement:
 4. ~~**Now**: Wire `tenex-conversations` into `tenex runtime`~~ ✓ Done 2026-04-28
 5. **Near-term**: Wire `tenex-context` into `tenex-agent` for context window management (compaction/decay)
 6. **Near-term**: Wire `tenex-system-prompt` into `tenex-agent` (replace inline `prompt.rs`)
-7. **Near-term**: Port remaining agent management commands (`tenex agent manage` interactive TUI)
-8. **Longer-term**: Retire `bun run src/boot.ts` and all TypeScript orchestration
+7. ~~**Near-term**: Port `tenex agent manage` interactive TUI~~ ✓ Done 2026-04-28
+8. **Near-term**: Delete TS originals for fully-ported flows (OpenClaw, categorize, agent manage)
+9. **Longer-term**: Retire `bun run src/boot.ts` and all TypeScript orchestration
