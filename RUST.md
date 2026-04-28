@@ -129,9 +129,12 @@ The `tenex` binary now includes:
 - **Doctor categorize preview** (`doctor/mod.rs`): scans agents, shows categorised/uncategorised count, surfaces LLM substrate hint
 - **Onboard LLM test substrate**: `llm_test_request.rs` (prompt/timeout/spinner constants) + `llm_test_hints.rs` (error→hint mapper, `is_meaningful_ai_message`, `format_stream_error`)
 - **Claude Code model aliases** (`onboard/claude_code_models.rs`): three aliases for `claude-code` provider
-- **models.dev types** (`store/models_dev.rs`): `CacheData`, `ModelsDevModel`, `is_stale` — pure types; HTTP fetch substrate pending
+- **models.dev full library** (`store/models_dev.rs`): `CacheData`, `ModelsDevModel`, `is_stale`, `resolve_model_data`, `get_model_info`, `get_provider_models`, `context_window`, `load_from_disk`, `cache_file_path`, `picker_label_segments`, `default_model_for_provider` — pure data, HTTP fetch still pending
+- **Role auto-select with real model data**: `ModelsDevSource` + `OwnedModelsDevSource` adapters; `load_or_empty()` reads on-disk cache (populated by TS or future Rust refresh); wired into both `tenex onboard` step 5 and `tenex config roles`
+- **Codex model listing** (`onboard/codex_models.rs`): `CodexModelOption`, `format_codex_model` — Codex CLI substrate still pending
 - **Provider ID constants** (`store/provider_ids.rs`): canonical string IDs for all 7 providers — eliminates magic strings
 - **Codex LLM config options** (`store/llm_config_options.rs`): effort/summary/personality/approvalPolicy/sandboxPolicy enums
+- **`tenex config <name>` direct subcommands**: 15 canonical variants matching TS Commander.js registration — `tenex config telegram`, `tenex config relays`, etc. all directly callable, bare `tenex config` keeps interactive menu
 - **Utils library ports**: `utils/error_formatter.rs` (ToolError + format_tool_error), `utils/parse_dotenv.rs` (strict .env parser), `utils/time.rs` (format_time_ago, format_relative_time_short, format_uptime_ms)
 - **Store utilities**: `store/agent_home_env.rs` (agent home .env helpers), `store/agent_home_files.rs` (agent home file listing), `store/event_ids.rs` (event ID types + shortening), `store/path_safety.rs` (path traversal guard), `store/project_ids.rs` (project ID normalization/validation)
 - **Utils**: `utils/path_expand.rs` (tilde expansion, $AGENT_HOME resolution)
@@ -173,7 +176,13 @@ All previously listed gaps have been closed. Remaining TS-only tools not yet por
 
 ## Compilation Status
 
-**As of 2026-04-28 (tenth/eleventh debt check pass): workspace compiles clean — zero errors.**
+**As of 2026-04-28 (twelfth debt check pass): workspace compiles clean — zero errors.**
+
+Resolved between eleventh and twelfth passes:
+- **models.dev full library**: `resolve_model_data`, `get_model_info`, `get_provider_models`, `context_window`, `load_from_disk`, `cache_file_path`, `picker_label_segments`, `default_model_for_provider` (17+7+8 new tests)
+- **Role auto-select wired with real data**: `ModelsDevSource`, `OwnedModelsDevSource`, `load_or_empty()` — onboard step 5 + config roles now use on-disk cache when available
+- **Codex model listing**: `CodexModelOption`, `format_codex_model` (5 new tests)
+- **15 `tenex config <name>` subcommands**: direct dispatch matching TS Commander.js
 
 Resolved between ninth and tenth passes:
 - **tenex-context wired**: `project()` called before each invocation; User+Assistant history passed to `stream_chat`; `record_turn()` persists each turn to the conversation store
