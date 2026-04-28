@@ -2856,6 +2856,7 @@ dependencies = [
  "serde",
  "serde_json",
  "shell-words",
+ "tenex-conversations",
  "tenex-identity",
  "tenex-llm-config",
  "tenex-project",

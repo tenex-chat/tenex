@@ -15,15 +15,20 @@ use clap::Parser;
 use tracing::{error, info};
 
 #[derive(Parser, Clone)]
+#[command(group(clap::ArgGroup::new("runtime-mode").required(true)))]
 pub struct DaemonArgs {
     /// TENEX base directory (default: $TENEX_BASE_DIR or ~/.tenex).
     #[arg(long, value_name = "PATH")]
     pub base_dir: Option<PathBuf>,
 
-    /// Boot command for per-project runtimes. The d-tag is appended as a
-    /// positional argument. Default: `<current-exe> runtime`.
-    #[arg(long, value_name = "CMD")]
-    pub boot_command: Option<String>,
+    /// Use the Rust orchestrator (`tenex runtime <d-tag>`) for per-project runtimes.
+    #[arg(long, group = "runtime-mode")]
+    pub rust: bool,
+
+    /// Use this TypeScript command as the per-project runtime; the d-tag is
+    /// appended as a positional argument.
+    #[arg(long, value_name = "CMD", group = "runtime-mode")]
+    pub ts: Option<String>,
 
     /// Boot the project whose d-tag starts with this prefix as soon as it is
     /// discovered on Nostr, without waiting for a kind:1/24000 trigger.
@@ -85,21 +90,20 @@ pub async fn run(args: DaemonArgs) -> Result<()> {
     }
     info!("llm-config IPC server started");
 
-    let boot_argv = match args.boot_command {
-        Some(cmd) => {
-            info!(boot_command = %cmd, "boot command resolved");
-            let argv = shell_words::split(&cmd)
-                .with_context(|| format!("parsing --boot-command: {cmd}"))?;
-            if argv.is_empty() {
-                return Err(anyhow::anyhow!("--boot-command is empty"));
-            }
-            argv
+    let boot_argv = if args.rust {
+        let argv = default_boot_argv();
+        info!(boot_command = %argv.join(" "), "boot command resolved (--rust)");
+        argv
+    } else if let Some(cmd) = args.ts {
+        info!(boot_command = %cmd, "boot command resolved (--ts)");
+        let argv = shell_words::split(&cmd)
+            .with_context(|| format!("parsing --ts: {cmd}"))?;
+        if argv.is_empty() {
+            return Err(anyhow::anyhow!("--ts is empty"));
         }
-        None => {
-            let argv = default_boot_argv();
-            info!(boot_command = %argv.join(" "), "boot command resolved");
-            argv
-        }
+        argv
+    } else {
+        unreachable!("clap ArgGroup requires --rust or --ts")
     };
 
     let supervisor = supervisor::Supervisor::new(boot_argv, base_dir.clone());

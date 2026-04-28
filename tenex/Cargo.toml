@@ -32,3 +32,4 @@ tenex-whitelist = { path = "../whitelist" }
 tenex-llm-config = { path = "../crates/tenex-llm-config" }
 tenex-identity = { path = "../crates/tenex-identity" }
 tenex-project = { path = "../crates/tenex-project" }
+tenex-conversations = { path = "../crates/tenex-conversations" }

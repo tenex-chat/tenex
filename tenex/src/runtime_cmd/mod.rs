@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
@@ -11,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter};
 use tracing::{info, warn};
 
+use tenex_conversations::{ConversationStore, NewMessage, Project as ConversationsProject};
 use tenex_project::{Agent, Project, models::ProjectAgent};
 
 use crate::daemon::config;
@@ -46,6 +48,11 @@ pub async fn run(args: RuntimeArgs) -> Result<()> {
     if agents.is_empty() {
         anyhow::bail!("project '{}' has no agents", meta.d_tag);
     }
+
+    let store = Mutex::new(
+        ConversationsProject::open_conversations(&meta.d_tag, &base_dir)
+            .context("opening conversation store")?,
+    );
 
     // Loop prevention: ignore events authored by any project agent.
     let agent_pubkeys: HashSet<String> = agents.iter().map(|a| a.pubkey.clone()).collect();
@@ -142,6 +149,7 @@ pub async fn run(args: RuntimeArgs) -> Result<()> {
                                     &agent_json,
                                     &meta.d_tag,
                                     &agent_binary,
+                                    &store,
                                 )
                                 .await
                                 {
@@ -217,12 +225,42 @@ async fn run_agent(
     agent_json: &Path,
     project_id: &str,
     agent_binary: &Path,
+    store: &Mutex<ConversationStore>,
 ) -> Result<()> {
     if !agent_json.exists() {
         anyhow::bail!(
             "agent JSON not found: {} — run 'tenex doctor migrate'",
             agent_json.display()
         );
+    }
+
+    let conv_id = conversation_id_from_event(event);
+    let ts = event.created_at.as_secs() as i64;
+
+    {
+        let s = store.lock().unwrap();
+        s.ensure_conversation(&conv_id)?;
+        s.append_message(
+            &conv_id,
+            &NewMessage {
+                record_id: format!("event:{}", event.id.to_hex()),
+                nostr_event_id: Some(event.id.to_hex()),
+                author_pubkey: event.pubkey.to_hex(),
+                sender_pubkey: None,
+                ral: None,
+                message_type: "text".to_string(),
+                role: Some("user".to_string()),
+                content: event.content.clone(),
+                timestamp: Some(ts),
+                targeted_pubkeys: None,
+                sender_principal: None,
+                targeted_principals: None,
+                tool_data: None,
+                delegation_marker: None,
+                human_readable: None,
+                transcript_tool_attributes: None,
+            },
+        )?;
     }
 
     let mut child = tokio::process::Command::new(agent_binary)
@@ -243,7 +281,8 @@ async fn run_agent(
         w.flush().await?;
     }
 
-    // Forward each signed event from the agent's stdout to the relay.
+    // Forward each signed event from the agent's stdout to the relay,
+    // and persist it to the conversation store.
     let stdout = child.stdout.take().context("child has no stdout")?;
     let mut lines = BufReader::new(stdout).lines();
     while let Some(line) = lines.next_line().await? {
@@ -253,6 +292,33 @@ async fn run_agent(
         }
         match Event::from_json(&line) {
             Ok(ev) => {
+                {
+                    let s = store.lock().unwrap();
+                    let agent_ts = ev.created_at.as_secs() as i64;
+                    if let Err(e) = s.append_message(
+                        &conv_id,
+                        &NewMessage {
+                            record_id: format!("event:{}", ev.id.to_hex()),
+                            nostr_event_id: Some(ev.id.to_hex()),
+                            author_pubkey: ev.pubkey.to_hex(),
+                            sender_pubkey: None,
+                            ral: None,
+                            message_type: "text".to_string(),
+                            role: Some("assistant".to_string()),
+                            content: ev.content.clone(),
+                            timestamp: Some(agent_ts),
+                            targeted_pubkeys: None,
+                            sender_principal: None,
+                            targeted_principals: None,
+                            tool_data: None,
+                            delegation_marker: None,
+                            human_readable: None,
+                            transcript_tool_attributes: None,
+                        },
+                    ) {
+                        warn!(error = %e, "failed to persist agent event");
+                    }
+                }
                 if let Err(e) = client.send_event(&ev).await {
                     warn!(error = %e, "relay publish failed");
                 }
@@ -269,6 +335,32 @@ async fn run_agent(
     }
 
     Ok(())
+}
+
+fn conversation_id_from_event(event: &Event) -> String {
+    let e_kind = TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::E));
+    let mut first_unmarked: Option<String> = None;
+
+    for tag in event.tags.iter() {
+        if tag.kind() != e_kind {
+            continue;
+        }
+        let parts = tag.as_slice();
+        // parts[0]="e", parts[1]=event-id, parts[2]=relay, parts[3]=marker
+        let Some(event_id) = parts.get(1) else { continue };
+        let marker = parts.get(3).map(|s| s.as_str());
+        match marker {
+            Some("root") => return event_id.clone(),
+            None | Some("") => {
+                if first_unmarked.is_none() {
+                    first_unmarked = Some(event_id.clone());
+                }
+            }
+            _ => {}
+        }
+    }
+
+    first_unmarked.unwrap_or_else(|| event.id.to_hex())
 }
 
 fn find_agent_binary() -> PathBuf {
