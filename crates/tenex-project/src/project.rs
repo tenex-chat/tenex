@@ -1,37 +1,32 @@
-//! [`Project`] — the typed, file-backed handle.
+//! [`Project`] — file-backed handle for project metadata and agents.
+//!
+//! Reads from:
+//! - `<base_dir>/projects/<d_tag>/event.json` — kind:31933 Nostr event
+//! - `<base_dir>/agents/<pubkey>.json` — per-agent files
 
 use std::path::{Path, PathBuf};
 
-use rusqlite::{params, Connection, OptionalExtension, Row};
+use serde::Deserialize;
 
 use crate::error::{Error, Result};
 use crate::id::{normalize_project_id, ProjectDTag};
-use crate::migrations;
 use crate::models::{Agent, ProjectAgent, ProjectMetadata};
 use crate::paths;
 use crate::signer::{signer_for, Signer, SignerError};
 
-/// Handle to a single project's SQLite file. Wraps a `rusqlite::Connection`.
 pub struct Project {
-    conn: Connection,
     d_tag: ProjectDTag,
-    db_path: PathBuf,
+    base_dir: PathBuf,
 }
 
 impl Project {
-    /// Open (or create) the project DB for `project_id` under `base_dir`.
+    /// Open the project view for `project_id` under `base_dir`.
     ///
     /// `project_id` may be a NIP-33 coordinate (`31933:<pubkey>:<dTag>`) or a
-    /// bare dTag — both resolve to the same DB file.
+    /// bare dTag.
     pub fn open(project_id: &str, base_dir: &Path) -> Result<Self> {
         let d_tag = normalize_project_id(project_id)?;
-        let db_path = paths::project_db(base_dir, &d_tag);
-        if let Some(parent) = db_path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        let mut conn = Connection::open(&db_path)?;
-        migrations::initialize(&mut conn)?;
-        Ok(Self { conn, d_tag, db_path })
+        Ok(Self { d_tag, base_dir: base_dir.to_path_buf() })
     }
 
     /// Open under [`paths::default_base_dir`].
@@ -44,74 +39,61 @@ impl Project {
         &self.d_tag
     }
 
-    pub fn db_path(&self) -> &Path {
-        &self.db_path
-    }
-
-    pub fn connection(&self) -> &Connection {
-        &self.conn
-    }
-
-    pub fn connection_mut(&mut self) -> &mut Connection {
-        &mut self.conn
-    }
-
-    // =========================================================================
-    // Read API
-    // =========================================================================
-
     pub fn metadata(&self) -> Result<Option<ProjectMetadata>> {
-        let row = self
-            .conn
-            .query_row(
-                "SELECT d_tag, owner_pubkey, title, repo_url, working_directory,
-                        latest_event_id, ingested_at
-                   FROM project WHERE id = 1",
-                [],
-                row_to_metadata,
-            )
-            .optional()?;
-        Ok(row)
+        let path = paths::project_event_file(&self.base_dir, &self.d_tag);
+        if !path.exists() {
+            return Ok(None);
+        }
+        let bytes = std::fs::read(&path)?;
+        let ev: RawProjectEvent = serde_json::from_slice(&bytes)?;
+        Ok(Some(metadata_from_event(&self.d_tag, &ev)))
     }
 
     pub fn agents(&self) -> Result<Vec<Agent>> {
-        let mut stmt = self.conn.prepare(AGENT_SELECT)?;
-        let rows = stmt
-            .query_map([], row_to_agent)?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        Ok(rows)
+        let pubkeys = self.member_pubkeys()?;
+        let mut agents = Vec::with_capacity(pubkeys.len());
+        for pk in &pubkeys {
+            let path = paths::agent_file(&self.base_dir, pk);
+            match read_agent_file(&path, pk) {
+                Ok(a) => agents.push(a),
+                Err(e) => {
+                    tracing::warn!(pubkey = %pk, error = %e, "skipping unreadable agent file")
+                }
+            }
+        }
+        Ok(agents)
     }
 
     pub fn project_agents(&self) -> Result<Vec<ProjectAgent>> {
-        let mut stmt = self.conn.prepare(PROJECT_AGENT_SELECT)?;
-        let rows = stmt
-            .query_map([], row_to_project_agent)?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        Ok(rows)
+        let pubkeys = self.member_pubkeys()?;
+        let pm_pubkey = pubkeys.first().cloned();
+        Ok(pubkeys
+            .into_iter()
+            .map(|pk| ProjectAgent {
+                is_pm: pm_pubkey.as_deref() == Some(&pk),
+                agent_pubkey: pk,
+            })
+            .collect())
     }
 
     pub fn agent_by_pubkey(&self, pubkey: &str) -> Result<Option<Agent>> {
-        let row = self
-            .conn
-            .query_row(
-                &format!("{AGENT_SELECT} WHERE pubkey = ?1"),
-                params![pubkey],
-                row_to_agent,
-            )
-            .optional()?;
-        Ok(row)
+        if !self.member_pubkeys()?.contains(&pubkey.to_string()) {
+            return Ok(None);
+        }
+        let path = paths::agent_file(&self.base_dir, pubkey);
+        if !path.exists() {
+            return Ok(None);
+        }
+        Ok(Some(read_agent_file(&path, pubkey)?))
     }
 
     pub fn agent_by_slug(&self, slug: &str) -> Result<Option<Agent>> {
-        let row = self
-            .conn
-            .query_row(
-                &format!("{AGENT_SELECT} WHERE slug = ?1 LIMIT 1"),
-                params![slug],
-                row_to_agent,
-            )
-            .optional()?;
-        Ok(row)
+        for a in self.agents()? {
+            if a.slug == slug {
+                return Ok(Some(a));
+            }
+        }
+        Ok(None)
     }
 
     pub fn resolve_slug(&self, slug: &str) -> Result<Option<String>> {
@@ -128,169 +110,117 @@ impl Project {
         Ok(signer_for(&agent))
     }
 
-    // =========================================================================
-    // Write API
-    // =========================================================================
-
-    pub fn upsert_metadata(&self, m: &ProjectMetadata) -> Result<()> {
-        self.conn.execute(
-            "INSERT INTO project (id, d_tag, owner_pubkey, title, repo_url, working_directory,
-                                  latest_event_id, ingested_at)
-             VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7)
-             ON CONFLICT(id) DO UPDATE SET
-                 d_tag = excluded.d_tag,
-                 owner_pubkey = excluded.owner_pubkey,
-                 title = excluded.title,
-                 repo_url = excluded.repo_url,
-                 working_directory = COALESCE(excluded.working_directory, project.working_directory),
-                 latest_event_id = excluded.latest_event_id,
-                 ingested_at = excluded.ingested_at",
-            params![
-                m.d_tag,
-                m.owner_pubkey,
-                m.title,
-                m.repo_url,
-                m.working_directory,
-                m.latest_event_id,
-                m.ingested_at,
-            ],
-        )?;
-        Ok(())
-    }
-
-    pub fn upsert_agent(&self, a: &Agent) -> Result<()> {
-        self.conn.execute(
-            "INSERT INTO agents (pubkey, slug, name, role, description, instructions, use_criteria,
-                                 category, inferred_category, signer_ref, event_id, status,
-                                 default_config_json, telegram_config_json, mcp_servers_json)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
-             ON CONFLICT(pubkey) DO UPDATE SET
-                 slug = excluded.slug,
-                 name = excluded.name,
-                 role = excluded.role,
-                 description = excluded.description,
-                 instructions = excluded.instructions,
-                 use_criteria = excluded.use_criteria,
-                 category = excluded.category,
-                 inferred_category = excluded.inferred_category,
-                 signer_ref = excluded.signer_ref,
-                 event_id = COALESCE(excluded.event_id, agents.event_id),
-                 status = excluded.status,
-                 default_config_json = excluded.default_config_json,
-                 telegram_config_json = excluded.telegram_config_json,
-                 mcp_servers_json = excluded.mcp_servers_json",
-            params![
-                a.pubkey,
-                a.slug,
-                a.name,
-                a.role,
-                a.description,
-                a.instructions,
-                a.use_criteria,
-                a.category,
-                a.inferred_category,
-                a.signer_ref,
-                a.event_id,
-                a.status,
-                a.default_config_json,
-                a.telegram_config_json,
-                a.mcp_servers_json,
-            ],
-        )?;
-        Ok(())
-    }
-
-    pub fn upsert_project_agent(&self, p: &ProjectAgent) -> Result<()> {
-        self.conn.execute(
-            "INSERT INTO project_agents (agent_pubkey, is_pm, intervention_enabled,
-                                         escalation_target)
-             VALUES (?1, ?2, ?3, ?4)
-             ON CONFLICT(agent_pubkey) DO UPDATE SET
-                 is_pm = excluded.is_pm,
-                 intervention_enabled = excluded.intervention_enabled,
-                 escalation_target = excluded.escalation_target",
-            params![
-                p.agent_pubkey,
-                p.is_pm as i64,
-                p.intervention_enabled as i64,
-                p.escalation_target,
-            ],
-        )?;
-        Ok(())
-    }
-
-    pub fn remove_project_agent(&self, agent_pubkey: &str) -> Result<()> {
-        self.conn.execute(
-            "DELETE FROM project_agents WHERE agent_pubkey = ?1",
-            params![agent_pubkey],
-        )?;
-        Ok(())
-    }
-
-    // =========================================================================
-    // Maintenance
-    // =========================================================================
-
-    pub fn vacuum(&self) -> Result<()> {
-        self.conn.execute_batch("VACUUM")?;
-        Ok(())
-    }
-
-    pub fn integrity_check(&self) -> Result<String> {
-        let result: String = self
-            .conn
-            .query_row("PRAGMA integrity_check", [], |r| r.get(0))?;
-        Ok(result)
+    fn member_pubkeys(&self) -> Result<Vec<String>> {
+        let path = paths::project_event_file(&self.base_dir, &self.d_tag);
+        if !path.exists() {
+            return Ok(Vec::new());
+        }
+        let bytes = std::fs::read(&path)?;
+        let ev: RawProjectEvent = serde_json::from_slice(&bytes)?;
+        Ok(extract_p_tag_pubkeys(&ev))
     }
 }
 
-const AGENT_SELECT: &str = "SELECT pubkey, slug, name, role, description, instructions,
-                                   use_criteria, category, inferred_category, signer_ref,
-                                   event_id, status, default_config_json, telegram_config_json,
-                                   mcp_servers_json FROM agents";
+#[derive(Debug, Deserialize)]
+struct RawProjectEvent {
+    #[serde(default)]
+    id: Option<String>,
+    #[serde(default)]
+    pubkey: Option<String>,
+    #[serde(default)]
+    created_at: Option<i64>,
+    #[serde(default)]
+    tags: Vec<Vec<String>>,
+}
 
-const PROJECT_AGENT_SELECT: &str = "SELECT agent_pubkey, is_pm, intervention_enabled,
-                                           escalation_target FROM project_agents";
+fn metadata_from_event(d_tag: &ProjectDTag, ev: &RawProjectEvent) -> ProjectMetadata {
+    ProjectMetadata {
+        d_tag: d_tag.as_str().to_string(),
+        owner_pubkey: ev.pubkey.clone(),
+        title: first_tag_value(&ev.tags, "title"),
+        repo_url: first_tag_value(&ev.tags, "repo"),
+        latest_event_id: ev.id.clone(),
+        ingested_at: ev.created_at,
+    }
+}
 
-fn row_to_metadata(r: &Row<'_>) -> rusqlite::Result<ProjectMetadata> {
-    Ok(ProjectMetadata {
-        d_tag: r.get(0)?,
-        owner_pubkey: r.get(1)?,
-        title: r.get(2)?,
-        repo_url: r.get(3)?,
-        working_directory: r.get(4)?,
-        latest_event_id: r.get(5)?,
-        ingested_at: r.get(6)?,
+fn extract_p_tag_pubkeys(ev: &RawProjectEvent) -> Vec<String> {
+    let mut out = Vec::new();
+    for tag in &ev.tags {
+        let mut parts = tag.iter();
+        if parts.next().map(String::as_str) == Some("p") {
+            if let Some(pk) = parts.next() {
+                if pk.len() == 64 && pk.bytes().all(|b| b.is_ascii_hexdigit()) {
+                    out.push(pk.clone());
+                }
+            }
+        }
+    }
+    out
+}
+
+fn first_tag_value(tags: &[Vec<String>], name: &str) -> Option<String> {
+    tags.iter().find_map(|tag| {
+        let mut iter = tag.iter();
+        if iter.next().map(String::as_str) == Some(name) {
+            iter.next().cloned()
+        } else {
+            None
+        }
     })
 }
 
-fn row_to_agent(r: &Row<'_>) -> rusqlite::Result<Agent> {
+#[derive(Debug, Deserialize)]
+struct RawStoredAgent {
+    #[serde(default)]
+    nsec: Option<String>,
+    #[serde(default)]
+    slug: Option<String>,
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    role: Option<String>,
+    #[serde(default)]
+    description: Option<String>,
+    #[serde(default)]
+    instructions: Option<String>,
+    #[serde(default, rename = "useCriteria")]
+    use_criteria: Option<String>,
+    #[serde(default)]
+    category: Option<String>,
+    #[serde(default, rename = "inferredCategory")]
+    inferred_category: Option<String>,
+    #[serde(default)]
+    status: Option<String>,
+    #[serde(default, rename = "eventId")]
+    event_id: Option<String>,
+    #[serde(default)]
+    default: Option<serde_json::Value>,
+    #[serde(default)]
+    telegram: Option<serde_json::Value>,
+    #[serde(default, rename = "mcpServers")]
+    mcp_servers: Option<serde_json::Value>,
+}
+
+fn read_agent_file(path: &Path, pubkey: &str) -> Result<Agent> {
+    let bytes = std::fs::read(path)?;
+    let raw: RawStoredAgent = serde_json::from_slice(&bytes)?;
+    let signer_ref = raw.nsec.as_ref().map(|n| format!("nsec:{n}"));
     Ok(Agent {
-        pubkey: r.get(0)?,
-        slug: r.get(1)?,
-        name: r.get(2)?,
-        role: r.get(3)?,
-        description: r.get(4)?,
-        instructions: r.get(5)?,
-        use_criteria: r.get(6)?,
-        category: r.get(7)?,
-        inferred_category: r.get(8)?,
-        signer_ref: r.get(9)?,
-        event_id: r.get(10)?,
-        status: r.get(11)?,
-        default_config_json: r.get(12)?,
-        telegram_config_json: r.get(13)?,
-        mcp_servers_json: r.get(14)?,
-    })
-}
-
-fn row_to_project_agent(r: &Row<'_>) -> rusqlite::Result<ProjectAgent> {
-    let is_pm: i64 = r.get(1)?;
-    let intervention_enabled: i64 = r.get(2)?;
-    Ok(ProjectAgent {
-        agent_pubkey: r.get(0)?,
-        is_pm: is_pm != 0,
-        intervention_enabled: intervention_enabled != 0,
-        escalation_target: r.get(3)?,
+        pubkey: pubkey.to_string(),
+        slug: raw.slug.clone().unwrap_or_else(|| pubkey[..8].to_string()),
+        name: raw.name.clone().unwrap_or_else(|| raw.slug.clone().unwrap_or_default()),
+        role: raw.role,
+        description: raw.description,
+        instructions: raw.instructions,
+        use_criteria: raw.use_criteria,
+        category: raw.category,
+        inferred_category: raw.inferred_category,
+        signer_ref,
+        event_id: raw.event_id,
+        status: raw.status,
+        default_config_json: raw.default.as_ref().map(|v| v.to_string()),
+        telegram_config_json: raw.telegram.as_ref().map(|v| v.to_string()),
+        mcp_servers_json: raw.mcp_servers.as_ref().map(|v| v.to_string()),
     })
 }

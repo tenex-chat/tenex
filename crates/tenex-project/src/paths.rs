@@ -23,10 +23,6 @@ pub fn project_dir(base_dir: &Path, d_tag: &ProjectDTag) -> PathBuf {
     projects_dir(base_dir).join(d_tag.as_str())
 }
 
-pub fn project_db(base_dir: &Path, d_tag: &ProjectDTag) -> PathBuf {
-    project_dir(base_dir, d_tag).join("project.db")
-}
-
 pub fn agents_dir(base_dir: &Path) -> PathBuf {
     base_dir.join("agents")
 }

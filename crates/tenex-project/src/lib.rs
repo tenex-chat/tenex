@@ -1,16 +1,13 @@
-//! `tenex-project` — typed SQLite-backed read/write view of per-project TENEX state.
+//! `tenex-project` — file-backed view of per-project TENEX state.
 //!
-//! One SQLite file per project at `<base_dir>/projects/<dTag>/project.db`.
-//! Library only: every Rust binary that needs project context links this crate
-//! and opens the file directly. No daemon, no socket.
+//! Reads from `<base_dir>/projects/<dTag>/event.json` and
+//! `<base_dir>/agents/<pubkey>.json`. No database, no write API.
 //!
 //! Project IDs are accepted as either a NIP-33 coordinate (`31933:<pubkey>:<dTag>`)
 //! or a bare dTag; normalization happens at the API boundary in [`id`].
 
 pub mod error;
 pub mod id;
-pub mod legacy;
-pub mod migrations;
 pub mod models;
 pub mod paths;
 pub mod project;

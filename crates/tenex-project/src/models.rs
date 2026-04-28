@@ -7,7 +7,6 @@ pub struct ProjectMetadata {
     pub owner_pubkey: Option<String>,
     pub title: Option<String>,
     pub repo_url: Option<String>,
-    pub working_directory: Option<String>,
     pub latest_event_id: Option<String>,
     pub ingested_at: Option<i64>,
 }
@@ -42,14 +41,8 @@ pub struct Agent {
 }
 
 /// Project-scoped membership row.
-///
-/// Project-scoped flags only (PM, intervention enablement, escalation target).
-/// Skill and MCP access lists belong on the agent's own row in
-/// `default_config_json`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct ProjectAgent {
     pub agent_pubkey: String,
     pub is_pm: bool,
-    pub intervention_enabled: bool,
-    pub escalation_target: Option<String>,
 }
