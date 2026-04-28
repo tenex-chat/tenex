@@ -104,6 +104,17 @@ impl TenexConfigDoc {
         self.raw.insert("tenexPrivateKey".into(), Value::String(key));
     }
 
+    /// Owner private key (hex or bech32) used by `tenex agent manage` to
+    /// sign kind:31933 mutations. Source: `TenexConfigSchema:129` /
+    /// `services/config/types.ts:18`.
+    pub fn owner_nsec(&self) -> Option<String> {
+        string_field(&self.raw, "ownerNsec")
+    }
+
+    pub fn set_owner_nsec(&mut self, nsec: String) {
+        self.raw.insert("ownerNsec".into(), Value::String(nsec));
+    }
+
     pub fn backend_name(&self) -> Option<String> {
         string_field(&self.raw, "backendName")
     }
