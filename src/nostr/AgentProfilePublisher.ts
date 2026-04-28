@@ -5,6 +5,7 @@ import { getNDK } from "@/nostr/ndkClient";
 import { getIdentityRelayUrls, getRelayUrls } from "@/nostr/relays";
 import { config } from "@/services/ConfigService";
 import { Nip46SigningService, Nip46SigningLog } from "@/services/nip46";
+import { readProjectAgentPubkeys } from "@/services/projects/ProjectMembersReader";
 import { shortenOptionalEventId, shortenPubkey } from "@/utils/conversation-id";
 import { logger } from "@/utils/logger";
 import {
@@ -85,19 +86,9 @@ export function publishProjectAgentSnapshot(projectDTag: string): void {
  * When NIP-46 is disabled, 14199 publishing is skipped entirely.
  */
 async function executeSnapshotPublish(projectDTag: string): Promise<void> {
-    const projectAgents = await agentStorage.getProjectAgents(projectDTag);
+    // Project membership lives in the persisted kind:31933 event's p-tags
+    const agentPubkeys = await readProjectAgentPubkeys(projectDTag);
     const whitelisted = config.getWhitelistedPubkeys();
-
-    // Collect unique agent pubkeys for this project
-    const agentPubkeys: string[] = [];
-    const seen = new Set<string>();
-    for (const agent of projectAgents) {
-        const agentSigner = new NDKPrivateKeySigner(agent.nsec);
-        if (!seen.has(agentSigner.pubkey)) {
-            seen.add(agentSigner.pubkey);
-            agentPubkeys.push(agentSigner.pubkey);
-        }
-    }
 
     logger.info("Publishing debounced 14199 snapshot", {
         projectDTag,

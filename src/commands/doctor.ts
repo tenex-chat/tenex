@@ -5,6 +5,7 @@ import { backfillAgentCategories } from "@/agents/backfillAgentCategories";
 import { NDKAgentDefinition } from "@/events/NDKAgentDefinition";
 import { initNDK, getNDK } from "@/nostr/ndkClient";
 import { migrationService } from "@/services/migrations";
+import { listProjectsForAgent } from "@/services/projects/ProjectMembersReader";
 import { shortenEventId } from "@/utils/conversation-id";
 import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 import { getConversationIndexingJob, getConversationEmbeddingService } from "@/conversations/search/embeddings";
@@ -112,14 +113,6 @@ async function repairAgents(): Promise<void> {
         }
 
         const agentDef = NDKAgentDefinition.from(event);
-        const toolTags = event.tags
-            .filter((t) => t[0] === "tool" && t[1])
-            .map((t) => t[1] as string);
-
-        const newDefault = {
-            ...agent.default,
-            tools: toolTags.length > 0 ? toolTags : undefined,
-        };
         const updatedAgent = {
             ...agent,
             name: agentDef.title || agent.name,
@@ -127,18 +120,14 @@ async function repairAgents(): Promise<void> {
             description: agentDef.description ?? agent.description,
             instructions: agentDef.instructions ?? agent.instructions,
             useCriteria: agentDef.useCriteria ?? agent.useCriteria,
-            default: Object.values(newDefault).some((v) => v !== undefined) ? newDefault : undefined,
         };
-
-        const toolsDisplay = toolTags.length > 0 ? toolTags.join(", ") : "(none)";
-        const suffix = chalk.gray(`  [tools: ${toolsDisplay}]`);
 
         if (agentChanged(agent, updatedAgent)) {
             await agentStorage.saveAgent(updatedAgent);
-            console.log(chalk.green(`  ✓ ${label}: updated`) + suffix);
+            console.log(chalk.green(`  ✓ ${label}: updated`));
             updated++;
         } else {
-            console.log(chalk.gray(`  ${label}: ok`) + suffix);
+            console.log(chalk.gray(`  ${label}: ok`));
         }
     }
 
@@ -156,7 +145,7 @@ async function findOrphanedAgents(purge: boolean): Promise<void> {
     const orphans: Array<{ agent: StoredAgent; pubkey: string }> = [];
     for (const agent of agents) {
         const pubkey = new NDKPrivateKeySigner(agent.nsec).pubkey;
-        const projects = await agentStorage.getAgentProjects(pubkey);
+        const projects = await listProjectsForAgent(pubkey);
         if (projects.length === 0) {
             orphans.push({ agent, pubkey });
         }

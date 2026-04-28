@@ -27,7 +27,6 @@ import { getTelegramGatewayService } from "@/services/telegram/TelegramGatewaySe
 import { RALRegistry } from "@/services/ral";
 import { createProjectDTag, type ProjectDTag } from "@/types/project-ids";
 import { getPubkeyService } from "@/services/PubkeyService";
-import { getTrustPubkeyService } from "@/services/trust-pubkeys";
 import { ActiveRalIndex } from "@/conversations/ActiveRalIndex";
 import { cloneGitRepository, initializeGitRepository } from "@/utils/git";
 import { agentEnvironmentService } from "@/services/AgentEnvironmentService";
@@ -217,13 +216,6 @@ export class ProjectRuntime {
                 await this.warmUserProfileCache();
             });
             trace.getActiveSpan()?.addEvent("project_runtime.context_warmup_complete");
-
-            // Initialize backend pubkey cache for the pubkey gate.
-            // Must happen before EventHandler is initialized so that
-            // isTrustedEventSync() can recognize backend-signed events
-            // without an async fallback (fail-closed gate).
-            await getTrustPubkeyService().initializeBackendPubkeyCache();
-            trace.getActiveSpan()?.addEvent("project_runtime.backend_pubkey_cache_initialized");
 
             // Initialize event handler
             const telegramDeliveryService = new TelegramDeliveryService();

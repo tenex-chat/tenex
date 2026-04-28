@@ -71,10 +71,9 @@ export class EventHandler {
         // Ignore ephemeral status and typing indicator events
         if (IGNORED_EVENT_KINDS.includes(event.kind)) return;
 
-        // PUBKEY GATE: Only allow events from trusted pubkeys (whitelisted, backend, or known agents)
-        // This is the front-door gate — all events must pass through before any routing occurs.
-        // Fail-closed: if the check errors, the event is denied.
-        if (!getPubkeyGateService().shouldAllowEvent(event)) {
+        // PUBKEY GATE: queries the standalone tenex-whitelist daemon over a
+        // Unix socket. Fail-closed on connect/parse errors.
+        if (!(await getPubkeyGateService().shouldAllowEvent(event))) {
             return;
         }
 

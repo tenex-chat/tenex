@@ -1,20 +1,21 @@
-import { getTrustPubkeyService, type TrustResult } from "@/services/trust-pubkeys";
 import { logger } from "@/utils/logger";
 import { trace } from "@opentelemetry/api";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
+import { checkPubkey, WhitelistDaemonError } from "./whitelistDaemonClient";
 
 /**
  * PubkeyGateService gates incoming events based on pubkey authorization.
  *
- * An event is allowed through if its author's pubkey is trusted by TrustPubkeyService
- * (whitelisted, backend, or known agent). All other events are silently dropped.
+ * The trust decision is delegated to the standalone `tenex-whitelist` Rust
+ * daemon over a Unix socket. The daemon is the single source of truth for
+ * "is pubkey X allowed on this machine"; this service is just the call site
+ * adapter for incoming Nostr events.
  *
- * Design principles:
- * - Fail-closed: if the trust check errors, the event is denied
- * - Sanitized logging: only pubkey prefix + event kind for observability
- * - OpenTelemetry telemetry for audit trail
- * - Sync trust checks for performance (requires backend pubkey cache initialization)
+ * Fail-closed: connect errors, timeouts, or malformed responses deny the
+ * event. Operators must keep the whitelist daemon running.
  */
+const NO_PROJECT_DTAG = "-";
+
 export class PubkeyGateService {
     private static instance: PubkeyGateService;
 
@@ -29,15 +30,9 @@ export class PubkeyGateService {
 
     /**
      * Check if an incoming event should be allowed through the gate.
-     *
-     * Uses synchronous trust checks for performance. The backend pubkey cache
-     * must be initialized via TrustPubkeyService.initializeBackendPubkeyCache()
-     * before calling this method for accurate backend pubkey checks.
-     *
-     * @param event The incoming NDKEvent to check
-     * @returns true if the event should be routed, false if it should be dropped
+     * Returns true if the event should be routed, false if it should be dropped.
      */
-    shouldAllowEvent(event: NDKEvent): boolean {
+    async shouldAllowEvent(event: NDKEvent): Promise<boolean> {
         const pubkey = event.pubkey;
 
         if (!pubkey) {
@@ -48,50 +43,36 @@ export class PubkeyGateService {
             return false;
         }
 
-        let trustResult: TrustResult;
         try {
-            trustResult = getTrustPubkeyService().isTrustedEventSync(event);
+            const allowed = await checkPubkey(pubkey, NO_PROJECT_DTAG);
+            if (!allowed) {
+                logger.debug("[PUBKEY_GATE] Event denied: untrusted pubkey", {
+                    pubkey: pubkey.substring(0, 8),
+                    kind: event.kind,
+                });
+                this.recordDenied(event, "untrusted");
+                return false;
+            }
+            return true;
         } catch (error) {
-            // Fail-closed: if the trust check errors, deny
-            logger.warn("[PUBKEY_GATE] Trust check failed, denying event (fail-closed)", {
+            logger.warn("[PUBKEY_GATE] Whitelist daemon query failed, denying event (fail-closed)", {
                 pubkey: pubkey.substring(0, 8),
                 kind: event.kind,
                 error: error instanceof Error ? error.message : String(error),
+                transport: error instanceof WhitelistDaemonError,
             });
             this.recordDenied(event, "error");
             return false;
         }
-
-        if (!trustResult.trusted) {
-            logger.debug("[PUBKEY_GATE] Event denied: untrusted pubkey", {
-                pubkey: pubkey.substring(0, 8),
-                kind: event.kind,
-            });
-            this.recordDenied(event, "untrusted");
-            return false;
-        }
-
-        return true;
     }
 
-    /**
-     * Record a denied event in telemetry for audit trail.
-     */
     private recordDenied(event: NDKEvent, reason: string): void {
-        if (!event.pubkey) {
-            throw new Error("[PubkeyGateService] Missing pubkey on denied event.");
-        }
-
         trace.getActiveSpan()?.addEvent("pubkey_gate.denied", {
-            "gate.pubkey": event.pubkey.substring(0, 8),
+            "gate.pubkey": event.pubkey ? event.pubkey.substring(0, 8) : "(none)",
             "gate.kind": event.kind ?? 0,
             "gate.reason": reason,
         });
     }
 }
 
-/**
- * Get the PubkeyGateService singleton instance
- */
-export const getPubkeyGateService = (): PubkeyGateService =>
-    PubkeyGateService.getInstance();
+export const getPubkeyGateService = (): PubkeyGateService => PubkeyGateService.getInstance();

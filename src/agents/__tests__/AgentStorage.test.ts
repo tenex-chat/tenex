@@ -5,6 +5,65 @@ import * as path from "node:path";
 import { AgentStorage, createStoredAgent, isAgentActive, type StoredAgent } from "../AgentStorage";
 import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 
+/**
+ * Read the on-disk index.json for the test storage directory.
+ *
+ * Tests historically relied on `agentStorage.getAgentProjects` /
+ * `agentStorage.getProjectAgents` for project membership lookups. Those methods
+ * were removed when project membership migrated to the persisted kind:31933
+ * event (`<TENEX_BASE_DIR>/projects/<dTag>/event.json`). Tests that exercise
+ * the slug index's projectIds (still maintained by addAgentToProject /
+ * removeAgentFromProject) read the raw index instead.
+ */
+async function readIndexFromDir(tempDir: string): Promise<{
+    bySlug: Record<string, { pubkey: string; projectIds?: string[] }>;
+    byEventId: Record<string, string>;
+}> {
+    const indexPath = path.join(tempDir, "index.json");
+    const content = await fs.readFile(indexPath, "utf-8");
+    return JSON.parse(content);
+}
+
+/**
+ * Return the project ids the given pubkey owns via the slug index.
+ * The slug index is the only in-storage record of project association after the
+ * byProject removal; the canonical source is the on-disk kind:31933 event.
+ */
+async function projectsOwnedBy(tempDir: string, pubkey: string): Promise<string[]> {
+    const index = await readIndexFromDir(tempDir);
+    const owned = new Set<string>();
+    for (const slugEntry of Object.values(index.bySlug)) {
+        if (slugEntry.pubkey !== pubkey) continue;
+        for (const projectId of slugEntry.projectIds ?? []) {
+            owned.add(projectId);
+        }
+    }
+    return [...owned];
+}
+
+/**
+ * Return the canonical agents (one per slug) recorded in the slug index for the
+ * given dTag. Mirrors the behaviour the old `getProjectAgents` exposed against
+ * the byProject mapping, but sourced from `bySlug.projectIds` which is what the
+ * mutation methods (addAgentToProject / removeAgentFromProject) write.
+ */
+async function projectAgentsFromIndex(
+    tempDir: string,
+    storage: AgentStorage,
+    dTag: string,
+): Promise<StoredAgent[]> {
+    const index = await readIndexFromDir(tempDir);
+    const agents: StoredAgent[] = [];
+    for (const slugEntry of Object.values(index.bySlug)) {
+        if (!(slugEntry.projectIds ?? []).includes(dTag)) continue;
+        const agent = await storage.loadAgent(slugEntry.pubkey);
+        if (!agent) continue;
+        if (!isAgentActive(agent)) continue;
+        agents.push(agent);
+    }
+    return agents;
+}
+
 describe("AgentStorage", () => {
     let tempDir: string;
     let storage: AgentStorage;
@@ -42,7 +101,6 @@ describe("AgentStorage", () => {
                 useCriteria: "Test criteria",
                 defaultConfig: {
                     model: "anthropic:claude-sonnet-4",
-                    tools: ["fs_read", "shell"],
                 },
                 eventId: "test-event-id",
             });
@@ -55,7 +113,6 @@ describe("AgentStorage", () => {
             expect(agent.instructions).toBe("Test instructions");
             expect(agent.useCriteria).toBe("Test criteria");
             expect(agent.default?.model).toBe("anthropic:claude-sonnet-4");
-            expect(agent.default?.tools).toEqual(["fs_read", "shell"]);
             expect(agent.eventId).toBe("test-event-id");
         });
 
@@ -173,7 +230,6 @@ describe("AgentStorage", () => {
                 slug: "test-agent",
                 name: "Test Agent",
                 role: "assistant",
-                tools: ["fs_read"],
             });
 
             await storage.saveAgent(agent);
@@ -292,49 +348,6 @@ describe("AgentStorage", () => {
             expect(loaded?.default?.model).toBe("anthropic:claude-opus-4");
         });
 
-        it("should update default tools in storage", async () => {
-            const signer = NDKPrivateKeySigner.generate();
-            const agent = createStoredAgent({
-                nsec: signer.nsec,
-                slug: "test-agent",
-                name: "Test Agent",
-                role: "assistant",
-                defaultConfig: { tools: ["fs_read"] },
-            });
-
-            await storage.saveAgent(agent);
-
-            const newTools = ["fs_read", "shell", "agents_write"];
-            const success = await storage.updateDefaultConfig(signer.pubkey, {
-                tools: newTools,
-            });
-            expect(success).toBe(true);
-
-            const loaded = await storage.loadAgent(signer.pubkey);
-            expect(loaded?.default?.tools).toEqual(newTools);
-        });
-
-        it("should update default blockedSkills in storage", async () => {
-            const signer = NDKPrivateKeySigner.generate();
-            const agent = createStoredAgent({
-                nsec: signer.nsec,
-                slug: "test-agent",
-                name: "Test Agent",
-                role: "assistant",
-                defaultConfig: { blockedSkills: ["shell"] },
-            });
-
-            await storage.saveAgent(agent);
-
-            const success = await storage.updateDefaultConfig(signer.pubkey, {
-                blockedSkills: ["shell", "write-access"],
-            });
-            expect(success).toBe(true);
-
-            const loaded = await storage.loadAgent(signer.pubkey);
-            expect(loaded?.default?.blockedSkills).toEqual(["shell", "write-access"]);
-        });
-
         it("should update default mcpAccess in storage", async () => {
             const signer = NDKPrivateKeySigner.generate();
             const agent = createStoredAgent({
@@ -354,27 +367,6 @@ describe("AgentStorage", () => {
 
             const loaded = await storage.loadAgent(signer.pubkey);
             expect(loaded?.default?.mcpAccess).toEqual(["github", "notion"]);
-        });
-
-        it("should clear default blockedSkills when updated with an empty list", async () => {
-            const signer = NDKPrivateKeySigner.generate();
-            const agent = createStoredAgent({
-                nsec: signer.nsec,
-                slug: "test-agent",
-                name: "Test Agent",
-                role: "assistant",
-                defaultConfig: { blockedSkills: ["shell"] },
-            });
-
-            await storage.saveAgent(agent);
-
-            const success = await storage.updateDefaultConfig(signer.pubkey, {
-                blockedSkills: [],
-            });
-            expect(success).toBe(true);
-
-            const loaded = await storage.loadAgent(signer.pubkey);
-            expect(loaded?.default?.blockedSkills).toBeUndefined();
         });
 
         it("should update top-level Telegram config in storage", async () => {
@@ -436,75 +428,6 @@ describe("AgentStorage", () => {
 
     });
 
-    describe("updateAgentIsPM", () => {
-        it("should set isPM flag in storage", async () => {
-            const signer = NDKPrivateKeySigner.generate();
-            const agent = createStoredAgent({
-                nsec: signer.nsec,
-                slug: "test-agent",
-                name: "Test Agent",
-                role: "assistant",
-            });
-
-            await storage.saveAgent(agent);
-
-            const success = await storage.updateAgentIsPM(signer.pubkey, true);
-            expect(success).toBe(true);
-
-            const loaded = await storage.loadAgent(signer.pubkey);
-            expect(loaded?.isPM).toBe(true);
-        });
-
-        it("should clear isPM flag when set to false", async () => {
-            const signer = NDKPrivateKeySigner.generate();
-            const agent = createStoredAgent({
-                nsec: signer.nsec,
-                slug: "test-agent",
-                name: "Test Agent",
-                role: "assistant",
-            });
-
-            await storage.saveAgent(agent);
-
-            // First set to true
-            await storage.updateAgentIsPM(signer.pubkey, true);
-            let loaded = await storage.loadAgent(signer.pubkey);
-            expect(loaded?.isPM).toBe(true);
-
-            // Then set to false - should delete the field
-            await storage.updateAgentIsPM(signer.pubkey, false);
-            loaded = await storage.loadAgent(signer.pubkey);
-            expect(loaded?.isPM).toBeUndefined();
-        });
-
-        it("should clear isPM flag when set to undefined", async () => {
-            const signer = NDKPrivateKeySigner.generate();
-            const agent = createStoredAgent({
-                nsec: signer.nsec,
-                slug: "test-agent",
-                name: "Test Agent",
-                role: "assistant",
-            });
-
-            await storage.saveAgent(agent);
-
-            // First set to true
-            await storage.updateAgentIsPM(signer.pubkey, true);
-            let loaded = await storage.loadAgent(signer.pubkey);
-            expect(loaded?.isPM).toBe(true);
-
-            // Then clear with undefined
-            await storage.updateAgentIsPM(signer.pubkey, undefined);
-            loaded = await storage.loadAgent(signer.pubkey);
-            expect(loaded?.isPM).toBeUndefined();
-        });
-
-        it("should return false for non-existent agent", async () => {
-            const success = await storage.updateAgentIsPM("nonexistent-pubkey", true);
-            expect(success).toBe(false);
-        });
-    });
-
     describe("project associations", () => {
         it("should add agent to project", async () => {
             const signer = NDKPrivateKeySigner.generate();
@@ -519,7 +442,7 @@ describe("AgentStorage", () => {
 
             await storage.addAgentToProject(signer.pubkey, "project-1");
 
-            const projects = await storage.getAgentProjects(signer.pubkey);
+            const projects = await projectsOwnedBy(tempDir, signer.pubkey);
             expect(projects).toContain("project-1");
         });
 
@@ -537,7 +460,7 @@ describe("AgentStorage", () => {
 
             await storage.addAgentToProject(signer.pubkey, "project-1");
 
-            const projects = await storage.getAgentProjects(signer.pubkey);
+            const projects = await projectsOwnedBy(tempDir, signer.pubkey);
             expect(projects.filter((p) => p === "project-1").length).toBe(1);
         });
 
@@ -556,7 +479,7 @@ describe("AgentStorage", () => {
 
             await storage.removeAgentFromProject(signer.pubkey, "project-1");
 
-            const projects = await storage.getAgentProjects(signer.pubkey);
+            const projects = await projectsOwnedBy(tempDir, signer.pubkey);
             expect(projects).not.toContain("project-1");
             expect(projects).toContain("project-2");
         });
@@ -584,7 +507,7 @@ describe("AgentStorage", () => {
             expect(loaded?.slug).toBe("test-agent");
 
             // No projects remain
-            const projects = await storage.getAgentProjects(signer.pubkey);
+            const projects = await projectsOwnedBy(tempDir, signer.pubkey);
             expect(projects).toEqual([]);
         });
 
@@ -609,7 +532,7 @@ describe("AgentStorage", () => {
             await storage.addAgentToProject(signer.pubkey, "project-2");
             loaded = await storage.loadAgent(signer.pubkey);
             expect(loaded?.status).toBe("active");
-            const projects = await storage.getAgentProjects(signer.pubkey);
+            const projects = await projectsOwnedBy(tempDir, signer.pubkey);
             expect(projects).toContain("project-2");
             // Original identity preserved
             expect(loaded?.nsec).toBe(signer.nsec);
@@ -640,14 +563,14 @@ describe("AgentStorage", () => {
             await storage.addAgentToProject(signer2.pubkey, "project-1");
 
             // Both agents should be in project initially
-            let projectAgents = await storage.getProjectAgents("project-1");
+            let projectAgents = await projectAgentsFromIndex(tempDir, storage, "project-1");
             expect(projectAgents.length).toBe(2);
 
             // Remove inactive agent from project (becomes inactive)
             await storage.removeAgentFromProject(signer2.pubkey, "project-1");
 
             // Only active agent should be returned
-            projectAgents = await storage.getProjectAgents("project-1");
+            projectAgents = await projectAgentsFromIndex(tempDir, storage, "project-1");
             expect(projectAgents.length).toBe(1);
             expect(projectAgents[0].slug).toBe("active-agent");
         });
@@ -692,7 +615,7 @@ describe("AgentStorage", () => {
             await storage.addAgentToProject(signer1.pubkey, "project-1");
 
             // Verify agent is visible
-            let projectAgents = await storage.getProjectAgents("project-1");
+            let projectAgents = await projectAgentsFromIndex(tempDir, storage, "project-1");
             expect(projectAgents.length).toBe(1);
             expect(projectAgents[0].name).toBe("Agent 1");
 
@@ -708,7 +631,7 @@ describe("AgentStorage", () => {
             await storage.addAgentToProject(signer1.pubkey, "project-2");
 
             // Agent should be active and visible again
-            projectAgents = await storage.getProjectAgents("project-2");
+            projectAgents = await projectAgentsFromIndex(tempDir, storage, "project-2");
             expect(projectAgents.length).toBe(1);
             expect(projectAgents[0].status).toBe("active");
 
@@ -859,32 +782,6 @@ describe("AgentStorage", () => {
         });
     });
 
-    describe("resetDefaultConfig", () => {
-        it("clears default config and isPM for an existing agent", async () => {
-            const signer = NDKPrivateKeySigner.generate();
-            await storage.saveAgent({
-                nsec: signer.nsec,
-                slug: "test-agent",
-                name: "Test Agent",
-                role: "assistant",
-                default: { model: "anthropic:claude-opus-4", tools: ["fs_read"] },
-                isPM: true,
-            } as any);
-
-            const result = await storage.resetDefaultConfig(signer.pubkey);
-            expect(result).toBe(true);
-
-            const loaded = await storage.loadAgent(signer.pubkey);
-            expect(loaded?.default).toBeUndefined();
-            expect(loaded?.isPM).toBeUndefined();
-        });
-
-        it("returns false for a non-existent agent", async () => {
-            const result = await storage.resetDefaultConfig("nonexistent-pubkey");
-            expect(result).toBe(false);
-        });
-    });
-
     describe("global agent listings", () => {
         it("should return every stored agent record in getAllStoredAgents", async () => {
             const signer1 = NDKPrivateKeySigner.generate();
@@ -985,7 +882,7 @@ describe("AgentStorage", () => {
             await storage.addAgentToProject(signer.pubkey, "project-2");
 
             // Verify both projects are tracked in the index
-            const projects = await storage.getAgentProjects(signer.pubkey);
+            const projects = await projectsOwnedBy(tempDir, signer.pubkey);
             expect(projects).toContain("project-1");
             expect(projects).toContain("project-2");
 
@@ -1031,7 +928,7 @@ describe("AgentStorage", () => {
             const agent1Loaded = await storage.loadAgent(signer1.pubkey);
             expect(agent1Loaded).not.toBeNull();
             expect(agent1Loaded?.status).toBe("inactive");
-            const agent1Projects = await storage.getAgentProjects(signer1.pubkey);
+            const agent1Projects = await projectsOwnedBy(tempDir, signer1.pubkey);
             expect(agent1Projects).toEqual([]);
         });
 
@@ -1065,10 +962,11 @@ describe("AgentStorage", () => {
             const loaded = await storage.getAgentBySlug("my-agent");
             expect(loaded?.name).toBe("Agent 2");
 
-            // Verify agent1 still exists in project-1
-            // (no cleanup happened because no overlapping projects)
-            const agent1Projects = await storage.getAgentProjects(signer1.pubkey);
-            expect(agent1Projects).toContain("project-1");
+            // Agent1 remains active (its project-1 association lives in the canonical
+            // kind:31933 event, not in the slug index whose ownership shifted to agent2).
+            const agent1Loaded = await storage.loadAgent(signer1.pubkey);
+            expect(agent1Loaded).not.toBeNull();
+            expect(agent1Loaded?.status).toBe("active");
         });
 
         it("should migrate old flat index format to SlugEntry structure", async () => {
@@ -1113,19 +1011,21 @@ describe("AgentStorage", () => {
                 const loaded = await newStorage.getAgentBySlug("test-agent");
                 expect(loaded).toBeDefined();
 
-                // Verify index is now in new format
+                // Verify index is now in new format and the legacy byProject was dropped.
+                // projectIds is empty post-migration: project membership is derived from
+                // the persisted kind:31933 event and is no longer mirrored in the index.
                 const indexContent = await fs.readFile(indexPath, "utf-8");
                 const migratedIndex = JSON.parse(indexContent);
                 expect(migratedIndex.bySlug["test-agent"]).toHaveProperty("pubkey");
                 expect(migratedIndex.bySlug["test-agent"]).toHaveProperty("projectIds");
-                expect(migratedIndex.bySlug["test-agent"].projectIds).toContain("project-1");
-                expect(migratedIndex.bySlug["test-agent"].projectIds).toContain("project-2");
+                expect(migratedIndex.bySlug["test-agent"].projectIds).toEqual([]);
+                expect(migratedIndex.byProject).toBeUndefined();
             } finally {
                 ConfigService.config.getConfigPath = originalGetConfigPath;
             }
         });
 
-        it("should handle migration with missing byProject entries", async () => {
+        it("migrates a legacy index with no project associations", async () => {
             // Override config path for this specific test
             const ConfigService = await import("@/services/ConfigService");
             const originalGetConfigPath = ConfigService.config.getConfigPath;
@@ -1140,38 +1040,28 @@ describe("AgentStorage", () => {
                     role: "assistant",
                 });
 
-                // Manually save agent file
                 const agentPath = path.join(tempDir, `${signer.pubkey}.json`);
                 await fs.writeFile(agentPath, JSON.stringify(agent, null, 2));
 
-                // Create OLD format index with MISSING byProject entry
+                // Old-format index with the flat bySlug shape and no project map.
                 const oldIndex = {
-                    bySlug: {
-                        "orphan-agent": signer.pubkey, // Old flat format
-                    },
+                    bySlug: { "orphan-agent": signer.pubkey },
                     byEventId: {},
-                    byProject: {}, // Empty - no projects tracked
                 };
 
                 const indexPath = path.join(tempDir, "index.json");
                 await fs.writeFile(indexPath, JSON.stringify(oldIndex, null, 2));
 
-                // Create new storage instance to trigger migration
-                // rebuildIndex is called when byProject is empty after migration
                 const newStorage = new AgentStorage();
                 await newStorage.initialize();
 
-                // Verify migration happened despite missing byProject
                 const loaded = await newStorage.getAgentBySlug("orphan-agent");
                 expect(loaded).toBeDefined();
 
-                // Verify index is now in new format
                 const indexContent = await fs.readFile(indexPath, "utf-8");
                 const migratedIndex = JSON.parse(indexContent);
                 expect(migratedIndex.bySlug["orphan-agent"]).toHaveProperty("pubkey");
                 expect(migratedIndex.bySlug["orphan-agent"]).toHaveProperty("projectIds");
-                // byProject cannot be rebuilt from agent files (no projects field)
-                // so it stays empty after rebuildIndex
                 expect(migratedIndex.bySlug["orphan-agent"].projectIds).toEqual([]);
             } finally {
                 ConfigService.config.getConfigPath = originalGetConfigPath;
@@ -1197,7 +1087,7 @@ describe("AgentStorage", () => {
             const loaded = await storage.getAgentBySlug("temp-agent");
             expect(loaded).not.toBeNull();
             expect(loaded?.status).toBe("inactive");
-            const projects = await storage.getAgentProjects(signer.pubkey);
+            const projects = await projectsOwnedBy(tempDir, signer.pubkey);
             expect(projects).toEqual([]);
         });
 
@@ -1228,13 +1118,17 @@ describe("AgentStorage", () => {
             await storage.saveAgent(agent2);
             await storage.addAgentToProject(signer2.pubkey, "project-2");
 
-            // Agent 1 should still exist but only in project-1 (removed from project-2 by cleanup)
-            const agent1Projects = await storage.getAgentProjects(signer1.pubkey);
-            expect(agent1Projects).toContain("project-1");
-            expect(agent1Projects).not.toContain("project-2");
+            // Agent 2 takes ownership of the slug. Agent 1's project-1 association is no
+            // longer tracked by the slug index — that's expected: the canonical source of
+            // project membership is the persisted kind:31933 event, not this index.
+            // Agent 1 itself is still active (still in project-1 according to the canonical
+            // source) and addressable by pubkey.
+            const agent1Loaded = await storage.loadAgent(signer1.pubkey);
+            expect(agent1Loaded).not.toBeNull();
+            expect(agent1Loaded?.status).toBe("active");
 
-            // Agent 2 should have project-2
-            const agent2Projects = await storage.getAgentProjects(signer2.pubkey);
+            // The slug now points to agent2 with project-2.
+            const agent2Projects = await projectsOwnedBy(tempDir, signer2.pubkey);
             expect(agent2Projects).toContain("project-2");
 
             // Slug should point to agent2 (last one saved)
@@ -1351,11 +1245,11 @@ describe("AgentStorage", () => {
             await storage.addAgentToProject(signer2.pubkey, "project-2");
 
             // Both agents should be retrievable from their respective projects
-            const project1Agents = await storage.getProjectAgents("project-1");
+            const project1Agents = await projectAgentsFromIndex(tempDir, storage, "project-1");
             expect(project1Agents).toHaveLength(1);
             expect(project1Agents[0].name).toBe("Worker 1");
 
-            const project2Agents = await storage.getProjectAgents("project-2");
+            const project2Agents = await projectAgentsFromIndex(tempDir, storage, "project-2");
             expect(project2Agents).toHaveLength(1);
             expect(project2Agents[0].name).toBe("Worker 2");
         });
@@ -1391,13 +1285,13 @@ describe("AgentStorage", () => {
             expect(slugLookup?.name).toBe("Worker 2");
 
             // Agent2 appears in its project because it owns the slug
-            const project2Agents = await storage.getProjectAgents("project-2");
+            const project2Agents = await projectAgentsFromIndex(tempDir, storage, "project-2");
             expect(project2Agents).toHaveLength(1);
             expect(project2Agents[0].name).toBe("Worker 2");
 
             // Agent1 does NOT appear in getProjectAgents because it doesn't own the slug
             // This is expected behavior - slug ownership is global, not project-scoped
-            const project1Agents = await storage.getProjectAgents("project-1");
+            const project1Agents = await projectAgentsFromIndex(tempDir, storage, "project-1");
             expect(project1Agents).toHaveLength(0);
         });
 
@@ -1465,28 +1359,17 @@ describe("AgentStorage", () => {
                 role: "assistant",
             });
 
-            // Save both agents (this would normally trigger cleanup)
+            // Save both agents — addAgentToProject runs cleanupDuplicateSlugs so the
+            // second add evicts agent1 from project-1 and agent2 takes the slug.
             await storage.saveAgent(agent1);
             await storage.addAgentToProject(signer1.pubkey, "project-1");
+            await storage.saveAgent(agent2);
+            await storage.addAgentToProject(signer2.pubkey, "project-1");
 
-            // Manually corrupt the index to simulate the bug scenario
-            // Add both agents to the same project with same slug
-            const indexPath = path.join(tempDir, "index.json");
-            const indexContent = await fs.readFile(indexPath, "utf-8");
-            const index = JSON.parse(indexContent);
-
-            // Force both pubkeys into project-1
-            index.byProject["project-1"].push(signer2.pubkey);
-            await fs.writeFile(indexPath, JSON.stringify(index, null, 2));
-
-            // Manually save agent2 file
-            const agent2Path = path.join(tempDir, `${signer2.pubkey}.json`);
-            await fs.writeFile(agent2Path, JSON.stringify(agent2, null, 2));
-
-            // getProjectAgents should handle this gracefully (return only first agent)
-            const projectAgents = await storage.getProjectAgents("project-1");
+            // Only one canonical owner per slug remains in project-1 (agent2 took over).
+            const projectAgents = await projectAgentsFromIndex(tempDir, storage, "project-1");
             expect(projectAgents).toHaveLength(1);
-            expect(projectAgents[0].name).toBe("Agent 1");
+            expect(projectAgents[0].name).toBe("Agent 2");
         });
     });
 
@@ -1568,7 +1451,7 @@ describe("AgentStorage", () => {
             await storage.saveAgent(agent);
             await storage.addAgentToProject(signer.pubkey, "project-1");
 
-            // Manually extend the index to claim agent is in project-2 (without the byProject entry)
+            // Manually extend the slug entry's projectIds to claim agent is in project-2
             const indexPath = path.join(tempDir, "index.json");
             const indexContent = await fs.readFile(indexPath, "utf-8");
             const index = JSON.parse(indexContent);
@@ -1687,62 +1570,8 @@ describe("AgentStorage", () => {
         });
     });
 
-    describe("migration with byProject rebuild", () => {
-        it("should rebuild byProject when migration produces empty byProject", async () => {
-            // Create agents manually
-            const signer1 = NDKPrivateKeySigner.generate();
-            const signer2 = NDKPrivateKeySigner.generate();
-
-            const agent1 = createStoredAgent({
-                nsec: signer1.nsec,
-                slug: "agent-1",
-                name: "Agent 1",
-                role: "assistant",
-            });
-
-            const agent2 = createStoredAgent({
-                nsec: signer2.nsec,
-                slug: "agent-2",
-                name: "Agent 2",
-                role: "assistant",
-            });
-
-            // Write agent files manually
-            const agent1Path = path.join(tempDir, `${signer1.pubkey}.json`);
-            const agent2Path = path.join(tempDir, `${signer2.pubkey}.json`);
-            await fs.writeFile(agent1Path, JSON.stringify(agent1, null, 2));
-            await fs.writeFile(agent2Path, JSON.stringify(agent2, null, 2));
-
-            // Create old-format index with EMPTY byProject (simulating corruption)
-            const indexPath = path.join(tempDir, "index.json");
-            const oldIndex = {
-                bySlug: {
-                    "agent-1": signer1.pubkey, // Old flat format
-                    "agent-2": signer2.pubkey,
-                },
-                byEventId: {},
-                byProject: {}, // EMPTY - should trigger rebuild
-            };
-            await fs.writeFile(indexPath, JSON.stringify(oldIndex, null, 2));
-
-            // Initialize storage - should migrate and rebuild
-            const originalGetConfigPath = (await import("@/services/ConfigService")).config.getConfigPath;
-            (await import("@/services/ConfigService")).config.getConfigPath = () => tempDir;
-            const newStorage = new AgentStorage();
-            await newStorage.initialize();
-            (await import("@/services/ConfigService")).config.getConfigPath = originalGetConfigPath;
-
-            // Verify slugs were migrated (byProject stays empty since no agent files have projects)
-            const indexContent = await fs.readFile(indexPath, "utf-8");
-            const index = JSON.parse(indexContent);
-
-            expect(index.bySlug["agent-1"]).toBeDefined();
-            expect(index.bySlug["agent-1"].pubkey).toBe(signer1.pubkey);
-            expect(index.bySlug["agent-2"]).toBeDefined();
-            expect(index.bySlug["agent-2"].pubkey).toBe(signer2.pubkey);
-        });
-
-        it("should preserve byProject when migration produces valid byProject", async () => {
+    describe("legacy index migration", () => {
+        it("migrates flat bySlug entries and silently drops legacy byProject", async () => {
             const signer = NDKPrivateKeySigner.generate();
 
             const agent = createStoredAgent({
@@ -1752,38 +1581,32 @@ describe("AgentStorage", () => {
                 role: "assistant",
             });
 
-            // Write agent file manually
             const agentPath = path.join(tempDir, `${signer.pubkey}.json`);
             await fs.writeFile(agentPath, JSON.stringify(agent, null, 2));
 
-            // Create old-format index with VALID byProject
+            // Old-format index with both the flat bySlug shape and a stale byProject map.
+            // Both should be normalized: bySlug becomes SlugEntry; byProject is dropped.
             const indexPath = path.join(tempDir, "index.json");
-            const oldIndex = {
-                bySlug: {
-                    "test-agent": signer.pubkey, // Old flat format
-                },
+            const legacyIndex = {
+                bySlug: { "test-agent": signer.pubkey },
                 byEventId: {},
-                byProject: {
-                    "project-1": [signer.pubkey], // Valid - should be preserved
-                },
+                byProject: { "project-1": [signer.pubkey] },
             };
-            await fs.writeFile(indexPath, JSON.stringify(oldIndex, null, 2));
+            await fs.writeFile(indexPath, JSON.stringify(legacyIndex, null, 2));
 
-            // Initialize storage - should migrate but NOT rebuild
             const originalGetConfigPath = (await import("@/services/ConfigService")).config.getConfigPath;
             (await import("@/services/ConfigService")).config.getConfigPath = () => tempDir;
             const newStorage = new AgentStorage();
             await newStorage.initialize();
             (await import("@/services/ConfigService")).config.getConfigPath = originalGetConfigPath;
 
-            // Verify byProject was preserved and slug was migrated
-            const indexContent = await fs.readFile(indexPath, "utf-8");
-            const index = JSON.parse(indexContent);
+            const migratedIndex = JSON.parse(await fs.readFile(indexPath, "utf-8"));
 
-            expect(index.bySlug["test-agent"]).toBeDefined();
-            expect(index.bySlug["test-agent"].pubkey).toBe(signer.pubkey);
-            expect(index.bySlug["test-agent"].projectIds).toContain("project-1");
-            expect(index.byProject["project-1"]).toEqual([signer.pubkey]);
+            expect(migratedIndex.bySlug["test-agent"]).toBeDefined();
+            expect(migratedIndex.bySlug["test-agent"].pubkey).toBe(signer.pubkey);
+            // projectIds resets to [] — project membership now lives in event.json.
+            expect(migratedIndex.bySlug["test-agent"].projectIds).toEqual([]);
+            expect(migratedIndex.byProject).toBeUndefined();
         });
     });
 
@@ -1831,7 +1654,7 @@ describe("AgentStorage", () => {
             const agent1Loaded = await storage.loadAgent(signer1.pubkey);
             expect(agent1Loaded).not.toBeNull();
             expect(agent1Loaded?.status).toBe("inactive");
-            const agent1Projects = await storage.getAgentProjects(signer1.pubkey);
+            const agent1Projects = await projectsOwnedBy(tempDir, signer1.pubkey);
             expect(agent1Projects).toEqual([]);
         });
     });

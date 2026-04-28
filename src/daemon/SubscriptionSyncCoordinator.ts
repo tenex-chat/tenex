@@ -1,5 +1,4 @@
 import { logger } from "@/utils/logger";
-import { getTrustPubkeyService } from "@/services/trust-pubkeys";
 import { OwnerAgentListService } from "@/services/OwnerAgentListService";
 import type { AgentInstance } from "@/agents/types";
 import type { Hexpubkey } from "@nostr-dev-kit/ndk";
@@ -14,8 +13,6 @@ const daemonTracer = trace.getTracer("tenex.daemon");
 export interface SubscriptionSyncCoordinatorDeps {
     getRuntimeLifecycle: () => RuntimeLifecycle | null;
     getSubscriptionManager: () => SubscriptionManager | null;
-    getStoredAgentPubkeys: () => Set<Hexpubkey>;
-    addStoredAgentPubkey: (pubkey: Hexpubkey) => void;
     getAgentPubkeyToProjects: () => Map<Hexpubkey, Set<ProjectDTag>>;
     clearAgentPubkeyToProjects: () => void;
     setAgentPubkeyInProjects: (pubkey: Hexpubkey, projects: Set<ProjectDTag>) => void;
@@ -29,7 +26,6 @@ export interface SubscriptionSyncCoordinatorDeps {
  * - updateSubscriptionAfterRuntimeRemoved: clean up after a runtime stops
  * - handleDynamicAgentAdded: immediately route a newly created agent
  * - syncLessonSubscriptions: add/remove per-agent lesson subscriptions
- * - syncTrustServiceAgentPubkeys: keep trust service in sync
  * - collectAgentData: enumerate all agent pubkeys and definition IDs from active runtimes
  */
 export class SubscriptionSyncCoordinator {
@@ -101,9 +97,6 @@ export class SubscriptionSyncCoordinator {
                     // Sync per-agent lesson subscriptions: add new, remove stale
                     this.syncLessonSubscriptions(allAgentDefinitionIds);
 
-                    // Sync trust service with all known agent pubkeys (cross-project trust)
-                    this.syncTrustServiceAgentPubkeys();
-
                     // Set up callback for dynamic agent additions (e.g., via agents_write tool)
                     // This ensures new agents are immediately routable without requiring a restart
                     const context = runtime.getContext();
@@ -161,9 +154,6 @@ export class SubscriptionSyncCoordinator {
 
             subscriptionManager.updateAgentMentions(Array.from(allAgentPubkeys));
             this.syncLessonSubscriptions(allAgentDefinitionIds);
-
-            // Sync trust service with remaining agent pubkeys (cross-project trust)
-            this.syncTrustServiceAgentPubkeys();
         } catch (error) {
             logger.error("Failed to update subscription after runtime removed", {
                 projectId,
@@ -187,9 +177,6 @@ export class SubscriptionSyncCoordinator {
             projectSet.add(projectId);
         }
 
-        // Persist in stored set so trust survives if this project later stops
-        this.deps.addStoredAgentPubkey(agent.pubkey);
-
         // Update subscriptions
         const subscriptionManager = this.deps.getSubscriptionManager();
         if (subscriptionManager) {
@@ -205,9 +192,6 @@ export class SubscriptionSyncCoordinator {
 
         // Register with global 14199 service
         OwnerAgentListService.getInstance().registerAgents(projectId, [agent.pubkey]);
-
-        // Sync trust service with updated agent pubkeys (cross-project trust)
-        this.syncTrustServiceAgentPubkeys();
 
         logger.info("Dynamic agent added to routing", {
             projectId,
@@ -242,24 +226,6 @@ export class SubscriptionSyncCoordinator {
         }
 
         this.trackedLessonDefinitionIds = new Set(currentDefinitionIds);
-    }
-
-    /**
-     * Push current agent pubkeys to TrustPubkeyService for cross-project trust.
-     * Unions the daemon-level runtime pubkeys (from currently running projects)
-     * with the stored pubkeys seeded from AgentStorage at startup (covers
-     * not-yet-running projects), so trust is never dropped for known agents.
-     */
-    syncTrustServiceAgentPubkeys(): void {
-        const agentPubkeyToProjects = this.deps.getAgentPubkeyToProjects();
-        const allPubkeys = new Set<Hexpubkey>(agentPubkeyToProjects.keys());
-
-        // Union with stored pubkeys so non-running projects retain trust
-        for (const pubkey of this.deps.getStoredAgentPubkeys()) {
-            allPubkeys.add(pubkey);
-        }
-
-        getTrustPubkeyService().setGlobalAgentPubkeys(allPubkeys);
     }
 
     /**

@@ -1,7 +1,10 @@
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { config } from "@/services/ConfigService";
-import { getProjectContext, projectEventPublishService } from "@/services/projects";
-import { agentStorage } from "@/agents/AgentStorage";
+import {
+    getProjectContext,
+    listProjectsForAgent,
+    projectEventPublishService,
+} from "@/services/projects";
 import { formatAnyError } from "@/lib/error-formatter";
 import { logger } from "@/utils/logger";
 import { trace } from "@opentelemetry/api";
@@ -70,7 +73,7 @@ async function handleGlobalDeletion(
     event: NDKEvent,
     agentPubkey: string,
 ): Promise<void> {
-    const projects = await agentStorage.getAgentProjects(agentPubkey);
+    const projects = await listProjectsForAgent(agentPubkey);
 
     if (projects.length === 0) {
         logger.warn("[AgentDeletion] Agent has no project associations, no-op", {

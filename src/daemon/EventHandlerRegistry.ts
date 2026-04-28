@@ -4,6 +4,7 @@ import { agentStorage } from "@/agents/AgentStorage";
 import { NDKAgentLesson } from "@/events/NDKAgentLesson";
 import { getNDK } from "@/nostr/ndkClient";
 import { AgentConfigUpdateService } from "@/services/agents";
+import { persistProjectEvent, removePersistedProjectEvent } from "@/services/projects";
 import { shouldTrustLesson } from "@/utils/lessonTrust";
 import { createProjectDTag, type ProjectDTag } from "@/types/project-ids";
 import type { AgentInstance } from "@/agents/types";
@@ -87,6 +88,15 @@ export class EventHandlerRegistry {
                 );
             }
 
+            try {
+                await removePersistedProjectEvent(projectId);
+            } catch (error) {
+                logger.error("Failed to remove persisted project event", {
+                    projectId,
+                    error: error instanceof Error ? error.message : String(error),
+                });
+            }
+
             logger.info("Ignored deleted project event", { projectId });
             return;
         }
@@ -95,6 +105,15 @@ export class EventHandlerRegistry {
         const isNewProject = !knownProjects.has(projectId);
 
         knownProjects.set(projectId, project);
+
+        try {
+            await persistProjectEvent(projectId, event);
+        } catch (error) {
+            logger.error("Failed to persist project event", {
+                projectId,
+                error: error instanceof Error ? error.message : String(error),
+            });
+        }
 
         // Update subscription for new projects
         if (isNewProject) {

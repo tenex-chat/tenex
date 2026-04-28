@@ -1,6 +1,7 @@
 import * as fs from "node:fs/promises";
 import { agentStorage } from "@/agents/AgentStorage";
 import { fileExists, readJsonFile, writeJsonFile } from "@/lib/fs";
+import { listProjectsForAgent } from "@/services/projects/ProjectMembersReader";
 import {
     getLegacySchedulesPath,
     getProjectSchedulesPath,
@@ -140,7 +141,7 @@ async function resolveTargetAgentSlug(
     }
 
     if (!pubkeyToProjects.has(pubkey)) {
-        const projectIds = await agentStorage.getAgentProjects(pubkey);
+        const projectIds = await listProjectsForAgent(pubkey);
         pubkeyToProjects.set(
             pubkey,
             projectIds.map((value) => normalizeProjectIdForRuntime(value))

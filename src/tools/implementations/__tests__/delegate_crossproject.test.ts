@@ -10,6 +10,7 @@ import { NDKEvent } from "@nostr-dev-kit/ndk";
 import { agentStorage } from "@/agents/AgentStorage";
 import * as daemonModule from "@/daemon";
 import * as ndkClientModule from "@/nostr/ndkClient";
+import * as ProjectMembersReader from "@/services/projects/ProjectMembersReader";
 import type { ToolExecutionContext } from "@/tools/types";
 import type { AgentInstance } from "@/agents/types";
 import { PendingDelegationsRegistry, RALRegistry } from "@/services/ral";
@@ -42,7 +43,7 @@ const mockGetActiveRuntimes = mock(() => new Map([
         }),
     }],
 ]));
-const mockGetProjectAgents = mock(async () => []);
+const mockReadProjectAgentPubkeys = mock(async (): Promise<string[]> => []);
 const mockRegisterDelegation = mock(() => {});
 
 const createTriggeringEnvelope = () => createMockInboundEnvelope();
@@ -131,7 +132,7 @@ describe("delegate_crossproject - Todo enforcement", () => {
     beforeEach(() => {
         mockGetKnownProjects.mockClear();
         mockGetActiveRuntimes.mockClear();
-        mockGetProjectAgents.mockClear();
+        mockReadProjectAgentPubkeys.mockClear();
         mockPublish.mockClear();
         mockRegisterDelegation.mockClear();
 
@@ -142,9 +143,10 @@ describe("delegate_crossproject - Todo enforcement", () => {
         spyOn(ndkClientModule, "getNDK").mockReturnValue({
             fetchEvent: async () => null,
         } as ReturnType<typeof ndkClientModule.getNDK>);
-        spyOn(agentStorage, "getProjectAgents").mockImplementation(
-            mockGetProjectAgents as typeof agentStorage.getProjectAgents
+        spyOn(ProjectMembersReader, "readProjectAgentPubkeys").mockImplementation(
+            mockReadProjectAgentPubkeys as typeof ProjectMembersReader.readProjectAgentPubkeys
         );
+        spyOn(agentStorage, "loadAgent").mockResolvedValue(null);
         spyOn(PendingDelegationsRegistry, "register").mockImplementation(mockRegisterDelegation);
         spyOn(NDKEvent.prototype, "publish").mockImplementation(
             mockPublish as typeof NDKEvent.prototype.publish

@@ -17,6 +17,7 @@ import * as display from "@/commands/config/display";
 import { deleteStoredAgent, installAgentFromDefinitionEventId } from "@/services/agents/AgentProvisioningService";
 import { projectMembershipPublishService } from "@/services/agents/ProjectMembershipPublishService";
 import { config } from "@/services/ConfigService";
+import { listProjectsForAgent } from "@/services/projects/ProjectMembersReader";
 import { initNDK } from "@/nostr/ndkClient";
 import { inquirerTheme } from "@/utils/cli-theme";
 
@@ -318,7 +319,7 @@ export class AgentManager {
 
         for (const storedAgent of storedAgents) {
             const pubkey = deriveAgentPubkeyFromNsec(storedAgent.nsec);
-            const projects = await agentStorage.getAgentProjects(pubkey);
+            const projects = await listProjectsForAgent(pubkey);
             const visibleProjects: string[] = [];
 
             for (const projectId of projects) {
@@ -640,7 +641,7 @@ export class AgentManager {
         return {
             storedAgent,
             pubkey,
-            projects: await agentStorage.getAgentProjects(pubkey),
+            projects: await listProjectsForAgent(pubkey),
         };
     }
 }

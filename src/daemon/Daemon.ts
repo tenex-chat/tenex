@@ -46,7 +46,6 @@ import { SkillService } from "@/services/skill";
 import { RestartState } from "./RestartState";
 import { StatusFile } from "./StatusFile";
 import { AgentDefinitionMonitor } from "@/services/AgentDefinitionMonitor";
-import { getTrustPubkeyService } from "@/services/trust-pubkeys";
 import { InstalledAgentListService } from "@/services/status/InstalledAgentListService";
 import { BackendHeartbeatService } from "@/services/status/BackendHeartbeatService";
 import { ShutdownCoordinator } from "./ShutdownCoordinator";
@@ -84,9 +83,6 @@ export class Daemon {
 
     // Agent pubkey mapping for routing (pubkey -> project d-tags)
     private agentPubkeyToProjects = new Map<Hexpubkey, Set<ProjectDTag>>();
-
-    // Agent pubkeys seeded from AgentStorage at startup (covers not-yet-running projects)
-    private storedAgentPubkeys = new Set<Hexpubkey>();
 
     // Auto-boot patterns - projects whose d-tag contains any of these patterns will be auto-started
     private autoBootPatterns: string[] = [];
@@ -152,6 +148,15 @@ export class Daemon {
         logger.info("Auto-boot patterns configured", { patterns });
     }
 
+    /**
+     * Restrict this Daemon instance to a fixed set of project d-tags. Used by
+     * the `tenex-boot` single-project entrypoint when running under the Rust
+     * supervisor.
+     *
+     * Setting this also disables the daemon-singleton lockfile in `start()`:
+     * the supervisor owns the global `~/.tenex/daemon/tenex.lock`, and per-
+     * project boot processes must not contend for it.
+     */
     setRuntimeBootAllowlist(projectIds: readonly ProjectDTag[]): void {
         this.runtimeBootAllowlist = new Set(projectIds);
         logger.info("Runtime boot allowlist configured", {
@@ -274,9 +279,13 @@ export class Daemon {
             await this.initializeDirectories();
             this.statusFile = new StatusFile(this.daemonDir);
 
-            // 2. Acquire lockfile to prevent multiple daemon instances
-            logger.debug("Acquiring daemon lock");
-            await this.acquireDaemonLock();
+            // 2. Acquire lockfile to prevent multiple daemon instances.
+            // Skip in single-project boot mode — the Rust supervisor owns the
+            // global lock and spawns one Daemon instance per project.
+            if (this.runtimeBootAllowlist === null) {
+                logger.debug("Acquiring daemon lock");
+                await this.acquireDaemonLock();
+            }
 
             // 3. Initialize routing logger
             logger.debug("Initializing routing logger");
@@ -359,8 +368,6 @@ export class Daemon {
             this.subscriptionSyncCoordinator = new SubscriptionSyncCoordinator({
                 getRuntimeLifecycle: () => this.runtimeLifecycle,
                 getSubscriptionManager: () => this.subscriptionManager,
-                getStoredAgentPubkeys: () => this.storedAgentPubkeys,
-                addStoredAgentPubkey: (pubkey) => this.storedAgentPubkeys.add(pubkey),
                 getAgentPubkeyToProjects: () => this.agentPubkeyToProjects,
                 clearAgentPubkeyToProjects: () => this.agentPubkeyToProjects.clear(),
                 setAgentPubkeyInProjects: (pubkey, projects) =>
@@ -429,15 +436,7 @@ export class Daemon {
                 this.onStaticEose.bind(this)
             );
 
-            // 8b. Seed trust service with all known agent pubkeys from storage
             await agentStorage.initialize();
-            this.storedAgentPubkeys = await agentStorage.getAllKnownPubkeys();
-            if (this.storedAgentPubkeys.size > 0) {
-                getTrustPubkeyService().setGlobalAgentPubkeys(this.storedAgentPubkeys);
-                logger.info("Seeded trust service with stored agent pubkeys", {
-                    count: this.storedAgentPubkeys.size,
-                });
-            }
 
             // 9. Start subscription immediately
             logger.debug("Starting subscription manager");

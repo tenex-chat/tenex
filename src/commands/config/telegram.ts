@@ -7,6 +7,7 @@ import type { TelegramAgentConfig } from "@/agents/types";
 import { config as configService } from "@/services/ConfigService";
 import { getTransportBindingStore } from "@/services/ingress/TransportBindingStoreService";
 import { getIdentityBindingStore } from "@/services/identity";
+import { listProjectsForAgent } from "@/services/projects/ProjectMembersReader";
 import { getTelegramChatContextStore } from "@/services/telegram/TelegramChatContextStoreService";
 import { parseTelegramChannelId } from "@/utils/telegram-identifiers";
 import { inquirerTheme } from "@/utils/cli-theme";
@@ -184,7 +185,7 @@ async function chooseAgent(): Promise<{ agent: StoredAgent; pubkey: string } | u
         value: { agent: StoredAgent; pubkey: string } | undefined;
     }> = await Promise.all(agents.map(async (agent) => {
         const pubkey = deriveAgentPubkeyFromNsec(agent.nsec);
-        const projects = await agentStorage.getAgentProjects(pubkey);
+        const projects = await listProjectsForAgent(pubkey);
         return {
             name: `${agent.slug} — ${agent.name} (${projects.length} project${projects.length === 1 ? "" : "s"})`,
             value: { agent, pubkey },

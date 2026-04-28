@@ -4,7 +4,6 @@ import { InterventionPublisher } from "@/nostr/InterventionPublisher";
 import { NDKKind } from "@/nostr/kinds";
 import { config } from "@/services/ConfigService";
 import { PubkeyService } from "@/services/PubkeyService";
-import { getTrustPubkeyService } from "@/services/trust-pubkeys/TrustPubkeyService";
 import { logger } from "@/utils/logger";
 import { trace } from "@opentelemetry/api";
 import { shortenConversationId, shortenEventId } from "@/utils/conversation-id";
@@ -497,23 +496,21 @@ export class InterventionService {
         // The timer will attempt resolution again at trigger time.
         // This handles startup/restart scenarios where runtime is briefly unavailable.
 
-        // CRITICAL: Only trigger interventions for whitelisted user pubkeys
-        // Skip if the "user" is actually an agent (agent-to-agent completion)
-        const trustService = getTrustPubkeyService();
-        const trustResult = trustService.isTrustedSync(userPubkey);
-
-        if (!trustResult.trusted || trustResult.reason !== "whitelisted") {
-            // The "user" is not a whitelisted human user - it's an agent or unknown
+        // CRITICAL: Only trigger interventions for whitelisted user pubkeys.
+        // Skip if the "user" is actually an agent (agent-to-agent completion).
+        // We need the *reason* (human vs agent), so we read config directly
+        // rather than asking the whitelist daemon — which collapses all trust
+        // sources into a single YES/NO.
+        const isWhitelisted = config.getWhitelistedPubkeys().includes(userPubkey);
+        if (!isWhitelisted) {
             logger.debug("InterventionService: skipping intervention, user is not whitelisted", {
                 conversationId: shortenConversationId(conversationId),
                 userPubkey: userPubkey.substring(0, 8),
-                trustReason: trustResult.reason ?? "not-trusted",
             });
 
             trace.getActiveSpan()?.addEvent("intervention.skipped_not_whitelisted_user", {
                 "conversation.id": conversationId,
                 "user.pubkey": userPubkey.substring(0, 8),
-                "trust.reason": trustResult.reason ?? "not-trusted",
             });
 
             return;

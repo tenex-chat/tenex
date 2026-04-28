@@ -1,6 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, mock, spyOn } from "bun:test";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
-import { agentStorage } from "@/agents/AgentStorage";
 import { config } from "@/services/ConfigService";
 import * as projectsModule from "@/services/projects";
 import { logger } from "@/utils/logger";
@@ -73,7 +72,7 @@ describe("handleAgentDeletion", () => {
         spyOn(logger, "error").mockImplementation(() => {});
 
         spyOn(config, "getWhitelistedPubkeys").mockReturnValue([OWNER_PUBKEY]);
-        spyOn(agentStorage, "getAgentProjects").mockImplementation(async (pubkey: string) => {
+        spyOn(projectsModule, "listProjectsForAgent").mockImplementation(async (pubkey: string) => {
             getAgentProjectsCalls.push(pubkey);
             return [PROJECT_DTAG];
         });

@@ -16,3 +16,14 @@ export type {
     ProjectMetadataKey,
     PublishProjectMutationParams,
 } from "./ProjectEventPublishService";
+export {
+    persistProjectEvent,
+    removePersistedProjectEvent,
+    readPersistedProjectEvent,
+} from "./projectEventStore";
+export {
+    readProjectAgentPubkeys,
+    listProjectDTagsOnDisk,
+    listProjectsForAgent,
+    collectAllProjectAgentPubkeys,
+} from "./ProjectMembersReader";

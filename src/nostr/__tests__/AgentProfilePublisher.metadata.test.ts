@@ -5,6 +5,7 @@ import * as AgentProfilePublisherModule from "../AgentProfilePublisher";
 import * as ndkClientModule from "../ndkClient";
 import { getNDK } from "../ndkClient";
 import { config } from "@/services/ConfigService";
+import * as ProjectMembersReader from "@/services/projects/ProjectMembersReader";
 import { logger } from "@/utils/logger";
 
 describe("AgentProfilePublisher - Agent Metadata in Kind:0", () => {
@@ -15,7 +16,7 @@ describe("AgentProfilePublisher - Agent Metadata in Kind:0", () => {
     let getConfigSpy: ReturnType<typeof spyOn>;
     let getWhitelistedPubkeysSpy: ReturnType<typeof spyOn>;
     let ensureBackendPrivateKeySpy: ReturnType<typeof spyOn>;
-    let getProjectAgentsSpy: ReturnType<typeof spyOn>;
+    let readProjectAgentPubkeysSpy: ReturnType<typeof spyOn>;
     let capturedEvents: NDKEvent[] = [];
 
     beforeEach(() => {
@@ -45,7 +46,7 @@ describe("AgentProfilePublisher - Agent Metadata in Kind:0", () => {
                 extend: mock((_msg: string) => ({ mock: true })),
             },
         } as any);
-        getProjectAgentsSpy = spyOn(agentStorage, "getProjectAgents").mockResolvedValue([]);
+        readProjectAgentPubkeysSpy = spyOn(ProjectMembersReader, "readProjectAgentPubkeys").mockResolvedValue([]);
         spyOn(agentStorage, "loadAgent").mockResolvedValue(null);
         spyOn(agentStorage, "getAgentBySlugForProject").mockResolvedValue(null);
         spyOn(logger, "debug").mockImplementation(() => undefined);
@@ -73,9 +74,7 @@ describe("AgentProfilePublisher - Agent Metadata in Kind:0", () => {
                     enabled: false,
                 },
             } as any);
-            getProjectAgentsSpy.mockResolvedValue([
-                { nsec: "1".repeat(64) },
-            ] as any);
+            readProjectAgentPubkeysSpy.mockResolvedValue(["a".repeat(64)]);
 
             const setTimeoutSpy = spyOn(globalThis, "setTimeout").mockImplementation(((callback: Parameters<typeof setTimeout>[0]) => {
                 if (typeof callback === "function") {

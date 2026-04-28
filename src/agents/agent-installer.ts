@@ -84,7 +84,7 @@ interface ParsedAgentEvent {
     description: string;
     instructions: string;
     useCriteria: string;
-    defaultConfig: { model: string; tools?: string[] };
+    defaultConfig: { model: string };
     skillEventIds: string[];
     definitionDTag?: string;
     definitionAuthor?: string;
@@ -111,15 +111,6 @@ function parseAgentEvent(event: NDKEvent, slug: string): ParsedAgentEvent {
     const definitionDTag = event.tagValue("d") || undefined;
     const definitionAuthor = event.pubkey || undefined;
 
-    // Extract tool requirements from the agent definition event
-    const toolTags = event.tags
-        .filter((tag) => tag[0] === "tool" && tag[1])
-        .map((tag) => tag[1]);
-
-    if (toolTags.length > 0) {
-        logger.info(`Agent "${title}" requests access to ${toolTags.length} tool(s):`, toolTags);
-    }
-
     return {
         eventId: event.id,
         slug,
@@ -131,7 +122,6 @@ function parseAgentEvent(event: NDKEvent, slug: string): ParsedAgentEvent {
         useCriteria,
         defaultConfig: {
             model: DEFAULT_AGENT_LLM_CONFIG,
-            tools: toolTags.length > 0 ? toolTags : undefined,
         },
         skillEventIds,
         definitionDTag,

@@ -5,7 +5,6 @@ import { tmpdir } from "node:os";
 import { InterventionPublisher } from "@/nostr/InterventionPublisher";
 import { config } from "@/services/ConfigService";
 import { PubkeyService } from "@/services/PubkeyService";
-import * as trustPubkeyServiceModule from "@/services/trust-pubkeys/TrustPubkeyService";
 import { logger } from "@/utils/logger";
 
 /**
@@ -91,11 +90,18 @@ const createDefaultProjectAgents = () => new Map([
     ["catchup-project", defaultTestAgents],
 ]);
 
-// Mock TrustPubkeyService - default to whitelisted user
-const mockIsTrustedSync = mock((_pubkey: string) => ({
-    trusted: true,
-    reason: "whitelisted" as const,
-}));
+// Mock the global whitelist used by InterventionService to gate user vs agent.
+//   null  → allow every pubkey (test default; matches the prior trust-service default)
+//   []    → no pubkey is whitelisted (used to simulate user-is-agent/backend/unknown)
+//   [pk]  → only listed pubkeys are whitelisted
+let mockWhitelistedPubkeys: string[] | null = null;
+
+const ALLOW_ALL_PUBKEYS = new Proxy([] as string[], {
+    get(target, prop) {
+        if (prop === "includes") return () => true;
+        return Reflect.get(target, prop);
+    },
+}) as string[];
 import { InterventionService } from "../InterventionService";
 
 /** Fixed timestamp for deterministic tests (avoids Date.now() non-determinism). */
@@ -127,7 +133,7 @@ describe("InterventionService", () => {
                 Promise.resolve("published-event-id")
         );
         mockPublisherInitialize.mockClear();
-        mockIsTrustedSync.mockClear();
+        mockWhitelistedPubkeys = null;
 
         spyOn(config, "getConfig").mockImplementation(mockGetConfig);
         spyOn(config, "getConfigPath").mockImplementation(mockGetConfigPath);
@@ -147,9 +153,9 @@ describe("InterventionService", () => {
         spyOn(PubkeyService, "getInstance").mockReturnValue({
             getNameSync: (pubkey: string) => pubkey,
         } as any);
-        spyOn(trustPubkeyServiceModule, "getTrustPubkeyService").mockReturnValue({
-            isTrustedSync: mockIsTrustedSync,
-        } as any);
+        spyOn(config, "getWhitelistedPubkeys").mockImplementation(
+            () => mockWhitelistedPubkeys ?? ALLOW_ALL_PUBKEYS
+        );
         spyOn(logger, "debug").mockImplementation(() => undefined);
         spyOn(logger, "info").mockImplementation(() => undefined);
         spyOn(logger, "warn").mockImplementation(() => undefined);
@@ -167,11 +173,8 @@ describe("InterventionService", () => {
         // Default project agents map
         projectAgents = createDefaultProjectAgents();
 
-        // Default: user is whitelisted
-        mockIsTrustedSync.mockReturnValue({
-            trusted: true,
-            reason: "whitelisted" as const,
-        });
+        // Default mockWhitelistedPubkeys = null → ALLOW_ALL_PUBKEYS proxy
+        // (every user pubkey is treated as whitelisted, matching the prior default).
     });
 
     /**
@@ -1066,11 +1069,7 @@ describe("InterventionService", () => {
 
     describe("whitelisted user filtering", () => {
         it("should trigger intervention when user is whitelisted", async () => {
-            // Default mock already returns whitelisted
-            mockIsTrustedSync.mockReturnValue({
-                trusted: true,
-                reason: "whitelisted" as const,
-            });
+            mockWhitelistedPubkeys = ["whitelisted-user-pubkey"];
 
             const service = await initServiceWithResolver();
             await service.setProject("project-789");
@@ -1084,15 +1083,11 @@ describe("InterventionService", () => {
             );
 
             expect(service.getPendingCount()).toBe(1);
-            expect(mockIsTrustedSync).toHaveBeenCalledWith("whitelisted-user-pubkey");
         });
 
         it("should NOT trigger intervention when user is an agent (agent-to-agent completion)", async () => {
-            // Mock returns "agent" reason - this is an agent pubkey, not a whitelisted user
-            mockIsTrustedSync.mockReturnValue({
-                trusted: true,
-                reason: "agent" as const,
-            });
+            // Whitelist excludes the "user" pubkey — they are not a human user.
+            mockWhitelistedPubkeys = [];
 
             const service = await initServiceWithResolver();
             await service.setProject("project-789");
@@ -1105,17 +1100,11 @@ describe("InterventionService", () => {
                 "project-789"
             );
 
-            // Should NOT create a pending intervention
             expect(service.getPendingCount()).toBe(0);
-            expect(mockIsTrustedSync).toHaveBeenCalledWith("agent-456-pubkey");
         });
 
         it("should NOT trigger intervention when user pubkey is the backend", async () => {
-            // Mock returns "backend" reason - the backend's own pubkey
-            mockIsTrustedSync.mockReturnValue({
-                trusted: true,
-                reason: "backend" as const,
-            });
+            mockWhitelistedPubkeys = [];
 
             const service = await initServiceWithResolver();
             await service.setProject("project-789");
@@ -1133,11 +1122,7 @@ describe("InterventionService", () => {
         });
 
         it("should NOT trigger intervention when user pubkey is not trusted at all", async () => {
-            // Mock returns not trusted (unknown pubkey)
-            mockIsTrustedSync.mockReturnValue({
-                trusted: false,
-                reason: undefined,
-            });
+            mockWhitelistedPubkeys = [];
 
             const service = await initServiceWithResolver();
             await service.setProject("project-789");
@@ -1158,11 +1143,8 @@ describe("InterventionService", () => {
             const service = await initServiceWithResolver();
             await service.setProject("project-789");
 
-            // First completion: user is whitelisted
-            mockIsTrustedSync.mockReturnValue({
-                trusted: true,
-                reason: "whitelisted" as const,
-            });
+            // First completion: user-1 is whitelisted
+            mockWhitelistedPubkeys = ["user-1"];
 
             service.onAgentCompletion(
                 "test-conv-1",
@@ -1174,11 +1156,8 @@ describe("InterventionService", () => {
 
             expect(service.getPendingCount()).toBe(1);
 
-            // Second completion: user is an agent (should be skipped)
-            mockIsTrustedSync.mockReturnValue({
-                trusted: true,
-                reason: "agent" as const,
-            });
+            // Second completion: agent-789 is an agent (whitelist no longer contains them)
+            mockWhitelistedPubkeys = ["user-1"];
 
             service.onAgentCompletion(
                 "test-conv-2",
@@ -1188,14 +1167,11 @@ describe("InterventionService", () => {
                 "project-789"
             );
 
-            // Should still be 1 (second was skipped)
+            // Still 1 — agent-789 is not in the whitelist
             expect(service.getPendingCount()).toBe(1);
 
-            // Third completion: user is whitelisted again
-            mockIsTrustedSync.mockReturnValue({
-                trusted: true,
-                reason: "whitelisted" as const,
-            });
+            // Third completion: user-2 added to whitelist
+            mockWhitelistedPubkeys = ["user-1", "user-2"];
 
             service.onAgentCompletion(
                 "test-conv-3",
@@ -1205,7 +1181,6 @@ describe("InterventionService", () => {
                 "project-789"
             );
 
-            // Should now be 2
             expect(service.getPendingCount()).toBe(2);
         });
     });
@@ -1930,11 +1905,8 @@ describe("InterventionService", () => {
         it("should not call delegation checker for non-whitelisted users", async () => {
             const mockDelegationChecker = mock((_agentPubkey: string, _conversationId: string) => true);
 
-            // Mock user as non-whitelisted
-            mockIsTrustedSync.mockReturnValue({
-                trusted: false,
-                reason: undefined,
-            });
+            // User pubkey is not in the whitelist
+            mockWhitelistedPubkeys = [];
 
             const service = await initServiceWithResolver();
             service.setActiveDelegationChecker(mockDelegationChecker);

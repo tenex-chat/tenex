@@ -2,6 +2,7 @@ import type { ToolExecutionContext } from "@/tools/types";
 import { agentStorage } from "@/agents/AgentStorage";
 import { getDaemon } from "@/daemon";
 import { getNDK } from "@/nostr/ndkClient";
+import { readProjectAgentPubkeys } from "@/services/projects/ProjectMembersReader";
 import { PendingDelegationsRegistry, RALRegistry } from "@/services/ral";
 import type { PendingDelegation } from "@/services/ral/types";
 import type { AISdkTool } from "@/tools/types";
@@ -79,13 +80,17 @@ async function executeDelegateCrossProject(
         }
     }
 
-    // Fall back to storage
+    // Fall back to storage: read pubkeys from the project's persisted event.json,
+    // then resolve each to its stored agent record by pubkey.
     if (!agentPubkey) {
-        const agents = await agentStorage.getProjectAgents(projectId);
-        const agent = agents.find((a) => a.slug === agentSlug);
-        if (agent) {
-            const signer = new NDKPrivateKeySigner(agent.nsec);
-            agentPubkey = signer.pubkey;
+        const projectPubkeys = await readProjectAgentPubkeys(projectId);
+        for (const pubkey of projectPubkeys) {
+            const agent = await agentStorage.loadAgent(pubkey);
+            if (agent?.slug === agentSlug) {
+                const signer = new NDKPrivateKeySigner(agent.nsec);
+                agentPubkey = signer.pubkey;
+                break;
+            }
         }
     }
 

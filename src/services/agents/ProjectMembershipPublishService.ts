@@ -9,6 +9,10 @@ import {
     projectEventPublishService,
     type ProjectEventPublishOutcome,
 } from "@/services/projects/ProjectEventPublishService";
+import {
+    listProjectDTagsOnDisk,
+    readProjectAgentPubkeys,
+} from "@/services/projects/ProjectMembersReader";
 import { logger } from "@/utils/logger";
 
 type ProjectMembershipSyncResult = {
@@ -56,7 +60,7 @@ export class ProjectMembershipPublishService {
             assignableProjectIds.add(dTag);
         }
 
-        const storedProjectIds = await agentStorage.getAllProjectDTags();
+        const storedProjectIds = await listProjectDTagsOnDisk();
         for (const projectId of storedProjectIds) {
             if (assignableProjectIds.has(projectId)) {
                 continue;
@@ -98,7 +102,7 @@ export class ProjectMembershipPublishService {
             return { projectDTag, outcome: "project_not_found" };
         }
 
-        const assignedPubkeys = await agentStorage.getProjectAgentPubkeys(projectDTag);
+        const assignedPubkeys = await readProjectAgentPubkeys(projectDTag);
         const result = await projectEventPublishService.publishMutation({
             ownerPubkey: projectEvent.pubkey,
             projectDTag,

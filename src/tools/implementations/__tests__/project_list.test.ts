@@ -1,11 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
 import { agentStorage } from "@/agents/AgentStorage";
 import * as daemonModule from "@/daemon";
+import * as ProjectMembersReader from "@/services/projects/ProjectMembersReader";
 import type { ToolExecutionContext } from "@/tools/types";
 import { createProjectListTool } from "../project_list";
 
-const mockGetProjectAgents = mock();
-const mockGetAllProjectDTags = mock();
+const mockReadProjectAgentPubkeys = mock();
+const mockListProjectDTagsOnDisk = mock();
+const mockLoadAgent = mock();
 
 function createMockContext(): ToolExecutionContext {
     return {
@@ -35,29 +37,52 @@ const toolCallOpts = (id: string) => ({
 });
 
 describe("project_list tool", () => {
-    let getProjectAgentsSpy: ReturnType<typeof spyOn>;
-    let getAllProjectDTagsSpy: ReturnType<typeof spyOn>;
+    let readProjectAgentPubkeysSpy: ReturnType<typeof spyOn>;
+    let listProjectDTagsOnDiskSpy: ReturnType<typeof spyOn>;
+    let loadAgentSpy: ReturnType<typeof spyOn>;
     let getDaemonSpy: ReturnType<typeof spyOn>;
 
     beforeEach(() => {
-        mockGetProjectAgents.mockReset();
-        mockGetAllProjectDTags.mockReset();
-        mockGetProjectAgents.mockResolvedValue([]);
-        mockGetAllProjectDTags.mockResolvedValue([]);
-        getProjectAgentsSpy = spyOn(agentStorage, "getProjectAgents").mockImplementation(
-            mockGetProjectAgents as never
-        );
-        getAllProjectDTagsSpy = spyOn(agentStorage, "getAllProjectDTags").mockImplementation(
-            mockGetAllProjectDTags as never
+        mockReadProjectAgentPubkeys.mockReset();
+        mockListProjectDTagsOnDisk.mockReset();
+        mockLoadAgent.mockReset();
+        mockReadProjectAgentPubkeys.mockResolvedValue([]);
+        mockListProjectDTagsOnDisk.mockResolvedValue([]);
+        mockLoadAgent.mockResolvedValue(null);
+        readProjectAgentPubkeysSpy = spyOn(ProjectMembersReader, "readProjectAgentPubkeys")
+            .mockImplementation(mockReadProjectAgentPubkeys as never);
+        listProjectDTagsOnDiskSpy = spyOn(ProjectMembersReader, "listProjectDTagsOnDisk")
+            .mockImplementation(mockListProjectDTagsOnDisk as never);
+        loadAgentSpy = spyOn(agentStorage, "loadAgent").mockImplementation(
+            mockLoadAgent as never
         );
     });
 
     afterEach(() => {
-        getProjectAgentsSpy?.mockRestore();
-        getAllProjectDTagsSpy?.mockRestore();
+        readProjectAgentPubkeysSpy?.mockRestore();
+        listProjectDTagsOnDiskSpy?.mockRestore();
+        loadAgentSpy?.mockRestore();
         getDaemonSpy?.mockRestore();
         mock.restore();
     });
+
+    /**
+     * Helper to wire up the readProjectAgentPubkeys + loadAgent pair so a project
+     * d-tag resolves to a list of stored agents.
+     */
+    function setProjectAgents(
+        dTag: string,
+        agents: Array<{ slug: string; role: string; nsec: string }>,
+    ): void {
+        const pubkeys = agents.map((_, i) => `${dTag}-pubkey-${i}`);
+        mockReadProjectAgentPubkeys.mockImplementation(async (requested: string) =>
+            requested === dTag ? pubkeys : []
+        );
+        mockLoadAgent.mockImplementation(async (pubkey: string) => {
+            const idx = pubkeys.indexOf(pubkey);
+            return idx >= 0 ? agents[idx] : null;
+        });
+    }
 
     it("prefers canonical repo/content project metadata", async () => {
         getDaemonSpy = spyOn(daemonModule, "getDaemon").mockReturnValue({
@@ -236,7 +261,7 @@ describe("project_list tool", () => {
                 getActiveRuntimes: () => new Map(),
             } as never);
 
-            mockGetProjectAgents.mockResolvedValue([
+            setProjectAgents("stored-project", [
                 { slug: "claude-code", role: "worker", nsec: "nsec-invalid" },
                 { slug: "architect", role: "planner", nsec: "nsec-invalid-2" },
             ]);
@@ -263,7 +288,7 @@ describe("project_list tool", () => {
             } as never);
 
             // Agent with deliberately invalid nsec — should not cause errors
-            mockGetProjectAgents.mockResolvedValue([
+            setProjectAgents("offline-p", [
                 { slug: "some-agent", role: "worker", nsec: "not-a-real-nsec" },
             ]);
 
@@ -281,8 +306,8 @@ describe("project_list tool", () => {
                 getActiveRuntimes: () => new Map(),
             } as never);
 
-            mockGetAllProjectDTags.mockResolvedValue(["offline-project"]);
-            mockGetProjectAgents.mockResolvedValue([
+            mockListProjectDTagsOnDisk.mockResolvedValue(["offline-project"]);
+            setProjectAgents("offline-project", [
                 { slug: "offline-agent", role: "coordinator", nsec: "irrelevant" },
             ]);
 

@@ -3,6 +3,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
 import { agentStorage } from "@/agents/AgentStorage";
+import * as ProjectMembersReader from "@/services/projects/ProjectMembersReader";
 import { fileExists } from "@/lib/fs";
 import { config } from "@/services/ConfigService";
 import { getLegacySchedulesPath, getProjectSchedulesPath } from "@/services/scheduling";
@@ -65,7 +66,7 @@ describe("MigrationService", () => {
             }
             return null;
         });
-        spyOn(agentStorage, "getAgentProjects").mockImplementation(async (pubkey: string) => {
+        spyOn(ProjectMembersReader, "listProjectsForAgent").mockImplementation(async (pubkey: string) => {
             if (pubkey === "agent-pubkey-1") {
                 return ["project-1"];
             }
@@ -135,7 +136,7 @@ describe("MigrationService", () => {
 
         spyOn(agentStorage, "initialize").mockResolvedValue(undefined);
         spyOn(agentStorage, "loadAgent").mockResolvedValue(null);
-        spyOn(agentStorage, "getAgentProjects").mockResolvedValue([]);
+        spyOn(ProjectMembersReader, "listProjectsForAgent").mockResolvedValue([]);
 
         // Mock PrefixKVStore for migration 1→2
         const { prefixKVStore } = await import("@/services/storage");

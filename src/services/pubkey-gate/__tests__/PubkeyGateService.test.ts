@@ -1,33 +1,33 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
-import type { TrustResult } from "@/services/trust-pubkeys";
 
 /**
- * Type-safe access to the private static `instance` field for singleton reset in tests.
- * Avoids `any` casts while keeping the test ergonomic.
+ * Type-safe access to the private static `instance` field for singleton reset
+ * in tests. Avoids `any` casts while keeping the test ergonomic.
  */
 type PubkeyGateServiceTestable = typeof PubkeyGateService & {
     instance: PubkeyGateService | undefined;
 };
 
-// Variables to control mock behavior
-let mockTrustResult: TrustResult = { trusted: false };
-let mockTrustSyncThrows = false;
-let mockTrustSyncError: Error | null = null;
+// Mock state controlling how the whitelist daemon client behaves per test.
+let mockCheckResolves: boolean | null = null;
+let mockCheckRejection: Error | null = null;
 
-// Mock TrustPubkeyService
-mock.module("@/services/trust-pubkeys", () => ({
-    getTrustPubkeyService: () => ({
-        isTrustedEventSync: (_event: NDKEvent) => {
-            if (mockTrustSyncThrows) {
-                throw mockTrustSyncError ?? new Error("Trust check failed");
-            }
-            return mockTrustResult;
-        },
-    }),
+class MockWhitelistDaemonError extends Error {}
+
+mock.module("../whitelistDaemonClient", () => ({
+    checkPubkey: async (_pubkey: string, _dtag: string): Promise<boolean> => {
+        if (mockCheckRejection) {
+            throw mockCheckRejection;
+        }
+        if (mockCheckResolves === null) {
+            throw new Error("test setup forgot to set mockCheckResolves");
+        }
+        return mockCheckResolves;
+    },
+    WhitelistDaemonError: MockWhitelistDaemonError,
 }));
 
-// Spied logger so tests can assert on denial-path logging
 const mockLoggerWarn = mock(() => {});
 const mockLoggerDebug = mock(() => {});
 
@@ -40,7 +40,6 @@ mock.module("@/utils/logger", () => ({
     },
 }));
 
-// Spied addEvent so tests can assert on telemetry side-effects
 const mockSpanAddEvent = mock(() => {});
 const mockSpan = () => ({
     addEvent: mockSpanAddEvent,
@@ -60,17 +59,10 @@ const mockContext = {
     deleteValue: () => mockContext,
 };
 
-// Preserve the minimal OpenTelemetry surface that downstream tests import.
 mock.module("@opentelemetry/api", () => ({
     createContextKey: mock((name: string) => Symbol.for(name)),
     DiagLogLevel: {
-        NONE: 0,
-        ERROR: 1,
-        WARN: 2,
-        INFO: 3,
-        DEBUG: 4,
-        VERBOSE: 5,
-        ALL: 6,
+        NONE: 0, ERROR: 1, WARN: 2, INFO: 3, DEBUG: 4, VERBOSE: 5, ALL: 6,
     },
     diag: {
         setLogger: mock(() => {}),
@@ -80,13 +72,7 @@ mock.module("@opentelemetry/api", () => ({
         info: mock(() => {}),
     },
     ROOT_CONTEXT: mockContext,
-    SpanKind: {
-        INTERNAL: 0,
-        SERVER: 1,
-        CLIENT: 2,
-        PRODUCER: 3,
-        CONSUMER: 4,
-    },
+    SpanKind: { INTERNAL: 0, SERVER: 1, CLIENT: 2, PRODUCER: 3, CONSUMER: 4 },
     context: {
         active: () => mockContext,
         with: <T>(
@@ -97,11 +83,7 @@ mock.module("@opentelemetry/api", () => ({
         ) => fn.apply(thisArg, args),
         bind: <T>(target: T) => target,
     },
-    SpanStatusCode: {
-        UNSET: 0,
-        OK: 1,
-        ERROR: 2,
-    },
+    SpanStatusCode: { UNSET: 0, OK: 1, ERROR: 2 },
     TraceFlags: { NONE: 0, SAMPLED: 1 },
     trace: {
         getActiveSpan: () => mockSpan(),
@@ -113,7 +95,6 @@ mock.module("@opentelemetry/api", () => ({
     },
 }));
 
-// Import after mocking
 import { PubkeyGateService } from "../PubkeyGateService";
 
 function createMockEvent(overrides: Partial<NDKEvent> = {}): NDKEvent {
@@ -129,16 +110,10 @@ describe("PubkeyGateService", () => {
     let gate: PubkeyGateService;
 
     beforeEach(() => {
-        // Reset singleton via testable type (avoids `any` cast)
         (PubkeyGateService as PubkeyGateServiceTestable).instance = undefined;
         gate = PubkeyGateService.getInstance();
-
-        // Reset mock state
-        mockTrustResult = { trusted: false };
-        mockTrustSyncThrows = false;
-        mockTrustSyncError = null;
-
-        // Reset spy call counts
+        mockCheckResolves = null;
+        mockCheckRejection = null;
         mockLoggerWarn.mockClear();
         mockLoggerDebug.mockClear();
         mockSpanAddEvent.mockClear();
@@ -149,161 +124,86 @@ describe("PubkeyGateService", () => {
     });
 
     describe("getInstance", () => {
-        it("should return the same instance", () => {
-            const instance1 = PubkeyGateService.getInstance();
-            const instance2 = PubkeyGateService.getInstance();
-            expect(instance1).toBe(instance2);
+        it("returns the same singleton", () => {
+            expect(PubkeyGateService.getInstance()).toBe(PubkeyGateService.getInstance());
         });
     });
 
     describe("shouldAllowEvent", () => {
-        it("should allow events from whitelisted pubkeys", () => {
-            mockTrustResult = { trusted: true, reason: "whitelisted" };
-            const event = createMockEvent();
-
-            expect(gate.shouldAllowEvent(event)).toBe(true);
+        it("allows when daemon answers YES", async () => {
+            mockCheckResolves = true;
+            await expect(gate.shouldAllowEvent(createMockEvent())).resolves.toBe(true);
         });
 
-        it("should allow events from backend pubkey", () => {
-            mockTrustResult = { trusted: true, reason: "backend" };
-            const event = createMockEvent();
-
-            expect(gate.shouldAllowEvent(event)).toBe(true);
+        it("denies when daemon answers NO", async () => {
+            mockCheckResolves = false;
+            await expect(gate.shouldAllowEvent(createMockEvent())).resolves.toBe(false);
         });
 
-        it("should allow events from agent pubkeys", () => {
-            mockTrustResult = { trusted: true, reason: "agent" };
-            const event = createMockEvent();
-
-            expect(gate.shouldAllowEvent(event)).toBe(true);
+        it("denies when event has no pubkey (without querying daemon)", async () => {
+            mockCheckResolves = true; // would allow if asked
+            await expect(
+                gate.shouldAllowEvent(createMockEvent({ pubkey: "" } as Partial<NDKEvent>))
+            ).resolves.toBe(false);
         });
 
-        it("should deny events from untrusted pubkeys", () => {
-            mockTrustResult = { trusted: false };
-            const event = createMockEvent({ pubkey: "untrusted-pubkey" } as Partial<NDKEvent>);
-
-            expect(gate.shouldAllowEvent(event)).toBe(false);
+        it("denies when event has undefined pubkey", async () => {
+            await expect(
+                gate.shouldAllowEvent({ kind: 1, id: "no-pubkey" } as NDKEvent)
+            ).resolves.toBe(false);
         });
 
-        it("should deny events with no pubkey", () => {
-            const event = createMockEvent({ pubkey: "" } as Partial<NDKEvent>);
-
-            expect(gate.shouldAllowEvent(event)).toBe(false);
-        });
-
-        it("should deny events with undefined pubkey", () => {
-            const event = { kind: 1, id: "no-pubkey-event" } as NDKEvent;
-
-            expect(gate.shouldAllowEvent(event)).toBe(false);
-        });
-
-        describe("fail-closed behavior", () => {
-            it("should deny when trust check throws an error", () => {
-                mockTrustSyncThrows = true;
-                mockTrustSyncError = new Error("Service unavailable");
-                const event = createMockEvent();
-
-                expect(gate.shouldAllowEvent(event)).toBe(false);
+        describe("fail-closed", () => {
+            it("denies on transport error", async () => {
+                mockCheckRejection = new MockWhitelistDaemonError("connect refused");
+                await expect(gate.shouldAllowEvent(createMockEvent())).resolves.toBe(false);
             });
 
-            it("should deny when trust check throws unexpected error type", () => {
-                mockTrustSyncThrows = true;
-                mockTrustSyncError = new TypeError("Unexpected type");
-                const event = createMockEvent();
-
-                expect(gate.shouldAllowEvent(event)).toBe(false);
+            it("denies on unexpected error type", async () => {
+                mockCheckRejection = new TypeError("boom");
+                await expect(gate.shouldAllowEvent(createMockEvent())).resolves.toBe(false);
             });
         });
 
-        describe("different event kinds", () => {
-            it("should gate kind 1 (text) events", () => {
-                mockTrustResult = { trusted: false };
-                const event = createMockEvent({ kind: 1 } as Partial<NDKEvent>);
-
-                expect(gate.shouldAllowEvent(event)).toBe(false);
-            });
-
-            it("should gate kind 30023 (article) events", () => {
-                mockTrustResult = { trusted: false };
-                const event = createMockEvent({ kind: 30023 } as Partial<NDKEvent>);
-
-                expect(gate.shouldAllowEvent(event)).toBe(false);
-            });
-
-            it("should allow trusted events of any kind", () => {
-                mockTrustResult = { trusted: true, reason: "whitelisted" };
-                const event = createMockEvent({ kind: 30023 } as Partial<NDKEvent>);
-
-                expect(gate.shouldAllowEvent(event)).toBe(true);
-            });
-        });
-
-        describe("observability side-effects", () => {
-            it("should emit telemetry on denial for untrusted pubkey", () => {
-                mockTrustResult = { trusted: false };
-                const event = createMockEvent();
-
-                gate.shouldAllowEvent(event);
-
-                expect(mockSpanAddEvent).toHaveBeenCalledWith("pubkey_gate.denied", expect.objectContaining({
-                    "gate.reason": "untrusted",
-                }));
-            });
-
-            it("should log debug on denial for untrusted pubkey", () => {
-                mockTrustResult = { trusted: false };
-                const event = createMockEvent();
-
-                gate.shouldAllowEvent(event);
-
-                expect(mockLoggerDebug).toHaveBeenCalledWith(
-                    "[PUBKEY_GATE] Event denied: untrusted pubkey",
-                    expect.objectContaining({
-                        pubkey: "abcdef12",
-                        kind: 1,
-                    }),
+        describe("observability", () => {
+            it("emits telemetry on untrusted denial", async () => {
+                mockCheckResolves = false;
+                await gate.shouldAllowEvent(createMockEvent());
+                expect(mockSpanAddEvent).toHaveBeenCalledWith(
+                    "pubkey_gate.denied",
+                    expect.objectContaining({ "gate.reason": "untrusted" }),
                 );
             });
 
-            it("should emit telemetry on denial for missing pubkey", () => {
-                const event = createMockEvent({ pubkey: "" } as Partial<NDKEvent>);
-
-                gate.shouldAllowEvent(event);
-
-                expect(mockSpanAddEvent).toHaveBeenCalledWith("pubkey_gate.denied", expect.objectContaining({
-                    "gate.reason": "no_pubkey",
-                }));
+            it("emits telemetry on missing pubkey", async () => {
+                await gate.shouldAllowEvent(createMockEvent({ pubkey: "" } as Partial<NDKEvent>));
+                expect(mockSpanAddEvent).toHaveBeenCalledWith(
+                    "pubkey_gate.denied",
+                    expect.objectContaining({ "gate.reason": "no_pubkey" }),
+                );
             });
 
-            it("should log warn and emit telemetry on trust check error (fail-closed)", () => {
-                mockTrustSyncThrows = true;
-                mockTrustSyncError = new Error("Service unavailable");
-                const event = createMockEvent();
-
-                gate.shouldAllowEvent(event);
-
-                // Assert logger.warn is called with fail-closed message
+            it("logs warn + emits 'error' telemetry on transport failure", async () => {
+                mockCheckRejection = new MockWhitelistDaemonError("connect refused");
+                await gate.shouldAllowEvent(createMockEvent());
                 expect(mockLoggerWarn).toHaveBeenCalledWith(
-                    "[PUBKEY_GATE] Trust check failed, denying event (fail-closed)",
+                    "[PUBKEY_GATE] Whitelist daemon query failed, denying event (fail-closed)",
                     expect.objectContaining({
                         pubkey: "abcdef12",
                         kind: 1,
-                        error: "Service unavailable",
+                        error: "connect refused",
+                        transport: true,
                     }),
                 );
-
-                // Assert telemetry records "error" reason
-                expect(mockSpanAddEvent).toHaveBeenCalledWith("pubkey_gate.denied", expect.objectContaining({
-                    "gate.reason": "error",
-                }));
+                expect(mockSpanAddEvent).toHaveBeenCalledWith(
+                    "pubkey_gate.denied",
+                    expect.objectContaining({ "gate.reason": "error" }),
+                );
             });
 
-            it("should NOT emit denial telemetry when event is allowed", () => {
-                mockTrustResult = { trusted: true, reason: "whitelisted" };
-                const event = createMockEvent();
-
-                gate.shouldAllowEvent(event);
-
+            it("does NOT emit denial telemetry when allowed", async () => {
+                mockCheckResolves = true;
+                await gate.shouldAllowEvent(createMockEvent());
                 expect(mockSpanAddEvent).not.toHaveBeenCalled();
             });
         });

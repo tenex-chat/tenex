@@ -106,7 +106,6 @@ export interface StoredAgent extends StoredAgentData {
  *   slug: 'my-agent',
  *   name: 'My Agent',
  *   role: 'assistant',
- *   tools: ['fs_read', 'shell'],
  *   eventId: 'nostr_event_id',
  * });
  * await agentStorage.saveAgent(agent);
@@ -183,12 +182,16 @@ interface SlugEntry {
 }
 
 /**
- * Index structure for fast lookups
+ * Index structure for fast lookups.
+ *
+ * Note: project membership (which pubkeys belong to which dTag) is no longer
+ * stored here. The canonical source is the persisted kind:31933 event at
+ * `~/.tenex/projects/<dTag>/event.json` — read it via
+ * `services/projects/ProjectMembersReader`.
  */
 interface AgentIndex {
     bySlug: Record<string, SlugEntry>; // slug -> { pubkey, projectIds[] }
     byEventId: Record<string, string>; // eventId -> pubkey
-    byProject: Record<string, string[]>; // projectDTag -> pubkey[]
 }
 
 /**
@@ -197,8 +200,12 @@ interface AgentIndex {
  * ## Responsibility
  * Manages agent data persistence in ~/.tenex/agents/
  * - One JSON file per agent: <pubkey>.json (contains all data including private key)
- * - Fast lookups via index.json (slug → pubkey, eventId → pubkey, project → pubkeys)
- * - Project associations (which agents belong to which projects)
+ * - Fast lookups via index.json (slug → pubkey, eventId → pubkey)
+ *
+ * Project membership (which pubkeys belong to which dTag) is NOT stored here —
+ * it is derived from the persisted kind:31933 event at
+ * `~/.tenex/projects/<dTag>/event.json`. Use
+ * `services/projects/ProjectMembersReader` to read it.
  *
  * ## Architecture
  * - **AgentStorage** (this): Handles ALL persistence operations
@@ -275,7 +282,11 @@ export class AgentStorage {
     }
 
     /**
-     * Load the index file or create empty index if it doesn't exist
+     * Load the index file or create empty index if it doesn't exist.
+     *
+     * Old on-disk indexes may carry an extra `byProject` field; it is silently
+     * dropped on load. Old `bySlug` entries that are flat strings are migrated
+     * to the SlugEntry structure.
      */
     private async loadIndex(): Promise<void> {
         if (await fileExists(this.indexPath)) {
@@ -288,33 +299,24 @@ export class AgentStorage {
                     Object.values(rawIndex.bySlug).some((val: unknown) => typeof val === "string");
 
                 if (needsMigration) {
-                    logger.info("Migrating agent index from old format to multi-project slug structure");
+                    logger.info("Migrating agent index from old format to SlugEntry structure");
                     this.index = this.migrateIndexFormat(rawIndex);
-
-                    // Verify byProject is populated after migration
-                    const hasValidByProject = this.index.byProject &&
-                        Object.keys(this.index.byProject).length > 0;
-
-                    if (!hasValidByProject) {
-                        logger.warn("Migration produced empty byProject index, rebuilding from agent files");
-                        await this.rebuildIndex();
-                    } else {
-                        await this.saveIndex();
-                    }
-
+                    await this.saveIndex();
                     logger.info("Agent index migration complete", {
                         slugCount: Object.keys(this.index.bySlug).length,
-                        projectCount: Object.keys(this.index.byProject).length,
                     });
                 } else {
-                    this.index = rawIndex;
+                    this.index = {
+                        bySlug: (rawIndex.bySlug || {}) as Record<string, SlugEntry>,
+                        byEventId: (rawIndex.byEventId || {}) as Record<string, string>,
+                    };
                 }
             } catch (error) {
                 logger.error("Failed to load agent index, creating new one", { error });
-                this.index = { bySlug: {}, byEventId: {}, byProject: {} };
+                this.index = { bySlug: {}, byEventId: {} };
             }
         } else {
-            this.index = { bySlug: {}, byEventId: {}, byProject: {} };
+            this.index = { bySlug: {}, byEventId: {} };
         }
     }
 
@@ -331,32 +333,23 @@ export class AgentStorage {
      * Old format: bySlug[slug] = pubkey
      * New format: bySlug[slug] = { pubkey, projectIds: [] }
      *
+     * Any legacy `byProject` field on the input is ignored; project membership
+     * now lives in the on-disk kind:31933 event, not in this index.
+     *
      * This function returns a new AgentIndex object and does NOT mutate the input.
      */
     private migrateIndexFormat(oldIndex: Record<string, unknown>): AgentIndex {
         const newIndex: AgentIndex = {
             bySlug: {},
             byEventId: (oldIndex.byEventId || {}) as Record<string, string>,
-            byProject: (oldIndex.byProject || {}) as Record<string, string[]>,
         };
-
-        // Build reverse lookup: pubkey -> projectIds[]
-        const pubkeyToProjects: Record<string, string[]> = {};
-        for (const [projectDTag, pubkeys] of Object.entries(oldIndex.byProject || {})) {
-            for (const pubkey of (pubkeys as string[])) {
-                if (!pubkeyToProjects[pubkey]) {
-                    pubkeyToProjects[pubkey] = [];
-                }
-                pubkeyToProjects[pubkey].push(projectDTag);
-            }
-        }
 
         // Convert slug index
         for (const [slug, pubkey] of Object.entries(oldIndex.bySlug || {})) {
             if (typeof pubkey === "string") {
                 newIndex.bySlug[slug] = {
                     pubkey,
-                    projectIds: pubkeyToProjects[pubkey] || [],
+                    projectIds: [],
                 };
             } else {
                 // Already in new format
@@ -370,9 +363,8 @@ export class AgentStorage {
     /**
      * Rebuild index by scanning all agent files.
      *
-     * Rebuilds bySlug and byEventId from agent files.
-     * byProject cannot be rebuilt from agent files (project associations live only in the index),
-     * so it is left empty.
+     * Rebuilds bySlug and byEventId from agent files. Project membership is not
+     * stored in this index; it is derived from the on-disk kind:31933 event.
      *
      * ## Slug Index Priority
      * Active agents take precedence over inactive agents for slug ownership.
@@ -380,7 +372,7 @@ export class AgentStorage {
      * If all agents with a slug are inactive, one is chosen arbitrarily.
      */
     async rebuildIndex(): Promise<void> {
-        const index: AgentIndex = { bySlug: {}, byEventId: {}, byProject: {} };
+        const index: AgentIndex = { bySlug: {}, byEventId: {} };
         // Track which slugs are owned by active agents
         const activeSlugOwners = new Set<string>();
 
@@ -504,8 +496,8 @@ export class AgentStorage {
         const existingEntry = this.index.bySlug[slug];
         if (!existingEntry || existingEntry.pubkey === newPubkey) return;
 
-        // Find overlapping projects using the index (source of truth for project associations)
-        const existingProjects = this.getIndexProjectsForAgent(existingEntry.pubkey);
+        // Find overlapping projects using the slug's tracked projectIds
+        const existingProjects = existingEntry.projectIds ?? [];
         const overlappingProjects = existingProjects.filter((p) => newProjects.includes(p));
         if (overlappingProjects.length === 0) return;
 
@@ -691,17 +683,6 @@ export class AgentStorage {
             delete this.index.byEventId[agent.eventId];
         }
 
-        // Remove from project index by scanning byProject
-        for (const projectDTag of Object.keys(this.index.byProject)) {
-            const projectAgents = this.index.byProject[projectDTag];
-            if (projectAgents.includes(pubkey)) {
-                this.index.byProject[projectDTag] = projectAgents.filter((p) => p !== pubkey);
-                if (this.index.byProject[projectDTag].length === 0) {
-                    delete this.index.byProject[projectDTag];
-                }
-            }
-        }
-
         await this.saveIndex();
         if (!options?.quiet) {
             logger.info(`Deleted agent ${agent.slug} (${pubkey})`);
@@ -769,82 +750,41 @@ export class AgentStorage {
     }
 
     /**
-     * Get all agents for a project (uses index for O(1) lookup).
-     * Deduplicates by slug, keeping only the agent currently in bySlug index.
+     * Return all dTags where this pubkey is the canonical slug owner.
      *
-     * Only returns active agents - inactive agents (removed from all projects
-     * but identity preserved) are filtered out.
-     */
-    async getProjectAgents(projectDTag: string): Promise<StoredAgent[]> {
-        if (!this.index) await this.loadIndex();
-        if (!this.index) return [];
-
-        const pubkeys = this.index.byProject[projectDTag] || [];
-        const agents: StoredAgent[] = [];
-        const seenSlugs = new Set<string>();
-
-        for (const pubkey of pubkeys) {
-            const agent = await this.loadAgent(pubkey);
-            if (!agent) continue;
-
-            // Skip inactive agents - they shouldn't appear in project listings
-            if (!isAgentActive(agent)) continue;
-
-            // Skip if we've already seen this slug - keep only the canonical one
-            if (seenSlugs.has(agent.slug)) continue;
-
-            // Only include if this pubkey is the canonical one for this slug
-            const slugEntry = this.index.bySlug[agent.slug];
-            if (slugEntry?.pubkey === pubkey) {
-                agents.push(agent);
-                seenSlugs.add(agent.slug);
-            }
-        }
-
-        return agents;
-    }
-
-    /**
-     * Get the raw pubkeys currently associated with a project in the local index.
-     *
-     * This returns the exact byProject membership without canonical slug filtering.
-     * Use it when you need to mirror authoritative project membership into storage.
-     */
-    async getProjectAgentPubkeys(projectDTag: string): Promise<string[]> {
-        if (!this.index) await this.loadIndex();
-        if (!this.index) return [];
-        return [...(this.index.byProject[projectDTag] || [])];
-    }
-
-    /**
-     * Get all projects for an agent (reverse lookup by pubkey via index)
-     */
-    async getAgentProjects(pubkey: string): Promise<string[]> {
-        if (!this.index) await this.loadIndex();
-        return this.getIndexProjectsForAgent(pubkey);
-    }
-
-    /**
-     * Get all known project dTags from the local index.
-     *
-     * This returns ALL projects that have agents stored locally, regardless of
-     * whether they are currently running or discovered via Nostr subscriptions.
-     * Use this as a source of truth for offline/non-running projects.
-     */
-    async getAllProjectDTags(): Promise<string[]> {
-        if (!this.index) await this.loadIndex();
-        if (!this.index) return [];
-        return Object.keys(this.index.byProject);
-    }
-
-    /**
-     * Scan byProject index and return all dTags where pubkey appears.
+     * Project membership lives in the on-disk kind:31933 event; this index only
+     * tracks which projects each *slug owner* is associated with for slug-conflict
+     * resolution. If a pubkey is not currently the canonical owner of its slug,
+     * this returns an empty list — the caller has no project association recorded
+     * in the index.
      */
     private getIndexProjectsForAgent(pubkey: string): string[] {
         if (!this.index) return [];
-        return Object.entries(this.index.byProject)
-            .filter(([, pubkeys]) => pubkeys.includes(pubkey))
-            .map(([dTag]) => dTag);
+        const projects = new Set<string>();
+        for (const slugEntry of Object.values(this.index.bySlug)) {
+            if (slugEntry.pubkey !== pubkey) continue;
+            for (const projectId of slugEntry.projectIds ?? []) {
+                projects.add(projectId);
+            }
+        }
+        return [...projects];
+    }
+
+    /**
+     * Return every slug-owner pubkey currently recorded in the index for the given dTag.
+     *
+     * Used by `syncProjectAgents` to compute the previous-state diff before applying the
+     * new desired membership. Project membership is canonically defined by the persisted
+     * kind:31933 event; this lookup only inspects the locally-tracked slug index.
+     */
+    private getProjectMembersFromIndex(projectDTag: string): string[] {
+        if (!this.index) return [];
+        const pubkeys: string[] = [];
+        for (const slugEntry of Object.values(this.index.bySlug)) {
+            if (!(slugEntry.projectIds ?? []).includes(projectDTag)) continue;
+            pubkeys.push(slugEntry.pubkey);
+        }
+        return pubkeys;
     }
 
     /**
@@ -864,16 +804,8 @@ export class AgentStorage {
 
         const wasInactive = !isAgentActive(agent);
 
-        // Update byProject index
         // Clean up any agent with the same slug already in this project
         await this.cleanupDuplicateSlugs(agent.slug, pubkey, [projectDTag]);
-
-        if (!this.index.byProject[projectDTag]) {
-            this.index.byProject[projectDTag] = [];
-        }
-        if (!this.index.byProject[projectDTag].includes(pubkey)) {
-            this.index.byProject[projectDTag].push(pubkey);
-        }
 
         // Update bySlug index - the last agent added to a project claims slug ownership
         const slugEntry = this.index.bySlug[agent.slug];
@@ -910,10 +842,11 @@ export class AgentStorage {
         skippedPubkeys: string[];
         removedPubkeys: string[];
     }> {
+        if (!this.index) await this.loadIndex();
         const dedupedDesiredPubkeys = Array.from(
             new Set(desiredPubkeys.filter((pubkey): pubkey is string => Boolean(pubkey)))
         );
-        const currentPubkeys = new Set(await this.getProjectAgentPubkeys(projectDTag));
+        const currentPubkeys = new Set(this.getProjectMembersFromIndex(projectDTag));
         const desiredPubkeySet = new Set(dedupedDesiredPubkeys);
         const removedPubkeys: string[] = [];
         const assignedPubkeys: string[] = [];
@@ -956,7 +889,6 @@ export class AgentStorage {
      * the same agent is later assigned to a project, it retains its original keys.
      *
      * Inactive agents:
-     * - Are NOT returned by getProjectAgents()
      * - Retain their pubkey, nsec, slug, and all configuration
      * - Can be reactivated by addAgentToProject()
      */
@@ -966,15 +898,6 @@ export class AgentStorage {
 
         if (!this.index) await this.loadIndex();
         if (!this.index) return;
-
-        // Update byProject index
-        const projectAgents = this.index.byProject[projectDTag];
-        if (projectAgents) {
-            this.index.byProject[projectDTag] = projectAgents.filter((p) => p !== pubkey);
-            if (this.index.byProject[projectDTag].length === 0) {
-                delete this.index.byProject[projectDTag];
-            }
-        }
 
         // Update bySlug index projectIds
         const slugEntry = this.index.bySlug[agent.slug];
@@ -1086,26 +1009,6 @@ export class AgentStorage {
             enabled: Boolean(agent.telegram?.botToken),
         });
         return true;
-    }
-
-    /**
-     * Get all known agent pubkeys across all projects from the index.
-     * Returns pubkeys from the byProject index (source of truth for project associations).
-     *
-     * Used by the Daemon to seed the TrustPubkeyService global agent pubkeys set
-     * at startup, covering agents from not-yet-running projects.
-     */
-    async getAllKnownPubkeys(): Promise<Set<string>> {
-        if (!this.index) await this.loadIndex();
-        if (!this.index) return new Set();
-
-        const pubkeys = new Set<string>();
-        for (const projectPubkeys of Object.values(this.index.byProject)) {
-            for (const pubkey of projectPubkeys) {
-                pubkeys.add(pubkey);
-            }
-        }
-        return pubkeys;
     }
 
     /**

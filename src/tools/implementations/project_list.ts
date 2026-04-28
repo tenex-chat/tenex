@@ -1,6 +1,10 @@
 import type { AISdkTool, ToolExecutionContext } from "@/tools/types";
 import { getDaemon } from "@/daemon";
-import { agentStorage } from "@/agents/AgentStorage";
+import { agentStorage, type StoredAgent } from "@/agents/AgentStorage";
+import {
+    listProjectDTagsOnDisk,
+    readProjectAgentPubkeys,
+} from "@/services/projects/ProjectMembersReader";
 import { logger } from "@/utils/logger";
 import { tool } from "ai";
 import { z } from "zod";
@@ -48,6 +52,22 @@ function matchesProjectSearch(project: ProjectInfo, query: string): boolean {
     return [project.id, project.title, project.description, project.repository].some((value) =>
         (value ?? "").toLowerCase().includes(query)
     );
+}
+
+/**
+ * Resolve agent slug+role for each pubkey listed on a project's persisted event.json.
+ * Pubkeys without a corresponding stored agent record are skipped.
+ */
+async function loadStoredAgentsForProject(dTag: string): Promise<StoredAgent[]> {
+    const pubkeys = await readProjectAgentPubkeys(dTag);
+    const agents: StoredAgent[] = [];
+    for (const pubkey of pubkeys) {
+        const agent = await agentStorage.loadAgent(pubkey);
+        if (agent) {
+            agents.push(agent);
+        }
+    }
+    return agents;
 }
 
 async function executeProjectList(
@@ -133,9 +153,9 @@ async function executeProjectList(
         const description = project.content || project.tagValue("description");
         const repository = project.tagValue("repo") || project.tagValue("repository");
 
-        // Not running - get agents from storage
+        // Not running - read agents from the project's persisted kind:31933 event
         const agents = Object.create(null) as AgentRoleMap;
-        const storedAgents = await agentStorage.getProjectAgents(id);
+        const storedAgents = await loadStoredAgentsForProject(id);
         for (const storedAgent of storedAgents) {
             addAgentRole(agents, storedAgent.slug, storedAgent.role);
         }
@@ -150,9 +170,9 @@ async function executeProjectList(
         });
     }
 
-    // Finally, process OFFLINE projects from AgentStorage (local storage, not discovered via Nostr)
-    // This catches projects that exist locally but haven't been discovered via Nostr subscriptions
-    const storedProjectDTags = await agentStorage.getAllProjectDTags();
+    // Finally, process OFFLINE projects from on-disk persisted kind:31933 events
+    // (projects that exist locally but haven't been discovered via Nostr subscriptions)
+    const storedProjectDTags = await listProjectDTagsOnDisk();
     for (const dTag of storedProjectDTags) {
         // Skip if already processed (either running or discovered via Nostr)
         if (processedDTags.has(dTag)) {
@@ -161,9 +181,9 @@ async function executeProjectList(
 
         processedDTags.add(dTag);
 
-        // Get agents from storage - this is the only metadata we have for offline projects
+        // Get agents from the project's persisted event.json
         const agents = Object.create(null) as AgentRoleMap;
-        const storedAgents = await agentStorage.getProjectAgents(dTag);
+        const storedAgents = await loadStoredAgentsForProject(dTag);
         for (const storedAgent of storedAgents) {
             addAgentRole(agents, storedAgent.slug, storedAgent.role);
         }
