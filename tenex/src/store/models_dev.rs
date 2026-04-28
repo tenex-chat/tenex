@@ -256,6 +256,60 @@ pub fn context_window(
     data.limit.as_ref().map(|l| l.context)
 }
 
+/// Mirror `getProviderModels` (`models-dev-cache.ts:319-337`).
+///
+/// Returns every model under the mapped provider's section, sorted by
+/// `last_updated` descending (newest first). Empty for unmapped or
+/// local-only providers (`ollama`, `codex`) and for providers absent
+/// from the cache.
+///
+/// The id/name fallback to the map key matches TS `data.id ?? modelId`
+/// — empty strings collapse to the map key (the BTreeMap key is the
+/// authoritative model ID for each entry).
+///
+/// Sort: TS uses `localeCompare(b.last_updated ?? "", a.last_updated ?? "")`
+/// for descending order. We emulate the JS `??` semantics on `Option<String>`
+/// by treating `None` as `""`. Entries with a real `last_updated` sort
+/// before entries without (since `"2024-..." > ""` lexicographically),
+/// and ties fall back to insertion order via Rust's stable sort.
+pub fn get_provider_models(
+    cache: &ModelsDevResponse,
+    provider: &str,
+) -> Vec<ModelsDevModel> {
+    let Some(models_dev_provider) = map_to_models_dev_provider(provider) else {
+        return Vec::new();
+    };
+    let Some(provider_data) = cache.get(models_dev_provider) else {
+        return Vec::new();
+    };
+
+    let mut out: Vec<ModelsDevModel> = provider_data
+        .models
+        .iter()
+        .map(|(model_id, data)| ModelsDevModel {
+            id: if data.id.is_empty() {
+                model_id.clone()
+            } else {
+                data.id.clone()
+            },
+            name: if data.name.is_empty() {
+                model_id.clone()
+            } else {
+                data.name.clone()
+            },
+            cost: data.cost.clone(),
+            limit: data.limit.clone(),
+            last_updated: data.last_updated.clone(),
+        })
+        .collect();
+    out.sort_by(|a, b| {
+        let a_key = a.last_updated.as_deref().unwrap_or("");
+        let b_key = b.last_updated.as_deref().unwrap_or("");
+        b_key.cmp(a_key)
+    });
+    out
+}
+
 /// Serialise a `CacheData` for disk writing. Mirrors `writeJsonFile` —
 /// pretty-printed with no trailing newline (matches the TS
 /// `JSON.stringify(data, null, 2)` shape used elsewhere in the port).
@@ -614,6 +668,100 @@ mod tests {
             Some("Claude X"),
         );
         std::fs::remove_dir_all(&base).ok();
+    }
+
+    // ── get_provider_models ─────────────────────────────────────────────
+
+    #[test]
+    fn get_provider_models_returns_empty_for_unmapped_provider() {
+        let cache = build_cache(&[("anthropic", "claude-x", model("claude-x", 100_000, 3.0))]);
+        // ollama maps to None in PROVIDER_MAPPING.
+        assert!(get_provider_models(&cache, "ollama").is_empty());
+        // Unknown provider — also empty.
+        assert!(get_provider_models(&cache, "totally-unknown").is_empty());
+    }
+
+    #[test]
+    fn get_provider_models_returns_empty_when_provider_section_missing() {
+        let cache = build_cache(&[("openai", "gpt-4o", model("gpt-4o", 128_000, 2.5))]);
+        // anthropic maps to "anthropic" but the cache only has openai.
+        assert!(get_provider_models(&cache, "anthropic").is_empty());
+    }
+
+    #[test]
+    fn get_provider_models_lists_every_model_under_the_mapped_provider() {
+        let cache = build_cache(&[
+            ("anthropic", "a", model("a", 100, 1.0)),
+            ("anthropic", "b", model("b", 200, 2.0)),
+            ("anthropic", "c", model("c", 300, 3.0)),
+        ]);
+        let models = get_provider_models(&cache, "anthropic");
+        assert_eq!(models.len(), 3);
+        let ids: Vec<&str> = models.iter().map(|m| m.id.as_str()).collect();
+        // BTreeMap preserves alphabetic key order; with no last_updated
+        // fields the secondary sort is stable and we get a, b, c.
+        assert_eq!(ids, vec!["a", "b", "c"]);
+    }
+
+    #[test]
+    fn get_provider_models_sorts_by_last_updated_descending() {
+        let mut older = model("old", 100, 1.0);
+        older.last_updated = Some("2023-06-01".into());
+        let mut newer = model("new", 100, 1.0);
+        newer.last_updated = Some("2024-12-01".into());
+        let mut middle = model("mid", 100, 1.0);
+        middle.last_updated = Some("2024-01-01".into());
+
+        let cache = build_cache(&[
+            ("anthropic", "old", older),
+            ("anthropic", "new", newer),
+            ("anthropic", "mid", middle),
+        ]);
+        let models = get_provider_models(&cache, "anthropic");
+        let ids: Vec<&str> = models.iter().map(|m| m.id.as_str()).collect();
+        assert_eq!(ids, vec!["new", "mid", "old"]);
+    }
+
+    #[test]
+    fn get_provider_models_entries_with_last_updated_sort_before_those_without() {
+        // TS: `(b.last_updated ?? "")` → entries with a real timestamp
+        // beat entries without (since any non-empty string > "" in
+        // ascending; descending puts non-empty first).
+        let mut dated = model("dated", 100, 1.0);
+        dated.last_updated = Some("2024-01-01".into());
+        let undated = model("undated", 100, 1.0); // last_updated: None
+        let cache = build_cache(&[
+            ("anthropic", "dated", dated),
+            ("anthropic", "undated", undated),
+        ]);
+        let models = get_provider_models(&cache, "anthropic");
+        let ids: Vec<&str> = models.iter().map(|m| m.id.as_str()).collect();
+        assert_eq!(ids, vec!["dated", "undated"]);
+    }
+
+    #[test]
+    fn get_provider_models_id_falls_back_to_map_key_when_empty() {
+        let mut empty_id = model("ignored", 100, 1.0);
+        empty_id.id = String::new();
+        empty_id.name = String::new();
+        let cache = build_cache(&[("anthropic", "the-key", empty_id)]);
+        let models = get_provider_models(&cache, "anthropic");
+        assert_eq!(models.len(), 1);
+        assert_eq!(models[0].id, "the-key");
+        assert_eq!(models[0].name, "the-key");
+    }
+
+    #[test]
+    fn get_provider_models_handles_openrouter_section() {
+        // openrouter maps to "openrouter" (1:1).
+        let cache = build_cache(&[(
+            "openrouter",
+            "anthropic/claude-3.5-sonnet",
+            model("anthropic/claude-3.5-sonnet", 200_000, 3.0),
+        )]);
+        let models = get_provider_models(&cache, "openrouter");
+        assert_eq!(models.len(), 1);
+        assert_eq!(models[0].id, "anthropic/claude-3.5-sonnet");
     }
 
     #[test]
