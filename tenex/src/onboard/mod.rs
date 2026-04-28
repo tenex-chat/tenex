@@ -243,6 +243,17 @@ pub async fn run(args: OnboardArgs) -> Result<()> {
                 return Ok(());
             }
         }
+    } else if !json_mode {
+        // Mirror TS `commands/onboard.ts:1142-1147` — when no providers
+        // are configured, Steps 4-7 are all skipped and a four-line block
+        // explains what's missing and how to recover. Without this the
+        // user sees an abrupt jump from Step 3 to the final summary.
+        display::blank();
+        display::hint("Skipping model configuration (no providers configured)");
+        display::context(
+            "Run tenex config providers and tenex config llm later to configure models.",
+        );
+        display::blank();
     }
 
     // End-of-flow summary. Step 7 (Project & Agents) still pending — needs
