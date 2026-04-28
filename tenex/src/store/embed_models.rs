@@ -114,6 +114,60 @@ const OLLAMA_MODELS: [EmbeddingModelChoice; 4] = [
     },
 ];
 
+/// Local-transformer model catalog used by `tenex config embed` (the
+/// `local` provider branch at `embed.ts:197-242`).
+///
+/// **Note**: this list intentionally diverges from the smaller list in
+/// `crate::onboard::embeddings`:
+/// - The first row's label is `(default, fast, good for general use)`
+///   — the embed.ts version, NOT onboard.ts's `(fast, good for general use)`.
+/// - The third row's label is `(multilingual support)` — the embed.ts
+///   version, NOT onboard.ts's `(multilingual)`.
+/// - This list includes a Custom-model sentinel row; onboard.ts has no
+///   such row in its local picker.
+///
+/// Until the standalone `config embed` port lands, both flows live in
+/// their respective files; do NOT unify until then.
+pub const LOCAL_TRANSFORMER_MODELS: &[EmbeddingModelChoice] = &[
+    EmbeddingModelChoice {
+        name: "all-MiniLM-L6-v2 (default, fast, good for general use)",
+        value: "Xenova/all-MiniLM-L6-v2",
+    },
+    EmbeddingModelChoice {
+        name: "all-mpnet-base-v2 (larger, better quality)",
+        value: "Xenova/all-mpnet-base-v2",
+    },
+    EmbeddingModelChoice {
+        name: "paraphrase-multilingual-MiniLM-L12-v2 (multilingual support)",
+        value: "Xenova/paraphrase-multilingual-MiniLM-L12-v2",
+    },
+    EmbeddingModelChoice {
+        name: "Custom model (enter HuggingFace model ID)",
+        value: "custom",
+    },
+];
+
+/// Default local model used when nothing is configured. Mirror
+/// `embed.ts:223` `existing?.model || "Xenova/all-MiniLM-L6-v2"`.
+pub const LOCAL_DEFAULT_MODEL: &str = "Xenova/all-MiniLM-L6-v2";
+
+/// Sentinel value emitted when the user picks the "Custom model" row.
+/// Mirror `embed.ts:163,168,182,194,220,227` — TS uses the bare
+/// string `"custom"`.
+pub const CUSTOM_MODEL_SENTINEL: &str = "custom";
+
+/// Mirror the row appended to OpenAI-compatible model lists when the
+/// `Custom` option isn't already present (`embed.ts:162-169`).
+///
+/// Returns the canonical label/value the TS source emits for that row.
+/// Distinct from the local-picker custom row label
+/// (`Custom model (enter HuggingFace model ID)`) — this is the
+/// non-local-provider version.
+pub const CUSTOM_OPENAI_COMPATIBLE_ROW: EmbeddingModelChoice = EmbeddingModelChoice {
+    name: "Enter custom model ID",
+    value: CUSTOM_MODEL_SENTINEL,
+};
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -225,5 +279,82 @@ mod tests {
                 );
             }
         }
+    }
+
+    // ── LOCAL_TRANSFORMER_MODELS ────────────────────────────────────────
+
+    #[test]
+    fn local_transformer_models_match_embed_ts_verbatim() {
+        // Source: embed.ts:205-222. Four rows, in this exact order,
+        // with the embed.ts-specific labels (NOT the onboard.ts
+        // labels — those are intentionally different).
+        let m = LOCAL_TRANSFORMER_MODELS;
+        assert_eq!(m.len(), 4);
+        assert_eq!(m[0].value, "Xenova/all-MiniLM-L6-v2");
+        assert_eq!(m[0].name, "all-MiniLM-L6-v2 (default, fast, good for general use)");
+        assert_eq!(m[1].value, "Xenova/all-mpnet-base-v2");
+        assert_eq!(m[1].name, "all-mpnet-base-v2 (larger, better quality)");
+        assert_eq!(m[2].value, "Xenova/paraphrase-multilingual-MiniLM-L12-v2");
+        assert_eq!(
+            m[2].name,
+            "paraphrase-multilingual-MiniLM-L12-v2 (multilingual support)"
+        );
+        assert_eq!(m[3].value, "custom");
+        assert_eq!(m[3].name, "Custom model (enter HuggingFace model ID)");
+    }
+
+    #[test]
+    fn local_transformer_first_row_label_diverges_from_onboard_ts() {
+        // Pin the divergence between the two TS flows so a future
+        // unifier doesn't silently regress. embed.ts uses
+        // 'all-MiniLM-L6-v2 (default, fast, good for general use)'
+        // — note the leading 'default,' word. onboard.ts at
+        // src/commands/onboard.ts:455 uses
+        // 'all-MiniLM-L6-v2 (fast, good for general use)' (no 'default').
+        assert!(LOCAL_TRANSFORMER_MODELS[0].name.contains("(default, fast"));
+        // Sanity: the bare 'fast,' (without 'default,') only matches
+        // because the substring 'default, fast' contains 'fast', so
+        // we additionally pin the 'default,' part on its own.
+        assert!(LOCAL_TRANSFORMER_MODELS[0].name.contains("default,"));
+    }
+
+    #[test]
+    fn local_transformer_multilingual_row_diverges_from_onboard_ts() {
+        // embed.ts: 'paraphrase-multilingual-MiniLM-L12-v2 (multilingual support)'
+        // onboard.ts: 'paraphrase-multilingual-MiniLM-L12-v2 (multilingual)'
+        // The 'support' suffix is unique to embed.ts.
+        assert!(LOCAL_TRANSFORMER_MODELS[2].name.contains("(multilingual support)"));
+    }
+
+    // ── LOCAL_DEFAULT_MODEL ─────────────────────────────────────────────
+
+    #[test]
+    fn local_default_model_pins_to_xenova_all_minilm() {
+        assert_eq!(LOCAL_DEFAULT_MODEL, "Xenova/all-MiniLM-L6-v2");
+    }
+
+    // ── CUSTOM_MODEL_SENTINEL ───────────────────────────────────────────
+
+    #[test]
+    fn custom_model_sentinel_is_bare_lowercase_string() {
+        assert_eq!(CUSTOM_MODEL_SENTINEL, "custom");
+    }
+
+    // ── CUSTOM_OPENAI_COMPATIBLE_ROW ────────────────────────────────────
+
+    #[test]
+    fn custom_openai_compatible_row_label_is_distinct_from_local_label() {
+        // The OpenAI-compatible custom row is the bare 'Enter custom
+        // model ID' (embed.ts:163,168). The LOCAL list's custom row
+        // is the longer 'Custom model (enter HuggingFace model ID)'
+        // (embed.ts:219). Don't conflate them.
+        assert_eq!(CUSTOM_OPENAI_COMPATIBLE_ROW.name, "Enter custom model ID");
+        assert_eq!(CUSTOM_OPENAI_COMPATIBLE_ROW.value, "custom");
+        // And it differs from the local picker's custom row.
+        let local_custom = LOCAL_TRANSFORMER_MODELS
+            .iter()
+            .find(|m| m.value == CUSTOM_MODEL_SENTINEL)
+            .unwrap();
+        assert_ne!(CUSTOM_OPENAI_COMPATIBLE_ROW.name, local_custom.name);
     }
 }
