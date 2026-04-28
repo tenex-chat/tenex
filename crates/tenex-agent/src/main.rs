@@ -141,6 +141,14 @@ async fn main() -> Result<()> {
         &trigger_pubkey_hex[..8]
     );
 
+    // Load teams (global + project-specific) and compute the prompt fragment.
+    let base_dir = tenex_project::paths::default_base_dir();
+    let teams = Arc::new(tenex_project::load_teams(&base_dir, Some(&project_id)));
+    let member_teams =
+        tenex_project::teams_for_agent(&teams, agent_config.slug.as_deref().unwrap_or(""));
+    let teams_fragment =
+        tenex_project::render_teams_context(&member_teams, envelope.metadata.team.as_deref());
+
     // Build system prompt
     let mut system_prompt = prompt::build_system_prompt(
         &agent_config,
@@ -148,6 +156,7 @@ async fn main() -> Result<()> {
         &working_dir,
         Some(&project_meta),
         &project_agents,
+        &teams_fragment,
     );
 
     // Shared todo state across tool calls
@@ -167,11 +176,12 @@ async fn main() -> Result<()> {
         triggering_message: Some(envelope.message.clone()),
         conversation_root,
         model: model_string.clone(),
+        team: envelope.metadata.team.clone(),
         meta: Arc::new(Mutex::new(AgentMeta::new())),
     });
 
     let hook = EmitHook::new(emit_state.clone());
-    let delegate_tool = DelegateTool::new(emit_state.clone(), project_agents);
+    let delegate_tool = DelegateTool::new(emit_state.clone(), project_agents, teams);
 
     // Initialize RAG store for the embedding tools. If embedding is not configured
     // or initialization fails, the tools remain available but return an error message.

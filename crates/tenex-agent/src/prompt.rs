@@ -7,6 +7,7 @@ pub fn build_system_prompt(
     working_dir: &str,
     project_meta: Option<&ProjectMetadata>,
     agents: &[Agent],
+    teams_fragment: &str,
 ) -> String {
     let mut parts: Vec<String> = Vec::new();
 
@@ -65,6 +66,11 @@ pub fn build_system_prompt(
             "<available-agents>\n{}\n</available-agents>",
             agent_lines.join("\n")
         ));
+    }
+
+    // Teams context
+    if !teams_fragment.is_empty() {
+        parts.push(teams_fragment.to_string());
     }
 
     // Fragment 06: Todo guidance

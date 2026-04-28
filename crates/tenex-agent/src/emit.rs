@@ -32,11 +32,20 @@ pub struct EmitState {
     pub triggering_message: Option<MessageRef>,
     pub conversation_root: Option<ConversationRef>,
     pub model: String,
+    /// Team scope from the inbound event's `["team", ...]` tag.
+    pub team: Option<String>,
     pub meta: Arc<Mutex<AgentMeta>>,
 }
 
 impl EmitState {
     pub fn build_ctx(&self, ral: u32) -> EncodingContext {
+        self.build_ctx_with_team(ral, self.team.clone())
+    }
+
+    /// Build an encoding context, overriding the team tag. Used by the
+    /// delegate tool when delegating by team name — the outbound event must
+    /// carry the resolved team name, not the inbound one.
+    pub fn build_ctx_with_team(&self, ral: u32, team: Option<String>) -> EncodingContext {
         EncodingContext {
             project: self.project.clone(),
             conversation_root: self.conversation_root.clone(),
@@ -50,7 +59,7 @@ impl EmitState {
             llm_runtime_ms: None,
             llm_runtime_total_ms: None,
             branch: None,
-            team: None,
+            team,
         }
     }
 }

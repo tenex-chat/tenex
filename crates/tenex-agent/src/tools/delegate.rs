@@ -3,7 +3,7 @@ use rig::{completion::ToolDefinition, tool::Tool};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::sync::Arc;
-use tenex_project::Agent;
+use tenex_project::{Agent, Team};
 use tenex_protocol::{
     DelegationIntent, DelegationRequest, Intent, MessageRef, PrincipalKind, PrincipalRef,
     ToolUseIntent,
@@ -23,18 +23,33 @@ pub struct DelegateError(String);
 pub struct DelegateTool {
     state: Arc<EmitState>,
     project_agents: Arc<Vec<Agent>>,
+    teams: Arc<Vec<Team>>,
 }
 
 impl DelegateTool {
-    pub fn new(state: Arc<EmitState>, project_agents: Arc<Vec<Agent>>) -> Self {
-        Self { state, project_agents }
+    pub fn new(
+        state: Arc<EmitState>,
+        project_agents: Arc<Vec<Agent>>,
+        teams: Arc<Vec<Team>>,
+    ) -> Self {
+        Self { state, project_agents, teams }
     }
 
-    fn lookup_pubkey(&self, slug: &str) -> Option<String> {
-        self.project_agents
+    /// Resolve a recipient string to (pubkey_hex, resolved_team_name).
+    /// Tries agent slug first; falls back to team name → team lead → pubkey.
+    fn resolve_recipient(&self, recipient: &str) -> Option<(String, Option<String>)> {
+        if let Some(agent) = self.project_agents.iter().find(|a| a.slug == recipient) {
+            return Some((agent.pubkey.clone(), None));
+        }
+        let team = self
+            .teams
             .iter()
-            .find(|a| a.slug == slug)
-            .map(|a| a.pubkey.clone())
+            .find(|t| t.name.eq_ignore_ascii_case(recipient))?;
+        let agent = self
+            .project_agents
+            .iter()
+            .find(|a| a.slug == team.team_lead)?;
+        Some((agent.pubkey.clone(), Some(team.name.clone())))
     }
 }
 
@@ -47,13 +62,13 @@ impl Tool for DelegateTool {
     async fn definition(&self, _prompt: String) -> ToolDefinition {
         ToolDefinition {
             name: Self::NAME.to_string(),
-            description: "Delegate a task to another agent by slug. The agent receives your message and will reply when done. Stop after delegating — do not take further actions this turn.".to_string(),
+            description: "Delegate a task to another agent by slug, or to a whole team by team name. The agent (or team lead) receives your message and will reply when done. Stop after delegating — do not take further actions this turn.".to_string(),
             parameters: json!({
                 "type": "object",
                 "properties": {
                     "recipient": {
                         "type": "string",
-                        "description": "Agent slug (e.g. 'architect', 'code-reviewer')"
+                        "description": "Agent slug (e.g. 'architect') or team name (e.g. 'design')"
                     },
                     "prompt": {
                         "type": "string",
@@ -66,17 +81,24 @@ impl Tool for DelegateTool {
     }
 
     async fn call(&self, args: DelegateArgs) -> Result<String, DelegateError> {
-        let pubkey_hex = match self.lookup_pubkey(&args.recipient) {
-            Some(p) => p,
+        let (pubkey_hex, resolved_team) = match self.resolve_recipient(&args.recipient) {
+            Some(r) => r,
             None => {
+                let agent_slugs = self
+                    .project_agents
+                    .iter()
+                    .map(|a| a.slug.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let team_names = self
+                    .teams
+                    .iter()
+                    .map(|t| t.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ");
                 return Ok(format!(
-                    "Error: no agent found with slug '{}'. Available agents: {}",
-                    args.recipient,
-                    self.project_agents
-                        .iter()
-                        .map(|a| a.slug.as_str())
-                        .collect::<Vec<_>>()
-                        .join(", ")
+                    "Error: no agent or team found with name '{}'. Agents: {}. Teams: {}.",
+                    args.recipient, agent_slugs, team_names
                 ));
             }
         };
@@ -91,7 +113,7 @@ impl Tool for DelegateTool {
         };
 
         let ral = self.state.meta.lock().unwrap().ral;
-        let ctx = self.state.build_ctx(ral);
+        let ctx = self.state.build_ctx_with_team(ral, resolved_team);
 
         let delegation_intent = DelegationIntent {
             items: vec![DelegationRequest {
