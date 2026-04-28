@@ -1,6 +1,6 @@
 # TENEX Rust Adoption Status
 
-_Last updated: 2026-04-28 (fifth pass). Auto-maintained by scheduled debt check._
+_Last updated: 2026-04-28 (sixth pass). Auto-maintained by scheduled debt check._
 
 ---
 
@@ -69,13 +69,15 @@ Spawned by `tenex runtime` per conversation turn via `tenex-agent <agent.json>` 
 - Shell tool
 - Delegate tool (reads project DB, emits delegation intents)
 - RAG index + search tools (via `tenex-rag`, optional — disabled if embed not configured)
+- **Skills tools**: `skill_list` (discover skills by scope) + `skills_set` (apply/remove per-conversation)
 - Provider dispatch: Anthropic, OpenAI, OpenRouter, Ollama (via `rig-core`)
 - Completion event emission over Nostr (stdout NDJSON)
 - LLM config resolution from `~/.tenex/llms.json` + `~/.tenex/providers.json`
 - Teams support: loads `teams.json`, renders `<teams-context>` fragment, routes delegation by team name
 - Agent home directory: per-agent `~/.tenex/home/<pubkey8>/` with `.env` auto-loading and `+filename` injection
 - Supervision heuristics: `tenex-supervision` drives post-completion re-engagement, todo nudging, delegation gating by category
-- **Todo persistence via `tenex-conversations`**: tenex-agent opens the conversation store directly, loads persisted todos on startup, and saves final todo state on completion
+- **Skills persistence**: loads `self_applied_skills` + todos from conversation store on startup; saves both atomically via `save_context_state` on completion
+- **Preloaded skills block**: agent config `default.skills` + conversation-scoped self-applied skills injected into system prompt
 
 ### `tenex-protocol`
 Fully used. Defines `Intent`, `Channel`, `ConversationRef`, `ProjectRef`, Nostr encoder/decoder, stdin source, stdout NDJSON sink. Used by `tenex-agent`, `tenex-intervention`, `tenex-scheduler`, `tenex-summarizer`.
@@ -88,7 +90,7 @@ Library built. Provides `RagStore` (SQLite + vector search) + `EmbedConfig` load
 
 ---
 
-### `tenex runtime` — Rust Per-Project Orchestrator (NEW)
+### `tenex runtime` — Rust Per-Project Orchestrator
 `tenex runtime <project-id>` is a Rust replacement for `bun run src/boot.ts --boot`. It:
 - Subscribes to Nostr kind:1 events #a-tagging the project or #p-tagging any project agent
 - Dispatches events to the right agent via `tenex-agent` (direct @mention → matching agent, fallback → PM agent)
@@ -100,7 +102,23 @@ Library built. Provides `RagStore` (SQLite + vector search) + `EmbedConfig` load
 ---
 
 ### `tenex-conversations`
-Wired into both `tenex runtime` and `tenex-agent`. `tenex-agent` opens the store directly: loads persisted todo state on startup, saves updated todo state on completion. **Conversation history (LLM message turns) is NOT loaded** — each invocation is stateless from the LLM's perspective.
+Wired into both `tenex runtime` and `tenex-agent`. `tenex-agent` opens the store directly: loads persisted todo state + self-applied skills on startup, saves updated state on completion in a single atomic read-modify-write.
+
+---
+
+### `tenex` CLI — Ported Commands and Utilities
+The `tenex` binary now includes:
+
+- **`tenex agent manage`**: fully interactive TUI — agent listing, detail view, bulk delete/merge, assign to projects
+- **`tenex agent import openclaw`**: wired — detects OpenClaw state dir, filters agents, surfaces LLM distillation gate (substrate pending)
+- **Agent category backfill** (`categorize.rs` + `role_categories.rs`): ports `backfillAgentCategories.ts`
+- **OpenClaw home/preview/reader**: ports `openclaw.ts` + `agent-home.ts` (symlink + copy modes)
+- **`tenex config telegram`**: per-agent telegram bot configuration fully wired via `telegram_config.rs` helpers
+- **Telegram identifiers**: `utils/telegram_identifiers.rs` — channel/native message ID encode/decode
+- **Conversation disk reader** (`store/conversation_disk_reader.rs`): pure file-based conversation walker for `tenex doctor`
+- **Identifier utils** (`utils/identifiers.rs`): `shorten_event_id`, `shorten_pubkey` — mirrors `conversation-id.ts`
+- **Owner signer** (`nostr_pub/owner_signer.rs`): resolves nsec from env → config → interactive prompt
+- **Project mutation publisher** (`nostr_pub/project_mutation.rs`): ports `ProjectEventPublishService.publishMutation`
 
 ---
 
@@ -109,20 +127,23 @@ Wired into both `tenex runtime` and `tenex-agent`. `tenex-agent` opens the store
 | Crate | Status | Notes |
 |-------|--------|-------|
 | `tenex-context` | Built, not integrated | Projection + compaction/decay strategies exist. Not yet used by `tenex-agent` — agent builds messages ad-hoc. |
-| `tenex-system-prompt` | Built, not integrated | Pure system-prompt assembly. `tenex-agent` has its own `prompt.rs`. Should migrate. |
+| `tenex-system-prompt` | Built, not integrated | Pure system-prompt assembly. `tenex-agent` has its own `prompt.rs`. Interface differs (skill refs vs full prompt fragments). Should migrate once aligned. |
 
 ---
 
 ## Compilation Status
 
-**As of 2026-04-28 (fifth debt check pass): workspace compiles clean — zero errors.**
+**As of 2026-04-28 (sixth debt check pass): workspace compiles clean — zero errors.**
 
-Resolved this pass (no compilation errors):
-- `tenex agent manage` now fully interactive — `show_main_menu` wired, was a stub
-- OpenClaw import ported: `openclaw_home/preview/reader.rs`
-- Agent category backfill ported: `categorize.rs` + `role_categories.rs`
-- `agent_storage.rs` extended with category storage helpers
-- Drift check: no TS↔Rust drift found; OpenClaw and categorize exist in both (expected migration parallel state)
+Resolved this pass (no compilation errors, all new work committed):
+- Skills system (`skills.rs`, `tools/skill_list.rs`, `tools/skills_set.rs`) — discover + apply per-conversation skills
+- Skills persistence: `save_context_state` unified write for todos + self-applied skills
+- Telegram config helpers (`telegram_config.rs`) + full `tenex config telegram` wiring
+- Telegram identifiers utils (`utils/telegram_identifiers.rs`)
+- Conversation disk reader (`store/conversation_disk_reader.rs`) for `tenex doctor`
+- Identifier utils (`utils/identifiers.rs`) — `shorten_event_id` extracted from inline code
+- OpenClaw import dispatch wired in `agent_cmd/mod.rs` (was a stub)
+- `manager_actions.rs` lazy owner-signer fix in `show_agent_detail`
 
 ---
 
@@ -138,19 +159,12 @@ tenex daemon (Rust)
     └── tenex-intervention (Rust, supervised)
     └── tenex runtime <d-tag>  (Rust, per project — DEFAULT)
             └── tenex-agent (Rust, spawned per conversation turn)
+                    └── skills system (built-in + agent + project + shared scopes)
+                    └── RAG tools (optional)
+                    └── delegate tool
 ```
 
 **TypeScript (`bun run src/boot.ts`) is still available via `--boot-command` but is no longer the default.**
-
-The Rust runtime (`tenex runtime`) currently handles:
-- Nostr subscription and event routing (kind:1 #a-tag and #p-tag)
-- Agent selection (direct @mention → PM fallback)
-- Event dispatch and stdout relay back to relays
-
-Still missing from `tenex runtime` before full TS retirement:
-- ~~RAL~~ — runtime serializes naturally: event loop `.await`s each `run_agent` call, so only one agent runs at a time per project. Per-conversation locking can be added later for true concurrency.
-- ~~Conversation persistence~~ ✓ `tenex-conversations` wired in
-- Context management — `tenex-context` strategies not yet applied
 
 ---
 
@@ -161,7 +175,9 @@ Still missing from `tenex runtime` before full TS retirement:
 3. ~~**Now**: Add RAL to `tenex runtime`~~ — natural serialization via event loop `.await` is sufficient for now ✓
 4. ~~**Now**: Wire `tenex-conversations` into `tenex runtime`~~ ✓ Done 2026-04-28
 5. **Near-term**: Wire `tenex-context` into `tenex-agent` for context window management (compaction/decay)
-6. **Near-term**: Wire `tenex-system-prompt` into `tenex-agent` (replace inline `prompt.rs`)
+6. **Near-term**: Align `tenex-system-prompt` interface with `prompt.rs` and migrate
 7. ~~**Near-term**: Port `tenex agent manage` interactive TUI~~ ✓ Done 2026-04-28
-8. **Near-term**: Delete TS originals for fully-ported flows (OpenClaw, categorize, agent manage)
-9. **Longer-term**: Retire `bun run src/boot.ts` and all TypeScript orchestration
+8. ~~**Near-term**: Port OpenClaw, categorize, telegram config, identifier utils~~ ✓ Done 2026-04-28
+9. **Near-term**: Delete TS originals for fully-ported flows (OpenClaw, categorize, telegram-identifiers, conversation-id utils)
+10. **Near-term**: Load conversation history into `tenex-agent` invocations (currently stateless from LLM perspective)
+11. **Longer-term**: Retire `bun run src/boot.ts` and all TypeScript orchestration
