@@ -176,7 +176,25 @@ Note: `conversation_get`, `conversation_list`, `kill` (scheduled tasks only), `s
 
 ## Compilation Status
 
-**As of 2026-04-28 (thirteenth debt check pass): workspace compiles clean — zero errors.**
+**As of 2026-04-28 (fourteenth debt check pass): workspace compiles clean — zero errors.**
+
+**MILESTONE: tenex-agent is live-tested end-to-end (see `RUST_REPORT.md`)**:
+- Basic completion ✅, streaming (kind:24135 deltas) ✅, final ConversationIntent ✅
+- todo_write ✅, shell ✅, fs tools (home-restricted) ✅
+- Self-delegation ✅, cross-agent delegation ✅
+- Conversation history persistence (10 convs, 20 history entries) ✅
+- Supervision (worker todo block) ✅
+- FK bug fixed: ensure_conversation() on store open
+
+Resolved between thirteenth and fourteenth passes:
+- **New tools**: conversation_get, conversation_list, change_model, kill (scheduled tasks), schedule_task
+- **learn refactored**: LLM-maintained +INDEX.md in agent home (intentional divergence from TS RAG)
+- **RAG collection tools removed**: agents don't manage collections; rag_add_documents maps scope internally
+- **ExtraToolsInput struct**: cleaner tool construction across all provider branches
+- **BuildSystemPromptInput struct**: consolidates 11 positional args into named struct
+- **Cross-crate cleanup**: tenex-context, tenex-conversations, tenex-scheduler, tenex-protocol, whitelist
+- **Multi-agent rules**: CLAUDE.md + AGENTS.md updated with design decisions and parallel-agent safety
+- **Test harness**: scripts/run_rust_test.sh for local end-to-end testing
 
 Resolved between twelfth and thirteenth passes:
 - **`conversation_get`**: reads message transcript from SQLite conversation store by ID
