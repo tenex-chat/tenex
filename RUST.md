@@ -1,6 +1,6 @@
 # TENEX Rust Adoption Status
 
-_Last updated: 2026-04-28 (third pass). Auto-maintained by scheduled debt check._
+_Last updated: 2026-04-28 (fourth pass). Auto-maintained by scheduled debt check._
 
 ---
 
@@ -24,7 +24,7 @@ The Rust port is underway crate by crate. The TypeScript daemon still owns per-p
 | `tenex-context` | lib | — | Conversation projection + compaction/decay/reminder strategies |
 | `tenex-conversations` | lib | — | Per-project SQLite conversation store |
 | `tenex-llm-config` | lib | — | LLM config resolver + NDJSON Unix-socket IPC server |
-| `tenex-project` | lib | — | Per-project SQLite state (agents, skills, MCP, allowlists, teams) |
+| `tenex-project` | lib | — | Per-project SQLite state (agents, skills, MCP, allowlists, teams) — legacy JSON migration layer removed |
 | `tenex-protocol` | lib | — | Transport-agnostic agent intents + Nostr/stdin channel adapters |
 | `tenex-rag` | lib | — | RAG: SQLite vector store + embedding client |
 | `tenex-supervision` | lib | — | Post-completion and pre-tool heuristics (todo nudging, re-engagement, delegation gating) |
@@ -110,15 +110,13 @@ Library built. Provides `RagStore` (SQLite + vector search) + `EmbedConfig` load
 
 ## Compilation Status
 
-**As of 2026-04-28 (third debt check pass): workspace compiles clean — zero errors.**
+**As of 2026-04-28 (fourth debt check pass): workspace compiles clean — zero errors.**
 
-Resolved this pass:
-- `tenex-summarizer`: schemars 0.8→1, `nostr::types::Kind`→`nostr::Kind`
-- `tenex-agent`: ProvidersConfig removed, RAG + teams + home dir + supervision wired in
-- `tenex runtime`: conversation persistence wired (`tenex-conversations`), `.await?` on `disconnect()` removed
-- `tenex-daemon`: now defaults to `tenex runtime <d-tag>` as boot command
-- `tenex-supervision`: new crate providing post-completion heuristics
-- `tenex-scheduler`: subcommand now optional (defaults to `run`)
+Resolved this pass (no compilation errors found):
+- `tenex-project`: removed `legacy.rs` and `migrations.rs` (JSON-file project format fully gone)
+- `tenex` agent_cmd: ported `AgentManager` bulk delete/merge, `AgentProvisioningService` (delete + inventory publish), project membership helpers
+- `tenex runtime`: serializes agent dispatch naturally (`.await` in event loop = one agent at a time per project)
+- Drift check: no TS↔Rust drift found — identity, summarization, scheduling all correctly delegated
 
 ---
 
@@ -144,8 +142,8 @@ The Rust runtime (`tenex runtime`) currently handles:
 - Event dispatch and stdout relay back to relays
 
 Still missing from `tenex runtime` before full TS retirement:
-- RAL (Resource Acquisition Lock) — prevents concurrent agents in same conversation
-- ~~Conversation persistence~~ ✓ `tenex-conversations` now wired in
+- ~~RAL~~ — runtime serializes naturally: event loop `.await`s each `run_agent` call, so only one agent runs at a time per project. Per-conversation locking can be added later for true concurrency.
+- ~~Conversation persistence~~ ✓ `tenex-conversations` wired in
 - Context management — `tenex-context` strategies not yet applied
 
 ---
@@ -154,8 +152,9 @@ Still missing from `tenex runtime` before full TS retirement:
 
 1. ~~**Immediate**: Fix compilation errors in `tenex-agent` and `tenex-summarizer`~~ ✓ Done 2026-04-28
 2. ~~**Near-term**: Switch daemon supervisor from `bun run src/boot.ts` to `tenex runtime`~~ ✓ Done 2026-04-28
-3. **Now**: Add RAL to `tenex runtime` — single-writer lock per conversation, queue or reject concurrent triggers
+3. ~~**Now**: Add RAL to `tenex runtime`~~ — natural serialization via event loop `.await` is sufficient for now ✓
 4. ~~**Now**: Wire `tenex-conversations` into `tenex runtime`~~ ✓ Done 2026-04-28
 5. **Near-term**: Wire `tenex-context` into `tenex-agent` for context window management (compaction/decay)
 6. **Near-term**: Wire `tenex-system-prompt` into `tenex-agent` (replace inline `prompt.rs`)
-7. **Longer-term**: Retire `bun run src/boot.ts` and all TypeScript orchestration
+7. **Near-term**: Port remaining agent management commands (`tenex agent manage` interactive TUI)
+8. **Longer-term**: Retire `bun run src/boot.ts` and all TypeScript orchestration
