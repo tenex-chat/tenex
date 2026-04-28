@@ -203,7 +203,7 @@ async fn run_openclaw_import(
     );
     println!(
         "{}",
-        blue.apply_to(format!("Found {} agent(s) to consider.", filtered.len()))
+        blue.apply_to(format!("Found {} agent(s) to import.", filtered.len()))
     );
     crate::tui::display::hint(
         "Identity distillation requires the LLM service (spec doc 10 §5.1, \
