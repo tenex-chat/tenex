@@ -55,7 +55,6 @@ export type ToolName =
     | "mcp_subscription_stop"
     | "conversation_search"
     | "todo_write"
-    | "nostr_publish_as_user"
     | "change_model"
     | "kill"
     | "no_response"
