@@ -18,6 +18,7 @@
 //! [`adapt_string_validator`] / [`adapt_static_str_validator`].
 
 mod theme;
+pub mod validators;
 
 pub use theme::theme;
 

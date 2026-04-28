@@ -66,10 +66,10 @@ fn run_configure(base_dir: &std::path::Path) -> Result<()> {
     drop(doc);
 
     let pos = prompts::adapt_static_str_validator(
-        crate::config_cmd::nip46::validate_positive_integer,
+        crate::tui::prompts::validators::validate_positive_integer,
     );
     let nonneg = prompts::adapt_static_str_validator(
-        crate::config_cmd::nip46::validate_non_negative_integer,
+        crate::tui::prompts::validators::validate_non_negative_integer,
     );
     let pct = prompts::adapt_static_str_validator(validate_percent_0_100);
     let batch = prompts::adapt_static_str_validator(validate_int_at_least_5);

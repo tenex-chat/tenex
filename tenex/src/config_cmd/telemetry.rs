@@ -200,7 +200,7 @@ fn run_configure(base_dir: &std::path::Path, resolved: &ResolvedAnalysis) -> Res
             Err(e) => return Err(anyhow!("dbPath prompt: {e}")),
         };
         let positive = prompts::adapt_static_str_validator(
-            crate::config_cmd::nip46::validate_positive_integer,
+            crate::tui::prompts::validators::validate_positive_integer,
         );
         let retention_raw = match prompts::input("Analysis retention days:")
             .with_default(&prev_retention.to_string())
