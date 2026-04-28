@@ -192,7 +192,25 @@ async fn run_providers_submenu(base_dir: &std::path::Path) -> Result<()> {
     match outcome {
         crate::onboard::providers::ProviderSetupResult::Configured(doc) => {
             doc.save(base_dir)?;
-            display::success("Provider credentials saved");
+            // Mirror TS verbatim at `commands/config/providers.ts:18`:
+            //   chalk.green("✓") + chalk.bold(` Provider credentials saved to ${path}/providers.json`)
+            // This is NOT the standard `display.success` shape — providers.ts
+            // builds its own success line (no leading indent, green ✓, bold
+            // body INCLUDING the leading space, full path interpolated). The
+            // shared `display::success` helper matches `display.ts:40-42`'s
+            // 2-space-indented green-bold-✓ shape, which is a different
+            // success line used by other modules.
+            let providers_json = base_dir.join("providers.json");
+            let green = console::Style::new().green();
+            let bold = console::Style::new().bold();
+            println!(
+                "{}{}",
+                green.apply_to("✓"),
+                bold.apply_to(format!(
+                    " Provider credentials saved to {}",
+                    providers_json.display()
+                )),
+            );
         }
         crate::onboard::providers::ProviderSetupResult::Cancelled => {}
     }
