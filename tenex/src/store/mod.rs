@@ -19,10 +19,11 @@ use std::path::PathBuf;
 
 pub mod agent_storage;
 pub mod atomic;
+pub mod conversation_disk_reader;
 pub mod embed;
+pub mod llm_config_options;
 pub mod llms;
 pub mod mcp;
-pub mod conversation_disk_reader;
 pub mod models_dev;
 pub mod project_members;
 pub mod project_mutation;
