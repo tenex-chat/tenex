@@ -19,6 +19,10 @@
 
 use anyhow::{anyhow, Result};
 
+use crate::agent_cmd::telegram_config::{
+    mask_token, normalize_telegram_draft, to_draft, TelegramDraft,
+};
+use crate::store::agent_storage::{AgentStorage, TelegramAgentConfig};
 use crate::store::tenex_config::TenexConfigDoc;
 use crate::tui::display;
 use crate::tui::prompts;
@@ -35,12 +39,7 @@ pub fn run(base_dir: &std::path::Path) -> Result<()> {
         };
         match action.value {
             TopAction::Back => return Ok(()),
-            TopAction::Agent => {
-                display::hint(
-                    "Per-agent Telegram bot configuration depends on the AgentStorage \
-                     subsystem (spec doc 10) — pending port.",
-                );
-            }
+            TopAction::Agent => configure_agent_telegram(base_dir)?,
             TopAction::Global => run_global_allowlist(base_dir)?,
         }
     }

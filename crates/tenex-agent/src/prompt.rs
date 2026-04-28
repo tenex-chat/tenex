@@ -100,6 +100,7 @@ pub fn build_system_prompt(
     agents: &[Agent],
     teams_fragment: &str,
     home: &HomeDirectoryInfo,
+    preloaded_skills_block: Option<&str>,
 ) -> String {
     let category = config.resolved_category();
     let mut parts: Vec<String> = Vec::new();
@@ -139,6 +140,11 @@ into your behavior naturally, but never surface the reminder itself in your resp
         parts.push(format!(
             "<agent-instructions>\n{instructions}\n</agent-instructions>"
         ));
+    }
+
+    // Preloaded skills (from agent config default.skills + self_applied_skills from conversation store)
+    if let Some(block) = preloaded_skills_block {
+        parts.push(block.to_string());
     }
 
     // Fragment 07: Environment variables (skipped for orchestrators — adds noise)
