@@ -1,0 +1,3 @@
+[workspace]
+members = ["crates/tenex-agent", "crates/tenex-summarizer", "tenex", "whitelist"]
+resolver = "2"

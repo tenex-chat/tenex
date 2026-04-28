@@ -1,0 +1,30 @@
+[package]
+name = "tenex-summarizer"
+version = "0.1.0"
+edition = "2021"
+description = "Daemon that generates kind:513 conversation metadata across all TENEX projects on the host."
+
+[[bin]]
+name = "tenex-summarizer"
+path = "src/main.rs"
+
+[dependencies]
+tokio = { version = "1.40", features = ["macros", "rt-multi-thread", "signal", "sync", "time", "fs"] }
+clap = { version = "4.5", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+schemars = "0.8"
+anyhow = "1"
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+rusqlite = { version = "0.31", features = ["bundled"] }
+nostr = "0.44"
+nostr-sdk = "0.44"
+rig-core = "0.35"
+dirs-next = "2"
+libc = "0.2"
+async-trait = "0.1"
+
+[dev-dependencies]
+tempfile = "3"
