@@ -3,8 +3,6 @@ import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import type { AgentExecutor } from "../../agents/execution/AgentExecutor";
 import * as executionContextFactoryModule from "@/agents/execution/ExecutionContextFactory";
 import { ConversationResolver } from "@/conversations/services/ConversationResolver";
-import { metadataDebounceManager } from "@/conversations/services/MetadataDebounceManager";
-import { ConversationSummarizer } from "@/conversations/services/ConversationSummarizer";
 import * as delegationCompletionHandlerModule from "@/services/dispatch/DelegationCompletionHandler";
 import { AgentRouter } from "@/services/dispatch/AgentRouter";
 import { projectContextStore } from "@/services/projects/ProjectContextStore";
@@ -86,10 +84,6 @@ describe("Delegation Event Filtering Bug", () => {
     let resolveDelegationTargetSpy: ReturnType<typeof spyOn>;
     let unblockAgentSpy: ReturnType<typeof spyOn>;
     let resolveTargetAgentsSpy: ReturnType<typeof spyOn>;
-    let markFirstPublishDoneSpy: ReturnType<typeof spyOn>;
-    let onAgentStartSpy: ReturnType<typeof spyOn>;
-    let schedulePublishSpy: ReturnType<typeof spyOn>;
-    let summarizeAndPublishSpy: ReturnType<typeof spyOn>;
     let loggerInfoSpy: ReturnType<typeof spyOn>;
     let loggerErrorSpy: ReturnType<typeof spyOn>;
     let loggerWarnSpy: ReturnType<typeof spyOn>;
@@ -140,21 +134,6 @@ describe("Delegation Event Filtering Bug", () => {
                 return agents;
             }
         );
-        markFirstPublishDoneSpy = spyOn(
-            metadataDebounceManager,
-            "markFirstPublishDone"
-        ).mockImplementation(() => undefined);
-        onAgentStartSpy = spyOn(metadataDebounceManager, "onAgentStart").mockImplementation(
-            () => undefined
-        );
-        schedulePublishSpy = spyOn(metadataDebounceManager, "schedulePublish").mockImplementation(
-            () => undefined
-        );
-        summarizeAndPublishSpy = spyOn(
-            ConversationSummarizer.prototype,
-            "summarizeAndPublish"
-        ).mockResolvedValue(undefined);
-
         ({ handleChatMessage } = await import(`../reply?${cacheBuster}`));
         if (!ConversationStore) {
             ({ ConversationStore } = await import("@/conversations/ConversationStore"));
@@ -231,10 +210,6 @@ describe("Delegation Event Filtering Bug", () => {
         resolveDelegationTargetSpy?.mockRestore();
         unblockAgentSpy?.mockRestore();
         resolveTargetAgentsSpy?.mockRestore();
-        markFirstPublishDoneSpy?.mockRestore();
-        onAgentStartSpy?.mockRestore();
-        schedulePublishSpy?.mockRestore();
-        summarizeAndPublishSpy?.mockRestore();
         loggerInfoSpy?.mockRestore();
         loggerErrorSpy?.mockRestore();
         loggerWarnSpy?.mockRestore();

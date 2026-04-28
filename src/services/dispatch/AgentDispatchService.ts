@@ -3,8 +3,6 @@ import { createExecutionContext } from "@/agents/execution/ExecutionContextFacto
 import type { AgentInstance } from "@/agents/types";
 import { ConversationStore } from "@/conversations/ConversationStore";
 import { ConversationResolver } from "@/conversations/services/ConversationResolver";
-import { ConversationSummarizer } from "@/conversations/services/ConversationSummarizer";
-import { metadataDebounceManager } from "@/conversations/services/MetadataDebounceManager";
 import type { DelegationMarker, MessagePrincipalContext, PrincipalSnapshot } from "@/conversations/types";
 import type { InboundEnvelope } from "@/events/runtime/InboundEnvelope";
 import {
@@ -423,24 +421,6 @@ export class AgentDispatchService {
             await ConversationStore.addEnvelope(conversation.id, envelope, principalContext);
         }
 
-        if (isNew && !isAgentInternalMessage(envelope)) {
-            metadataDebounceManager.markFirstPublishDone(conversation.id);
-
-            const summarizer = new ConversationSummarizer(projectCtx);
-            summarizer.summarizeAndPublish(conversation).catch((error) => {
-                logger.error("Failed to generate initial metadata for new conversation", {
-                    conversationId: conversation.id,
-                    error: formatAnyError(error),
-                });
-            });
-            getSafeActiveSpan()?.addEvent("reply.initial_metadata_scheduled", {
-                "conversation.id": shortenConversationId(conversation.id),
-            });
-            span.addEvent("dispatch.initial_metadata_scheduled", {
-                "conversation.id": shortenConversationId(conversation.id),
-            });
-        }
-
         const whitelist = new Set(config.getConfig().whitelistedPubkeys ?? []);
         if (senderPubkey && whitelist.has(senderPubkey)) {
             const { unblocked } = AgentRouter.unblockAgent(envelope, conversation, projectCtx, whitelist);
@@ -489,8 +469,6 @@ export class AgentDispatchService {
             });
         }
 
-        metadataDebounceManager.onAgentStart(conversation.id);
-
         await this.dispatchToAgent({
             targetAgent: targetAgents[0],
             envelope,
@@ -502,23 +480,6 @@ export class AgentDispatchService {
             parentSpan: span,
         });
 
-        if (!isAgentInternalMessage(envelope)) {
-            metadataDebounceManager.schedulePublish(
-                conversation.id,
-                false,
-                async () => {
-                    const summarizer = new ConversationSummarizer(projectCtx);
-                    await summarizer.summarizeAndPublish(conversation);
-                }
-            );
-            getSafeActiveSpan()?.addEvent("reply.summarization_scheduled", {
-                "conversation.id": shortenConversationId(conversation.id),
-                debounced: true,
-            });
-            span.addEvent("dispatch.summarization_scheduled", {
-                "conversation.id": shortenConversationId(conversation.id),
-            });
-        }
     }
 
     private async handleDelegationResponse(
@@ -748,23 +709,9 @@ export class AgentDispatchService {
                 mcpManager: projectCtx.mcpManager,
             });
 
-            metadataDebounceManager.onAgentStart(delegationTarget.conversationId);
-
             await otelContext.with(trace.setSpan(otelContext.active(), span), async () => {
                 await agentExecutor.execute(executionContext);
             });
-
-            metadataDebounceManager.schedulePublish(
-                delegationTarget.conversationId,
-                false,
-                async () => {
-                    const summarizer = new ConversationSummarizer(projectCtx);
-                    const originalConversation = ConversationStore.get(delegationTarget.conversationId);
-                    if (originalConversation) {
-                        await summarizer.summarizeAndPublish(originalConversation);
-                    }
-                }
-            );
 
             span.setStatus({ code: SpanStatusCode.OK });
         } catch (error) {
