@@ -8,7 +8,10 @@ pub mod skills_set;
 pub mod todo;
 
 pub use delegate::DelegateTool;
-pub use fs::{FsEditTool, FsGlobTool, FsGrepTool, FsReadTool, FsWriteTool};
+pub use fs::{
+    FsEditTool, FsGlobTool, FsGrepTool, FsReadTool, FsWriteTool,
+    HomeFsEditTool, HomeFsGlobTool, HomeFsGrepTool, HomeFsReadTool, HomeFsWriteTool,
+};
 pub use rag_index::RagIndexTool;
 pub use rag_search::RagSearchTool;
 pub use shell::ShellTool;

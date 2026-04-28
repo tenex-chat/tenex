@@ -2853,6 +2853,7 @@ dependencies = [
  "libc",
  "nostr",
  "nostr-sdk",
+ "regex",
  "serde",
  "serde_json",
  "sha2",
@@ -2875,6 +2876,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "dirs-next",
+ "futures",
  "glob",
  "nostr",
  "regex",

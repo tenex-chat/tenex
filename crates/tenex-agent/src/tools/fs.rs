@@ -21,6 +21,35 @@ fn resolve_path(base: &str, path: &str) -> PathBuf {
     }
 }
 
+fn normalize_lexically(path: &Path) -> PathBuf {
+    let mut out = PathBuf::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::ParentDir => { out.pop(); }
+            std::path::Component::CurDir => {}
+            c => out.push(c),
+        }
+    }
+    out
+}
+
+fn resolve_home_path(home_dir: &str, path: &str) -> Result<PathBuf, FsError> {
+    let base = PathBuf::from(home_dir);
+    let raw = if Path::new(path).is_absolute() {
+        PathBuf::from(path)
+    } else {
+        base.join(path)
+    };
+    let normalized = normalize_lexically(&raw);
+    if !normalized.starts_with(&base) {
+        return Err(FsError(format!(
+            "Access denied: path '{}' is outside your home directory",
+            path
+        )));
+    }
+    Ok(normalized)
+}
+
 fn make_relative(path: &Path, base: &str) -> String {
     path.strip_prefix(base)
         .map(|p| p.display().to_string())
@@ -618,5 +647,427 @@ fn parse_grep_content_line(line: &str, working_dir: &str) -> String {
         )
     } else {
         line.to_string()
+    }
+}
+
+// ─── home_fs_read ─────────────────────────────────────────────────────────────
+
+pub struct HomeFsReadTool {
+    home_dir: String,
+}
+
+impl HomeFsReadTool {
+    pub fn new(home_dir: String) -> Self {
+        Self { home_dir }
+    }
+}
+
+impl Tool for HomeFsReadTool {
+    const NAME: &'static str = "home_fs_read";
+    type Error = FsError;
+    type Args = FsReadArgs;
+    type Output = String;
+
+    async fn definition(&self, _prompt: String) -> ToolDefinition {
+        ToolDefinition {
+            name: Self::NAME.to_string(),
+            description: format!(
+                "Read a file or directory listing within your agent home directory ({}). \
+                 Paths are relative to your home directory. \
+                 File reads include line numbers, default to {DEFAULT_LINE_LIMIT} lines, \
+                 and truncate lines over {MAX_LINE_LENGTH} characters. \
+                 Use offset/limit to paginate large files.",
+                self.home_dir
+            ),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "path":        { "type": "string",  "description": "File or directory path (relative to your home directory)" },
+                    "description": { "type": "string",  "description": "Brief reason for this read" },
+                    "offset":      { "type": "integer", "description": "1-based line number to start from (default 1)" },
+                    "limit":       { "type": "integer", "description": format!("Maximum lines to return (default {DEFAULT_LINE_LIMIT})") }
+                },
+                "required": ["path", "description"]
+            }),
+        }
+    }
+
+    async fn call(&self, args: FsReadArgs) -> Result<Self::Output, FsError> {
+        let path = resolve_home_path(&self.home_dir, &args.path)?;
+
+        if path.is_dir() {
+            let mut entries: Vec<String> = fs::read_dir(&path)
+                .map_err(|e| FsError(format!("Error reading directory {}: {e}", path.display())))?
+                .filter_map(|e| e.ok())
+                .map(|e| e.file_name().to_string_lossy().to_string())
+                .collect();
+            entries.sort();
+            let listing = entries.iter().map(|e| format!("  - {e}")).collect::<Vec<_>>().join("\n");
+            return Ok(format!(
+                "Directory listing for {}:\n{listing}\n\nTo read a specific file, pass its path relative to your home directory.",
+                path.display()
+            ));
+        }
+
+        let content = fs::read_to_string(&path)
+            .map_err(|e| FsError(format!("Error reading {}: {e}", path.display())))?;
+
+        let start = args.offset.unwrap_or(1).max(1);
+        let limit = args.limit.unwrap_or(DEFAULT_LINE_LIMIT);
+        let total_lines = content.lines().count();
+        let start_idx = start - 1;
+        if start_idx >= total_lines && total_lines > 0 {
+            return Err(FsError(format!(
+                "File has {total_lines} line(s), but offset {start} was requested."
+            )));
+        }
+        let end_idx = (start_idx + limit).min(total_lines);
+        let selected: Vec<&str> = content.lines().skip(start_idx).take(limit).collect();
+
+        let mut out = String::new();
+        for (i, line) in selected.iter().enumerate() {
+            let line_no = start_idx + i + 1;
+            let display = if line.len() > MAX_LINE_LENGTH {
+                format!("{}...", &line[..MAX_LINE_LENGTH])
+            } else {
+                line.to_string()
+            };
+            out.push_str(&format!("{line_no:>6}\t{display}\n"));
+        }
+        if end_idx < total_lines {
+            let remaining = total_lines - end_idx;
+            out.push_str(&format!(
+                "\n[Showing lines {start}-{end_idx} of {total_lines}. \
+                 {remaining} more lines available. Use offset={} to continue.]",
+                end_idx + 1
+            ));
+        }
+        Ok(out)
+    }
+}
+
+// ─── home_fs_write ────────────────────────────────────────────────────────────
+
+pub struct HomeFsWriteTool {
+    home_dir: String,
+}
+
+impl HomeFsWriteTool {
+    pub fn new(home_dir: String) -> Self {
+        Self { home_dir }
+    }
+}
+
+impl Tool for HomeFsWriteTool {
+    const NAME: &'static str = "home_fs_write";
+    type Error = FsError;
+    type Args = FsWriteArgs;
+    type Output = String;
+
+    async fn definition(&self, _prompt: String) -> ToolDefinition {
+        ToolDefinition {
+            name: Self::NAME.to_string(),
+            description: format!(
+                "Write content to a file within your agent home directory ({}). \
+                 Creates parent directories automatically and overwrites existing files. \
+                 Paths are relative to your home directory.",
+                self.home_dir
+            ),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "path":        { "type": "string", "description": "File path to write (relative to your home directory)" },
+                    "content":     { "type": "string", "description": "Content to write to the file" },
+                    "description": { "type": "string", "description": "Brief reason for this write" }
+                },
+                "required": ["path", "content", "description"]
+            }),
+        }
+    }
+
+    async fn call(&self, args: FsWriteArgs) -> Result<Self::Output, FsError> {
+        let path = resolve_home_path(&self.home_dir, &args.path)?;
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)
+                .map_err(|e| FsError(format!("Error creating directories: {e}")))?;
+        }
+        fs::write(&path, &args.content)
+            .map_err(|e| FsError(format!("Error writing {}: {e}", path.display())))?;
+        Ok(format!("Successfully wrote {} bytes to {}", args.content.len(), path.display()))
+    }
+}
+
+// ─── home_fs_edit ─────────────────────────────────────────────────────────────
+
+pub struct HomeFsEditTool {
+    home_dir: String,
+}
+
+impl HomeFsEditTool {
+    pub fn new(home_dir: String) -> Self {
+        Self { home_dir }
+    }
+}
+
+impl Tool for HomeFsEditTool {
+    const NAME: &'static str = "home_fs_edit";
+    type Error = FsError;
+    type Args = FsEditArgs;
+    type Output = String;
+
+    async fn definition(&self, _prompt: String) -> ToolDefinition {
+        ToolDefinition {
+            name: Self::NAME.to_string(),
+            description: format!(
+                "Perform exact string replacements in a file within your agent home directory ({}). \
+                 When replace_all is false, old_string must match exactly once. \
+                 Paths are relative to your home directory.",
+                self.home_dir
+            ),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "path":        { "type": "string",  "description": "File path to edit (relative to your home directory)" },
+                    "description": { "type": "string",  "description": "Brief reason for this edit" },
+                    "old_string":  { "type": "string",  "description": "Exact string to replace" },
+                    "new_string":  { "type": "string",  "description": "Replacement string" },
+                    "replace_all": { "type": "boolean", "description": "Replace every occurrence instead of requiring a unique match (default false)" }
+                },
+                "required": ["path", "description", "old_string", "new_string"]
+            }),
+        }
+    }
+
+    async fn call(&self, args: FsEditArgs) -> Result<Self::Output, FsError> {
+        if args.old_string == args.new_string {
+            return Err(FsError("old_string and new_string must be different".to_string()));
+        }
+        let path = resolve_home_path(&self.home_dir, &args.path)?;
+        let content = fs::read_to_string(&path)
+            .map_err(|e| FsError(format!("Error reading {}: {e}", path.display())))?;
+        if !content.contains(&args.old_string) {
+            return Err(FsError(format!(
+                "old_string not found in {}. Make sure you're using the exact string from the file.",
+                path.display()
+            )));
+        }
+        let (new_content, count) = if args.replace_all.unwrap_or(false) {
+            let count = content.matches(&args.old_string).count();
+            (content.replace(&args.old_string, &args.new_string), count)
+        } else {
+            let count = content.matches(&args.old_string).count();
+            if count > 1 {
+                return Err(FsError(format!(
+                    "old_string appears {count} times in {}. \
+                     Provide more surrounding context or set replace_all: true.",
+                    path.display()
+                )));
+            }
+            (content.replacen(&args.old_string, &args.new_string, 1), 1)
+        };
+        fs::write(&path, &new_content)
+            .map_err(|e| FsError(format!("Error writing {}: {e}", path.display())))?;
+        Ok(format!("Successfully replaced {count} occurrence(s) in {}", path.display()))
+    }
+}
+
+// ─── home_fs_glob ─────────────────────────────────────────────────────────────
+
+pub struct HomeFsGlobTool {
+    home_dir: String,
+}
+
+impl HomeFsGlobTool {
+    pub fn new(home_dir: String) -> Self {
+        Self { home_dir }
+    }
+}
+
+impl Tool for HomeFsGlobTool {
+    const NAME: &'static str = "home_fs_glob";
+    type Error = FsError;
+    type Args = FsGlobArgs;
+    type Output = String;
+
+    async fn definition(&self, _prompt: String) -> ToolDefinition {
+        ToolDefinition {
+            name: Self::NAME.to_string(),
+            description: format!(
+                "Fast glob-based file search within your agent home directory ({}). \
+                 Returns matching file paths relative to your home directory. \
+                 Patterns are relative to your home directory.",
+                self.home_dir
+            ),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "pattern":     { "type": "string",  "description": "Glob pattern to match files (e.g. **/*.md, notes/*.txt)" },
+                    "description": { "type": "string",  "description": "Brief reason for this search" },
+                    "head_limit":  { "type": "integer", "description": format!("Maximum results; 0 for unlimited (default {DEFAULT_GLOB_LIMIT})") },
+                    "offset":      { "type": "integer", "description": "Skip the first N results (default 0)" }
+                },
+                "required": ["pattern", "description"]
+            }),
+        }
+    }
+
+    async fn call(&self, args: FsGlobArgs) -> Result<Self::Output, FsError> {
+        let head_limit = args.head_limit.unwrap_or(DEFAULT_GLOB_LIMIT);
+        let offset = args.offset.unwrap_or(0);
+
+        let full_pattern = if Path::new(&args.pattern).is_absolute() {
+            // Verify the absolute pattern is within home_dir
+            if !Path::new(&args.pattern).starts_with(&self.home_dir) {
+                return Err(FsError(format!(
+                    "Access denied: pattern '{}' is outside your home directory",
+                    args.pattern
+                )));
+            }
+            args.pattern.clone()
+        } else {
+            format!("{}/{}", self.home_dir, args.pattern)
+        };
+
+        let mut all_paths: Vec<String> = Vec::new();
+        for entry in glob(&full_pattern).map_err(|e| FsError(format!("Invalid glob pattern: {e}")))? {
+            match entry {
+                Ok(path) => {
+                    if path.is_file() && !has_excluded_segment(&path) {
+                        all_paths.push(make_relative(&path, &self.home_dir));
+                    }
+                }
+                Err(e) => eprintln!("home_fs_glob: {e}"),
+            }
+        }
+        all_paths.sort();
+
+        let effective_limit = if head_limit == 0 { usize::MAX } else { head_limit };
+        let paginated: Vec<&str> = all_paths.iter()
+            .skip(offset)
+            .take(effective_limit)
+            .map(String::as_str)
+            .collect();
+
+        if paginated.is_empty() {
+            return Ok(format!("No files found matching pattern: {}", args.pattern));
+        }
+
+        let body = paginated.join("\n");
+        let has_more = head_limit > 0 && (offset + paginated.len()) < all_paths.len();
+        if has_more {
+            Ok(format!(
+                "{body}\n\n[Truncated: showing {} results after offset; additional files omitted]",
+                paginated.len()
+            ))
+        } else {
+            Ok(body)
+        }
+    }
+}
+
+// ─── home_fs_grep ─────────────────────────────────────────────────────────────
+
+pub struct HomeFsGrepTool {
+    home_dir: String,
+}
+
+impl HomeFsGrepTool {
+    pub fn new(home_dir: String) -> Self {
+        Self { home_dir }
+    }
+}
+
+impl Tool for HomeFsGrepTool {
+    const NAME: &'static str = "home_fs_grep";
+    type Error = FsError;
+    type Args = FsGrepArgs;
+    type Output = String;
+
+    async fn definition(&self, _prompt: String) -> ToolDefinition {
+        ToolDefinition {
+            name: Self::NAME.to_string(),
+            description: format!(
+                "Search file contents within your agent home directory ({}) with ripgrep (grep fallback). \
+                 Supports content, file-list, and count modes. \
+                 Search is restricted to your home directory.",
+                self.home_dir
+            ),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "pattern":     { "type": "string",  "description": "Regex pattern to search for" },
+                    "description": { "type": "string",  "description": "Brief reason for this search" },
+                    "path":        { "type": "string",  "description": "File or subdirectory to search within your home directory (defaults to home directory root)" },
+                    "output_mode": { "type": "string",  "enum": ["files_with_matches", "content", "count"], "description": "Output mode (default: files_with_matches)" },
+                    "glob":        { "type": "string",  "description": "Glob filter for files (e.g. *.md)" },
+                    "-i":          { "type": "boolean", "description": "Case-insensitive search" },
+                    "-A":          { "type": "integer", "description": "Lines of trailing context (content mode)" },
+                    "-B":          { "type": "integer", "description": "Lines of leading context (content mode)" },
+                    "-C":          { "type": "integer", "description": "Lines of surrounding context (content mode)" },
+                    "head_limit":  { "type": "integer", "description": format!("Maximum results; 0 for unlimited (default {DEFAULT_GREP_LIMIT})") },
+                    "offset":      { "type": "integer", "description": "Skip the first N results (default 0)" }
+                },
+                "required": ["pattern", "description"]
+            }),
+        }
+    }
+
+    async fn call(&self, args: FsGrepArgs) -> Result<Self::Output, FsError> {
+        let head_limit = args.head_limit.unwrap_or(DEFAULT_GREP_LIMIT);
+        let offset = args.offset.unwrap_or(0);
+        let output_mode = args.output_mode.clone().unwrap_or_else(|| "files_with_matches".to_string());
+        let output_mode = output_mode.as_str();
+
+        let search_path = if let Some(ref p) = args.path {
+            resolve_home_path(&self.home_dir, p)?
+        } else {
+            PathBuf::from(&self.home_dir)
+        };
+
+        let use_rg = Command::new("rg").arg("--version").output().await.is_ok();
+
+        // Adapt args to use the home-scoped search path
+        let adapted_args = FsGrepArgs {
+            path: Some(search_path.display().to_string()),
+            ..args
+        };
+
+        let lines = run_search(use_rg, &adapted_args, &search_path, output_mode, &self.home_dir).await?;
+
+        if lines.is_empty() {
+            return Ok(format!("No matches found for pattern: {}", adapted_args.pattern));
+        }
+
+        let effective_limit = if head_limit == 0 { usize::MAX } else { head_limit };
+        let paginated: Vec<&str> = lines.iter()
+            .skip(offset)
+            .take(effective_limit)
+            .map(String::as_str)
+            .collect();
+
+        let joined = paginated.join("\n");
+
+        if output_mode == "content" && joined.len() > MAX_CONTENT_SIZE {
+            let file_lines = run_search(use_rg, &adapted_args, &search_path, "files_with_matches", &self.home_dir).await?;
+            let file_paginated: Vec<&str> = file_lines.iter()
+                .skip(offset)
+                .take(effective_limit)
+                .map(String::as_str)
+                .collect();
+            return Ok(format!(
+                "Content output would exceed the size limit.\nReturning matching files instead:\n\n{}",
+                file_paginated.join("\n")
+            ));
+        }
+
+        let has_more = head_limit > 0 && (offset + paginated.len()) < lines.len();
+        if has_more {
+            Ok(format!(
+                "{joined}\n\n[Truncated: showing {} results after offset; additional results omitted]",
+                paginated.len()
+            ))
+        } else {
+            Ok(joined)
+        }
     }
 }

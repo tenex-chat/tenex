@@ -1,9 +1,13 @@
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    Arc, Mutex,
+};
+
 use crate::emit::EmitState;
 use crate::tools::{TodoItem, TodoStatus};
 use rig::agent::{HookAction, PromptHook, ToolCallHookAction};
-use rig::completion::{AssistantContent, CompletionModel, CompletionResponse, Message};
-use std::sync::{Arc, Mutex};
-use tenex_protocol::{ConversationIntent, Intent, LlmUsage, ToolUseIntent};
+use rig::completion::{CompletionModel, Message};
+use tenex_protocol::{ConversationIntent, Intent, StreamTextDeltaIntent, ToolUseIntent};
 use tenex_supervision::{
     supervisor::Supervisor,
     types::{AgentCategory, TodoEntry, TodoStatus as SupTodoStatus},
@@ -30,6 +34,14 @@ pub struct EmitHook {
     supervisor: Arc<Mutex<Supervisor>>,
     todos: Arc<Mutex<Vec<TodoItem>>>,
     agent_category: Option<AgentCategory>,
+    /// Accumulates text for the current streaming turn; cleared after each turn.
+    accumulated_text: Arc<Mutex<String>>,
+    /// Monotonic counter reset to 0 at the start of each new LLM turn.
+    sequence: Arc<AtomicU64>,
+    /// Holds the completed text and RAL for the most recent turn, not yet emitted.
+    /// Intermediate turns are emitted when the next turn starts; the final turn
+    /// is emitted by main.rs (with usage from FinalResponse).
+    pending: Arc<Mutex<Option<(String, u32)>>>,
 }
 
 impl EmitHook {
@@ -39,59 +51,85 @@ impl EmitHook {
         todos: Arc<Mutex<Vec<TodoItem>>>,
         agent_category: Option<AgentCategory>,
     ) -> Self {
-        Self { state, supervisor, todos, agent_category }
+        Self {
+            state,
+            supervisor,
+            todos,
+            agent_category,
+            accumulated_text: Arc::new(Mutex::new(String::new())),
+            sequence: Arc::new(AtomicU64::new(0)),
+            pending: Arc::new(Mutex::new(None)),
+        }
+    }
+
+    /// Take the pending final turn content and RAL. Called by main.rs after the
+    /// stream ends to emit the last ConversationIntent with usage attached.
+    pub fn take_pending(&self) -> Option<(String, u32)> {
+        self.pending.lock().unwrap().take()
     }
 }
 
 impl<M: CompletionModel> PromptHook<M> for EmitHook {
-    fn on_completion_response(
+    fn on_text_delta(
         &self,
-        _prompt: &Message,
-        response: &CompletionResponse<M::Response>,
+        text_delta: &str,
+        _aggregated_text: &str,
     ) -> impl std::future::Future<Output = HookAction> + Send {
-        let texts: Vec<String> = response
-            .choice
-            .iter()
-            .filter_map(|c| {
-                if let AssistantContent::Text(t) = c {
-                    Some(t.text.clone())
-                } else {
-                    None
-                }
-            })
-            .collect();
-        let content = texts.join("\n");
-
-        let usage = LlmUsage {
-            input_tokens: Some(response.usage.input_tokens),
-            output_tokens: Some(response.usage.output_tokens),
-            total_tokens: Some(response.usage.total_tokens),
-            cached_input_tokens: Some(response.usage.cached_input_tokens),
-            ..Default::default()
+        let seq = self.sequence.fetch_add(1, Ordering::Relaxed) + 1;
+        {
+            let mut acc = self.accumulated_text.lock().unwrap();
+            acc.push_str(text_delta);
+        }
+        let delta = text_delta.to_string();
+        let ctx = {
+            let meta = self.state.meta.lock().unwrap();
+            self.state.build_ctx(meta.ral)
         };
-
-        let (ral, ctx) = {
-            let mut meta = self.state.meta.lock().unwrap();
-            meta.ral += 1;
-            meta.input_tokens += response.usage.input_tokens;
-            meta.output_tokens += response.usage.output_tokens;
-            meta.total_tokens += response.usage.total_tokens;
-            meta.cached_input_tokens += response.usage.cached_input_tokens;
-            (meta.ral, self.state.build_ctx(meta.ral))
-        };
-        let _ = ral;
-
         let channel = self.state.channel.clone();
         async move {
-            if !content.is_empty() {
+            let intent = StreamTextDeltaIntent { delta, sequence: seq };
+            if let Err(e) = channel.send(Intent::StreamTextDelta(intent), &ctx).await {
+                eprintln!("[tenex-agent] warn: stream delta emit failed: {e}");
+            }
+            HookAction::cont()
+        }
+    }
+
+    fn on_stream_completion_response_finish(
+        &self,
+        _prompt: &Message,
+        _response: &<M as CompletionModel>::StreamingResponse,
+    ) -> impl std::future::Future<Output = HookAction> + Send {
+        let content = std::mem::take(&mut *self.accumulated_text.lock().unwrap());
+        self.sequence.store(0, Ordering::Relaxed);
+
+        let ral = {
+            let mut meta = self.state.meta.lock().unwrap();
+            meta.ral += 1;
+            meta.ral
+        };
+
+        // Swap: emit the previous pending turn (intermediate), store this one.
+        // The final pending is emitted by main.rs with usage from FinalResponse.
+        let prev_pending = std::mem::replace(
+            &mut *self.pending.lock().unwrap(),
+            if content.is_empty() { None } else { Some((content, ral)) },
+        );
+
+        let state = self.state.clone();
+        let channel = self.state.channel.clone();
+
+        async move {
+            if let Some((prev_content, prev_ral)) = prev_pending {
+                let ctx = state.build_ctx(prev_ral);
                 let intent = ConversationIntent {
-                    content,
+                    content: prev_content,
                     is_reasoning: false,
-                    usage: Some(usage),
+                    usage: None,
                     metadata: None,
                 };
                 if let Err(e) = channel.send(Intent::Conversation(intent), &ctx).await {
-                    eprintln!("[tenex-agent] warn: failed to emit conversation event: {e}");
+                    eprintln!("[tenex-agent] warn: conversation emit failed: {e}");
                 }
             }
             HookAction::cont()
@@ -109,7 +147,6 @@ impl<M: CompletionModel> PromptHook<M> for EmitHook {
         let name = tool_name.to_string();
         let args_string = args.to_string();
 
-        // Pre-tool supervision check (synchronous, before async block)
         let block_reason: Option<String> = self.agent_category.as_ref().and_then(|category| {
             let todos_snapshot = {
                 let lock = self.todos.lock().unwrap();

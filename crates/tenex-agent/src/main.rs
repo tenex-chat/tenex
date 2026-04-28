@@ -11,7 +11,6 @@ use config::{LlmsConfig, ResolvedModel};
 use emit::{AgentMeta, EmitState};
 use hook::EmitHook;
 use rig::client::{CompletionClient, Nothing};
-use rig::completion::Prompt;
 use rig::providers::{anthropic, ollama, openai, openrouter};
 use std::sync::{Arc, Mutex};
 use tenex_conversations::{AgentContextState, ConversationStore};
@@ -21,31 +20,32 @@ use tenex_supervision::heuristics::default_supervisor;
 use tenex_protocol::{
     nostr::{read_one_from_stdin, NostrChannel},
     sink::StdoutNdjsonSink,
-    Channel, CompletionIntent, ConversationRef, Intent, LlmUsage, MessageRef, PrincipalRef,
+    Channel, ConversationIntent, ConversationRef, Intent, LlmUsage, MessageRef, PrincipalRef,
     ProjectRef,
 };
+use rig::tool::ToolDyn;
 use tools::{
-    DelegateTool, FsEditTool, FsGlobTool, FsGrepTool, FsReadTool, FsWriteTool, RagIndexTool,
-    RagSearchTool, ShellTool, SkillListTool, SkillsSetTool, TodoItem, TodoWriteTool,
+    DelegateTool, FsEditTool, FsGlobTool, FsGrepTool, FsReadTool, FsWriteTool,
+    HomeFsEditTool, HomeFsGlobTool, HomeFsGrepTool, HomeFsReadTool, HomeFsWriteTool,
+    RagIndexTool, RagSearchTool, ShellTool, SkillListTool, SkillsSetTool, TodoItem, TodoWriteTool,
 };
 
-/// Build and run the agent with all tools attached.
-/// The macro avoids duplicating tool registration across provider branches
-/// while still returning different concrete types per provider.
+/// Build and run the agent with all tools attached, streaming the response.
+/// Returns a `rig::agent::FinalResponse` containing the final turn text and
+/// aggregated token usage across all turns.
 /// $delegate is Option<DelegateTool> — None for categories that cannot delegate.
 macro_rules! run_agent {
-    ($client:expr, $model:expr, $system:expr, $message:expr, $wd:expr, $env:expr, $todos:expr, $hook:expr, $delegate:expr, $rag_index:expr, $rag_search:expr, $skill_list:expr, $skills_set:expr) => {{
+    ($client:expr, $model:expr, $system:expr, $message:expr, $wd:expr, $env:expr, $todos:expr, $hook:expr, $delegate:expr, $rag_index:expr, $rag_search:expr, $skill_list:expr, $skills_set:expr, $fs_tools:expr) => {{
+        use ::futures::StreamExt as _;
+        use ::rig::streaming::StreamingPrompt as _;
+
         let __base = $client
             .agent($model)
             .preamble($system)
             .max_tokens(16384)
             .default_max_turns(25)
             .tool(ShellTool::new($wd.clone(), $env.clone()))
-            .tool(FsReadTool::new($wd.clone()))
-            .tool(FsWriteTool::new($wd.clone()))
-            .tool(FsEditTool::new($wd.clone()))
-            .tool(FsGlobTool::new($wd.clone()))
-            .tool(FsGrepTool::new($wd.clone()))
+            .tools($fs_tools)
             .tool(TodoWriteTool::new($todos.clone()))
             .tool($skill_list)
             .tool($skills_set);
@@ -56,14 +56,63 @@ macro_rules! run_agent {
             __base
         };
 
-        __base
+        let mut __stream = __base
             .tool($rag_index)
             .tool($rag_search)
             .build()
-            .prompt($message)
+            .stream_prompt($message)
             .with_hook($hook)
-            .await?
+            .await;
+
+        let mut __final = ::rig::agent::FinalResponse::empty();
+        while let Some(__item) = __stream.next().await {
+            match __item {
+                Ok(::rig::agent::MultiTurnStreamItem::FinalResponse(__r)) => {
+                    __final = __r;
+                    break;
+                }
+                Ok(_) => {}
+                Err(__e) => return Err(::anyhow::anyhow!("stream error: {__e}")),
+            }
+        }
+        __final
     }};
+}
+
+fn build_fs_tools(
+    granted_tools: &std::collections::HashSet<String>,
+    working_dir: &str,
+    home_dir: &str,
+) -> Vec<Box<dyn ToolDyn>> {
+    let mut tools: Vec<Box<dyn ToolDyn>> = Vec::new();
+
+    if granted_tools.contains("fs_read") {
+        tools.push(Box::new(FsReadTool::new(working_dir.to_string())));
+    } else {
+        tools.push(Box::new(HomeFsReadTool::new(home_dir.to_string())));
+    }
+
+    if granted_tools.contains("fs_write") {
+        tools.push(Box::new(FsWriteTool::new(working_dir.to_string())));
+        tools.push(Box::new(FsEditTool::new(working_dir.to_string())));
+    } else {
+        tools.push(Box::new(HomeFsWriteTool::new(home_dir.to_string())));
+        tools.push(Box::new(HomeFsEditTool::new(home_dir.to_string())));
+    }
+
+    if granted_tools.contains("fs_glob") {
+        tools.push(Box::new(FsGlobTool::new(working_dir.to_string())));
+    } else {
+        tools.push(Box::new(HomeFsGlobTool::new(home_dir.to_string())));
+    }
+
+    if granted_tools.contains("fs_grep") {
+        tools.push(Box::new(FsGrepTool::new(working_dir.to_string())));
+    } else {
+        tools.push(Box::new(HomeFsGrepTool::new(home_dir.to_string())));
+    }
+
+    tools
 }
 
 fn load_todos_from_store(
@@ -313,6 +362,16 @@ async fn main() -> Result<()> {
 
     // Pre-fetch and render preloaded skills for the system prompt.
     let preloaded_skills = skills::fetch_skills(&all_skill_ids, &skill_ctx);
+
+    // Determine which fs_* tools are granted via skill frontmatter (tools: field).
+    // Mirrors the TypeScript HOME_FS_FALLBACKS pattern: any fs_* tool not granted
+    // will fall back to the equivalent home_fs_* variant scoped to agent home dir.
+    let granted_tools: std::collections::HashSet<String> = preloaded_skills
+        .iter()
+        .filter_map(|s| s.frontmatter.as_ref())
+        .flat_map(|fm| fm.tools.iter().cloned())
+        .collect();
+
     let preloaded_skills_block: Option<String> = if preloaded_skills.is_empty() {
         None
     } else {
@@ -448,7 +507,13 @@ async fn main() -> Result<()> {
 
     eprintln!("[tenex-agent] Running agent...");
 
-    let response: String = match resolved.provider.as_str() {
+    let agent_home_str = agent_home.display().to_string();
+
+    // Keep a handle with shared Arc refs so we can read the pending final turn
+    // after the stream ends, even after `hook` is moved into the agent builder.
+    let hook_handle = hook.clone();
+
+    let final_response = match resolved.provider.as_str() {
         "openrouter" => {
             let key = resolved
                 .api_key
@@ -467,7 +532,8 @@ async fn main() -> Result<()> {
                 rag_index.clone(),
                 rag_search.clone(),
                 skill_list_tool.clone(),
-                skills_set_tool.clone()
+                skills_set_tool.clone(),
+                build_fs_tools(&granted_tools, &working_dir, &agent_home_str)
             )
         }
         "openai" => {
@@ -488,7 +554,8 @@ async fn main() -> Result<()> {
                 rag_index.clone(),
                 rag_search.clone(),
                 skill_list_tool.clone(),
-                skills_set_tool.clone()
+                skills_set_tool.clone(),
+                build_fs_tools(&granted_tools, &working_dir, &agent_home_str)
             )
         }
         "ollama" => {
@@ -510,7 +577,8 @@ async fn main() -> Result<()> {
                 rag_index.clone(),
                 rag_search.clone(),
                 skill_list_tool.clone(),
-                skills_set_tool.clone()
+                skills_set_tool.clone(),
+                build_fs_tools(&granted_tools, &working_dir, &agent_home_str)
             )
         }
         _ => {
@@ -536,7 +604,8 @@ async fn main() -> Result<()> {
                 rag_index,
                 rag_search,
                 skill_list_tool,
-                skills_set_tool
+                skills_set_tool,
+                build_fs_tools(&granted_tools, &working_dir, &agent_home_str)
             )
         }
     };
@@ -554,31 +623,28 @@ async fn main() -> Result<()> {
         );
     }
 
-    eprintln!("[tenex-agent] Agent completed. Emitting completion event.");
+    eprintln!("[tenex-agent] Agent completed.");
 
-    let (final_ral, completion_usage) = {
-        let meta = emit_state.meta.lock().unwrap();
-        (
-            meta.ral,
-            LlmUsage {
-                input_tokens: Some(meta.input_tokens),
-                output_tokens: Some(meta.output_tokens),
-                total_tokens: Some(meta.total_tokens),
-                cached_input_tokens: Some(meta.cached_input_tokens),
+    let stream_usage = final_response.usage();
+    if let Some((final_content, final_ral)) = hook_handle.take_pending() {
+        let final_ctx = emit_state.build_ctx(final_ral);
+        let intent = ConversationIntent {
+            content: final_content,
+            is_reasoning: false,
+            usage: Some(LlmUsage {
+                input_tokens: Some(stream_usage.input_tokens),
+                output_tokens: Some(stream_usage.output_tokens),
+                total_tokens: Some(stream_usage.total_tokens),
+                cached_input_tokens: Some(stream_usage.cached_input_tokens),
                 ..Default::default()
-            },
-        )
-    };
-    let final_ctx = emit_state.build_ctx(final_ral);
-    let completion = CompletionIntent {
-        content: response,
-        usage: Some(completion_usage),
-        metadata: None,
-    };
-    channel
-        .send(Intent::Completion(completion), &final_ctx)
-        .await
-        .context("Failed to emit completion event")?;
+            }),
+            metadata: None,
+        };
+        channel
+            .send(Intent::Conversation(intent), &final_ctx)
+            .await
+            .context("Failed to emit final conversation event")?;
+    }
 
     Ok(())
 }

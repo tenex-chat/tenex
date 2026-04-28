@@ -516,10 +516,9 @@ impl SkillSummary {
 
         let description = raw_description.map(|d| {
             let flat = d.replace('\n', " ");
-            if flat.len() > MAX_DESCRIPTION_LEN {
-                flat[..MAX_DESCRIPTION_LEN].to_string()
-            } else {
-                flat
+            match flat.char_indices().nth(MAX_DESCRIPTION_LEN) {
+                Some((i, _)) => flat[..i].to_string(),
+                None => flat,
             }
         });
 

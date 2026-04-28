@@ -7,18 +7,14 @@ use tenex_protocol::{
     Channel, ConversationRef, EncodingContext, MessageRef, PrincipalRef, ProjectRef,
 };
 
-/// Token-and-RAL accumulator across all turns of a single agent invocation.
+/// RAL turn counter across all turns of a single agent invocation.
 pub struct AgentMeta {
     pub ral: u32,
-    pub input_tokens: u64,
-    pub output_tokens: u64,
-    pub total_tokens: u64,
-    pub cached_input_tokens: u64,
 }
 
 impl AgentMeta {
     pub fn new() -> Self {
-        Self { ral: 0, input_tokens: 0, output_tokens: 0, total_tokens: 0, cached_input_tokens: 0 }
+        Self { ral: 0 }
     }
 }
 

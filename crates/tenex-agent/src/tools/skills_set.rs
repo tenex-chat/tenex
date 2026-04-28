@@ -117,6 +117,9 @@ impl Tool for SkillsSetTool {
             }).to_string());
         }
 
+        // Snapshot before applying remove so we can restore on add-validation failure.
+        let snapshot = current.clone();
+
         // Apply remove
         if remove_ids.contains(&"*".to_string()) {
             current.clear();
@@ -160,6 +163,7 @@ impl Tool for SkillsSetTool {
             .map(|s| s.as_str())
             .collect();
         if !unresolved.is_empty() {
+            *current = snapshot; // restore: remove must not persist if add fails
             return Ok(json!({
                 "success": false,
                 "message": format!(
