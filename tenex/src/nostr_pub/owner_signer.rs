@@ -208,22 +208,25 @@ mod tests {
 
     #[test]
     fn resolve_uses_env_var_first() {
-        with_env_var(None, || {
-            let keys = Keys::generate();
-            let hex = keys.secret_key().to_secret_hex();
-            let base = unique_temp();
-            seed_config_owner(&base, "nsec1somethingDifferent000000000000");
-
-            with_env_var(Some(&hex), || {
-                let resolved = resolve_owner_signer(&base).unwrap();
-                assert_eq!(
-                    resolved.public_key(),
-                    keys.public_key(),
-                    "env var should win over config"
-                );
-            });
-            std::fs::remove_dir_all(&base).ok();
+        // Seed a malformed config nsec, then set the env var to a real
+        // hex secret. `resolve_owner_signer` should pick the env var and
+        // never hit the config path. The env-var swap and the resolve
+        // call must happen *inside the same* `with_env_var` invocation —
+        // the helper's lock is non-reentrant, so nesting two calls
+        // deadlocks.
+        let keys = Keys::generate();
+        let hex = keys.secret_key().to_secret_hex();
+        let base = unique_temp();
+        seed_config_owner(&base, "nsec1somethingDifferent000000000000");
+        with_env_var(Some(&hex), || {
+            let resolved = resolve_owner_signer(&base).unwrap();
+            assert_eq!(
+                resolved.public_key(),
+                keys.public_key(),
+                "env var should win over config"
+            );
         });
+        std::fs::remove_dir_all(&base).ok();
     }
 
     #[test]
