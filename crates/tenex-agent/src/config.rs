@@ -82,6 +82,7 @@ pub fn load_providers_config() -> Option<ProviderDocs> {
 
 // ─── Model resolution ─────────────────────────────────────────────────────────
 
+#[derive(Clone)]
 pub struct ResolvedModel {
     pub provider: String,
     pub model: String,

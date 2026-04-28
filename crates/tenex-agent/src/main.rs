@@ -28,12 +28,13 @@ use tenex_protocol::{
 use rig::OneOrMany;
 use rig::tool::ToolDyn;
 use tools::{
-    AskTool, DelegateCrossProjectTool, DelegateFollowupTool, DelegateTool,
+    AskTool, ChangeModelTool, ConversationGetTool, ConversationListTool,
+    DelegateCrossProjectTool, DelegateFollowupTool, DelegateTool,
     FsEditTool, FsGlobTool, FsGrepTool, FsReadTool, FsWriteTool,
     HomeFsEditTool, HomeFsGlobTool, HomeFsGrepTool, HomeFsReadTool, HomeFsWriteTool,
-    LearnTool, ProjectListTool, RagAddDocumentsTool, RagCollectionDeleteTool,
-    RagCollectionListTool, RagSearchTool, SelfDelegateTool, ShellTool, SkillListTool,
-    SkillsSetTool, TodoItem, TodoWriteTool,
+    KillTool, LearnTool, ProjectListTool, RagAddDocumentsTool,
+    RagSearchTool, ScheduleTaskTool, SelfDelegateTool, ShellTool,
+    SkillListTool, SkillsSetTool, TodoItem, TodoWriteTool,
 };
 
 /// Convert a `tenex_context::Message` to `rig::completion::Message` for passing
@@ -174,33 +175,63 @@ fn build_fs_tools(
 }
 
 fn build_extra_tools(
-    emit_state: &Arc<EmitState>,
-    rag_store: &Option<Arc<RagStore>>,
-    project_agents: &Arc<Vec<tenex_project::Agent>>,
-    teams: &Arc<Vec<tenex_project::Team>>,
-    owner_pubkey: &str,
-    base_dir: &std::path::Path,
-    allows_delegation: bool,
+    input: &ExtraToolsInput<'_>,
 ) -> Vec<Box<dyn ToolDyn>> {
     let mut tools: Vec<Box<dyn ToolDyn>> = vec![
-        Box::new(LearnTool::new(emit_state.clone(), rag_store.clone())),
-        Box::new(AskTool::new(emit_state.clone(), owner_pubkey.to_string())),
-        Box::new(ProjectListTool::new(base_dir.to_path_buf())),
-        Box::new(RagCollectionListTool::new(rag_store.clone())),
-        Box::new(RagCollectionDeleteTool::new(rag_store.clone())),
+        Box::new(LearnTool::new(
+            input.emit_state.clone(),
+            input.agent_home.clone(),
+            input.resolved_model.clone(),
+        )),
+        Box::new(AskTool::new(
+            input.emit_state.clone(),
+            input.owner_pubkey.to_string(),
+        )),
+        Box::new(ProjectListTool::new(input.base_dir.to_path_buf())),
+        Box::new(ConversationGetTool::new(input.conv_db_path.clone())),
+        Box::new(ConversationListTool::new(input.conv_db_path.clone())),
+        Box::new(ChangeModelTool::new(
+            input.conv_db_path.clone(),
+            input.conversation_id.clone(),
+            input.agent_pubkey.clone(),
+        )),
+        Box::new(KillTool::new(input.project_d_tag.clone())),
+        Box::new(ScheduleTaskTool::new(
+            input.project_d_tag.clone(),
+            input.agent_pubkey.clone(),
+            input.agent_slug.clone(),
+            input.project_id.clone(),
+        )),
     ];
 
-    if allows_delegation {
-        tools.push(Box::new(SelfDelegateTool::new(emit_state.clone())));
-        tools.push(Box::new(DelegateCrossProjectTool::new(emit_state.clone())));
+    if input.allows_delegation {
+        tools.push(Box::new(SelfDelegateTool::new(input.emit_state.clone())));
+        tools.push(Box::new(DelegateCrossProjectTool::new(input.emit_state.clone())));
         tools.push(Box::new(DelegateFollowupTool::new(
-            emit_state.clone(),
-            project_agents.clone(),
-            teams.clone(),
+            input.emit_state.clone(),
+            input.project_agents.clone(),
+            input.teams.clone(),
         )));
     }
 
     tools
+}
+
+struct ExtraToolsInput<'a> {
+    emit_state: &'a Arc<EmitState>,
+    project_agents: &'a Arc<Vec<tenex_project::Agent>>,
+    teams: &'a Arc<Vec<tenex_project::Team>>,
+    owner_pubkey: &'a str,
+    base_dir: &'a std::path::Path,
+    allows_delegation: bool,
+    conv_db_path: std::path::PathBuf,
+    conversation_id: String,
+    agent_pubkey: String,
+    agent_home: std::path::PathBuf,
+    resolved_model: Arc<ResolvedModel>,
+    project_d_tag: String,
+    agent_slug: String,
+    project_id: String,
 }
 
 fn load_todos_from_store(
@@ -348,13 +379,30 @@ async fn main() -> Result<()> {
         }
     })();
 
+    // Ensure the conversation row exists so FK-dependent writes (agent_context_state,
+    // agent_prompt_history) don't fail on the first invocation of a new conversation.
+    if let Some(ref store) = conv_store {
+        if let Err(e) = store.ensure_conversation(&conversation_id) {
+            eprintln!("[tenex-agent] Failed to ensure conversation row: {e}");
+        }
+    }
+
     // Load TENEX configuration files for model/key resolution
     let llms = LlmsConfig::load();
     let providers = config::load_providers_config();
 
-    // Resolve provider + model + API key
-    let resolved =
-        ResolvedModel::resolve(agent_config.raw_model(), llms.as_ref(), providers.as_ref());
+    // Check for a per-conversation model override stored by a prior change_model call.
+    let model_override: Option<String> = conv_store
+        .as_ref()
+        .and_then(|s| s.get_agent_context_state(&conversation_id, &pubkey_hex).ok().flatten())
+        .and_then(|state| state.meta_model_variant);
+
+    // Resolve provider + model + API key (override takes precedence over static config).
+    let resolved = ResolvedModel::resolve(
+        model_override.as_deref().or_else(|| agent_config.raw_model()),
+        llms.as_ref(),
+        providers.as_ref(),
+    );
 
     eprintln!(
         "[tenex-agent] {} ({}) @ {}",
@@ -479,17 +527,19 @@ async fn main() -> Result<()> {
 
     // Build system prompt
     let mut system_prompt = tenex_system_prompt::build_system_prompt(
-        agent_config.identity_name(),
-        &pubkey_hex,
-        agent_config.category.as_deref(),
-        agent_config.resolved_category(),
-        agent_config.instructions.as_deref(),
-        &working_dir,
-        Some(&project_meta),
-        &project_agents,
-        &teams_fragment,
-        &home_info,
-        preloaded_skills_block.as_deref(),
+        tenex_system_prompt::BuildSystemPromptInput {
+            identity_name: agent_config.identity_name(),
+            pubkey_hex: &pubkey_hex,
+            category_str: agent_config.category.as_deref(),
+            category: agent_config.resolved_category(),
+            instructions: agent_config.instructions.as_deref(),
+            working_dir: &working_dir,
+            project_meta: Some(&project_meta),
+            agents: &project_agents,
+            teams_fragment: &teams_fragment,
+            home: &home_info,
+            preloaded_skills_block: preloaded_skills_block.as_deref(),
+        },
     );
 
     // Load persisted todos and inject them as a system reminder into the user message.
@@ -510,7 +560,7 @@ async fn main() -> Result<()> {
     let model_string = format!("{}:{}", resolved.provider, resolved.model);
     let conversation_root = match &envelope.root {
         MessageRef::Nostr { event_id } => Some(ConversationRef::Nostr {
-            root_event_id: event_id.clone(),
+            root_event_id: *event_id,
         }),
     };
 
@@ -554,7 +604,7 @@ async fn main() -> Result<()> {
         }
     })();
 
-    let rag_add_documents = RagAddDocumentsTool::new(rag_store.clone());
+    let rag_add_documents = RagAddDocumentsTool::new(rag_store.clone(), project_id.clone(), pubkey_hex.clone());
     let rag_search = RagSearchTool::new(rag_store.clone(), project_id.clone(), pubkey_hex.clone());
 
     // Proactive context: search RAG before the LLM call so relevant past
@@ -562,7 +612,6 @@ async fn main() -> Result<()> {
     if let Some(store) = &rag_store {
         let collections = [
             "conversations".to_string(),
-            "lessons".to_string(),
             format!("project_{project_id}"),
             format!("agent_{pubkey_hex}"),
         ];
@@ -641,6 +690,30 @@ async fn main() -> Result<()> {
 
     let agent_home_str = agent_home.display().to_string();
 
+    // Compute paths for tool injection from the already-resolved project d_tag.
+    let conv_db_path = {
+        let conv_base = tenex_conversations::paths::default_base_dir();
+        tenex_conversations::paths::conversation_db_path(&conv_base, &project_meta.d_tag)
+    };
+
+    let agent_slug = agent_config.identity_name().to_string();
+    let extra_tools_input = ExtraToolsInput {
+        emit_state: &emit_state,
+        project_agents: &project_agents,
+        teams: &teams,
+        owner_pubkey: owner_pubkey_hex,
+        base_dir: &base_dir,
+        allows_delegation,
+        conv_db_path: conv_db_path.clone(),
+        conversation_id: conversation_id.clone(),
+        agent_pubkey: pubkey_hex.clone(),
+        agent_home: agent_home.clone(),
+        resolved_model: Arc::new(resolved.clone()),
+        project_d_tag: project_meta.d_tag.clone(),
+        agent_slug: agent_slug.clone(),
+        project_id: project_id.clone(),
+    };
+
     // Keep a handle with shared Arc refs so we can read the pending final turn
     // after the stream ends, even after `hook` is moved into the agent builder.
     let hook_handle = hook.clone();
@@ -667,7 +740,7 @@ async fn main() -> Result<()> {
                 skill_list_tool.clone(),
                 skills_set_tool.clone(),
                 build_fs_tools(&granted_tools, &working_dir, &agent_home_str),
-                build_extra_tools(&emit_state, &rag_store, &project_agents, &teams, owner_pubkey_hex, &base_dir, allows_delegation)
+                build_extra_tools(&extra_tools_input)
             )
         }
         "openai" => {
@@ -691,7 +764,7 @@ async fn main() -> Result<()> {
                 skill_list_tool.clone(),
                 skills_set_tool.clone(),
                 build_fs_tools(&granted_tools, &working_dir, &agent_home_str),
-                build_extra_tools(&emit_state, &rag_store, &project_agents, &teams, owner_pubkey_hex, &base_dir, allows_delegation)
+                build_extra_tools(&extra_tools_input)
             )
         }
         "ollama" => {
@@ -716,7 +789,7 @@ async fn main() -> Result<()> {
                 skill_list_tool.clone(),
                 skills_set_tool.clone(),
                 build_fs_tools(&granted_tools, &working_dir, &agent_home_str),
-                build_extra_tools(&emit_state, &rag_store, &project_agents, &teams, owner_pubkey_hex, &base_dir, allows_delegation)
+                build_extra_tools(&extra_tools_input)
             )
         }
         _ => {
@@ -745,7 +818,7 @@ async fn main() -> Result<()> {
                 skill_list_tool,
                 skills_set_tool,
                 build_fs_tools(&granted_tools, &working_dir, &agent_home_str),
-                build_extra_tools(&emit_state, &rag_store, &project_agents, &teams, owner_pubkey_hex, &base_dir, allows_delegation)
+                build_extra_tools(&extra_tools_input)
             )
         }
     };

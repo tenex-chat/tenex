@@ -1,10 +1,12 @@
+use crate::config::ResolvedModel;
 use crate::emit::EmitState;
-use rig::{completion::ToolDefinition, tool::Tool};
+use rig::{client::CompletionClient, completion::Prompt, completion::ToolDefinition, tool::Tool};
+use rig::providers::{anthropic, ollama, openai, openrouter};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use std::path::PathBuf;
 use std::sync::Arc;
 use tenex_protocol::{Intent, LessonIntent};
-use tenex_rag::RagStore;
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct LearnArgs {
@@ -21,12 +23,103 @@ pub struct LearnError(String);
 #[derive(Clone)]
 pub struct LearnTool {
     state: Arc<EmitState>,
-    rag_store: Option<Arc<RagStore>>,
+    agent_home: PathBuf,
+    resolved: Arc<ResolvedModel>,
 }
 
 impl LearnTool {
-    pub fn new(state: Arc<EmitState>, rag_store: Option<Arc<RagStore>>) -> Self {
-        Self { state, rag_store }
+    pub fn new(state: Arc<EmitState>, agent_home: PathBuf, resolved: Arc<ResolvedModel>) -> Self {
+        Self { state, agent_home, resolved }
+    }
+
+    async fn call_llm(&self, prompt: String) -> anyhow::Result<String> {
+        use rig::client::Nothing;
+
+        let result = match self.resolved.provider.as_str() {
+            "openrouter" => {
+                let key = self.resolved.api_key.as_deref()
+                    .ok_or_else(|| anyhow::anyhow!("no OpenRouter API key"))?;
+                let agent = openrouter::Client::new(key)?.agent(&self.resolved.model).build();
+                agent.prompt(prompt).await.map_err(|e| anyhow::anyhow!("{e:?}"))?
+            }
+            "openai" => {
+                let key = self.resolved.api_key.as_deref()
+                    .ok_or_else(|| anyhow::anyhow!("no OpenAI API key"))?;
+                let agent = openai::CompletionsClient::builder().api_key(key).build()?
+                    .agent(&self.resolved.model).build();
+                agent.prompt(prompt).await.map_err(|e| anyhow::anyhow!("{e:?}"))?
+            }
+            "ollama" => {
+                let mut builder = ollama::Client::builder().api_key(Nothing);
+                if let Some(url) = self.resolved.base_url.as_deref() {
+                    builder = builder.base_url(url);
+                }
+                let agent = builder.build()?.agent(&self.resolved.model).build();
+                agent.prompt(prompt).await.map_err(|e| anyhow::anyhow!("{e:?}"))?
+            }
+            _ => {
+                let key = self.resolved.api_key.as_deref()
+                    .ok_or_else(|| anyhow::anyhow!("no Anthropic API key"))?;
+                let agent = anthropic::Client::new(key)?.agent(&self.resolved.model).build();
+                agent.prompt(prompt).await.map_err(|e| anyhow::anyhow!("{e:?}"))?
+            }
+        };
+
+        Ok(result)
+    }
+
+    async fn update_index(&self, title: &str, lesson: &str, category: Option<&str>) -> anyhow::Result<()> {
+        let index_path = self.agent_home.join("+INDEX.md");
+        let current = std::fs::read_to_string(&index_path).unwrap_or_default();
+
+        let category_hint = category
+            .map(|c| format!(" (category: {c})"))
+            .unwrap_or_default();
+
+        let prompt = format!(
+            "You maintain a categorized index of lessons an AI agent has learned. \
+Update the index to incorporate the new lesson below. \
+Rules: organize by category headings, keep each entry to 1-2 lines, \
+remove duplicates or superseded entries, \
+keep the TOTAL output under 1200 characters so it fits within the agent's memory window. \
+Return ONLY the raw markdown — no explanation, no preamble, no code fences.\n\n\
+<current-index>\n{current}\n</current-index>\n\n\
+<new-lesson title=\"{title}\"{category_hint}>\n{lesson}\n</new-lesson>"
+        );
+
+        let raw = self.call_llm(prompt).await?;
+
+        // Strip common LLM preamble patterns: code fences and leading prose before a heading.
+        let content = strip_llm_preamble(raw.trim());
+
+        std::fs::create_dir_all(&self.agent_home)
+            .map_err(|e| anyhow::anyhow!("failed to create agent home: {e}"))?;
+        std::fs::write(&index_path, content)
+            .map_err(|e| anyhow::anyhow!("failed to write +INDEX.md: {e}"))?;
+
+        Ok(())
+    }
+}
+
+/// Remove markdown code fences and any leading prose before the first `#` heading.
+fn strip_llm_preamble(s: &str) -> &str {
+    // Unwrap ```markdown ... ``` or ``` ... ``` fences.
+    let s = if s.starts_with("```") {
+        let after_fence = s.find('\n').map(|i| &s[i + 1..]).unwrap_or(s);
+        let without_closing = after_fence
+            .rsplit_once("\n```")
+            .map(|(body, _)| body)
+            .unwrap_or(after_fence);
+        without_closing.trim()
+    } else {
+        s
+    };
+
+    // If there's a `#` heading, start from there.
+    if let Some(pos) = s.find("\n#").or_else(|| if s.starts_with('#') { Some(0) } else { None }) {
+        if pos == 0 { s } else { s[pos + 1..].trim() }
+    } else {
+        s
     }
 }
 
@@ -39,7 +132,7 @@ impl Tool for LearnTool {
     async fn definition(&self, _prompt: String) -> ToolDefinition {
         ToolDefinition {
             name: Self::NAME.to_string(),
-            description: "Persist a lesson learned so it informs future work. Publishes a Nostr lesson event and indexes the content in the 'lessons' RAG collection for retrieval.".to_string(),
+            description: "Persist a lesson learned so it informs future work. Publishes a Nostr lesson event and updates your +INDEX.md knowledge file with a categorized summary of what was learned.".to_string(),
             parameters: json!({
                 "type": "object",
                 "properties": {
@@ -53,7 +146,7 @@ impl Tool for LearnTool {
                     },
                     "category": {
                         "type": "string",
-                        "description": "Optional category tag (e.g. 'debugging', 'architecture', 'workflow')"
+                        "description": "Category for organizing the lesson (e.g. 'debugging', 'architecture', 'workflow')"
                     },
                     "hashtags": {
                         "type": "array",
@@ -75,7 +168,7 @@ impl Tool for LearnTool {
             title: args.title.clone(),
             lesson: args.lesson.clone(),
             category: args.category.clone(),
-            hashtags: hashtags.clone(),
+            hashtags,
             agent_definition_id: None,
         };
 
@@ -85,13 +178,10 @@ impl Tool for LearnTool {
             .await
             .map_err(|e| LearnError(format!("failed to emit lesson: {e}")))?;
 
-        if let Some(store) = &self.rag_store {
-            let content = format!("# {}\n\n{}", args.title, args.lesson);
-            if let Err(e) = store.index(&content, Some(&args.title), "lessons").await {
-                eprintln!("[learn] RAG indexing failed: {e}");
-            }
-        }
+        self.update_index(&args.title, &args.lesson, args.category.as_deref())
+            .await
+            .map_err(|e| LearnError(format!("failed to update +INDEX.md: {e}")))?;
 
-        Ok(format!("Lesson '{}' published and indexed.", args.title))
+        Ok(format!("Lesson '{}' published and +INDEX.md updated.", args.title))
     }
 }

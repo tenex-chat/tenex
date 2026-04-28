@@ -7,7 +7,7 @@ use tenex_rag::RagStore;
 #[derive(Debug, Deserialize, Serialize)]
 pub struct RagAddDocumentsArgs {
     pub content: String,
-    pub collection: String,
+    pub audience: String,
     pub title: Option<String>,
 }
 
@@ -18,11 +18,13 @@ pub struct RagAddDocumentsError(String);
 #[derive(Clone)]
 pub struct RagAddDocumentsTool {
     store: Option<Arc<RagStore>>,
+    project_id: String,
+    agent_pubkey: String,
 }
 
 impl RagAddDocumentsTool {
-    pub fn new(store: Option<Arc<RagStore>>) -> Self {
-        Self { store }
+    pub fn new(store: Option<Arc<RagStore>>, project_id: String, agent_pubkey: String) -> Self {
+        Self { store, project_id, agent_pubkey }
     }
 }
 
@@ -35,9 +37,9 @@ impl Tool for RagAddDocumentsTool {
     async fn definition(&self, _prompt: String) -> ToolDefinition {
         ToolDefinition {
             name: Self::NAME.to_string(),
-            description: "Embed and store a document in a named RAG collection for later semantic retrieval. \
-                Built-in collections: 'conversations', 'lessons', 'project_<id>', 'agent_<pubkey>'. \
-                Custom collection names are also allowed."
+            description: "Embed and store a document for later semantic retrieval. \
+                Use audience='self' to store in your personal knowledge base, \
+                or audience='project' to share with the whole project."
                 .to_string(),
             parameters: json!({
                 "type": "object",
@@ -46,16 +48,17 @@ impl Tool for RagAddDocumentsTool {
                         "type": "string",
                         "description": "The text content to embed and store"
                     },
-                    "collection": {
+                    "audience": {
                         "type": "string",
-                        "description": "Collection name — use 'lessons' for lessons, 'agent_<pubkey>' for personal notes, 'project_<id>' for project knowledge"
+                        "enum": ["self", "project"],
+                        "description": "'self' stores in your personal agent collection; 'project' stores in the shared project collection"
                     },
                     "title": {
                         "type": "string",
                         "description": "Short descriptive title for the document (optional)"
                     }
                 },
-                "required": ["content", "collection"]
+                "required": ["content", "audience"]
             }),
         }
     }
@@ -71,11 +74,22 @@ impl Tool for RagAddDocumentsTool {
             }
         };
 
+        let collection = match args.audience.as_str() {
+            "self" => format!("agent_{}", self.agent_pubkey),
+            "project" => format!("project_{}", self.project_id),
+            other => {
+                return Err(RagAddDocumentsError(format!(
+                    "Invalid audience '{}'. Use 'self' or 'project'.",
+                    other
+                )))
+            }
+        };
+
         let id = store
-            .index(&args.content, args.title.as_deref(), &args.collection)
+            .index(&args.content, args.title.as_deref(), &collection)
             .await
             .map_err(|e| RagAddDocumentsError(format!("failed to store document: {e}")))?;
 
-        Ok(format!("Stored as '{}' in collection '{}'.", id, args.collection))
+        Ok(format!("Stored as '{}' in {} collection.", id, args.audience))
     }
 }

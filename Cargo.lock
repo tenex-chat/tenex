@@ -2875,6 +2875,7 @@ name = "tenex-agent"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "chrono",
  "dirs-next",
  "futures",
  "glob",
@@ -2889,6 +2890,7 @@ dependencies = [
  "tenex-project",
  "tenex-protocol",
  "tenex-rag",
+ "tenex-scheduler",
  "tenex-supervision",
  "tenex-system-prompt",
  "thiserror 2.0.18",

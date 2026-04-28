@@ -15,6 +15,7 @@ tenex-protocol = { path = "../tenex-protocol", default-features = false }
 tenex-llm-config = { path = "../tenex-llm-config" }
 tenex-rag = { path = "../tenex-rag" }
 tenex-supervision = { path = "../tenex-supervision" }
+tenex-scheduler = { path = "../tenex-scheduler" }
 tenex-system-prompt = { path = "../tenex-system-prompt" }
 rig-core = "0.35"
 tokio = { version = "1", features = ["full"] }
@@ -28,3 +29,4 @@ walkdir = "2"
 regex = "1"
 dirs-next = "2"
 futures = "0.3"
+chrono = { version = "0.4", features = ["serde"] }
