@@ -3,6 +3,7 @@ mod emit;
 mod home;
 mod hook;
 mod prompt;
+mod skills;
 mod tools;
 
 use anyhow::{Context, Result};
@@ -25,7 +26,7 @@ use tenex_protocol::{
 };
 use tools::{
     DelegateTool, FsEditTool, FsGlobTool, FsGrepTool, FsReadTool, FsWriteTool, RagIndexTool,
-    RagSearchTool, ShellTool, TodoItem, TodoWriteTool,
+    RagSearchTool, ShellTool, SkillListTool, SkillsSetTool, TodoItem, TodoWriteTool,
 };
 
 /// Build and run the agent with all tools attached.
@@ -33,7 +34,7 @@ use tools::{
 /// while still returning different concrete types per provider.
 /// $delegate is Option<DelegateTool> — None for categories that cannot delegate.
 macro_rules! run_agent {
-    ($client:expr, $model:expr, $system:expr, $message:expr, $wd:expr, $env:expr, $todos:expr, $hook:expr, $delegate:expr, $rag_index:expr, $rag_search:expr) => {{
+    ($client:expr, $model:expr, $system:expr, $message:expr, $wd:expr, $env:expr, $todos:expr, $hook:expr, $delegate:expr, $rag_index:expr, $rag_search:expr, $skill_list:expr, $skills_set:expr) => {{
         let __base = $client
             .agent($model)
             .preamble($system)
@@ -45,7 +46,9 @@ macro_rules! run_agent {
             .tool(FsEditTool::new($wd.clone()))
             .tool(FsGlobTool::new($wd.clone()))
             .tool(FsGrepTool::new($wd.clone()))
-            .tool(TodoWriteTool::new($todos.clone()));
+            .tool(TodoWriteTool::new($todos.clone()))
+            .tool($skill_list)
+            .tool($skills_set);
 
         let __base = if let Some(__d) = $delegate {
             __base.tool(__d)
@@ -77,11 +80,14 @@ fn load_todos_from_store(
     serde_json::from_value(todos_val).unwrap_or_default()
 }
 
-fn save_todos_to_store(
+/// Unified save for both todos and self_applied_skills in a single read-modify-write.
+/// Keeping these in one call prevents the second writer from overwriting the first's changes.
+fn save_context_state(
     store: &ConversationStore,
     conversation_id: &str,
     agent_pubkey: &str,
     todos: &[TodoItem],
+    self_applied_skills: &[String],
 ) {
     let todos_json = match serde_json::to_value(todos) {
         Ok(v) => v,
@@ -90,6 +96,9 @@ fn save_todos_to_store(
             return;
         }
     };
+    // Serialize as explicit empty array (not None) so future reads can distinguish
+    // "never set" (None) from "user cleared all" (Some([])).
+    let skills_json = serde_json::to_value(self_applied_skills).ok();
 
     let existing = store
         .get_agent_context_state(conversation_id, agent_pubkey)
@@ -114,7 +123,7 @@ fn save_todos_to_store(
         reminder_state: existing.as_ref().and_then(|s| s.reminder_state.clone()),
         reminder_delta_state: existing.as_ref().and_then(|s| s.reminder_delta_state.clone()),
         todos: Some(todos_json),
-        self_applied_skills: existing.as_ref().and_then(|s| s.self_applied_skills.clone()),
+        self_applied_skills: skills_json,
         meta_model_variant: existing.as_ref().and_then(|s| s.meta_model_variant.clone()),
         is_blocked: existing.as_ref().map(|s| s.is_blocked).unwrap_or(false),
         todo_nudged: existing.as_ref().map(|s| s.todo_nudged).unwrap_or(false),
@@ -122,7 +131,7 @@ fn save_todos_to_store(
     };
 
     if let Err(e) = store.upsert_agent_context_state(&state) {
-        eprintln!("[tenex-agent] Failed to save todos: {e}");
+        eprintln!("[tenex-agent] Failed to save agent context state: {e}");
     }
 }
 
@@ -270,6 +279,59 @@ async fn main() -> Result<()> {
         injected_files: &injected_files,
     };
 
+    // Build skill lookup context for discovery tools and preloading.
+    let skill_ctx = Arc::new(skills::SkillLookupCtx {
+        agent_pubkey: pubkey_hex.clone(),
+        project_path: working_dir.clone(),
+        base_dir: base_dir.clone(),
+        agent_config_path: args[1].clone(),
+    });
+
+    // Load self-applied skills persisted from prior invocations of this conversation.
+    let initial_self_applied: Vec<String> = conv_store
+        .as_ref()
+        .and_then(|s| {
+            s.get_agent_context_state(&conversation_id, &pubkey_hex)
+                .ok()
+                .flatten()
+        })
+        .and_then(|state| state.self_applied_skills)
+        .and_then(|v| serde_json::from_value(v).ok())
+        .unwrap_or_default();
+
+    // Merge always-on skills from agent config with conversation-scoped self-applied skills.
+    let mut all_skill_ids: Vec<String> = agent_config
+        .default
+        .as_ref()
+        .and_then(|d| d.skills.clone())
+        .unwrap_or_default();
+    for id in &initial_self_applied {
+        if !all_skill_ids.contains(id) {
+            all_skill_ids.push(id.clone());
+        }
+    }
+
+    // Pre-fetch and render preloaded skills for the system prompt.
+    let preloaded_skills = skills::fetch_skills(&all_skill_ids, &skill_ctx);
+    let preloaded_skills_block: Option<String> = if preloaded_skills.is_empty() {
+        None
+    } else {
+        let user_home = std::env::var("HOME").unwrap_or_default();
+        let agent_home_str = agent_home.display().to_string();
+        let tenex_base_str = base_dir.display().to_string();
+        let path_vars: Vec<(&str, &str)> = vec![
+            ("$USER_HOME", &user_home),
+            ("$AGENT_HOME", &agent_home_str),
+            ("$TENEX_BASE_DIR", &tenex_base_str),
+            ("$PROJECT_BASE", &working_dir),
+        ];
+        Some(skills::render_loaded_skills_block(&preloaded_skills, &path_vars))
+    };
+
+    // Shared self-applied skills state (pre-seeded from persistence; updated by skills_set tool).
+    let self_applied_skills: Arc<Mutex<Vec<String>>> =
+        Arc::new(Mutex::new(initial_self_applied));
+
     // Build system prompt
     let mut system_prompt = prompt::build_system_prompt(
         &agent_config,
@@ -279,6 +341,7 @@ async fn main() -> Result<()> {
         &project_agents,
         &teams_fragment,
         &home_info,
+        preloaded_skills_block.as_deref(),
     );
 
     // Load persisted todos and inject them as a system reminder into the user message.
@@ -325,6 +388,9 @@ async fn main() -> Result<()> {
         } else {
             None
         };
+
+    let skill_list_tool = SkillListTool::new(skill_ctx.clone());
+    let skills_set_tool = SkillsSetTool::new(skill_ctx.clone(), self_applied_skills.clone());
 
     // Initialize RAG store for the embedding tools. If embedding is not configured
     // or initialization fails, the tools remain available but return an error message.
@@ -399,7 +465,9 @@ async fn main() -> Result<()> {
                 hook.clone(),
                 delegate_tool.clone(),
                 rag_index.clone(),
-                rag_search.clone()
+                rag_search.clone(),
+                skill_list_tool.clone(),
+                skills_set_tool.clone()
             )
         }
         "openai" => {
@@ -418,7 +486,9 @@ async fn main() -> Result<()> {
                 hook.clone(),
                 delegate_tool.clone(),
                 rag_index.clone(),
-                rag_search.clone()
+                rag_search.clone(),
+                skill_list_tool.clone(),
+                skills_set_tool.clone()
             )
         }
         "ollama" => {
@@ -438,7 +508,9 @@ async fn main() -> Result<()> {
                 hook.clone(),
                 delegate_tool.clone(),
                 rag_index.clone(),
-                rag_search.clone()
+                rag_search.clone(),
+                skill_list_tool.clone(),
+                skills_set_tool.clone()
             )
         }
         _ => {
@@ -462,15 +534,24 @@ async fn main() -> Result<()> {
                 hook,
                 delegate_tool,
                 rag_index,
-                rag_search
+                rag_search,
+                skill_list_tool,
+                skills_set_tool
             )
         }
     };
 
-    // Persist final todo state back to the conversation store.
+    // Persist final todos and self-applied skills back to the conversation store.
     if let Some(ref store) = conv_store {
         let final_todos = todos.lock().unwrap();
-        save_todos_to_store(store, &conversation_id, &pubkey_hex, &final_todos);
+        let final_skills = self_applied_skills.lock().unwrap();
+        save_context_state(
+            store,
+            &conversation_id,
+            &pubkey_hex,
+            &final_todos,
+            &final_skills,
+        );
     }
 
     eprintln!("[tenex-agent] Agent completed. Emitting completion event.");

@@ -2855,6 +2855,7 @@ dependencies = [
  "nostr-sdk",
  "serde",
  "serde_json",
+ "sha2",
  "shell-words",
  "tenex-conversations",
  "tenex-identity",

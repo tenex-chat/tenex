@@ -8,6 +8,7 @@ pub use tenex_supervision::types::AgentCategory;
 #[derive(Debug, Deserialize)]
 pub struct AgentDefault {
     pub model: Option<String>,
+    pub skills: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize)]
