@@ -3,7 +3,7 @@
 use anyhow::{Context, Result};
 use nostr::event::{EventBuilder, Tag};
 use nostr::key::Keys;
-use nostr::types::Kind;
+use nostr::Kind;
 use nostr_sdk::Client;
 
 use crate::source::ProjectEvent;
