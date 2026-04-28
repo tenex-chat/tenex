@@ -20,6 +20,7 @@ use std::path::PathBuf;
 pub mod agent_home_env;
 pub mod agent_home_files;
 pub mod agent_storage;
+pub mod api_keys;
 pub mod atomic;
 pub mod conversation_disk_reader;
 pub mod embed;

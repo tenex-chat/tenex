@@ -47,6 +47,7 @@ use crossterm::{queue, QueueableCommand};
 use indexmap::IndexMap;
 
 use super::raw_mode::RawMode;
+use crate::store::api_keys::parse_api_key_entry;
 use crate::tui::glyphs;
 
 // Provider IDs that DO NOT require an API key — toggling them on stores the
@@ -517,31 +518,10 @@ fn format_key_info(value: &ApiKeyValue) -> String {
     format!(" [{count} {plural}]")
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct ParsedApiKeyEntry {
-    key: String,
-    label: Option<String>,
-}
-
-/// Mirror of `parseApiKeyEntry` at `src/llm/providers/key-manager.ts:288-303`.
-fn parse_api_key_entry(value: &str) -> ParsedApiKeyEntry {
-    let serialized = value.trim();
-    if serialized.is_empty() {
-        return ParsedApiKeyEntry {
-            key: String::new(),
-            label: None,
-        };
-    }
-    let mut parts = serialized.split_whitespace();
-    let key = parts.next().unwrap_or("").to_owned();
-    let label_str = parts.collect::<Vec<_>>().join(" ");
-    let label = if label_str.is_empty() {
-        None
-    } else {
-        Some(label_str)
-    };
-    ParsedApiKeyEntry { key, label }
-}
+// `parse_api_key_entry` lives in `crate::store::api_keys` as the shared
+// canonical helper (mirrors TS `parseApiKeyEntry` at
+// `src/llm/providers/key-manager.ts:288-303`). This module's renderer
+// imports it directly via `use crate::store::api_keys::parse_api_key_entry`.
 
 // =========================================================================
 // I/O loop
