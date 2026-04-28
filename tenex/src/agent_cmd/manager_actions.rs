@@ -519,7 +519,7 @@ pub async fn offer_auto_merge_for_duplicate_slugs(
 ///    - `delete` → [`confirm_and_delete`], return
 pub async fn show_agent_detail(
     base_dir: &std::path::Path,
-    keys: &Keys,
+    owner_keys: &mut Option<Keys>,
     pubkey: &str,
     page_size: usize,
 ) -> Result<()> {
@@ -563,16 +563,16 @@ pub async fn show_agent_detail(
         match action.as_str() {
             CHOICE_BACK => return Ok(()),
             CHOICE_ASSIGN => {
-                // Snapshot the entry for the call; the loop will re-load
-                // on the next iteration to reflect the mutation.
+                let keys = ensure_owner_signer(owner_keys, base_dir)?;
                 let snapshot = entry.clone();
-                assign_agent_to_projects(base_dir, keys, Some(&snapshot), page_size)
+                assign_agent_to_projects(base_dir, &keys, Some(&snapshot), page_size)
                     .await?;
                 continue;
             }
             CHOICE_DELETE => {
+                let keys = ensure_owner_signer(owner_keys, base_dir)?;
                 let snapshot = entry.clone();
-                confirm_and_delete(base_dir, keys, Some(&snapshot)).await?;
+                confirm_and_delete(base_dir, &keys, Some(&snapshot)).await?;
                 return Ok(());
             }
             other => {
@@ -685,8 +685,7 @@ pub async fn show_main_menu(base_dir: &std::path::Path) -> Result<()> {
             }
             other if other.starts_with("agent:") => {
                 let pubkey = &other["agent:".len()..];
-                let keys = ensure_owner_signer(&mut owner_keys, base_dir)?;
-                show_agent_detail(base_dir, &keys, pubkey, page_size).await?;
+                show_agent_detail(base_dir, &mut owner_keys, pubkey, page_size).await?;
                 continue;
             }
             other if other.starts_with("delete:") => {

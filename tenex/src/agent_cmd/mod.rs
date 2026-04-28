@@ -26,6 +26,7 @@ pub mod openclaw_home;
 pub mod openclaw_preview;
 pub mod openclaw_reader;
 pub mod provisioning;
+pub mod telegram_config;
 
 #[derive(Parser, Clone)]
 pub struct AgentArgs {
@@ -126,13 +127,89 @@ async fn run_import(import: ImportArgs) -> Result<()> {
             json,
             no_sync,
             slugs,
-        } => {
-            let _ = (dry_run, json, no_sync, slugs);
-            crate::tui::display::hint(
-                "tenex agent import openclaw — depends on the OpenClaw reader + LLM \
-                 distillation service (spec doc 10 §5). Pending port.",
-            );
-            Ok(())
-        }
+        } => run_openclaw_import(dry_run, json, no_sync, slugs).await,
     }
+}
+
+/// Dispatch `tenex agent import openclaw`. Mirrors the early-exit and
+/// empty-filter branches of `openclawImportCommand.action` at
+/// `src/commands/agent/import/openclaw.ts:155-183` byte-for-byte.
+///
+/// The local pieces are wired here:
+/// 1. Detect state directory → `[]` (json) or red+gray verbatim error
+///    (default, exit 1) when not found.
+/// 2. Read + filter agents → `[]` (json) or yellow "No matching…"
+///    (default) when filter is empty.
+///
+/// The actual import (LLM distillation + per-agent home-dir
+/// materialisation) surfaces an honest hint identifying the missing
+/// substrate. The remaining `--no-sync` flag is parameter to that
+/// downstream substrate; threaded through so future iterations don't
+/// have to re-thread.
+async fn run_openclaw_import(
+    dry_run: bool,
+    json: bool,
+    no_sync: bool,
+    slugs: Vec<String>,
+) -> Result<()> {
+    use crate::agent_cmd::{openclaw_preview, openclaw_reader};
+
+    // ── 1. Detect state directory ─────────────────────────────────────
+    let Some(state_dir) = openclaw_reader::detect_openclaw_state_dir() else {
+        if json {
+            println!("[]");
+            return Ok(());
+        }
+        // Red error + gray "Checked: …" line, exit code 1.
+        eprint!("{}", openclaw_preview::format_no_installation_detected());
+        std::process::exit(1);
+    };
+
+    // ── 2. Read + filter agents ───────────────────────────────────────
+    let all_agents = openclaw_reader::read_openclaw_agents(&state_dir)?;
+    let filtered: Vec<openclaw_reader::OpenClawAgent> = openclaw_preview::filter_agents(
+        &all_agents,
+        &slugs,
+    )
+    .into_iter()
+    .cloned()
+    .collect();
+
+    if filtered.is_empty() {
+        if json {
+            println!("[]");
+        } else {
+            let yellow = console::Style::new().yellow();
+            println!("{}", yellow.apply_to("No matching OpenClaw agents found."));
+        }
+        return Ok(());
+    }
+
+    // ── 3. LLM distillation gate ──────────────────────────────────────
+    //
+    // Distill identities from the workspace files via an LLM, then either
+    // (a) print the dry-run/JSON preview, or (b) write each agent through
+    // `importOneAgent` (storage save + `create_home_dir` materialisation).
+    //
+    // The LLM service substrate is the only remaining gap. Surface an
+    // honest hint citing what's blocking and the verified-local context
+    // (`Found OpenClaw installation at: <stateDir>` is the same line TS
+    // prints at `openclaw.ts:217-219` once it commits to the import path).
+    let _ = (dry_run, no_sync);
+    let blue = console::Style::new().blue();
+    println!(
+        "{}",
+        blue.apply_to(format!("Found OpenClaw installation at: {}", state_dir.display()))
+    );
+    println!(
+        "{}",
+        blue.apply_to(format!("Found {} agent(s) to consider.", filtered.len()))
+    );
+    crate::tui::display::hint(
+        "Identity distillation requires the LLM service (spec doc 10 §5.1, \
+         openclaw-distiller.ts) — pending port. The reader, slug derivation, \
+         preview formatter, and home-dir materialisation are all wired; only \
+         the per-agent LLM call is missing.",
+    );
+    Ok(())
 }

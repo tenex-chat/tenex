@@ -173,16 +173,7 @@ fn find_orphaned_agents(purge: bool) -> Result<()> {
     for (slug, pubkey, event_id, _name) in &orphans {
         let prefix8 = pubkey.get(..8).unwrap_or(pubkey.as_str());
         let source = match event_id {
-            Some(eid) => {
-                // `shortenEventId(eid)` = first 10 chars, lowercased
-                // (`utils/conversation-id.ts:26-27`).
-                let short: String = eid
-                    .chars()
-                    .take(10)
-                    .map(|c| c.to_ascii_lowercase())
-                    .collect();
-                format!("nostr:{short}")
-            }
+            Some(eid) => format!("nostr:{}", crate::utils::identifiers::shorten_event_id(eid)),
             None => "local".to_string(),
         };
         println!(

@@ -62,18 +62,11 @@ this kind. Spec 11 doesn't list it directly but
 
 (none currently)
 
-## Workspace-state notes
+## Cleared notes
 
-### Root `Cargo.toml` carries uncommitted parallel-work edits
+### Root `Cargo.toml` workspace block (resolved)
 
-Observed during a fire: the working-tree root `Cargo.toml` declared
-`crates/tenex-context` and `crates/tenex-system-prompt` as workspace
-members, but those directories don't exist on disk yet. `cargo test`
-fails to load the workspace until that gap closes.
-
-`git show HEAD:Cargo.toml` lists only the 8 crates that actually exist.
-The diff is parallel user work mid-flight. Per CLAUDE.md "investigate
-before deleting or overwriting", neither stubbing the missing crates nor
-`git checkout`-ing Cargo.toml is appropriate — both squat on the user's
-in-progress edits. Block clears as soon as the user lands the new
-crate scaffolds.
+Earlier fires hit a transient state where root `Cargo.toml` listed
+`crates/tenex-context` / `crates/tenex-system-prompt` without the
+directories existing yet. The user's parallel work has since landed
+both crate scaffolds; `cargo build` / `cargo test` succeed cleanly.

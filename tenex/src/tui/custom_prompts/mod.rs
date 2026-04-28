@@ -28,10 +28,13 @@ pub mod role_menu_prompt;
 pub mod section_menu_prompt;
 pub mod variant_list_prompt;
 
-pub use agent_select_prompt::{
-    agent_select_prompt, get_visible_window, ActionItem, AgentInput, AgentItem, AgentOutcome,
-    AgentSelectResult, AgentSelectState, VisibleWindow,
-};
+// Re-exports below cover symbols that are imported by external modules
+// via `custom_prompts::Foo` (rather than the deeper
+// `custom_prompts::foo_prompt::Foo` path). Anything reached only via the
+// submodule path is intentionally NOT re-exported here — keeps the
+// surface lean and the "unused import" warning surface clean. Per
+// CLAUDE.md "delete unused code".
+
 pub use provider_select_prompt::{
     provider_select_prompt, ApiKeyValue, ProviderCredentialsLite, ProviderMode,
     ProviderSelectResult, ProviderState,
@@ -39,9 +42,5 @@ pub use provider_select_prompt::{
 pub use raw_mode::RawMode;
 pub use relay_prompt::{relay_prompt, RelayItem, RelayPromptConfig};
 pub use role_menu_prompt::{
-    role_menu_prompt, RoleInput, RoleKey, RoleMenuResult, RoleMenuState, RoleOutcome, ROLES,
-};
-pub use variant_list_prompt::{
-    variant_list_prompt, MetaVariantData, VariantInput, VariantListResult, VariantListState,
-    VariantOutcome,
+    role_menu_prompt, RoleKey, RoleMenuResult, RoleMenuState, ROLES,
 };

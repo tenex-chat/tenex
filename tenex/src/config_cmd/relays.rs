@@ -21,7 +21,6 @@
 use anyhow::{anyhow, Result};
 
 use crate::store::tenex_config::TenexConfigDoc;
-use crate::tui::display;
 use crate::tui::prompts;
 
 const DEFAULT_IDENTITY_RELAY: &str = "wss://purplepag.es";
