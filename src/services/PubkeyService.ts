@@ -3,6 +3,10 @@ import type { ProjectContext } from "@/services/projects/ProjectContext";
 import { getProjectContext } from "@/services/projects";
 import { logger } from "@/utils/logger";
 import { shortenPubkey } from "@/utils/conversation-id";
+import {
+    IdentityDaemonError,
+    resolveIdentity,
+} from "@/services/identity/identityDaemonClient";
 import type { Hexpubkey, NDKEvent } from "@nostr-dev-kit/ndk";
 import { trace } from "@opentelemetry/api";
 
@@ -118,7 +122,39 @@ export class PubkeyService {
             return cached.profile;
         }
 
-        // Cache miss - fetch from network
+        // Cache miss — try the identity daemon first (hits its own 24h SQLite cache,
+        // then fetches from relays). Falls through to NDK if the daemon is not running.
+        try {
+            const result = await resolveIdentity(pubkey);
+            if (result) {
+                const profile: UserProfile = {
+                    name: result.name ?? undefined,
+                    display_name: result.display_name ?? undefined,
+                    picture: result.picture ?? undefined,
+                    fetchedAt: Date.now(),
+                };
+                this.userProfileCache.set(pubkey, {
+                    profile,
+                    ttl: Date.now() + this.CACHE_TTL_MS,
+                });
+                logger.debug("[PUBKEY_NAME_REPO] Fetched user profile via identity daemon", {
+                    pubkey,
+                    name: profile.name,
+                    display_name: profile.display_name,
+                });
+                return profile;
+            }
+        } catch (error) {
+            if (!(error instanceof IdentityDaemonError)) {
+                logger.warn("[PUBKEY_NAME_REPO] Unexpected error from identity daemon", {
+                    pubkey,
+                    error,
+                });
+            }
+            // IdentityDaemonError means daemon not running — fall through to NDK fetch
+        }
+
+        // NDK fallback
         try {
             const ndk = getNDK();
 
