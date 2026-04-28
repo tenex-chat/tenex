@@ -43,7 +43,7 @@ pub mod telegram;
 pub mod telemetry;
 
 use anyhow::Result;
-use clap::Parser;
+use clap::{Parser, Subcommand};
 
 use crate::onboard::auto_select_roles;
 use crate::store::providers::ProvidersDoc;
@@ -52,16 +52,96 @@ use crate::tui::custom_prompts::section_menu_prompt::{
 };
 use crate::tui::display;
 
+/// Mirror of the TS `configCommand` subcommand surface
+/// (`src/commands/config/index.ts:125-154`). Bare `tenex config` enters
+/// the interactive section menu; each named subcommand jumps straight
+/// to the corresponding submenu, matching every `tenex config <X>`
+/// shortcut TS exposes.
 #[derive(Parser, Clone)]
-pub struct ConfigArgs {}
+pub struct ConfigArgs {
+    #[command(subcommand)]
+    pub command: Option<ConfigCommand>,
+}
 
-pub async fn run(_args: ConfigArgs) -> Result<()> {
+#[derive(Subcommand, Clone)]
+pub enum ConfigCommand {
+    /// Configure global provider credentials
+    Providers,
+    /// Manage LLM configurations (global only)
+    Llm,
+    /// Configure which model handles what task
+    Roles,
+    /// Configure embedding model for RAG (global by default, --project for current project)
+    Embed,
+    /// Configure agent escalation — route ask() calls through an agent first
+    Escalation,
+    /// Configure intervention — auto-review when you're idle
+    Intervention,
+    /// Configure agent Telegram bots, global DM access, and remembered project bindings
+    Telegram,
+    /// Configure Nostr relay connections
+    Relays,
+    /// Configure auto-summary timing
+    Summarization,
+    /// Configure managed context settings
+    #[command(name = "context-management")]
+    ContextManagement,
+    /// Configure authorized pubkeys
+    Identity,
+    /// Configure a global system prompt that is added to all projects
+    #[command(name = "system-prompt")]
+    SystemPrompt,
+    /// Configure file paths and storage
+    Paths,
+    /// Configure logging — log level and file path
+    Logging,
+    /// Configure OpenTelemetry tracing and analysis telemetry
+    Telemetry,
+}
+
+impl ConfigCommand {
+    /// Stable token used by the section-menu dispatch path. Matches the
+    /// values returned by the TS menu rows at
+    /// `src/commands/config/index.ts:33-75` so the same dispatcher
+    /// works for both the menu and the direct-subcommand entry.
+    fn dispatch_value(&self) -> &'static str {
+        match self {
+            ConfigCommand::Providers => "providers",
+            ConfigCommand::Llm => "llm",
+            ConfigCommand::Roles => "roles",
+            ConfigCommand::Embed => "embed",
+            ConfigCommand::Escalation => "escalation",
+            ConfigCommand::Intervention => "intervention",
+            ConfigCommand::Telegram => "telegram",
+            ConfigCommand::Relays => "relays",
+            ConfigCommand::Summarization => "summarization",
+            ConfigCommand::ContextManagement => "context-management",
+            ConfigCommand::Identity => "identity",
+            ConfigCommand::SystemPrompt => "system-prompt",
+            ConfigCommand::Paths => "paths",
+            ConfigCommand::Logging => "logging",
+            ConfigCommand::Telemetry => "telemetry",
+        }
+    }
+}
+
+pub async fn run(args: ConfigArgs) -> Result<()> {
+    let base_dir = crate::store::resolve_base_dir(None);
+
+    if let Some(cmd) = args.command {
+        // Direct subcommand path — skip the welcome banner and section
+        // menu, dispatch straight to the submodule. Matches TS's
+        // `tenex config <name>` direct-action behaviour
+        // (`src/commands/config/index.ts:137-153` — each submodule
+        // command attaches its own action handler).
+        return dispatch(&base_dir, cmd.dispatch_value()).await;
+    }
+
     // The TS source prints a welcome banner on entry to interactive
     // config (`src/commands/config/interactive.ts:10`). Reproduce that
     // here — same `display::welcome` used by `tenex onboard`.
     display::welcome();
 
-    let base_dir = crate::store::resolve_base_dir(None);
     let sections = build_menu_sections();
 
     loop {
@@ -229,6 +309,103 @@ mod tests {
     fn menu_has_five_sections() {
         let s = build_menu_sections();
         assert_eq!(s.len(), 5);
+    }
+
+    /// Pin each `tenex config <name>` subcommand description against
+    /// the TS source. Prevents future drift.
+    #[test]
+    fn config_subcommand_descriptions_match_ts_verbatim() {
+        use clap::CommandFactory;
+        let cmd = ConfigArgs::command();
+
+        let expected = [
+            ("providers", "Configure global provider credentials"),
+            ("llm", "Manage LLM configurations (global only)"),
+            ("roles", "Configure which model handles what task"),
+            (
+                "embed",
+                "Configure embedding model for RAG (global by default, --project for current project)",
+            ),
+            (
+                "escalation",
+                "Configure agent escalation — route ask() calls through an agent first",
+            ),
+            (
+                "intervention",
+                "Configure intervention — auto-review when you're idle",
+            ),
+            (
+                "telegram",
+                "Configure agent Telegram bots, global DM access, and remembered project bindings",
+            ),
+            ("relays", "Configure Nostr relay connections"),
+            ("summarization", "Configure auto-summary timing"),
+            ("context-management", "Configure managed context settings"),
+            ("identity", "Configure authorized pubkeys"),
+            (
+                "system-prompt",
+                "Configure a global system prompt that is added to all projects",
+            ),
+            ("paths", "Configure file paths and storage"),
+            ("logging", "Configure logging — log level and file path"),
+            (
+                "telemetry",
+                "Configure OpenTelemetry tracing and analysis telemetry",
+            ),
+        ];
+
+        for (name, want) in expected {
+            let sub = cmd
+                .find_subcommand(name)
+                .unwrap_or_else(|| panic!("missing subcommand: {name}"));
+            assert_eq!(
+                sub.get_about().map(|s| s.to_string()).as_deref(),
+                Some(want),
+                "description mismatch on `tenex config {name}`"
+            );
+        }
+    }
+
+    #[test]
+    fn config_subcommands_count_matches_ts() {
+        // Spec doc 02 §2.4 / TS commands/config/index.ts:137-153 — 15
+        // subcommands attached after the NIP-46 cutover (was 16 before).
+        use clap::CommandFactory;
+        let cmd = ConfigArgs::command();
+        // Real subcommands plus the auto-generated `help`.
+        let names: Vec<&str> = cmd
+            .get_subcommands()
+            .map(|s| s.get_name())
+            .filter(|n| *n != "help")
+            .collect();
+        assert_eq!(names.len(), 15, "got: {names:?}");
+    }
+
+    #[test]
+    fn config_dispatch_value_for_each_variant_matches_ts_subcommand_name() {
+        // For every variant, dispatch_value() must equal the same name
+        // clap registers so `tenex config <name>` and the section-menu
+        // dispatch path use the exact same dispatcher branch.
+        let cases = [
+            (ConfigCommand::Providers, "providers"),
+            (ConfigCommand::Llm, "llm"),
+            (ConfigCommand::Roles, "roles"),
+            (ConfigCommand::Embed, "embed"),
+            (ConfigCommand::Escalation, "escalation"),
+            (ConfigCommand::Intervention, "intervention"),
+            (ConfigCommand::Telegram, "telegram"),
+            (ConfigCommand::Relays, "relays"),
+            (ConfigCommand::Summarization, "summarization"),
+            (ConfigCommand::ContextManagement, "context-management"),
+            (ConfigCommand::Identity, "identity"),
+            (ConfigCommand::SystemPrompt, "system-prompt"),
+            (ConfigCommand::Paths, "paths"),
+            (ConfigCommand::Logging, "logging"),
+            (ConfigCommand::Telemetry, "telemetry"),
+        ];
+        for (variant, expected_name) in cases {
+            assert_eq!(variant.dispatch_value(), expected_name);
+        }
     }
 
     #[test]
