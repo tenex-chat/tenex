@@ -134,6 +134,91 @@ pub fn parse_cache_bytes(bytes: &[u8]) -> serde_json::Result<CacheData> {
     serde_json::from_slice(bytes)
 }
 
+/// Mirror `resolveModelData` (`models-dev-cache.ts:240-271`).
+///
+/// Three-step lookup against a parsed [`ModelsDevResponse`]:
+///
+/// 1. **Direct lookup** — map TENEX provider via [`map_to_models_dev_provider`]
+///    and look up the model under that provider's section.
+/// 2. **Vendor-prefix split** — when `model` contains `/`, treat the
+///    prefix as a vendor and look up the bare model under that vendor.
+///    (Used by OpenRouter-style IDs like `anthropic/claude-3.5-sonnet`.)
+/// 3. **Global scan** — last-resort linear scan across every provider
+///    in the cache for an exact model-ID match.
+///
+/// Returns `(resolved_model_id, model_data)`. The resolved ID may differ
+/// from the input — when step 2 fires it's the bare model after the
+/// vendor prefix.
+pub fn resolve_model_data<'a>(
+    cache: &'a ModelsDevResponse,
+    provider: &str,
+    model: &str,
+) -> Option<(String, &'a ModelsDevModel)> {
+    // 1. Direct lookup in the mapped provider section.
+    if let Some(models_dev_provider) = map_to_models_dev_provider(provider) {
+        if let Some(provider_data) = cache.get(models_dev_provider) {
+            if let Some(data) = provider_data.models.get(model) {
+                return Some((model.to_owned(), data));
+            }
+        }
+    }
+
+    // 2. Vendor-prefix split (`vendor/bare`).
+    if let Some(slash_idx) = model.find('/') {
+        let vendor = &model[..slash_idx];
+        let bare_model = &model[slash_idx + 1..];
+        if let Some(vendor_data) = cache.get(vendor) {
+            if let Some(data) = vendor_data.models.get(bare_model) {
+                return Some((bare_model.to_owned(), data));
+            }
+        }
+    }
+
+    // 3. Global scan: search every provider for a matching model ID.
+    for section in cache.values() {
+        if let Some(data) = section.models.get(model) {
+            return Some((model.to_owned(), data));
+        }
+    }
+
+    None
+}
+
+/// Mirror `getModelInfo` (`models-dev-cache.ts:294-306`).
+///
+/// Wraps [`resolve_model_data`] and assembles a `ModelsDevModel` whose
+/// `id` and `name` fall back to the resolved model ID when the
+/// underlying data has empty values (TS uses `data.id ?? modelId` /
+/// `data.name ?? modelId` — `??` matches `None`-or-empty for `String`
+/// here since serde gives us `String::new()` for missing strings).
+pub fn get_model_info(
+    cache: &ModelsDevResponse,
+    provider: &str,
+    model: &str,
+) -> Option<ModelsDevModel> {
+    let (resolved_id, data) = resolve_model_data(cache, provider, model)?;
+    let id = if data.id.is_empty() { resolved_id.clone() } else { data.id.clone() };
+    let name = if data.name.is_empty() { resolved_id } else { data.name.clone() };
+    Some(ModelsDevModel {
+        id,
+        name,
+        cost: data.cost.clone(),
+        limit: data.limit.clone(),
+        last_updated: data.last_updated.clone(),
+    })
+}
+
+/// Mirror `getContextWindowFromModelsdev` (`models-dev-cache.ts:311-314`).
+/// Convenience getter for the context limit when present.
+pub fn context_window(
+    cache: &ModelsDevResponse,
+    provider: &str,
+    model: &str,
+) -> Option<u64> {
+    let (_, data) = resolve_model_data(cache, provider, model)?;
+    data.limit.as_ref().map(|l| l.context)
+}
+
 /// Serialise a `CacheData` for disk writing. Mirrors `writeJsonFile` —
 /// pretty-printed with no trailing newline (matches the TS
 /// `JSON.stringify(data, null, 2)` shape used elsewhere in the port).
@@ -316,5 +401,118 @@ mod tests {
         assert!(!s.contains("cost"));
         assert!(!s.contains("limit"));
         assert!(!s.contains("last_updated"));
+    }
+
+    // ── resolve_model_data + get_model_info ─────────────────────────────
+
+    fn build_cache(entries: &[(&str, &str, ModelsDevModel)]) -> ModelsDevResponse {
+        let mut out: ModelsDevResponse = BTreeMap::new();
+        for (provider, model_id, data) in entries {
+            let entry = out
+                .entry((*provider).to_owned())
+                .or_insert_with(ProviderModels::default);
+            entry.models.insert((*model_id).to_owned(), data.clone());
+        }
+        out
+    }
+
+    fn model(id: &str, ctx: u64, input_cost: f64) -> ModelsDevModel {
+        ModelsDevModel {
+            id: id.into(),
+            name: id.into(),
+            cost: Some(ModelCost {
+                input: input_cost,
+                output: input_cost * 5.0,
+            }),
+            limit: Some(ModelLimits {
+                context: ctx,
+                output: 4096,
+            }),
+            last_updated: None,
+        }
+    }
+
+    #[test]
+    fn resolve_direct_lookup_via_provider_mapping() {
+        // anthropic → models.dev "anthropic" section.
+        let cache = build_cache(&[("anthropic", "claude-sonnet-4-6", model("claude-sonnet-4-6", 200_000, 3.0))]);
+        let resolved = resolve_model_data(&cache, "anthropic", "claude-sonnet-4-6").unwrap();
+        assert_eq!(resolved.0, "claude-sonnet-4-6");
+        assert_eq!(resolved.1.limit.as_ref().unwrap().context, 200_000);
+    }
+
+    #[test]
+    fn resolve_vendor_slash_split_for_openrouter_style_ids() {
+        // Model ID "anthropic/claude-3.5-sonnet" — first lookup misses
+        // because the ID isn't in openrouter's section, then vendor
+        // split finds it under "anthropic".
+        let cache = build_cache(&[(
+            "anthropic",
+            "claude-3.5-sonnet",
+            model("claude-3.5-sonnet", 200_000, 3.0),
+        )]);
+        let resolved =
+            resolve_model_data(&cache, "openrouter", "anthropic/claude-3.5-sonnet").unwrap();
+        // The resolved id is the *bare* model after the slash strip.
+        assert_eq!(resolved.0, "claude-3.5-sonnet");
+    }
+
+    #[test]
+    fn resolve_global_scan_when_provider_section_missing() {
+        // Cache has only "openai" but caller looks up via an unknown
+        // provider — global scan finds the model under "openai".
+        let cache = build_cache(&[("openai", "gpt-4o", model("gpt-4o", 128_000, 2.5))]);
+        let resolved = resolve_model_data(&cache, "totally-unknown", "gpt-4o").unwrap();
+        assert_eq!(resolved.0, "gpt-4o");
+    }
+
+    #[test]
+    fn resolve_returns_none_for_truly_missing_model() {
+        let cache = build_cache(&[("anthropic", "claude-sonnet-4-6", model("claude-sonnet-4-6", 200_000, 3.0))]);
+        assert!(resolve_model_data(&cache, "openai", "gpt-4o").is_none());
+        assert!(resolve_model_data(&cache, "anthropic", "missing-model").is_none());
+    }
+
+    #[test]
+    fn resolve_local_provider_falls_through_to_global_scan() {
+        // ollama maps to None in the provider mapping → step 1 skipped.
+        // The model ID also has no slash → step 2 skipped. Step 3
+        // global-scans and may find a match.
+        let cache = build_cache(&[("anthropic", "claude-sonnet-4-6", model("claude-sonnet-4-6", 200_000, 3.0))]);
+        let resolved = resolve_model_data(&cache, "ollama", "claude-sonnet-4-6").unwrap();
+        assert_eq!(resolved.0, "claude-sonnet-4-6");
+    }
+
+    #[test]
+    fn get_model_info_falls_back_to_resolved_id_when_data_id_empty() {
+        // Construct a model with an empty `id` field — get_model_info
+        // should populate id+name from the resolved key.
+        let mut empty_id_model = model("ignored", 100_000, 1.0);
+        empty_id_model.id = String::new();
+        empty_id_model.name = String::new();
+        let cache = build_cache(&[("anthropic", "claude-x", empty_id_model)]);
+        let info = get_model_info(&cache, "anthropic", "claude-x").unwrap();
+        assert_eq!(info.id, "claude-x");
+        assert_eq!(info.name, "claude-x");
+    }
+
+    #[test]
+    fn context_window_returns_limit_context_when_present() {
+        let cache = build_cache(&[("anthropic", "claude-x", model("claude-x", 200_000, 3.0))]);
+        assert_eq!(context_window(&cache, "anthropic", "claude-x"), Some(200_000));
+    }
+
+    #[test]
+    fn context_window_returns_none_when_model_missing() {
+        let cache = ModelsDevResponse::new();
+        assert_eq!(context_window(&cache, "anthropic", "claude-x"), None);
+    }
+
+    #[test]
+    fn context_window_returns_none_when_limit_field_absent() {
+        let mut no_limit = model("claude-x", 0, 3.0);
+        no_limit.limit = None;
+        let cache = build_cache(&[("anthropic", "claude-x", no_limit)]);
+        assert_eq!(context_window(&cache, "anthropic", "claude-x"), None);
     }
 }

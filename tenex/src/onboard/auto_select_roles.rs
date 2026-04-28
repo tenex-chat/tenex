@@ -51,6 +51,50 @@ impl ModelInfoSource for EmptyModelInfoSource {
     }
 }
 
+/// `ModelInfoSource` backed by an in-memory `models.dev` cache (a parsed
+/// [`crate::store::models_dev::ModelsDevResponse`]).
+///
+/// Mirrors the TS path in `commands/config/roles.ts:34-83` →
+/// `getModelInfo(provider, model)` (`models-dev-cache.ts:294-306`),
+/// which wraps `resolveModelData`'s 3-step lookup. We adapt that to the
+/// scoring-side `ModelInfo` shape (input cost + context window only).
+///
+/// Construct from a parsed `ModelsDevResponse`:
+///
+/// ```ignore
+/// let bytes = std::fs::read(cache_path)?;
+/// let cache: CacheData = parse_cache_bytes(&bytes)?;
+/// let source = ModelsDevSource::new(&cache.data);
+/// auto_select_roles(&doc, &source);
+/// ```
+///
+/// Returns `None` whenever the cache lacks the model OR the model entry
+/// is missing either `cost.input` or `limit.context` (the two fields the
+/// scorer needs). That matches the TS guards at
+/// `models-dev-cache.ts:284-287` and `roles.ts:46-47`.
+pub struct ModelsDevSource<'a> {
+    cache: &'a crate::store::models_dev::ModelsDevResponse,
+}
+
+impl<'a> ModelsDevSource<'a> {
+    pub fn new(cache: &'a crate::store::models_dev::ModelsDevResponse) -> Self {
+        Self { cache }
+    }
+}
+
+impl ModelInfoSource for ModelsDevSource<'_> {
+    fn info(&self, provider: &str, model: &str) -> Option<ModelInfo> {
+        let (_, data) =
+            crate::store::models_dev::resolve_model_data(self.cache, provider, model)?;
+        let cost = data.cost.as_ref()?;
+        let limit = data.limit.as_ref()?;
+        Some(ModelInfo {
+            input_cost: cost.input,
+            context_window: limit.context,
+        })
+    }
+}
+
 #[derive(Debug, Clone)]
 struct ScoredConfig {
     name: String,
@@ -389,5 +433,116 @@ mod tests {
             doc.summarization().is_some() || doc.supervision().is_some(),
             "expected at least one role assigned",
         );
+    }
+
+    // ── ModelsDevSource adapter ─────────────────────────────────────────
+
+    #[test]
+    fn models_dev_source_returns_info_when_cache_has_cost_and_context() {
+        use crate::store::models_dev::{
+            ModelCost, ModelLimits, ModelsDevModel, ModelsDevResponse, ProviderModels,
+        };
+        use std::collections::BTreeMap;
+
+        let mut cache: ModelsDevResponse = BTreeMap::new();
+        let mut models = BTreeMap::new();
+        models.insert(
+            "claude-sonnet-4-6".to_owned(),
+            ModelsDevModel {
+                id: "claude-sonnet-4-6".into(),
+                name: "Claude Sonnet 4.6".into(),
+                cost: Some(ModelCost {
+                    input: 3.0,
+                    output: 15.0,
+                }),
+                limit: Some(ModelLimits {
+                    context: 200_000,
+                    output: 8192,
+                }),
+                last_updated: None,
+            },
+        );
+        cache.insert("anthropic".into(), ProviderModels { models });
+
+        let source = ModelsDevSource::new(&cache);
+        let info = source.info("anthropic", "claude-sonnet-4-6").unwrap();
+        assert_eq!(info.input_cost, 3.0);
+        assert_eq!(info.context_window, 200_000);
+    }
+
+    #[test]
+    fn models_dev_source_returns_none_when_model_missing() {
+        use crate::store::models_dev::ModelsDevResponse;
+        let cache = ModelsDevResponse::new();
+        let source = ModelsDevSource::new(&cache);
+        assert!(source.info("anthropic", "missing").is_none());
+    }
+
+    #[test]
+    fn models_dev_source_returns_none_when_cost_field_absent() {
+        // TS `getModelLimits` returns undefined when cost or limit
+        // fields are missing. Mirror that here.
+        use crate::store::models_dev::{
+            ModelLimits, ModelsDevModel, ModelsDevResponse, ProviderModels,
+        };
+        use std::collections::BTreeMap;
+
+        let mut cache: ModelsDevResponse = BTreeMap::new();
+        let mut models = BTreeMap::new();
+        models.insert(
+            "no-cost".to_owned(),
+            ModelsDevModel {
+                id: "no-cost".into(),
+                name: "no-cost".into(),
+                cost: None,
+                limit: Some(ModelLimits {
+                    context: 1000,
+                    output: 100,
+                }),
+                last_updated: None,
+            },
+        );
+        cache.insert("anthropic".into(), ProviderModels { models });
+
+        let source = ModelsDevSource::new(&cache);
+        assert!(source.info("anthropic", "no-cost").is_none());
+    }
+
+    #[test]
+    fn models_dev_source_resolves_via_vendor_slash_split() {
+        // OpenRouter-style ID: "anthropic/claude-sonnet-4-6". The
+        // direct lookup (in the openrouter section) misses; the vendor
+        // split matches the "anthropic" section.
+        use crate::store::models_dev::{
+            ModelCost, ModelLimits, ModelsDevModel, ModelsDevResponse, ProviderModels,
+        };
+        use std::collections::BTreeMap;
+
+        let mut cache: ModelsDevResponse = BTreeMap::new();
+        let mut models = BTreeMap::new();
+        models.insert(
+            "claude-sonnet-4-6".to_owned(),
+            ModelsDevModel {
+                id: "claude-sonnet-4-6".into(),
+                name: "Claude Sonnet 4.6".into(),
+                cost: Some(ModelCost {
+                    input: 3.0,
+                    output: 15.0,
+                }),
+                limit: Some(ModelLimits {
+                    context: 200_000,
+                    output: 8192,
+                }),
+                last_updated: None,
+            },
+        );
+        cache.insert("anthropic".into(), ProviderModels { models });
+
+        let source = ModelsDevSource::new(&cache);
+        let info = source
+            .info("openrouter", "anthropic/claude-sonnet-4-6")
+            .unwrap();
+        assert_eq!(info.input_cost, 3.0);
+        assert_eq!(info.context_window, 200_000);
     }
 }
