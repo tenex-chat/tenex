@@ -166,9 +166,9 @@ async fn main() -> Result<()> {
                 .unwrap_or_else(|_| ".".to_string())
         });
 
-    // Open project DB and load context used for prompts + delegate tool.
+    // Open project and load context used for prompts + delegate tool.
     let project = Project::open_default(&project_id)
-        .with_context(|| format!("Failed to open project DB for '{project_id}'"))?;
+        .with_context(|| format!("Failed to open project for '{project_id}'"))?;
     let project_meta = project
         .metadata()
         .context("Failed to read project metadata")?
