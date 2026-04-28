@@ -1,6 +1,6 @@
 # TENEX Rust Adoption Status
 
-_Last updated: 2026-04-28 (second pass). Auto-maintained by scheduled debt check._
+_Last updated: 2026-04-28 (third pass). Auto-maintained by scheduled debt check._
 
 ---
 
@@ -24,9 +24,10 @@ The Rust port is underway crate by crate. The TypeScript daemon still owns per-p
 | `tenex-context` | lib | — | Conversation projection + compaction/decay/reminder strategies |
 | `tenex-conversations` | lib | — | Per-project SQLite conversation store |
 | `tenex-llm-config` | lib | — | LLM config resolver + NDJSON Unix-socket IPC server |
-| `tenex-project` | lib | — | Per-project SQLite state (agents, skills, MCP, allowlists) |
+| `tenex-project` | lib | — | Per-project SQLite state (agents, skills, MCP, allowlists, teams) |
 | `tenex-protocol` | lib | — | Transport-agnostic agent intents + Nostr/stdin channel adapters |
 | `tenex-rag` | lib | — | RAG: SQLite vector store + embedding client |
+| `tenex-supervision` | lib | — | Post-completion and pre-tool heuristics (todo nudging, re-engagement, delegation gating) |
 | `tenex-system-prompt` | lib | — | Pure system-prompt assembly from identity + project + skills |
 
 ---
@@ -72,6 +73,8 @@ Spawned by `tenex runtime` per conversation turn via `tenex-agent <agent.json>` 
 - Completion event emission over Nostr (stdout NDJSON)
 - LLM config resolution from `~/.tenex/llms.json` + `~/.tenex/providers.json`
 - Teams support: loads `teams.json`, renders `<teams-context>` fragment, routes delegation by team name
+- Agent home directory: per-agent `~/.tenex/home/<pubkey8>/` with `.env` auto-loading and `+filename` injection
+- Supervision heuristics: `tenex-supervision` drives post-completion re-engagement, todo nudging, delegation gating by category
 
 ### `tenex-protocol`
 Fully used. Defines `Intent`, `Channel`, `ConversationRef`, `ProjectRef`, Nostr encoder/decoder, stdin source, stdout NDJSON sink. Used by `tenex-agent`, `tenex-intervention`, `tenex-scheduler`, `tenex-summarizer`.
@@ -99,21 +102,23 @@ Library built. Provides `RagStore` (SQLite + vector search) + `EmbedConfig` load
 
 | Crate | Status | Notes |
 |-------|--------|-------|
-| `tenex-context` | Built, not integrated | Projection + compaction/decay strategies exist. Not yet used by `tenex-agent` — agent builds messages ad-hoc. Should replace agent's prompt-building with this library. |
-| `tenex-system-prompt` | Built, not integrated | Pure system-prompt assembly. `tenex-agent` currently has its own `prompt.rs` that builds prompts inline. Should migrate to use this crate. |
-| `tenex-conversations` | Built, not integrated | Full SQLite conversation store. `tenex-agent` does NOT persist conversation history to it yet — each invocation is stateless. The TS layer owns the conversation DB currently. |
+| `tenex-context` | Built, not integrated | Projection + compaction/decay strategies exist. Not yet used by `tenex-agent` — agent builds messages ad-hoc. |
+| `tenex-system-prompt` | Built, not integrated | Pure system-prompt assembly. `tenex-agent` has its own `prompt.rs`. Should migrate. |
+| `tenex-conversations` | **Now wired into `tenex runtime`** | `tenex runtime` opens the conversation store and passes it to the agent runner. `tenex-agent` itself still doesn't persist history (stateless per-invocation). |
 
 ---
 
 ## Compilation Status
 
-**As of 2026-04-28 (second debt check pass): workspace compiles clean — zero errors.**
+**As of 2026-04-28 (third debt check pass): workspace compiles clean — zero errors.**
 
-Issues found and resolved this pass:
+Resolved this pass:
 - `tenex-summarizer`: schemars 0.8→1, `nostr::types::Kind`→`nostr::Kind`
-- `tenex-agent`: `ProvidersConfig` removed (→ `load_providers_config()`), RAG tools + teams wired into agent
-- `tenex runtime`: `client.disconnect().await?` — returns `()`, `?` removed
-- `tenex-daemon`: switched default boot from `bun run src/boot.ts` to `tenex runtime <d-tag>`
+- `tenex-agent`: ProvidersConfig removed, RAG + teams + home dir + supervision wired in
+- `tenex runtime`: conversation persistence wired (`tenex-conversations`), `.await?` on `disconnect()` removed
+- `tenex-daemon`: now defaults to `tenex runtime <d-tag>` as boot command
+- `tenex-supervision`: new crate providing post-completion heuristics
+- `tenex-scheduler`: subcommand now optional (defaults to `run`)
 
 ---
 
@@ -140,7 +145,7 @@ The Rust runtime (`tenex runtime`) currently handles:
 
 Still missing from `tenex runtime` before full TS retirement:
 - RAL (Resource Acquisition Lock) — prevents concurrent agents in same conversation
-- Conversation persistence — `tenex-conversations` not yet wired in
+- ~~Conversation persistence~~ ✓ `tenex-conversations` now wired in
 - Context management — `tenex-context` strategies not yet applied
 
 ---
@@ -150,7 +155,7 @@ Still missing from `tenex runtime` before full TS retirement:
 1. ~~**Immediate**: Fix compilation errors in `tenex-agent` and `tenex-summarizer`~~ ✓ Done 2026-04-28
 2. ~~**Near-term**: Switch daemon supervisor from `bun run src/boot.ts` to `tenex runtime`~~ ✓ Done 2026-04-28
 3. **Now**: Add RAL to `tenex runtime` — single-writer lock per conversation, queue or reject concurrent triggers
-4. **Now**: Wire `tenex-conversations` into `tenex runtime` so conversation history is available across turns
+4. ~~**Now**: Wire `tenex-conversations` into `tenex runtime`~~ ✓ Done 2026-04-28
 5. **Near-term**: Wire `tenex-context` into `tenex-agent` for context window management (compaction/decay)
 6. **Near-term**: Wire `tenex-system-prompt` into `tenex-agent` (replace inline `prompt.rs`)
 7. **Longer-term**: Retire `bun run src/boot.ts` and all TypeScript orchestration
