@@ -40,6 +40,22 @@ pub enum LlmEditorResult {
 
 /// Run the editor against `<base_dir>/llms.json` until the user exits.
 pub fn run(base_dir: &std::path::Path) -> Result<LlmEditorResult> {
+    // Pre-menu rendering on first entry: blank line, step header, and
+    // the "Configured Providers" block. Mirrors TS at
+    // `LLMConfigEditor.ts:185-187` —
+    //   display.blank();
+    //   display.step(0, 0, 'LLM Configuration');
+    //   displayProviders(llmsConfig);
+    // The TS source runs this once at the start of `showMainMenu()`,
+    // before its recursion into the action handler. The rust port's
+    // loop reload-then-prompts so we render this header on each
+    // iteration to mirror the recursion's effect.
+    let providers = crate::store::providers::ProvidersDoc::load(base_dir)
+        .with_context(|| format!("loading providers.json from {}", base_dir.display()))?;
+    display::blank();
+    display::step(0, 0, "LLM Configuration");
+    display_providers(&providers);
+
     loop {
         let doc = LlmsDoc::load(base_dir)
             .with_context(|| format!("loading llms.json from {}", base_dir.display()))?;
@@ -47,7 +63,8 @@ pub fn run(base_dir: &std::path::Path) -> Result<LlmEditorResult> {
         let actions = action_items();
 
         let result = llm_menu_prompt(
-            "LLM configurations:",
+            // TS LLMConfigEditor.ts:215 — `message: "Configurations"`.
+            "Configurations",
             &actions,
             &items,
             Some(|_name: &str| TestResult {
@@ -139,6 +156,34 @@ pub fn build_items(doc: &LlmsDoc) -> Vec<ConfigItem> {
             }
         })
         .collect()
+}
+
+/// Mirror `displayProviders` (`src/llm/utils/ProviderConfigUI.ts:26-42`).
+///
+/// Renders the "Configured Providers" header, one row per configured
+/// provider (display name via [`crate::store::provider_ids::provider_display_name`]),
+/// or `chalk.gray("  None configured")` when nothing is configured;
+/// trailing blank line.
+///
+/// Filtering matches the TS `hasApiKey(key) || key === "none"` rule —
+/// reusing [`crate::store::providers::ProvidersDoc::configured_provider_ids`]
+/// which already encapsulates that filter.
+fn display_providers(providers: &crate::store::providers::ProvidersDoc) {
+    crate::tui::display::context("Configured Providers");
+    let configured = providers.configured_provider_ids();
+    if configured.is_empty() {
+        // TS uses `chalk.gray("  None configured")` — leading 2-space
+        // indent inside the gray wrap. Mirror with the muted-gray
+        // style and the same indent.
+        let gray = console::Style::new().color256(244);
+        println!("{}", gray.apply_to("  None configured"));
+    } else {
+        for pid in &configured {
+            let label = crate::store::provider_ids::provider_display_name(pid);
+            crate::tui::display::success(label);
+        }
+    }
+    crate::tui::display::blank();
 }
 
 /// Detail-string formatter for the row label shown under each config.
