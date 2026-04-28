@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Mutex;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
 use clap::Parser;
@@ -16,6 +16,7 @@ use tenex_conversations::{ConversationStore, NewMessage, Project as Conversation
 use tenex_project::{Agent, Project, models::ProjectAgent};
 
 use crate::daemon::config;
+use crate::nostr_pub::{backend_signer, operations_status, project_status};
 use crate::store::resolve_base_dir;
 
 #[derive(Parser, Clone)]
@@ -87,6 +88,14 @@ pub async fn run(args: RuntimeArgs) -> Result<()> {
         .context("project metadata has no owner_pubkey")?;
     let project_addr = format!("31933:{}:{}", owner_pubkey, meta.d_tag);
 
+    let backend_keys = match backend_signer::ensure_backend_keys(&base_dir) {
+        Ok(keys) => Some(keys),
+        Err(e) => {
+            warn!(error = %e, "backend keys unavailable; status events (24010/24133) will not be published");
+            None
+        }
+    };
+
     // kind:1 events #a-tagging this project (initial messages to the project)
     let filter_a = Filter::new()
         .kind(Kind::TextNote)
@@ -116,6 +125,36 @@ pub async fn run(args: RuntimeArgs) -> Result<()> {
         .await?;
     info!("subscriptions active");
 
+    // Publish project status (kind:24010) immediately and every 30 seconds.
+    if let Some(ref keys) = backend_keys {
+        let client_status = client.clone();
+        let keys_status = keys.clone();
+        let meta_status = meta.clone();
+        let agents_status = agents.clone();
+        let pa_status = project_agents.clone();
+        let whitelist_status = cfg.whitelisted_pubkeys.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_secs(30));
+            loop {
+                interval.tick().await;
+                match project_status::build_project_status_event(
+                    &keys_status,
+                    &meta_status,
+                    &agents_status,
+                    &pa_status,
+                    &whitelist_status,
+                ) {
+                    Ok(event) => {
+                        if let Err(e) = client_status.send_event(&event).await {
+                            warn!(error = %e, "24010 publish failed");
+                        }
+                    }
+                    Err(e) => warn!(error = %e, "24010 build failed"),
+                }
+            }
+        });
+    }
+
     let agent_binary = find_agent_binary();
     // Deduplicate across the two overlapping subscriptions.
     let mut seen: HashSet<EventId> = HashSet::new();
@@ -140,9 +179,23 @@ pub async fn run(args: RuntimeArgs) -> Result<()> {
                         match select_agent(&event, &agents, &project_agents) {
                             Ok(agent) => {
                                 info!(event_id = short, agent = %agent.slug, "dispatching");
+                                let conv_id = conversation_id_from_event(&event);
                                 let agent_json = base_dir
                                     .join("agents")
                                     .join(format!("{}.json", agent.pubkey));
+
+                                if let Some(ref keys) = backend_keys {
+                                    send_operations_status(
+                                        &client,
+                                        keys,
+                                        &conv_id,
+                                        &project_addr,
+                                        &cfg.whitelisted_pubkeys,
+                                        &[agent.pubkey.as_str()],
+                                    )
+                                    .await;
+                                }
+
                                 if let Err(e) = run_agent(
                                     &client,
                                     &event,
@@ -154,6 +207,18 @@ pub async fn run(args: RuntimeArgs) -> Result<()> {
                                 .await
                                 {
                                     warn!(event_id = short, agent = %agent.slug, error = %e, "agent run failed");
+                                }
+
+                                if let Some(ref keys) = backend_keys {
+                                    send_operations_status(
+                                        &client,
+                                        keys,
+                                        &conv_id,
+                                        &project_addr,
+                                        &cfg.whitelisted_pubkeys,
+                                        &[],
+                                    )
+                                    .await;
                                 }
                             }
                             Err(e) => {
@@ -358,6 +423,30 @@ fn conversation_id_from_event(event: &Event) -> String {
     }
 
     first_unmarked.unwrap_or_else(|| event.id.to_hex())
+}
+
+async fn send_operations_status(
+    client: &Client,
+    backend_keys: &Keys,
+    conv_id: &str,
+    project_ref: &str,
+    whitelisted_pubkeys: &[String],
+    active_agent_pubkeys: &[&str],
+) {
+    match operations_status::build_operations_status_event(
+        backend_keys,
+        conv_id,
+        project_ref,
+        whitelisted_pubkeys,
+        active_agent_pubkeys,
+    ) {
+        Ok(ev) => {
+            if let Err(e) = client.send_event(&ev).await {
+                warn!(error = %e, "24133 publish failed");
+            }
+        }
+        Err(e) => warn!(error = %e, "24133 build failed"),
+    }
 }
 
 fn find_agent_binary() -> PathBuf {

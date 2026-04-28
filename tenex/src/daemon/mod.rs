@@ -129,6 +129,28 @@ pub async fn run(args: DaemonArgs) -> Result<()> {
     }
     let mut nostr_handle = nostr::run(cfg, supervisor.clone(), args.boot).await?;
 
+    // Publish the installed-agent inventory (kind:24011) immediately and then
+    // every 30 seconds so Nostr clients always have a fresh view of what agents
+    // are available on this installation.
+    {
+        let base_dir_clone = base_dir.clone();
+        tokio::spawn(async move {
+            let mut interval =
+                tokio::time::interval(std::time::Duration::from_secs(30));
+            loop {
+                interval.tick().await;
+                if let Err(e) =
+                    crate::nostr_pub::installed_agents::publish_installed_agents_inventory(
+                        &base_dir_clone,
+                    )
+                    .await
+                {
+                    tracing::warn!(error = %e, "24011 inventory publish failed");
+                }
+            }
+        });
+    }
+
     tokio::select! {
         _ = wait_for_signal() => {
             info!("shutdown signal received");

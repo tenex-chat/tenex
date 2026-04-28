@@ -17,5 +17,7 @@
 
 pub mod backend_signer;
 pub mod installed_agents;
+pub mod operations_status;
 pub mod owner_signer;
 pub mod project_mutation;
+pub mod project_status;
