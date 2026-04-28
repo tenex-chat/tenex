@@ -2,7 +2,6 @@ mod config;
 mod emit;
 mod home;
 mod hook;
-mod prompt;
 mod skills;
 mod tools;
 
@@ -11,8 +10,11 @@ use config::{LlmsConfig, ResolvedModel};
 use emit::{AgentMeta, EmitState};
 use hook::EmitHook;
 use rig::client::{CompletionClient, Nothing};
+use rig::completion::{AssistantContent, Message as RigMessage};
+use rig::completion::message::{ToolResult, ToolResultContent, UserContent};
 use rig::providers::{anthropic, ollama, openai, openrouter};
 use std::sync::{Arc, Mutex};
+use tenex_context::{CacheObservation, Message as CtxMessage, ModelProfile, ToolDef, TurnRecord};
 use tenex_conversations::{AgentContextState, ConversationStore};
 use tenex_project::Project;
 use tenex_rag::{EmbedConfig, RagStore};
@@ -23,6 +25,7 @@ use tenex_protocol::{
     Channel, ConversationIntent, ConversationRef, Intent, LlmUsage, MessageRef, PrincipalRef,
     ProjectRef,
 };
+use rig::OneOrMany;
 use rig::tool::ToolDyn;
 use tools::{
     AskTool, DelegateCrossProjectTool, DelegateFollowupTool, DelegateTool,
@@ -33,14 +36,65 @@ use tools::{
     SkillsSetTool, TodoItem, TodoWriteTool,
 };
 
+/// Convert a `tenex_context::Message` to `rig::completion::Message` for passing
+/// as history to `stream_chat`.
+///
+/// System messages are excluded at the call site (preamble handles them).
+/// ToolResult messages are excluded until `tenex-context` projection captures
+/// tool_calls on assistant records — without paired tool_calls, providers reject
+/// the sequence with a 400.
+fn ctx_msg_to_rig(msg: CtxMessage) -> RigMessage {
+    use rig::completion::message::{Text, ToolCall as RigToolCall, ToolFunction};
+
+    match msg {
+        CtxMessage::System { content } => RigMessage::System { content },
+        CtxMessage::User { content } => RigMessage::User {
+            content: OneOrMany::one(UserContent::Text(Text { text: content })),
+        },
+        CtxMessage::Assistant { content, tool_calls } => {
+            let mut parts: Vec<AssistantContent> = Vec::new();
+            if !content.is_empty() {
+                parts.push(AssistantContent::Text(Text { text: content }));
+            }
+            for tc in tool_calls {
+                parts.push(AssistantContent::ToolCall(RigToolCall::new(
+                    tc.id,
+                    ToolFunction::new(tc.name, tc.arguments),
+                )));
+            }
+            if parts.is_empty() {
+                parts.push(AssistantContent::Text(Text { text: String::new() }));
+            }
+            let content = if parts.len() == 1 {
+                OneOrMany::one(parts.remove(0))
+            } else {
+                OneOrMany::many(parts)
+                    .unwrap_or_else(|_| OneOrMany::one(AssistantContent::Text(Text { text: String::new() })))
+            };
+            RigMessage::Assistant { id: None, content }
+        }
+        CtxMessage::ToolResult { tool_call_id, content, .. } => {
+            RigMessage::User {
+                content: OneOrMany::one(UserContent::ToolResult(ToolResult {
+                    id: tool_call_id,
+                    call_id: None,
+                    content: OneOrMany::one(ToolResultContent::Text(
+                        rig::completion::message::Text { text: content },
+                    )),
+                })),
+            }
+        }
+    }
+}
+
 /// Build and run the agent with all tools attached, streaming the response.
 /// Returns a `rig::agent::FinalResponse` containing the final turn text and
 /// aggregated token usage across all turns.
 /// $delegate is Option<DelegateTool> — None for categories that cannot delegate.
 macro_rules! run_agent {
-    ($client:expr, $model:expr, $system:expr, $message:expr, $wd:expr, $env:expr, $todos:expr, $hook:expr, $delegate:expr, $rag_add_docs:expr, $rag_search:expr, $skill_list:expr, $skills_set:expr, $fs_tools:expr, $extra_tools:expr) => {{
+    ($client:expr, $model:expr, $system:expr, $message:expr, $history:expr, $wd:expr, $env:expr, $todos:expr, $hook:expr, $delegate:expr, $rag_add_docs:expr, $rag_search:expr, $skill_list:expr, $skills_set:expr, $fs_tools:expr, $extra_tools:expr) => {{
         use ::futures::StreamExt as _;
-        use ::rig::streaming::StreamingPrompt as _;
+        use ::rig::streaming::StreamingChat as _;
 
         let __base = $client
             .agent($model)
@@ -64,7 +118,7 @@ macro_rules! run_agent {
             .tool($rag_search)
             .tools($extra_tools)
             .build()
-            .stream_prompt($message)
+            .stream_chat($message, $history)
             .with_hook($hook)
             .await;
 
@@ -277,7 +331,7 @@ async fn main() -> Result<()> {
         d_tag: project_meta.d_tag.clone(),
     };
 
-    // Open the conversation store for todo persistence.
+    // Open the conversation store for todo persistence and history projection.
     let conversation_id = match &envelope.root {
         MessageRef::Nostr { event_id } => event_id.to_hex(),
     };
@@ -356,7 +410,7 @@ async fn main() -> Result<()> {
 
     let injected_files = home::get_injected_files(&agent_home);
     let file_count = home::count_home_files(&agent_home);
-    let home_info = prompt::HomeDirectoryInfo {
+    let home_info = tenex_system_prompt::HomeDirectoryInfo {
         home_dir: &agent_home.display().to_string(),
         file_count: &file_count,
         injected_files: &injected_files,
@@ -398,8 +452,6 @@ async fn main() -> Result<()> {
     let preloaded_skills = skills::fetch_skills(&all_skill_ids, &skill_ctx);
 
     // Determine which fs_* tools are granted via skill frontmatter (tools: field).
-    // Mirrors the TypeScript HOME_FS_FALLBACKS pattern: any fs_* tool not granted
-    // will fall back to the equivalent home_fs_* variant scoped to agent home dir.
     let granted_tools: std::collections::HashSet<String> = preloaded_skills
         .iter()
         .filter_map(|s| s.frontmatter.as_ref())
@@ -426,9 +478,12 @@ async fn main() -> Result<()> {
         Arc::new(Mutex::new(initial_self_applied));
 
     // Build system prompt
-    let mut system_prompt = prompt::build_system_prompt(
-        &agent_config,
+    let mut system_prompt = tenex_system_prompt::build_system_prompt(
+        agent_config.identity_name(),
         &pubkey_hex,
+        agent_config.category.as_deref(),
+        agent_config.resolved_category(),
+        agent_config.instructions.as_deref(),
         &working_dir,
         Some(&project_meta),
         &project_agents,
@@ -485,8 +540,7 @@ async fn main() -> Result<()> {
     let skill_list_tool = SkillListTool::new(skill_ctx.clone());
     let skills_set_tool = SkillsSetTool::new(skill_ctx.clone(), self_applied_skills.clone());
 
-    // Initialize RAG store for the embedding tools. If embedding is not configured
-    // or initialization fails, the tools remain available but return an error message.
+    // Initialize RAG store for the embedding tools.
     let rag_store: Option<Arc<RagStore>> = (|| -> Option<Arc<RagStore>> {
         let embed_config = EmbedConfig::load()?;
         let base_dir = dirs_next::home_dir()?.join(".tenex");
@@ -540,7 +594,50 @@ async fn main() -> Result<()> {
         }
     }
 
-    eprintln!("[tenex-agent] Running agent...");
+    // Project conversation history. Filters out System (handled by preamble) and
+    // ToolResult messages (excluded until projection captures tool_calls on assistant
+    // records — without paired tool_calls providers reject the sequence).
+    let history: Vec<RigMessage> = conv_store
+        .as_ref()
+        .and_then(|store| {
+            let model_profile = ModelProfile {
+                provider: resolved.provider.clone(),
+                model_id: resolved.model.clone(),
+                prompt_cache: resolved.provider == "anthropic",
+                ephemeral_reminders: false,
+                image_support: false,
+                max_context_tokens: 200_000,
+            };
+            let tool_defs: Vec<ToolDef> = Vec::new();
+            match tenex_context::project(
+                store,
+                &conversation_id,
+                &pubkey_hex,
+                &system_prompt,
+                &model_profile,
+                &tool_defs,
+            ) {
+                Ok(projection) => {
+                    let msgs: Vec<RigMessage> = projection
+                        .messages
+                        .into_iter()
+                        .filter(|m| !matches!(
+                            m,
+                            CtxMessage::System { .. } | CtxMessage::ToolResult { .. }
+                        ))
+                        .map(ctx_msg_to_rig)
+                        .collect();
+                    Some(msgs)
+                }
+                Err(e) => {
+                    eprintln!("[tenex-agent] Context projection failed: {e}");
+                    None
+                }
+            }
+        })
+        .unwrap_or_default();
+
+    eprintln!("[tenex-agent] Running agent (history: {} messages)...", history.len());
 
     let agent_home_str = agent_home.display().to_string();
 
@@ -559,6 +656,7 @@ async fn main() -> Result<()> {
                 &resolved.model,
                 &system_prompt,
                 &user_message,
+                history,
                 working_dir,
                 shell_env,
                 todos,
@@ -582,6 +680,7 @@ async fn main() -> Result<()> {
                 &resolved.model,
                 &system_prompt,
                 &user_message,
+                history,
                 working_dir,
                 shell_env,
                 todos,
@@ -606,6 +705,7 @@ async fn main() -> Result<()> {
                 &resolved.model,
                 &system_prompt,
                 &user_message,
+                history,
                 working_dir,
                 shell_env,
                 todos,
@@ -634,6 +734,7 @@ async fn main() -> Result<()> {
                 &resolved.model,
                 &system_prompt,
                 &user_message,
+                history,
                 working_dir,
                 shell_env,
                 todos,
@@ -660,6 +761,30 @@ async fn main() -> Result<()> {
             &final_todos,
             &final_skills,
         );
+    }
+
+    // Record this turn's messages into the conversation store for future history projection.
+    if let Some(ref store) = conv_store {
+        let stream_usage = final_response.usage();
+        let turn = TurnRecord {
+            messages_visible: vec![
+                CtxMessage::User { content: envelope.content.clone() },
+                CtxMessage::Assistant {
+                    content: final_response.response().to_string(),
+                    tool_calls: Vec::new(),
+                },
+            ],
+            reminders_applied: Vec::new(),
+            compaction_decisions: Vec::new(),
+            cache_observed: CacheObservation {
+                hit_tokens: stream_usage.cached_input_tokens as u64,
+                miss_tokens: 0,
+                written_tokens: 0,
+            },
+        };
+        if let Err(e) = tenex_context::record_turn(store, &conversation_id, &pubkey_hex, turn) {
+            eprintln!("[tenex-agent] Failed to record turn: {e}");
+        }
     }
 
     eprintln!("[tenex-agent] Agent completed.");

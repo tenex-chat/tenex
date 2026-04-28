@@ -2883,12 +2883,14 @@ dependencies = [
  "rig-core",
  "serde",
  "serde_json",
+ "tenex-context",
  "tenex-conversations",
  "tenex-llm-config",
  "tenex-project",
  "tenex-protocol",
  "tenex-rag",
  "tenex-supervision",
+ "tenex-system-prompt",
  "thiserror 2.0.18",
  "tokio",
  "walkdir",
@@ -3072,6 +3074,10 @@ version = "0.1.0"
 [[package]]
 name = "tenex-system-prompt"
 version = "0.1.0"
+dependencies = [
+ "tenex-project",
+ "tenex-supervision",
+]
 
 [[package]]
 name = "tenex-whitelist"

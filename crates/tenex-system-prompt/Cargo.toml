@@ -9,3 +9,5 @@ name = "tenex_system_prompt"
 path = "src/lib.rs"
 
 [dependencies]
+tenex-project = { path = "../tenex-project" }
+tenex-supervision = { path = "../tenex-supervision" }

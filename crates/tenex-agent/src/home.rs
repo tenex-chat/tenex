@@ -4,14 +4,10 @@ use std::io::Write;
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 
+pub use tenex_system_prompt::InjectedFile;
+
 const MAX_INJECTED_FILES: usize = 10;
 const MAX_INJECTED_FILE_LENGTH: usize = 1500;
-
-pub struct InjectedFile {
-    pub filename: String,
-    pub content: String,
-    pub truncated: bool,
-}
 
 pub fn agent_home_dir(base_dir: &Path, pubkey_hex: &str) -> PathBuf {
     base_dir.join("home").join(&pubkey_hex[..8.min(pubkey_hex.len())])
