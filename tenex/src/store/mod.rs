@@ -22,6 +22,7 @@ pub mod atomic;
 pub mod embed;
 pub mod llms;
 pub mod mcp;
+pub mod conversation_disk_reader;
 pub mod project_members;
 pub mod project_mutation;
 pub mod providers;
