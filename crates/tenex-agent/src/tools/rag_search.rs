@@ -71,6 +71,7 @@ impl Tool for RagSearchTool {
         let limit = args.limit.unwrap_or(10) as usize;
         let collections = [
             "conversations".to_string(),
+            "lessons".to_string(),
             format!("project_{}", self.project_id),
             format!("agent_{}", self.agent_pubkey),
         ];

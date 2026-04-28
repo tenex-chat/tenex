@@ -123,6 +123,27 @@ impl VectorStore for SqliteStore {
         scored.truncate(limit);
         Ok(scored)
     }
+
+    async fn list_collections(&self) -> anyhow::Result<Vec<String>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn
+            .prepare("SELECT DISTINCT collection FROM doc_meta ORDER BY collection")
+            .context("prepare list_collections")?;
+        let collections: Vec<String> = stmt
+            .query_map([], |row| row.get(0))
+            .context("query list_collections")?
+            .filter_map(|r| r.ok())
+            .collect();
+        Ok(collections)
+    }
+
+    async fn delete_collection(&self, collection: &str) -> anyhow::Result<usize> {
+        let conn = self.conn.lock().unwrap();
+        let n = conn
+            .execute("DELETE FROM doc_meta WHERE collection = ?1", rusqlite::params![collection])
+            .with_context(|| format!("delete collection '{collection}'"))?;
+        Ok(n)
+    }
 }
 
 fn floats_to_bytes(v: &[f32]) -> Vec<u8> {

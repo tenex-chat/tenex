@@ -27,4 +27,8 @@ pub trait VectorStore: Send + Sync {
         collections: &[&str],
         limit: usize,
     ) -> anyhow::Result<Vec<VectorMatch>>;
+
+    async fn list_collections(&self) -> anyhow::Result<Vec<String>>;
+
+    async fn delete_collection(&self, collection: &str) -> anyhow::Result<usize>;
 }

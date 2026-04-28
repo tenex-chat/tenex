@@ -123,7 +123,12 @@ fn encode_delegation(
             let mut builder = EventBuilder::new(Kind::TextNote, prefixed)
                 .custom_created_at(now_plus_one);
 
-            // Delegation events start a fresh conversation — no e-tag.
+            // Followup delegations carry an e-tag referencing the original event.
+            // Fresh delegations start a new conversation without any e-tag.
+            if let Some(MessageRef::Nostr { event_id }) = d.followup_of.as_ref() {
+                builder = builder.tag(e_reply_tag(event_id)?);
+            }
+
             builder = builder.tag(p_tag(&d.recipient)?);
 
             if let Some(branch) = d.branch.as_deref() {
@@ -465,6 +470,7 @@ mod tests {
                 recipient_label: "@architect".into(),
                 request: "Please review".into(),
                 branch: None,
+                followup_of: None,
             }],
         };
         let builders = NostrEncoder::encode(&Intent::Delegation(intent), &ctx).expect("encode");

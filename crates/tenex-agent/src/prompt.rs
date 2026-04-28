@@ -76,21 +76,11 @@ When delegating tasks, a todo list helps you track progress and stay organized.
 
 const AGENT_DIRECTED_MONITORING: &str = "## Monitoring Delegated Work
 
-When you delegate tasks to other agents, you can monitor their progress using existing tools:
+Delegation is **asynchronous**: after you call `delegate`, stop for the turn. The system automatically re-invokes you when the delegatee completes and returns their response.
 
-1. **Check Progress**: Use `conversation_get` with the delegation conversation ID. Optionally pass a `prompt` parameter to have the tool summarize the delegatee's progress.
-
-2. **Wait Between Checks**: Use `shell()` with `sleep <seconds>` to wait between progress checks. Choose intervals based on task complexity:
-   - Quick tasks (< 2 min expected): Check every 30 seconds
-   - Medium tasks (2-10 min): Check every 1-2 minutes
-   - Long tasks (> 10 min): Check every 3-5 minutes
-
-3. **When to Monitor**: You decide whether active monitoring is needed based on:
-   - Task criticality and deadline pressure
-   - Whether you need intermediate results
-   - The delegatee's reliability for the task type
-
-Most delegations complete and return results automatically. Active monitoring is optional and primarily useful for long-running tasks where you want progress visibility.";
+- **Do not poll or wait** — there is no progress-check tool available. Stop after delegating and let the runtime re-invoke you.
+- **Mid-flight corrections**: If you realise a delegatee needs clarification before they finish, use `delegate_followup` with the delegation event ID returned by `delegate`.
+- **On re-invocation**: you will receive the delegatee's completion as your next message. Review it, update your todo list, and proceed with the next step.";
 
 pub fn build_system_prompt(
     config: &AgentConfig,

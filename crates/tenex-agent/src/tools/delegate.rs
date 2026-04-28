@@ -121,6 +121,7 @@ impl Tool for DelegateTool {
                 recipient_label: format!("@{}", args.recipient),
                 request: args.prompt.clone(),
                 branch: None,
+                followup_of: None,
             }],
         };
 
@@ -135,14 +136,16 @@ impl Tool for DelegateTool {
             .next()
             .ok_or_else(|| DelegateError("delegation produced no event".into()))?;
 
+        let delegation_event_id = match &delegation_ref {
+            MessageRef::Nostr { event_id } => event_id.to_hex(),
+        };
+
         let args_json = serde_json::to_string(&args).unwrap_or_default();
         let tool_use_intent = ToolUseIntent {
             tool_name: "delegate".to_string(),
             content: String::new(),
             args_json: Some(args_json),
-            referenced_messages: vec![match delegation_ref {
-                MessageRef::Nostr { event_id } => MessageRef::Nostr { event_id },
-            }],
+            referenced_messages: vec![delegation_ref],
             usage: None,
         };
 
@@ -153,8 +156,8 @@ impl Tool for DelegateTool {
             .map_err(|e| DelegateError(format!("Failed to emit tool-use event: {e}")))?;
 
         Ok(format!(
-            "Delegated to @{}. Stop here — do not take further actions this turn.",
-            args.recipient
+            "Delegated to @{}. Delegation event ID: {}. Use this ID with delegate_followup if you need to send corrections before they finish. Stop here — do not take further actions this turn.",
+            args.recipient, delegation_event_id
         ))
     }
 }

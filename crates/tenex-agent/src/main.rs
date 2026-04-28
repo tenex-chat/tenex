@@ -25,9 +25,12 @@ use tenex_protocol::{
 };
 use rig::tool::ToolDyn;
 use tools::{
-    DelegateTool, FsEditTool, FsGlobTool, FsGrepTool, FsReadTool, FsWriteTool,
+    AskTool, DelegateCrossProjectTool, DelegateFollowupTool, DelegateTool,
+    FsEditTool, FsGlobTool, FsGrepTool, FsReadTool, FsWriteTool,
     HomeFsEditTool, HomeFsGlobTool, HomeFsGrepTool, HomeFsReadTool, HomeFsWriteTool,
-    RagIndexTool, RagSearchTool, ShellTool, SkillListTool, SkillsSetTool, TodoItem, TodoWriteTool,
+    LearnTool, ProjectListTool, RagAddDocumentsTool, RagCollectionDeleteTool,
+    RagCollectionListTool, RagSearchTool, SelfDelegateTool, ShellTool, SkillListTool,
+    SkillsSetTool, TodoItem, TodoWriteTool,
 };
 
 /// Build and run the agent with all tools attached, streaming the response.
@@ -35,7 +38,7 @@ use tools::{
 /// aggregated token usage across all turns.
 /// $delegate is Option<DelegateTool> — None for categories that cannot delegate.
 macro_rules! run_agent {
-    ($client:expr, $model:expr, $system:expr, $message:expr, $wd:expr, $env:expr, $todos:expr, $hook:expr, $delegate:expr, $rag_index:expr, $rag_search:expr, $skill_list:expr, $skills_set:expr, $fs_tools:expr) => {{
+    ($client:expr, $model:expr, $system:expr, $message:expr, $wd:expr, $env:expr, $todos:expr, $hook:expr, $delegate:expr, $rag_add_docs:expr, $rag_search:expr, $skill_list:expr, $skills_set:expr, $fs_tools:expr, $extra_tools:expr) => {{
         use ::futures::StreamExt as _;
         use ::rig::streaming::StreamingPrompt as _;
 
@@ -57,8 +60,9 @@ macro_rules! run_agent {
         };
 
         let mut __stream = __base
-            .tool($rag_index)
+            .tool($rag_add_docs)
             .tool($rag_search)
+            .tools($extra_tools)
             .build()
             .stream_prompt($message)
             .with_hook($hook)
@@ -110,6 +114,36 @@ fn build_fs_tools(
         tools.push(Box::new(FsGrepTool::new(working_dir.to_string())));
     } else {
         tools.push(Box::new(HomeFsGrepTool::new(home_dir.to_string())));
+    }
+
+    tools
+}
+
+fn build_extra_tools(
+    emit_state: &Arc<EmitState>,
+    rag_store: &Option<Arc<RagStore>>,
+    project_agents: &Arc<Vec<tenex_project::Agent>>,
+    teams: &Arc<Vec<tenex_project::Team>>,
+    owner_pubkey: &str,
+    base_dir: &std::path::Path,
+    allows_delegation: bool,
+) -> Vec<Box<dyn ToolDyn>> {
+    let mut tools: Vec<Box<dyn ToolDyn>> = vec![
+        Box::new(LearnTool::new(emit_state.clone(), rag_store.clone())),
+        Box::new(AskTool::new(emit_state.clone(), owner_pubkey.to_string())),
+        Box::new(ProjectListTool::new(base_dir.to_path_buf())),
+        Box::new(RagCollectionListTool::new(rag_store.clone())),
+        Box::new(RagCollectionDeleteTool::new(rag_store.clone())),
+    ];
+
+    if allows_delegation {
+        tools.push(Box::new(SelfDelegateTool::new(emit_state.clone())));
+        tools.push(Box::new(DelegateCrossProjectTool::new(emit_state.clone())));
+        tools.push(Box::new(DelegateFollowupTool::new(
+            emit_state.clone(),
+            project_agents.clone(),
+            teams.clone(),
+        )));
     }
 
     tools
@@ -441,12 +475,12 @@ async fn main() -> Result<()> {
         agent_config.category.as_deref().and_then(|s| s.parse().ok());
     let supervisor = Arc::new(Mutex::new(default_supervisor()));
     let hook = EmitHook::new(emit_state.clone(), supervisor, todos.clone(), sup_category);
-    let delegate_tool: Option<DelegateTool> =
-        if sup_category.map(|c| c.allows_delegation()).unwrap_or(true) {
-            Some(DelegateTool::new(emit_state.clone(), project_agents, teams))
-        } else {
-            None
-        };
+    let allows_delegation = sup_category.map(|c| c.allows_delegation()).unwrap_or(true);
+    let delegate_tool: Option<DelegateTool> = if allows_delegation {
+        Some(DelegateTool::new(emit_state.clone(), project_agents.clone(), teams.clone()))
+    } else {
+        None
+    };
 
     let skill_list_tool = SkillListTool::new(skill_ctx.clone());
     let skills_set_tool = SkillsSetTool::new(skill_ctx.clone(), self_applied_skills.clone());
@@ -466,7 +500,7 @@ async fn main() -> Result<()> {
         }
     })();
 
-    let rag_index = RagIndexTool::new(rag_store.clone(), project_id.clone(), pubkey_hex.clone());
+    let rag_add_documents = RagAddDocumentsTool::new(rag_store.clone());
     let rag_search = RagSearchTool::new(rag_store.clone(), project_id.clone(), pubkey_hex.clone());
 
     // Proactive context: search RAG before the LLM call so relevant past
@@ -474,6 +508,7 @@ async fn main() -> Result<()> {
     if let Some(store) = &rag_store {
         let collections = [
             "conversations".to_string(),
+            "lessons".to_string(),
             format!("project_{project_id}"),
             format!("agent_{pubkey_hex}"),
         ];
@@ -529,11 +564,12 @@ async fn main() -> Result<()> {
                 todos,
                 hook.clone(),
                 delegate_tool.clone(),
-                rag_index.clone(),
+                rag_add_documents.clone(),
                 rag_search.clone(),
                 skill_list_tool.clone(),
                 skills_set_tool.clone(),
-                build_fs_tools(&granted_tools, &working_dir, &agent_home_str)
+                build_fs_tools(&granted_tools, &working_dir, &agent_home_str),
+                build_extra_tools(&emit_state, &rag_store, &project_agents, &teams, owner_pubkey_hex, &base_dir, allows_delegation)
             )
         }
         "openai" => {
@@ -551,11 +587,12 @@ async fn main() -> Result<()> {
                 todos,
                 hook.clone(),
                 delegate_tool.clone(),
-                rag_index.clone(),
+                rag_add_documents.clone(),
                 rag_search.clone(),
                 skill_list_tool.clone(),
                 skills_set_tool.clone(),
-                build_fs_tools(&granted_tools, &working_dir, &agent_home_str)
+                build_fs_tools(&granted_tools, &working_dir, &agent_home_str),
+                build_extra_tools(&emit_state, &rag_store, &project_agents, &teams, owner_pubkey_hex, &base_dir, allows_delegation)
             )
         }
         "ollama" => {
@@ -574,11 +611,12 @@ async fn main() -> Result<()> {
                 todos,
                 hook.clone(),
                 delegate_tool.clone(),
-                rag_index.clone(),
+                rag_add_documents.clone(),
                 rag_search.clone(),
                 skill_list_tool.clone(),
                 skills_set_tool.clone(),
-                build_fs_tools(&granted_tools, &working_dir, &agent_home_str)
+                build_fs_tools(&granted_tools, &working_dir, &agent_home_str),
+                build_extra_tools(&emit_state, &rag_store, &project_agents, &teams, owner_pubkey_hex, &base_dir, allows_delegation)
             )
         }
         _ => {
@@ -601,11 +639,12 @@ async fn main() -> Result<()> {
                 todos,
                 hook,
                 delegate_tool,
-                rag_index,
+                rag_add_documents,
                 rag_search,
                 skill_list_tool,
                 skills_set_tool,
-                build_fs_tools(&granted_tools, &working_dir, &agent_home_str)
+                build_fs_tools(&granted_tools, &working_dir, &agent_home_str),
+                build_extra_tools(&emit_state, &rag_store, &project_agents, &teams, owner_pubkey_hex, &base_dir, allows_delegation)
             )
         }
     };

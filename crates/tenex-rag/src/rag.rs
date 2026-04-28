@@ -72,4 +72,12 @@ impl<S: VectorStore> RagStore<S> {
         let matches = self.store.search(&vector, collections, limit).await?;
         Ok(matches.into_iter().map(SearchResult::from).collect())
     }
+
+    pub async fn list_collections(&self) -> Result<Vec<String>> {
+        self.store.list_collections().await
+    }
+
+    pub async fn delete_collection(&self, collection: &str) -> Result<usize> {
+        self.store.delete_collection(collection).await
+    }
 }

@@ -58,6 +58,9 @@ pub struct DelegationRequest {
     pub recipient_label: String,
     pub request: String,
     pub branch: Option<String>,
+    /// When set, the outbound event carries an e-tag referencing this message,
+    /// turning the delegation into a followup rather than a fresh conversation.
+    pub followup_of: Option<MessageRef>,
 }
 
 /// Delegate work to one or more other agents. Each request becomes a separate

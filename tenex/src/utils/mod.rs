@@ -7,5 +7,6 @@
 pub mod error_formatter;
 pub mod identifiers;
 pub mod parse_dotenv;
+pub mod path_expand;
 pub mod telegram_identifiers;
 pub mod time;

@@ -17,14 +17,19 @@
 
 use std::path::PathBuf;
 
+pub mod agent_home_env;
+pub mod agent_home_files;
 pub mod agent_storage;
 pub mod atomic;
 pub mod conversation_disk_reader;
 pub mod embed;
+pub mod event_ids;
 pub mod llm_config_options;
 pub mod llms;
 pub mod mcp;
 pub mod models_dev;
+pub mod path_safety;
+pub mod project_ids;
 pub mod project_members;
 pub mod project_mutation;
 pub mod provider_ids;

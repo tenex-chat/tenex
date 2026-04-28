@@ -110,29 +110,13 @@ pub fn default_projects_base_with_home(home: Option<&str>) -> String {
     }
 }
 
-/// Lightweight `~`-expanding `path.resolve` analogue. Absolute paths pass
-/// through; `~` and `~/...` are expanded against `$HOME`; relative paths
-/// are joined onto the current working directory.
-pub fn resolve_path(input: &str) -> PathBuf {
-    if input == "~" {
-        if let Ok(home) = std::env::var("HOME") {
-            return PathBuf::from(home);
-        }
-    }
-    if let Some(rest) = input.strip_prefix("~/") {
-        if let Ok(home) = std::env::var("HOME") {
-            return PathBuf::from(home).join(rest);
-        }
-    }
-    let p = PathBuf::from(input);
-    if p.is_absolute() {
-        return p;
-    }
-    match std::env::current_dir() {
-        Ok(cwd) => cwd.join(p),
-        Err(_) => p,
-    }
-}
+/// Re-export of [`crate::utils::path_expand::resolve_path`].
+///
+/// This was originally an inline tilde-expanding `path.resolve`
+/// analogue; consolidated into `utils::path_expand` (which also covers
+/// the `expandHome` case independently) and re-exported here for
+/// backwards-compatible callers + tests.
+pub use crate::utils::path_expand::resolve_path;
 
 #[cfg(test)]
 mod tests {
