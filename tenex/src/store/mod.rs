@@ -23,6 +23,7 @@ pub mod embed;
 pub mod llms;
 pub mod mcp;
 pub mod project_members;
+pub mod project_mutation;
 pub mod providers;
 pub mod tenex_config;
 

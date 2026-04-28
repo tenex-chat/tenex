@@ -132,6 +132,66 @@ pub fn list_projects_for_agent(
     Ok(matches)
 }
 
+/// `isDeletedProjectEvent` (`ProjectEventPublishService.ts:68-70`).
+///
+/// Returns `true` iff the kind:31933 event carries any `["deleted", …]`
+/// tag. Operates on the parsed JSON value (the same shape returned by
+/// [`read_persisted_project_event`]).
+pub fn is_deleted_project_event(event: &Value) -> bool {
+    let Some(tags) = event.get("tags").and_then(Value::as_array) else {
+        return false;
+    };
+    tags.iter().any(|t| {
+        t.as_array()
+            .and_then(|a| a.first())
+            .and_then(Value::as_str)
+            == Some("deleted")
+    })
+}
+
+/// `ProjectVisibilityStatus`, mirrored from
+/// `ProjectMembershipPublishService.ts:78-88`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProjectVisibility {
+    /// No persisted event found for this dTag.
+    Unknown,
+    /// Event exists and carries a `["deleted", …]` tag.
+    Deleted,
+    /// Event exists and is not marked deleted.
+    Active,
+}
+
+impl ProjectVisibility {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ProjectVisibility::Unknown => "unknown",
+            ProjectVisibility::Deleted => "deleted",
+            ProjectVisibility::Active => "active",
+        }
+    }
+}
+
+/// `getProjectVisibility` — local read-only variant. The TS source goes
+/// through NDK `fetchLatestProjectEvent({ includeDeleted: true })`; our
+/// canonical store is the on-disk `event.json`, which is what the daemon
+/// persists. Returns:
+/// - `Unknown` when no `event.json` exists
+/// - `Deleted` when the event has a `["deleted", …]` tag
+/// - `Active` otherwise
+pub fn get_project_visibility(
+    base_dir: &std::path::Path,
+    dtag: &str,
+) -> Result<ProjectVisibility> {
+    let Some(parsed) = read_persisted_project_event(base_dir, dtag)? else {
+        return Ok(ProjectVisibility::Unknown);
+    };
+    if is_deleted_project_event(&parsed) {
+        Ok(ProjectVisibility::Deleted)
+    } else {
+        Ok(ProjectVisibility::Active)
+    }
+}
+
 /// Collect every agent pubkey across every project on disk. Matches
 /// `collectAllProjectAgentPubkeys` (`ProjectMembersReader.ts:113-123`).
 pub fn collect_all_project_agent_pubkeys(
@@ -297,6 +357,70 @@ mod tests {
         std::fs::create_dir_all(projects_base_path(&base).join("ghost")).unwrap();
         assert!(read_persisted_project_event(&base, "ghost").unwrap().is_none());
         std::fs::remove_dir_all(&base).ok();
+    }
+
+    #[test]
+    fn is_deleted_project_event_detects_deleted_tag() {
+        let v: Value = serde_json::from_str(r#"{"tags":[["d","p"],["deleted",""]]}"#).unwrap();
+        assert!(is_deleted_project_event(&v));
+    }
+
+    #[test]
+    fn is_deleted_project_event_false_when_no_deleted_tag() {
+        let v: Value = serde_json::from_str(r#"{"tags":[["d","p"],["p","aaaa"]]}"#).unwrap();
+        assert!(!is_deleted_project_event(&v));
+    }
+
+    #[test]
+    fn is_deleted_project_event_false_when_tags_missing_or_malformed() {
+        let v: Value = serde_json::from_str(r#"{}"#).unwrap();
+        assert!(!is_deleted_project_event(&v));
+        let v: Value = serde_json::from_str(r#"{"tags":"not-an-array"}"#).unwrap();
+        assert!(!is_deleted_project_event(&v));
+        let v: Value = serde_json::from_str(r#"{"tags":[null,42,[]]}"#).unwrap();
+        assert!(!is_deleted_project_event(&v));
+    }
+
+    #[test]
+    fn get_project_visibility_unknown_when_event_missing() {
+        let base = unique_temp();
+        assert_eq!(
+            get_project_visibility(&base, "ghost").unwrap(),
+            ProjectVisibility::Unknown
+        );
+        std::fs::remove_dir_all(&base).ok();
+    }
+
+    #[test]
+    fn get_project_visibility_active_when_no_deleted_tag() {
+        let base = unique_temp();
+        write_event(&base, "alive", r#"{"tags":[["d","alive"],["p","aaaa"]]}"#);
+        assert_eq!(
+            get_project_visibility(&base, "alive").unwrap(),
+            ProjectVisibility::Active
+        );
+        std::fs::remove_dir_all(&base).ok();
+    }
+
+    #[test]
+    fn get_project_visibility_deleted_when_deleted_tag_present() {
+        let base = unique_temp();
+        write_event(&base, "rip", r#"{"tags":[["d","rip"],["deleted",""]]}"#);
+        assert_eq!(
+            get_project_visibility(&base, "rip").unwrap(),
+            ProjectVisibility::Deleted
+        );
+        std::fs::remove_dir_all(&base).ok();
+    }
+
+    #[test]
+    fn project_visibility_as_str_matches_ts_literals() {
+        // The TS string literals `"unknown" | "deleted" | "active"` are
+        // surfaced in logs and consumed by the caller's
+        // `visibility !== "deleted"` check; preserve them verbatim.
+        assert_eq!(ProjectVisibility::Unknown.as_str(), "unknown");
+        assert_eq!(ProjectVisibility::Deleted.as_str(), "deleted");
+        assert_eq!(ProjectVisibility::Active.as_str(), "active");
     }
 
     #[test]

@@ -10,12 +10,16 @@
 //!
 //! | Subcommand | Depends on | Status |
 //! |---|---|---|
-//! | `agents refetch` | NDK + AgentStorage (spec doc 10) | pending — honest hint |
-//! | `agents orphans [--purge]` | AgentStorage + project-membership reader | pending — honest hint |
+//! | `agents orphans [--purge]` | AgentStorage + project-membership reader | wired — see `find_orphaned_agents` |
 //! | `agents categorize [--dry-run]` | AgentStorage + LLM service | pending — honest hint |
 //! | `migrate` | TS-side state migration registry | n/a — Rust port has no legacy state to migrate; clean no-op exit |
 //! | `conversations status` | conversation-index DB | pending — honest hint |
 //! | `conversations reindex [--confirm]` | conversation-index DB | pending — honest hint |
+//!
+//! Note: spec 11 §1 listed an `agents refetch` subcommand. That was removed
+//! in TS commit `2855d63d` (kind:4199 / Nostr-event-driven agent install
+//! cutover) — there's no longer anything to "refetch" from Nostr. The Rust
+//! port matches the live TS source at `src/commands/doctor.ts:43-46`.
 //!
 //! Per CLAUDE.md "no half-finished implementations" — every pending
 //! subcommand surfaces a clear hint identifying which subsystem is
@@ -50,8 +54,6 @@ pub struct AgentsArgs {
 
 #[derive(Subcommand, Clone)]
 pub enum AgentsCommand {
-    /// Refetch and update all agent definitions from Nostr
-    Refetch,
     /// List agents not assigned to any project
     Orphans {
         /// Delete the orphaned agents found
@@ -105,13 +107,6 @@ pub async fn run(args: DoctorArgs) -> Result<()> {
 
 async fn run_agents(args: AgentsArgs) -> Result<()> {
     match args.command {
-        AgentsCommand::Refetch => {
-            display::hint(
-                "doctor agents refetch — depends on NDK client + AgentStorage \
-                 (spec doc 10). Pending port.",
-            );
-            Ok(())
-        }
         AgentsCommand::Orphans { purge } => find_orphaned_agents(purge),
         AgentsCommand::Categorize { dry_run } => {
             let _ = dry_run;
@@ -265,11 +260,13 @@ mod tests {
     }
 
     #[test]
-    fn agents_has_three_leaf_subcommands_in_canonical_order() {
-        // Source: spec doc 11 §1 — `refetch`, `orphans`, `categorize`.
+    fn agents_has_two_leaf_subcommands_in_canonical_order() {
+        // Source: live TS at `src/commands/doctor.ts:43-46` — `orphans`,
+        // `categorize`. Spec doc 11 §1 also listed `refetch` but that was
+        // removed in TS commit `2855d63d` (kind:4199 cutover).
         let cmd = AgentsArgs::command();
         let names: Vec<&str> = cmd.get_subcommands().map(|s| s.get_name()).collect();
-        assert_eq!(names, vec!["refetch", "orphans", "categorize"]);
+        assert_eq!(names, vec!["orphans", "categorize"]);
     }
 
     #[test]
@@ -342,13 +339,8 @@ mod tests {
 
     #[test]
     fn agents_subcommand_descriptions_match_ts_verbatim() {
-        // Source: spec doc 11 §1.
+        // Source: live TS at `src/commands/doctor.ts:17, 24`.
         let agents = AgentsArgs::command();
-        let refetch = agents.find_subcommand("refetch").unwrap();
-        assert_eq!(
-            refetch.get_about().map(|s| s.to_string()).as_deref(),
-            Some("Refetch and update all agent definitions from Nostr")
-        );
         let orphans = agents.find_subcommand("orphans").unwrap();
         assert_eq!(
             orphans.get_about().map(|s| s.to_string()).as_deref(),
