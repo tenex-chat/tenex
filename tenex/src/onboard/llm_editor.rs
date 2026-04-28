@@ -128,16 +128,40 @@ pub fn route(base_dir: &std::path::Path, value: &str) -> Result<bool> {
     }
 }
 
+/// Mirror `LLMConfigEditor.deleteConfig` (`LLMConfigEditor.ts:237-250`):
+/// 1. Drop the named config from the configurations map.
+/// 2. If the deleted config was the default, promote the first
+///    remaining config to default; surface
+///    `display.hint("Default changed to \"${newDefault}\"")` if there
+///    is one. (When no configs remain, default is cleared and no hint.)
+/// 3. Persist.
+/// 4. `display.success("Configuration \"${configName}\" deleted")`.
+///
+/// TS doesn't guard against the missing-config case (the
+/// `delete map[key]` is a no-op for missing keys); the Rust port
+/// matches that behaviour — silently no-ops the delete and still
+/// emits the success line. Tests in this module exercise the missing
+/// case via `route_delete_of_missing_config_is_noop_and_continues`.
 fn delete_configuration(base_dir: &std::path::Path, name: &str) -> Result<()> {
     let mut doc = LlmsDoc::load(base_dir)?;
-    if doc.get(name).is_none() {
-        // Already absent — nothing to delete; surface a hint and continue.
-        display::hint(&format!("Configuration {name:?} not found."));
-        return Ok(());
-    }
+    let was_default = doc.default_config() == Some(name);
     doc.remove_config(name);
+
+    if was_default {
+        let remaining = doc.config_names();
+        if let Some(new_default) = remaining.first() {
+            let new_default = new_default.clone();
+            doc.set_default_config(Some(new_default.clone()));
+            display::hint(&format!("Default changed to \"{new_default}\""));
+        } else {
+            // No configs remain — clear the default field entirely.
+            // Mirrors TS `llmsConfig.default = undefined` at line 242.
+            doc.set_default_config(None);
+        }
+    }
+
     doc.save(base_dir)?;
-    display::success(&format!("Deleted configuration: {name}"));
+    display::success(&format!("Configuration \"{name}\" deleted"));
     Ok(())
 }
 
@@ -441,6 +465,65 @@ mod tests {
         // No "Ghost" config exists; route returns continue=true and the
         // file stays empty (or unchanged) without erroring.
         assert!(route(&base, "delete:Ghost").unwrap());
+        std::fs::remove_dir_all(&base).ok();
+    }
+
+    #[test]
+    fn delete_promotes_first_remaining_config_when_default_is_deleted() {
+        // TS LLMConfigEditor.ts:240-246 — when the deleted config was the
+        // default, pick the first remaining config as the new default
+        // and surface a hint.
+        let base = fresh_temp();
+        let mut doc = LlmsDoc::new();
+        doc.set_standard_config("Sonnet", StandardConfig::new("anthropic", "x"));
+        doc.set_standard_config("Opus", StandardConfig::new("anthropic", "y"));
+        doc.set_default_config(Some("Sonnet".to_owned()));
+        doc.save(&base).unwrap();
+
+        assert!(route(&base, "delete:Sonnet").unwrap());
+
+        let reloaded = LlmsDoc::load(&base).unwrap();
+        assert!(reloaded.get("Sonnet").is_none());
+        // "Opus" was inserted second but is the only remaining
+        // standard config — the new default.
+        assert_eq!(reloaded.default_config(), Some("Opus"));
+        std::fs::remove_dir_all(&base).ok();
+    }
+
+    #[test]
+    fn delete_clears_default_when_no_configs_remain() {
+        // TS LLMConfigEditor.ts:242 — `default = remaining.length > 0
+        // ? remaining[0] : undefined`. When no configs remain after the
+        // delete, the default must be cleared.
+        let base = fresh_temp();
+        let mut doc = LlmsDoc::new();
+        doc.set_standard_config("Sonnet", StandardConfig::new("anthropic", "x"));
+        doc.set_default_config(Some("Sonnet".to_owned()));
+        doc.save(&base).unwrap();
+
+        assert!(route(&base, "delete:Sonnet").unwrap());
+
+        let reloaded = LlmsDoc::load(&base).unwrap();
+        assert!(reloaded.get("Sonnet").is_none());
+        assert_eq!(reloaded.default_config(), None);
+        std::fs::remove_dir_all(&base).ok();
+    }
+
+    #[test]
+    fn delete_of_non_default_config_leaves_default_untouched() {
+        let base = fresh_temp();
+        let mut doc = LlmsDoc::new();
+        doc.set_standard_config("Sonnet", StandardConfig::new("anthropic", "x"));
+        doc.set_standard_config("Opus", StandardConfig::new("anthropic", "y"));
+        doc.set_default_config(Some("Sonnet".to_owned()));
+        doc.save(&base).unwrap();
+
+        assert!(route(&base, "delete:Opus").unwrap());
+
+        let reloaded = LlmsDoc::load(&base).unwrap();
+        assert!(reloaded.get("Opus").is_none());
+        // "Sonnet" was the default and wasn't deleted; it stays put.
+        assert_eq!(reloaded.default_config(), Some("Sonnet"));
         std::fs::remove_dir_all(&base).ok();
     }
 
