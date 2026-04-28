@@ -51,16 +51,15 @@ use crate::tui::display;
 
 #[derive(Parser, Clone)]
 pub struct OnboardArgs {
-    /// Pubkeys to whitelist (npub, nprofile, or hex). Repeatable.
+    /// Pubkeys to whitelist (npub, nprofile, or hex)
     #[arg(long = "pubkey", value_name = "PUBKEY")]
     pub pubkey: Vec<String>,
 
-    /// URL of a running local relay to offer as an option.
+    /// URL of a running local relay to offer as an option
     #[arg(long = "local-relay-url", value_name = "URL")]
     pub local_relay_url: Option<String>,
 
-    /// Output configuration as JSON (suppresses banners and interactive prompts
-    /// where CLI alternatives exist).
+    /// Output configuration as JSON
     #[arg(long)]
     pub json: bool,
 }
@@ -432,6 +431,37 @@ fn capture_provider_env() -> HashMap<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Pin the three TS-verbatim flag descriptions on `tenex onboard`.
+    /// Source: `src/commands/onboard.ts:1201-1203` —
+    ///   .option("--pubkey <pubkeys...>", "Pubkeys to whitelist (npub, nprofile, or hex)")
+    ///   .option("--local-relay-url <url>", "URL of a running local relay to offer as an option")
+    ///   .option("--json", "Output configuration as JSON")
+    /// Trailing periods (Rust's clap renders /// doc comments verbatim)
+    /// would diverge from Commander.js's no-period rendering — pin
+    /// the no-period form so a future cleanup doesn't slip them back in.
+    #[test]
+    fn onboard_flag_descriptions_match_ts_verbatim() {
+        use clap::CommandFactory;
+        let cmd = OnboardArgs::command();
+        let help_for = |long: &str| -> String {
+            cmd.get_arguments()
+                .find(|a| a.get_long() == Some(long))
+                .unwrap_or_else(|| panic!("--{long} flag missing on `tenex onboard`"))
+                .get_help()
+                .map(|s| s.to_string())
+                .unwrap_or_default()
+        };
+        assert_eq!(
+            help_for("pubkey"),
+            "Pubkeys to whitelist (npub, nprofile, or hex)",
+        );
+        assert_eq!(
+            help_for("local-relay-url"),
+            "URL of a running local relay to offer as an option",
+        );
+        assert_eq!(help_for("json"), "Output configuration as JSON");
+    }
 
     #[test]
     fn capture_provider_env_only_includes_known_keys() {
