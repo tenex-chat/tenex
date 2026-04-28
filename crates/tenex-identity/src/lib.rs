@@ -97,6 +97,7 @@ async fn run_daemon_async() -> AnyResult<()> {
     let pid_path = paths::pid_path();
     let pid_file = fs::OpenOptions::new()
         .create(true)
+        .truncate(false)
         .read(true)
         .write(true)
         .open(&pid_path)

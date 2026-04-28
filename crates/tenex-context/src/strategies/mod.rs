@@ -43,7 +43,7 @@ pub trait Strategy {
 pub fn default_stack() -> Vec<Box<dyn Strategy>> {
     vec![
         Box::new(CompactionToolStrategy::default()),
-        Box::new(ToolResultDecayStrategy::default()),
-        Box::new(RemindersStrategy::default()),
+        Box::new(ToolResultDecayStrategy),
+        Box::new(RemindersStrategy),
     ]
 }

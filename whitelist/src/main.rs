@@ -126,6 +126,7 @@ fn run_daemon() -> Result<()> {
     // CLI that spawned it will still find this daemon's socket and connect.
     let pid_file = fs::OpenOptions::new()
         .create(true)
+        .truncate(false)
         .read(true)
         .write(true)
         .open(&pid_path)

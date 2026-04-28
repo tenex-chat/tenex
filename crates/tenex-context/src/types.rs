@@ -6,6 +6,7 @@
 //!
 //! Types are intentionally minimal: this crate represents role + content
 //! + tool linkage, not provider-specific message shapes. The agent runner
+//!
 //! is responsible for translating [`Message`] into the concrete shape its
 //! LLM client expects.
 

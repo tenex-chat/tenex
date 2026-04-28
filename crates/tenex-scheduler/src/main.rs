@@ -158,7 +158,7 @@ fn list_tasks(project: Option<String>) -> Result<()> {
         return Ok(());
     }
 
-    println!("{:<20}  {:<12}  {:<28}  {}", "PROJECT", "ID", "SCHEDULE", "TITLE");
+    println!("{:<20}  {:<12}  {:<28}  TITLE", "PROJECT", "ID", "SCHEDULE");
     println!("{}", "─".repeat(80));
     for (d_tag, task) in tasks {
         let title = task.title.as_deref().unwrap_or("—");

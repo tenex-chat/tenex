@@ -1,7 +1,7 @@
-/// Integration tests against the real ~/.tenex config files.
-///
-/// These tests are skipped when neither TENEX_BASE_DIR nor ~/.tenex exist, so
-/// CI (which has no config) stays green.
+//! Integration tests against the real ~/.tenex config files.
+//!
+//! These tests are skipped when neither TENEX_BASE_DIR nor ~/.tenex exist, so
+//! CI (which has no config) stays green.
 
 use std::path::PathBuf;
 

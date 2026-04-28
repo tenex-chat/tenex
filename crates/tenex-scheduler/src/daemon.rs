@@ -6,7 +6,7 @@
 //! files change on disk.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -386,8 +386,7 @@ fn missed_occurrences(task: &ScheduledTask) -> Vec<chrono::DateTime<Utc>> {
     let now = Utc::now();
 
     let mut missed = Vec::new();
-    let mut iter = cron.iter_from(start);
-    while let Some(t) = iter.next() {
+    for t in cron.iter_from(start) {
         if t >= now {
             break;
         }
@@ -420,7 +419,7 @@ fn oneoff_catchup_deadline(task: &ScheduledTask) -> Option<chrono::DateTime<Utc>
     Some(t)
 }
 
-fn project_dtag_from_path(path: &PathBuf) -> Option<String> {
+fn project_dtag_from_path(path: &Path) -> Option<String> {
     let projects_dir = crate::paths::projects_dir();
     let rel = path.strip_prefix(&projects_dir).ok()?;
     let d_tag = rel.components().next()?.as_os_str().to_str()?.to_string();

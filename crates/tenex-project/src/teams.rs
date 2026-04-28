@@ -88,9 +88,7 @@ pub fn render_teams_context(member_teams: &[&Team], active_team: Option<&str>) -
         lines.push(format!("  You belong to teams: {}", names.join(", ")));
         lines.push("  Team members:".to_string());
         for team in member_teams {
-            let label = if active_team
-                .map_or(false, |a| a.eq_ignore_ascii_case(&team.name))
-            {
+            let label = if active_team.is_some_and(|a| a.eq_ignore_ascii_case(&team.name)) {
                 format!("{} (active)", team.name)
             } else {
                 team.name.clone()

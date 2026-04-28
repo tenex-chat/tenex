@@ -64,6 +64,13 @@ impl CapturingSink {
 }
 
 #[cfg(test)]
+impl Default for CapturingSink {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(test)]
 #[async_trait]
 impl EventSink for CapturingSink {
     async fn deliver(&self, event: nostr::Event) -> anyhow::Result<()> {

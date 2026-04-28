@@ -139,9 +139,9 @@ fn should_process(
     Ok(match prior {
         None => Decision::Process,
         Some(s) => {
-            if last_activity > s.last_activity_summarized {
-                Decision::Process
-            } else if now_ms - s.last_summarized_at_ms >= MAX_DELAY_MS {
+            if last_activity > s.last_activity_summarized
+                || now_ms - s.last_summarized_at_ms >= MAX_DELAY_MS
+            {
                 Decision::Process
             } else {
                 Decision::Skip

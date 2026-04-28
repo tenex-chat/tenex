@@ -274,7 +274,7 @@ impl ConversationStore {
                 msg.timestamp,
                 msg.targeted_pubkeys
                     .as_ref()
-                    .map(|v| serde_json::to_string(v))
+                    .map(serde_json::to_string)
                     .transpose()?,
                 msg.sender_principal
                     .as_ref()

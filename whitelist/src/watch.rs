@@ -1,6 +1,6 @@
 use anyhow::Result;
 use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
-use std::path::PathBuf;
+use std::path::Path;
 use std::sync::mpsc::channel;
 use std::sync::Arc;
 use std::thread;
@@ -121,13 +121,13 @@ fn is_relevant(kind: &EventKind) -> bool {
     )
 }
 
-fn is_event_json(path: &PathBuf) -> bool {
+fn is_event_json(path: &Path) -> bool {
     path.file_name()
         .and_then(|n| n.to_str())
         .map(|n| n == "event.json")
         .unwrap_or(false)
 }
 
-fn same_path(a: &PathBuf, b: &PathBuf) -> bool {
+fn same_path(a: &Path, b: &Path) -> bool {
     a == b
 }
