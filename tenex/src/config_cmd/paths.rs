@@ -80,10 +80,14 @@ pub fn run(base_dir: &std::path::Path) -> Result<()> {
     }
 
     doc.save(base_dir)?;
-    println!();
-    let check_bold = console::Style::new().green().bold().apply_to("✓");
-    let body = console::Style::new().green().apply_to(" Path settings updated");
-    println!("{check_bold}{body}");
+    // Mirror TS verbatim at `commands/config/paths.ts:50`:
+    //   console.log(chalk.green("\n✓ Path settings updated"));
+    // The whole thing is wrapped in plain chalk.green — neither the
+    // ✓ nor the body is bold (unlike most other config submodules,
+    // which use `chalk.green("✓") + chalk.bold(" ...")`). Pinned
+    // here because it's a real divergence that's easy to "fix" wrong.
+    let green = console::Style::new().green();
+    println!("{}", green.apply_to("\n✓ Path settings updated"));
     Ok(())
 }
 
