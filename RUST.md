@@ -1,6 +1,6 @@
 # TENEX Rust Adoption Status
 
-_Last updated: 2026-04-28 (sixth pass). Auto-maintained by scheduled debt check._
+_Last updated: 2026-04-28 (tenth pass). Auto-maintained by scheduled debt check._
 
 ---
 
@@ -81,7 +81,8 @@ Spawned by `tenex runtime` per conversation turn via `tenex-agent <agent.json>` 
 - Supervision heuristics: `tenex-supervision` drives post-completion re-engagement, todo nudging, delegation gating by category
 - **Skills persistence**: loads `self_applied_skills` + todos from conversation store on startup; saves both atomically via `save_context_state` on completion
 - **Preloaded skills block**: agent config `default.skills` + conversation-scoped self-applied skills injected into system prompt
-- **NOTE**: Conversation history is NOT loaded — each invocation is stateless from the LLM's perspective. `tenex-context` is built but not yet wired.
+- **Conversation history**: `tenex-context::project()` is called before each LLM invocation to project prior turns from the conversation store. History (User + Assistant messages) is passed to `stream_chat`; ToolResult messages excluded until projection captures tool_calls inline. `record_turn()` persists each turn (user + assistant) for future projection.
+- **System prompt via `tenex-system-prompt`**: `prompt.rs` replaced by `tenex_system_prompt::build_system_prompt()`. `InjectedFile` type moved to the crate; `home.rs` re-imports it.
 
 ### `tenex-protocol`
 Fully used. Defines `Intent`, `Channel`, `ConversationRef`, `ProjectRef`, Nostr encoder/decoder, stdin source, stdout NDJSON sink. Used by `tenex-agent`, `tenex-intervention`, `tenex-scheduler`, `tenex-summarizer`.
@@ -137,28 +138,45 @@ The `tenex` binary now includes:
 
 ---
 
-## Architecture Observations (ninth pass drift check)
+## Architecture Observations (tenth pass drift check)
 
 - **TS `ProjectRuntime.ts` is dead code in the default path**: `tenex daemon` uses `tenex runtime` (Rust) by default. TS ProjectRuntime is only invoked via `--ts` / `--boot-command`. Safe to remove on full TS retirement.
 - **No dual-publish**: Since TS ProjectRuntime is not the default, status events (24010/24133) are only published by Rust. No conflict.
 - **`PubkeyService.ts`** correctly delegates to `identityDaemonClient` (Rust daemon) — no drift.
 - **`LlmConfigClient.ts`** correctly uses the Rust Unix-socket IPC — no drift.
-- **Conversation history gap**: `tenex-context` has a full `project()` function that loads history from `ConversationStore`. Not yet called from `tenex-agent` — each invocation is stateless. This is the top remaining gap.
+- **`tenex-context` is now wired**: `project()` is called before each `stream_chat` call. History is text-only (User + Assistant) until projection.rs records tool_calls inline on assistant records — ToolResult messages are filtered to prevent provider 400s.
 
 ---
 
 ## What Is NOT Yet Wired
 
-| Crate | Status | Notes |
-|-------|--------|-------|
-| `tenex-context` | Built, not integrated | Projection + compaction/decay strategies exist. Not yet used by `tenex-agent` — agent builds messages ad-hoc. |
-| `tenex-system-prompt` | Built, not integrated | Pure system-prompt assembly. `tenex-agent` has its own `prompt.rs`. Interface differs (skill refs vs full prompt fragments). Should migrate once aligned. |
+All previously listed gaps have been closed. Remaining TS-only tools not yet ported to Rust:
+
+| TS Tool | Status | Notes |
+|---------|--------|-------|
+| `conversation_get` | TS-only | Fetch conversation history by ID. Not applicable in Rust (agent is invoked per-turn with injected history). |
+| `conversation_list` | TS-only | List conversations. No Rust equivalent. |
+| `conversation_search` | TS-only | Semantic search across conversations. No Rust equivalent. |
+| `no_response` | TS-only | Suppress the completion event. Not yet ported. |
+| `kill` | TS-only | Terminate a running agent. Not applicable to single-invocation Rust agent. |
+| `send_message` | TS-only | Send arbitrary Nostr message. Not yet ported. |
+| `mcp_list_resources`, `mcp_resource_read`, `mcp_subscribe`, `mcp_subscription_stop` | TS-only | MCP protocol tools. No Rust equivalent yet. |
+| `report_publish` | TS-only | Publish a formatted report event. Not yet ported. |
+| `schedule_task` | TS-only | Schedule a future task. Not yet ported (tenex-scheduler handles scheduling externally). |
+| `change_model` | TS-only | Switch LLM mid-conversation. Not yet ported. |
+| `agents_write` | TS-only | Create/update agent records. Not yet ported. |
+| `rag_subscription_*` | TS-only | RAG subscription management. No Rust equivalent. |
 
 ---
 
 ## Compilation Status
 
-**As of 2026-04-28 (ninth debt check pass): workspace compiles clean — zero errors.**
+**As of 2026-04-28 (tenth debt check pass): workspace compiles clean — zero errors.**
+
+Resolved between ninth and tenth passes:
+- **tenex-context wired**: `project()` called before each invocation; User+Assistant history passed to `stream_chat`; `record_turn()` persists each turn to the conversation store
+- **tenex-system-prompt wired**: full `prompt.rs` content migrated into the crate; `InjectedFile` moved there; `prompt.rs` deleted from `tenex-agent`
+- **stream_chat**: `run_agent!` macro switched from `stream_prompt` to `stream_chat` with history
 
 Resolved between eighth and ninth passes (automated hourly check + committed):
 - **New tools**: `ask`, `delegate_crossproject`, `delegate_followup`, `learn`, `project_list`, `self_delegate`
@@ -224,10 +242,10 @@ tenex daemon (Rust)
 2. ~~**Near-term**: Switch daemon supervisor from `bun run src/boot.ts` to `tenex runtime`~~ ✓ Done 2026-04-28
 3. ~~**Now**: Add RAL to `tenex runtime`~~ — natural serialization via event loop `.await` is sufficient for now ✓
 4. ~~**Now**: Wire `tenex-conversations` into `tenex runtime`~~ ✓ Done 2026-04-28
-5. **Near-term**: Wire `tenex-context` into `tenex-agent` for context window management (compaction/decay)
-6. **Near-term**: Align `tenex-system-prompt` interface with `prompt.rs` and migrate
+5. ~~**Near-term**: Wire `tenex-context` into `tenex-agent` for context window management~~ ✓ Done 2026-04-28
+6. ~~**Near-term**: Align `tenex-system-prompt` interface with `prompt.rs` and migrate~~ ✓ Done 2026-04-28
 7. ~~**Near-term**: Port `tenex agent manage` interactive TUI~~ ✓ Done 2026-04-28
 8. ~~**Near-term**: Port OpenClaw, categorize, telegram config, identifier utils~~ ✓ Done 2026-04-28
 9. **Near-term**: Delete TS originals for fully-ported flows (OpenClaw, categorize, telegram-identifiers, conversation-id utils)
-10. **Near-term**: Load conversation history into `tenex-agent` invocations (currently stateless from LLM perspective)
+10. ~~**Near-term**: Load conversation history into `tenex-agent` invocations~~ ✓ Done 2026-04-28
 11. **Longer-term**: Retire `bun run src/boot.ts` and all TypeScript orchestration

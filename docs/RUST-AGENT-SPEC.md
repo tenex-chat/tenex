@@ -103,7 +103,7 @@ Shell commands automatically see environment variables from the `.env` file plus
 
 ## System Prompt
 
-Built from fragments assembled by `prompt.rs`:
+Built from fragments assembled by `tenex_system_prompt::build_system_prompt()`:
 
 ### Fragment 01 — Agent Identity
 ```xml
@@ -214,7 +214,7 @@ When tools have a `description` parameter, write 5-10 words in active voice.
 
 - **Orchestrator**: Orchestrator guidance (coordinate, don't do everything yourself).
 - **Domain expert**: Hard-refuse on out-of-domain requests; no delegation.
-- **Non-worker, non-domain-expert**: Delegation tips, todo-before-delegation, and agent-directed monitoring guidance (how to use `conversation_get` + sleep to poll delegatees).
+- **Non-worker, non-domain-expert**: Delegation tips, todo-before-delegation, and agent-directed monitoring guidance (async re-invocation model; use `delegate_followup` for mid-flight corrections).
 
 ### Proactive Context (dynamic)
 If RAG is configured and the vector search returns results with score ≥ 0.65, a `<proactive-context>` block is appended to the system prompt with up to 5 relevant snippets (collections searched: `conversations`, `project_<id>`, `agent_<pubkey>`).
@@ -315,18 +315,83 @@ Delegate a task to another agent by slug, or to a whole team by team name. **Onl
 | `recipient` | string | Agent slug (e.g. `architect`) or team name (e.g. `design`) |
 | `prompt` | string | Task and full context for the delegated agent |
 
-Emits a `DelegationIntent` event on stdout, then a `ToolUseIntent` event referencing it. Returns a message instructing the agent to stop for the turn. Team names are resolved case-insensitively to the team lead agent.
+Emits a `DelegationIntent` event on stdout, then a `ToolUseIntent` event referencing it. Returns a message with the delegation event ID instructing the agent to stop for the turn. Team names are resolved case-insensitively to the team lead agent.
 
-### `rag_index`
-Index content into the RAG vector store. The `audience` field determines which collection to store in: `"self"` → `agent_{pubkey}` (personal notes); `"project"` → `project_{id}` (shared project knowledge).
+### `delegate_followup`
+Send a followup message to an agent already delegated to, referencing the original delegation event. Use for corrections or additional context before the delegatee finishes. **Only available to categories that allow delegation.**
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `recipient` | string | Agent slug — same as in the original `delegate` call |
+| `delegation_event_id` | string | Hex event ID returned by the original `delegate` call |
+| `message` | string | Additional instructions, corrections, or context |
+
+### `delegate_crossproject`
+Delegate a task to an agent in a different project. Use `project_list` first to discover available project IDs and agent slugs. **Only available to categories that allow delegation.**
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `project_id` | string | Target project ID (bare dTag) |
+| `recipient` | string | Agent slug in the target project |
+| `request` | string | Task and full context for the delegated agent |
+| `branch` | string? | Optional git branch context |
+
+### `self_delegate`
+Schedule follow-on work for yourself as a new top-level task. Use to defer work to a future invocation or split a large task across turns. **Only available to categories that allow delegation.**
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `request` | string | The follow-on task to execute in the next invocation |
+| `branch` | string? | Optional git branch context |
+
+### `ask`
+Ask the project owner a structured question and pause execution. Stop after calling this — the owner's reply arrives in a future invocation.
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `title` | string | Short title summarizing what you need to know |
+| `context` | string | Background explaining why you're asking |
+| `questions` | array | One or more structured questions |
+| `questions[].type` | string | `single_select` or `multi_select` |
+| `questions[].title` | string | Question label |
+| `questions[].prompt` | string | Detailed question text |
+| `questions[].options` | string[] | Available choices |
+
+### `learn`
+Persist a lesson learned. Publishes a Nostr lesson event and indexes the content in the `lessons` RAG collection for retrieval.
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `title` | string | Short title for the lesson |
+| `lesson` | string | What was learned and why it matters |
+| `category` | string? | Optional category tag (e.g. `debugging`, `architecture`) |
+| `hashtags` | string[]? | Optional hashtags without the `#` prefix |
+
+### `project_list`
+List all TENEX projects available on this system. Returns project IDs, titles, repo URLs, and agent slugs. Use before `delegate_crossproject` to discover project IDs.
+
+No parameters.
+
+### `rag_add_documents`
+Embed and store a document in a named RAG collection for later semantic retrieval.
 
 | Param | Type | Description |
 |-------|------|-------------|
 | `content` | string | Text to embed and store |
-| `audience` | string | `"self"` (personal agent knowledge) \| `"project"` (shared project knowledge) |
-| `title` | string? | Optional document title |
+| `collection` | string | Collection name — e.g. `lessons`, `agent_<pubkey>`, `project_<id>`, or custom |
+| `title` | string? | Short descriptive title |
 
 Disabled (returns error message) when embedding is not configured (`~/.tenex/embed.json` absent).
+
+### `rag_collection_list`
+List all RAG collections in the current project's knowledge base. No parameters. Returns one collection name per line, or an error if RAG is not configured.
+
+### `rag_collection_delete`
+Delete a named RAG collection and all its documents.
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `collection` | string | Collection name to delete |
 
 ### `rag_search`
 Search the RAG vector store for relevant content. Always searches across all three fixed collections: `conversations`, `project_{id}`, and `agent_{pubkey}`.
@@ -369,16 +434,18 @@ When a pre-tool heuristic fires, `ToolCallHookAction::skip(reason)` is returned 
 
 ## Iterative Loop
 
-Uses `rig-core`'s `Agent::stream_prompt()` with an `EmitHook`. The stream is consumed to completion; only the final `FinalResponse` item (containing the response text and aggregated token usage) is retained.
+Uses `rig-core`'s `Agent::stream_chat()` with projected history and an `EmitHook`. The stream is consumed to completion; only the final `FinalResponse` item (containing the response text and aggregated token usage) is retained.
 
-1. Build system prompt from fragments (preloaded skills → home dir → reminders → instructions → env vars → project context → agents → teams → todo guidance → category-specific → proactive RAG context).
+1. Build system prompt from fragments via `tenex_system_prompt::build_system_prompt()` (identity → home dir → system reminders → instructions → preloaded skills → env vars → project context → agents → teams → todo guidance → category-specific → proactive RAG context).
 2. Inject todo reminder into the user message if persisted todos exist.
-3. Call `agent.stream_prompt(user_message).with_hook(hook)` and drain the stream.
-4. `rig` sends messages to the provider, receives tool calls, executes them, feeds results back — looping until the provider returns a final text response.
-5. **Before each tool call**: `EmitHook::on_tool_call` runs pre-tool supervision checks. If blocked, returns `skip(reason)`. Otherwise emits a `ToolUseIntent` event (except `delegate`, which emits its own).
-6. **After each LLM turn**: `EmitHook::on_completion_response` emits a `ConversationIntent` event with the turn text and token usage.
-7. Sign and emit the final `CompletionIntent` event with token usage from `FinalResponse`.
+3. Call `tenex_context::project()` to load prior turns from the conversation store into a `Projection`. Filter to User + Assistant messages (System excluded — handled by preamble; ToolResult excluded until projection captures tool_calls inline to avoid provider 400s).
+4. Call `agent.stream_chat(user_message, history).with_hook(hook)` and drain the stream.
+5. `rig` sends messages to the provider, receives tool calls, executes them, feeds results back — looping until the provider returns a final text response.
+6. **Before each tool call**: `EmitHook::on_tool_call` runs pre-tool supervision checks. If blocked, returns `skip(reason)`. Otherwise emits a `ToolUseIntent` event (except `delegate`, which emits its own).
+7. **After each LLM turn**: `EmitHook::on_completion_response` emits a `ConversationIntent` event with the turn text and token usage.
 8. Save todos and self-applied skills atomically to the conversation store via `save_context_state`.
+9. Call `tenex_context::record_turn()` to persist the user message + assistant response to the conversation store for future history projection.
+10. Sign and emit the final `CompletionIntent` event with token usage from `FinalResponse`.
 
 The loop terminates when the provider returns a text response without tool calls. `rig` enforces `default_max_turns(25)`.
 
@@ -408,15 +475,16 @@ API keys are resolved from environment (`ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY
 | `tenex-protocol` | `Intent`, `Channel`, Nostr encoder, stdin source, stdout NDJSON sink |
 | `tenex-project` | Project SQLite DB (agents, metadata, teams) |
 | `tenex-conversations` | Conversation SQLite store (todos + self-applied skills via `AgentContextState`) |
+| `tenex-context` | Conversation history projection (compaction/decay/reminders); `record_turn` write-back |
+| `tenex-system-prompt` | System prompt assembly (`build_system_prompt`); `InjectedFile`, `HomeDirectoryInfo` types |
 | `tenex-rag` | RAG: SQLite vector store + embedding client |
 | `tenex-supervision` | Heuristic pre-tool and post-completion checks; `AgentCategory` enum |
 | `tenex-llm-config` | Provider credential resolution |
 
 ## Future Work (not yet implemented)
 
-- **Streaming intermediate events**: The agent now uses `stream_prompt` internally, but `ConversationIntent` events are still emitted once per LLM turn. Per-chunk streaming to the relay is not yet implemented.
-- **Conversation history**: Load prior turns from `tenex-conversations` so the agent has full message history across invocations. Currently each invocation is stateless from the LLM's perspective.
-- **Context management**: Wire `tenex-context` strategies (compaction → tool-result decay → reminders) into the agent's message projection. Currently the agent has no token-budget enforcement or message compaction.
-- **System prompt crate**: Replace inline `prompt.rs` with `tenex-system-prompt` for consistent assembly across binaries.
+- **Streaming intermediate events**: `ConversationIntent` events are emitted once per LLM turn. Per-chunk streaming to the relay is not yet implemented.
+- **ToolResult in history**: Projection filters out `ToolResult` messages because assistant records currently have empty `tool_calls`. Once `record_turn` captures tool calls inline, paired tool-call/result sequences can flow to providers.
+- **Context compaction/decay**: `tenex-context` strategy pipeline (compaction → tool-result decay → reminders) is defined but the decay and compaction strategies are not yet applied — only reminders run. Full token-budget enforcement is pending.
 - **`no_response` tool**: Suppress the completion event when the agent decides no reply is needed.
-- **`ask` tool**: Pause execution and emit an ask event; wait for a reply on stdin.
+- **TS-only tools**: `conversation_get/list/search`, `kill`, `send_message`, MCP tools (`mcp_list_resources`, `mcp_resource_read`, `mcp_subscribe`, `mcp_subscription_stop`), `report_publish`, `schedule_task`, `change_model`, `agents_write`, RAG subscription tools.
