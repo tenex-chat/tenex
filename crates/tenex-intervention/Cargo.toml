@@ -19,6 +19,8 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 nostr-sdk = "0.44"
 dirs-next = "2"
+tenex-project = { path = "../tenex-project" }
+tenex-protocol = { path = "../tenex-protocol", features = ["relay"] }
 libc = "0.2"
 
 [dev-dependencies]

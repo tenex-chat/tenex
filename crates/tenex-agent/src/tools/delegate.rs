@@ -1,10 +1,13 @@
-use crate::hook::AgentMeta;
-use crate::nostr::{AgentSigner, LlmTags};
+use crate::emit::EmitState;
 use rig::{completion::ToolDefinition, tool::Tool};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use tenex_project::Agent;
+use tenex_protocol::{
+    DelegationIntent, DelegationRequest, Intent, MessageRef, PrincipalKind, PrincipalRef,
+    ToolUseIntent,
+};
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct DelegateArgs {
@@ -18,24 +21,13 @@ pub struct DelegateError(String);
 
 #[derive(Clone)]
 pub struct DelegateTool {
-    signer: Arc<AgentSigner>,
-    root_id: String,
-    reply_id: Option<String>,
-    model: String,
-    meta: Arc<Mutex<AgentMeta>>,
+    state: Arc<EmitState>,
     project_agents: Arc<Vec<Agent>>,
 }
 
 impl DelegateTool {
-    pub fn new(
-        signer: Arc<AgentSigner>,
-        root_id: String,
-        reply_id: Option<String>,
-        model: String,
-        meta: Arc<Mutex<AgentMeta>>,
-        project_agents: Arc<Vec<Agent>>,
-    ) -> Self {
-        Self { signer, root_id, reply_id, model, meta, project_agents }
+    pub fn new(state: Arc<EmitState>, project_agents: Arc<Vec<Agent>>) -> Self {
+        Self { state, project_agents }
     }
 
     fn lookup_pubkey(&self, slug: &str) -> Option<String> {
@@ -74,7 +66,7 @@ impl Tool for DelegateTool {
     }
 
     async fn call(&self, args: DelegateArgs) -> Result<String, DelegateError> {
-        let pubkey = match self.lookup_pubkey(&args.recipient) {
+        let pubkey_hex = match self.lookup_pubkey(&args.recipient) {
             Some(p) => p,
             None => {
                 return Ok(format!(
@@ -89,33 +81,53 @@ impl Tool for DelegateTool {
             }
         };
 
-        let llm = {
-            let meta = self.meta.lock().unwrap();
-            LlmTags {
-                model: self.model.clone(),
-                ral: meta.ral,
-                input_tokens: None,
-                output_tokens: None,
-                total_tokens: None,
-                cached_input_tokens: None,
-            }
+        let pubkey = nostr::PublicKey::from_hex(&pubkey_hex)
+            .map_err(|e| DelegateError(format!("invalid recipient pubkey: {e}")))?;
+
+        let recipient = PrincipalRef::Nostr {
+            pubkey,
+            kind: PrincipalKind::Agent,
+            display_name: None,
         };
 
-        let delegation_id = self
-            .signer
-            .emit_delegation(&pubkey, &args.prompt, &llm)
+        let ral = self.state.meta.lock().unwrap().ral;
+        let ctx = self.state.build_ctx(ral);
+
+        let delegation_intent = DelegationIntent {
+            items: vec![DelegationRequest {
+                recipient: recipient.clone(),
+                recipient_label: format!("@{}", args.recipient),
+                request: args.prompt.clone(),
+                branch: None,
+            }],
+        };
+
+        let refs = self
+            .state
+            .channel
+            .send(Intent::Delegation(delegation_intent), &ctx)
+            .await
             .map_err(|e| DelegateError(format!("Failed to emit delegation: {e}")))?;
+        let delegation_ref = refs
+            .into_iter()
+            .next()
+            .ok_or_else(|| DelegateError("delegation produced no event".into()))?;
 
         let args_json = serde_json::to_string(&args).unwrap_or_default();
-        self.signer
-            .emit_tool_use(
-                "delegate",
-                &args_json,
-                &self.root_id,
-                self.reply_id.as_deref(),
-                &llm,
-                &[delegation_id.clone()],
-            )
+        let tool_use_intent = ToolUseIntent {
+            tool_name: "delegate".to_string(),
+            content: String::new(),
+            args_json: Some(args_json),
+            referenced_messages: vec![match delegation_ref {
+                MessageRef::Nostr { event_id } => MessageRef::Nostr { event_id },
+            }],
+            usage: None,
+        };
+
+        self.state
+            .channel
+            .send(Intent::ToolUse(tool_use_intent), &ctx)
+            .await
             .map_err(|e| DelegateError(format!("Failed to emit tool-use event: {e}")))?;
 
         Ok(format!(

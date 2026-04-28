@@ -1,19 +1,24 @@
 mod config;
+mod emit;
 mod hook;
-mod nostr;
 mod prompt;
 mod tools;
 
 use anyhow::{Context, Result};
 use config::{LlmsConfig, ProvidersConfig, ResolvedModel};
-use hook::NostrHook;
-use nostr::{AgentSigner, InputEvent, LlmTags};
+use emit::{AgentMeta, EmitState};
+use hook::EmitHook;
 use rig::client::{CompletionClient, Nothing};
 use rig::completion::Prompt;
 use rig::providers::{anthropic, ollama, openai, openrouter};
-use std::io::{self, Read};
 use std::sync::{Arc, Mutex};
 use tenex_project::Project;
+use tenex_protocol::{
+    nostr::{read_one_from_stdin, NostrChannel},
+    sink::StdoutNdjsonSink,
+    Channel, CompletionIntent, ConversationRef, Intent, LlmUsage, MessageRef, PrincipalRef,
+    ProjectRef,
+};
 use tools::{
     DelegateTool, FsEditTool, FsGlobTool, FsGrepTool, FsReadTool, FsWriteTool, ShellTool,
     TodoItem, TodoWriteTool,
@@ -59,19 +64,19 @@ async fn main() -> Result<()> {
 
     let agent_config = config::AgentConfig::load(&args[1])?;
 
-    // Read triggering event from stdin
-    let mut stdin_content = String::new();
-    io::stdin()
-        .read_to_string(&mut stdin_content)
-        .context("Failed to read from stdin")?;
-    let input_event =
-        InputEvent::from_json(stdin_content.trim()).context("Failed to parse input event")?;
+    // Read triggering envelope from stdin
+    let envelope = read_one_from_stdin()
+        .await
+        .context("Failed to parse triggering event from stdin")?;
 
-    // Set up signer (parses nsec, derives pubkey)
-    let signer = Arc::new(
-        AgentSigner::new(&agent_config.nsec).context("Failed to initialize agent signer")?,
+    // Initialize channel (parses nsec, derives pubkey, signs to NDJSON-stdout)
+    let channel: Arc<dyn Channel> = Arc::new(
+        NostrChannel::from_nsec(&agent_config.nsec, StdoutNdjsonSink::new())
+            .context("Failed to initialize Nostr channel")?,
     );
-    let pubkey_hex = signer.pubkey_hex();
+    let pubkey_hex = match channel.identity() {
+        PrincipalRef::Nostr { pubkey, .. } => pubkey.to_hex(),
+    };
 
     // Resolve working directory
     let working_dir = agent_config
@@ -87,19 +92,29 @@ async fn main() -> Result<()> {
     // Open project DB and load context used for prompts + delegate tool.
     let project = Project::open_default(&project_id)
         .with_context(|| format!("Failed to open project DB for '{project_id}'"))?;
-    let project_meta = project.metadata().context("Failed to read project metadata")?;
+    let project_meta = project
+        .metadata()
+        .context("Failed to read project metadata")?
+        .context("Project metadata is missing — has the project been ingested?")?;
     let project_agents = Arc::new(project.agents().context("Failed to read project agents")?);
+
+    let owner_pubkey_hex = project_meta
+        .owner_pubkey
+        .as_ref()
+        .context("Project metadata has no owner_pubkey — cannot construct project ref")?;
+    let project_ref = ProjectRef {
+        author: nostr::PublicKey::from_hex(owner_pubkey_hex)
+            .context("Failed to parse project owner pubkey")?,
+        d_tag: project_meta.d_tag.clone(),
+    };
 
     // Load TENEX configuration files for model/key resolution
     let llms = LlmsConfig::load();
     let providers = ProvidersConfig::load();
 
     // Resolve provider + model + API key
-    let resolved = ResolvedModel::resolve(
-        agent_config.raw_model(),
-        llms.as_ref(),
-        providers.as_ref(),
-    );
+    let resolved =
+        ResolvedModel::resolve(agent_config.raw_model(), llms.as_ref(), providers.as_ref());
 
     eprintln!(
         "[tenex-agent] {} ({}) @ {}",
@@ -111,10 +126,16 @@ async fn main() -> Result<()> {
         "[tenex-agent] provider: {} | model: {}",
         resolved.provider, resolved.model
     );
+    let trigger_pubkey_hex = match &envelope.principal {
+        PrincipalRef::Nostr { pubkey, .. } => pubkey.to_hex(),
+    };
+    let trigger_event_id = match &envelope.message {
+        MessageRef::Nostr { event_id } => event_id.to_hex(),
+    };
     eprintln!(
         "[tenex-agent] Triggered by event {} from {}",
-        &input_event.id[..8],
-        &input_event.pubkey[..8]
+        &trigger_event_id[..8],
+        &trigger_pubkey_hex[..8]
     );
 
     // Build system prompt
@@ -122,26 +143,31 @@ async fn main() -> Result<()> {
         &agent_config,
         &pubkey_hex,
         &working_dir,
-        project_meta.as_ref(),
+        Some(&project_meta),
         &project_agents,
     );
 
     // Shared todo state across tool calls
     let todos: Arc<Mutex<Vec<TodoItem>>> = Arc::new(Mutex::new(Vec::new()));
 
-    let root_id = input_event.root_event_id().to_string();
-    let reply_id = input_event.reply_event_id().map(String::from);
     let model_string = format!("{}:{}", resolved.provider, resolved.model);
-    let (hook, agent_meta) =
-        NostrHook::new(signer.clone(), root_id.clone(), reply_id.clone(), model_string.clone());
-    let delegate_tool = DelegateTool::new(
-        signer.clone(),
-        root_id,
-        reply_id,
-        model_string.clone(),
-        agent_meta.clone(),
-        project_agents,
-    );
+    let conversation_root = match &envelope.root {
+        MessageRef::Nostr { event_id } => Some(ConversationRef::Nostr {
+            root_event_id: event_id.clone(),
+        }),
+    };
+
+    let emit_state = Arc::new(EmitState {
+        channel: channel.clone(),
+        project: project_ref,
+        triggering_principal: envelope.principal.clone(),
+        conversation_root,
+        model: model_string.clone(),
+        meta: Arc::new(Mutex::new(AgentMeta::new())),
+    });
+
+    let hook = EmitHook::new(emit_state.clone());
+    let delegate_tool = DelegateTool::new(emit_state.clone(), project_agents);
 
     eprintln!("[tenex-agent] Running agent...");
 
@@ -155,7 +181,7 @@ async fn main() -> Result<()> {
                 client,
                 &resolved.model,
                 &system_prompt,
-                &input_event.content,
+                &envelope.content,
                 working_dir,
                 todos,
                 hook.clone(),
@@ -166,14 +192,12 @@ async fn main() -> Result<()> {
             let key = resolved
                 .api_key
                 .context("No OpenAI API key found. Set OPENAI_API_KEY or add it to ~/.tenex/providers.json")?;
-            let client = openai::CompletionsClient::builder()
-                .api_key(&key)
-                .build()?;
+            let client = openai::CompletionsClient::builder().api_key(&key).build()?;
             run_agent!(
                 client,
                 &resolved.model,
                 &system_prompt,
-                &input_event.content,
+                &envelope.content,
                 working_dir,
                 todos,
                 hook.clone(),
@@ -190,7 +214,7 @@ async fn main() -> Result<()> {
                 client,
                 &resolved.model,
                 &system_prompt,
-                &input_event.content,
+                &envelope.content,
                 working_dir,
                 todos,
                 hook.clone(),
@@ -211,7 +235,7 @@ async fn main() -> Result<()> {
                 client,
                 &resolved.model,
                 &system_prompt,
-                &input_event.content,
+                &envelope.content,
                 working_dir,
                 todos,
                 hook,
@@ -222,20 +246,28 @@ async fn main() -> Result<()> {
 
     eprintln!("[tenex-agent] Agent completed. Emitting completion event.");
 
-    let completion_llm = {
-        let meta = agent_meta.lock().unwrap();
-        LlmTags {
-            model: model_string,
-            ral: meta.ral,
-            input_tokens: Some(meta.input_tokens),
-            output_tokens: Some(meta.output_tokens),
-            total_tokens: Some(meta.total_tokens),
-            cached_input_tokens: Some(meta.cached_input_tokens),
-        }
+    let (final_ral, completion_usage) = {
+        let meta = emit_state.meta.lock().unwrap();
+        (
+            meta.ral,
+            LlmUsage {
+                input_tokens: Some(meta.input_tokens),
+                output_tokens: Some(meta.output_tokens),
+                total_tokens: Some(meta.total_tokens),
+                cached_input_tokens: Some(meta.cached_input_tokens),
+                ..Default::default()
+            },
+        )
     };
-
-    signer
-        .emit_completion(&response, &input_event, &completion_llm)
+    let final_ctx = emit_state.build_ctx(final_ral);
+    let completion = CompletionIntent {
+        content: response,
+        usage: Some(completion_usage),
+        metadata: None,
+    };
+    channel
+        .send(Intent::Completion(completion), &final_ctx)
+        .await
         .context("Failed to emit completion event")?;
 
     Ok(())

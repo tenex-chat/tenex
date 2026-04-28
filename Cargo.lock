@@ -2758,9 +2758,23 @@ dependencies = [
  "serde",
  "serde_json",
  "tenex-project",
+ "tenex-protocol",
  "thiserror 2.0.18",
  "tokio",
  "walkdir",
+]
+
+[[package]]
+name = "tenex-context"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tenex-conversations",
+ "thiserror 2.0.18",
+ "tracing",
 ]
 
 [[package]]
@@ -2809,6 +2823,8 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+ "tenex-project",
+ "tenex-protocol",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -2841,6 +2857,21 @@ dependencies = [
  "thiserror 2.0.18",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "tenex-protocol"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "nostr",
+ "nostr-sdk",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -2887,6 +2918,10 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
 ]
+
+[[package]]
+name = "tenex-system-prompt"
+version = "0.1.0"
 
 [[package]]
 name = "tenex-whitelist"
