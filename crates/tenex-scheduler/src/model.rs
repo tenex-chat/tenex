@@ -23,7 +23,8 @@ pub struct ScheduledTask {
     pub next_run: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub created_at: Option<String>,
-    pub from_pubkey: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from_pubkey: Option<String>,
     pub target_agent_slug: String,
     pub project_id: String,
     /// NIP-33 address tag: "31933:<pubkey>:<dTag>".

@@ -55,7 +55,8 @@ struct ScheduledTask {
     next_run: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     created_at: Option<String>,
-    from_pubkey: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    from_pubkey: Option<String>,
     target_agent_slug: String,
     project_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -75,7 +76,7 @@ impl ScheduledTask {
 
     fn display_schedule(&self) -> &str {
         if self.is_oneoff() {
-            self.execute_at.as_deref().unwrap_or(&self.schedule)
+            self.execute_at.as_deref().unwrap_or("[missing execute_at]")
         } else {
             &self.schedule
         }
@@ -626,7 +627,7 @@ fn prompt_add_task() -> Result<Option<TaskEntry>> {
         last_run: None,
         next_run: None,
         created_at: Some(now),
-        from_pubkey: String::new(),
+        from_pubkey: None,
         target_agent_slug: target,
         project_id: d_tag.clone(),
         project_ref: None,

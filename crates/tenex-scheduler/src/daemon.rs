@@ -314,15 +314,19 @@ async fn run_oneoff_loop(
     publisher: Arc<Publisher>,
     shutdown_rx: &mut watch::Receiver<bool>,
 ) {
-    let execute_at = match task.execute_at.as_deref().or(Some(&task.schedule)) {
-        Some(s) => match chrono::DateTime::parse_from_rfc3339(s) {
-            Ok(t) => t.with_timezone(&Utc),
-            Err(e) => {
-                error!(task_id = %task.id, schedule = %s, error = %e, "invalid executeAt timestamp");
-                return;
-            }
-        },
-        None => return,
+    let execute_at_str = match task.execute_at.as_deref() {
+        Some(s) => s,
+        None => {
+            error!(task_id = %task.id, "one-off task has no executeAt timestamp");
+            return;
+        }
+    };
+    let execute_at = match chrono::DateTime::parse_from_rfc3339(execute_at_str) {
+        Ok(t) => t.with_timezone(&Utc),
+        Err(e) => {
+            error!(task_id = %task.id, schedule = %execute_at_str, error = %e, "invalid executeAt timestamp");
+            return;
+        }
     };
 
     loop {
@@ -399,7 +403,13 @@ fn oneoff_catchup_deadline(task: &ScheduledTask) -> Option<chrono::DateTime<Utc>
     if task.last_run.is_some() {
         return None; // already fired
     }
-    let execute_at_str = task.execute_at.as_deref().unwrap_or(&task.schedule);
+    let execute_at_str = match task.execute_at.as_deref() {
+        Some(s) => s,
+        None => {
+            warn!(task_id = %task.id, "one-off task has no executeAt, skipping catch-up");
+            return None;
+        }
+    };
     let t = chrono::DateTime::parse_from_rfc3339(execute_at_str)
         .ok()?
         .with_timezone(&Utc);

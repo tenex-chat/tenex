@@ -189,8 +189,6 @@ fn add_cron_task(
 ) -> Result<()> {
     let id = Uuid::new_v4().to_string();
     let now = Utc::now().to_rfc3339();
-    let from_pubkey = from.unwrap_or_default();
-
     let project_ref = build_project_ref(&project);
 
     let task = ScheduledTask {
@@ -201,7 +199,7 @@ fn add_cron_task(
         last_run: None,
         next_run: None,
         created_at: Some(now),
-        from_pubkey,
+        from_pubkey: from,
         target_agent_slug: target,
         project_id: project.clone(),
         project_ref,
@@ -226,7 +224,6 @@ fn add_oneoff_task(
 ) -> Result<()> {
     let id = Uuid::new_v4().to_string();
     let now = Utc::now().to_rfc3339();
-    let from_pubkey = from.unwrap_or_default();
     let project_ref = build_project_ref(&project);
 
     let task = ScheduledTask {
@@ -237,7 +234,7 @@ fn add_oneoff_task(
         last_run: None,
         next_run: None,
         created_at: Some(now),
-        from_pubkey,
+        from_pubkey: from,
         target_agent_slug: target,
         project_id: project.clone(),
         project_ref,

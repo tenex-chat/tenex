@@ -1,6 +1,5 @@
 pub mod config;
 pub mod daemon;
-pub mod delegation;
 pub mod detector;
 pub mod lockfile;
 pub mod model;

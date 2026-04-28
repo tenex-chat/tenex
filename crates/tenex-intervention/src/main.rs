@@ -1,6 +1,5 @@
 mod config;
 mod daemon;
-mod delegation;
 mod detector;
 mod lockfile;
 mod model;
