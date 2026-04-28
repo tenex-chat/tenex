@@ -580,17 +580,28 @@ mod tests {
         assert!(owned.info("anthropic", "missing").is_none());
     }
 
+    /// Build a unique per-call temp dir. Uses a process-wide counter
+    /// so two parallel tests inside this module never collide on the
+    /// same `<prefix>-<pid>-<n>` path.
+    fn unique_temp(label: &str) -> std::path::PathBuf {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+        std::env::temp_dir().join(format!(
+            "tenex-load-or-empty-{label}-{}-{}-{n}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0),
+        ))
+    }
+
     #[test]
     fn load_or_empty_returns_empty_source_when_cache_file_missing() {
         // No cache file at <base>/cache/models-dev.json → empty source.
         // Verify by checking that any lookup returns None.
-        use std::sync::atomic::{AtomicU64, Ordering};
-        static COUNTER: AtomicU64 = AtomicU64::new(0);
-        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-        let base = std::env::temp_dir().join(format!(
-            "tenex-load-or-empty-{}-{n}",
-            std::process::id()
-        ));
+        let base = unique_temp("missing");
         std::fs::create_dir_all(&base).unwrap();
         let source = load_or_empty(&base);
         assert!(source.info("anthropic", "claude-x").is_none());
@@ -599,13 +610,7 @@ mod tests {
 
     #[test]
     fn load_or_empty_returns_owned_source_when_cache_file_parses() {
-        use std::sync::atomic::{AtomicU64, Ordering};
-        static COUNTER: AtomicU64 = AtomicU64::new(0);
-        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-        let base = std::env::temp_dir().join(format!(
-            "tenex-load-or-empty-{}-{n}",
-            std::process::id()
-        ));
+        let base = unique_temp("parses");
         std::fs::create_dir_all(base.join("cache")).unwrap();
         let payload = br#"{"fetchedAt":0,"data":{"anthropic":{"models":{"claude-x":{"id":"claude-x","name":"Claude X","cost":{"input":2.0,"output":10.0},"limit":{"context":150000,"output":4096}}}}}}"#;
         std::fs::write(

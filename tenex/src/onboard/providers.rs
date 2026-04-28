@@ -261,19 +261,10 @@ pub fn ask_for_key(
         .map_err(|e| anyhow!("{display_name} label prompt: {e}"))?;
     let label = label_raw.trim();
 
-    Ok(Some(serialize_api_key_entry(&value, label)))
-}
-
-/// 1:1 port of `serializeApiKeyEntry` (`src/llm/providers/key-manager.ts:316-323`).
-/// Returns `<key> <label>` when label is non-empty, otherwise just `<key>`.
-pub fn serialize_api_key_entry(key: &str, label: &str) -> String {
-    let key = key.trim();
-    let label = label.trim();
-    if label.is_empty() {
-        key.to_owned()
-    } else {
-        format!("{key} {label}")
-    }
+    Ok(Some(crate::store::api_keys::serialize_api_key_entry(
+        &value,
+        Some(label),
+    )))
 }
 
 #[cfg(test)]
@@ -309,23 +300,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn serialize_api_key_entry_without_label_is_key_only() {
-        assert_eq!(serialize_api_key_entry("sk-1", ""), "sk-1");
-        assert_eq!(serialize_api_key_entry("  sk-1  ", "   "), "sk-1");
-    }
-
-    #[test]
-    fn serialize_api_key_entry_with_label_joins_with_single_space() {
-        assert_eq!(
-            serialize_api_key_entry("sk-1", "personal"),
-            "sk-1 personal"
-        );
-        assert_eq!(
-            serialize_api_key_entry("  sk-1 ", " pfer@me.com"),
-            "sk-1 pfer@me.com"
-        );
-    }
+    // serialize_api_key_entry tests live in `store::api_keys::tests` —
+    // this module no longer has its own copy of the function.
 
     #[test]
     fn state_from_doc_lifts_single_key_into_apikeyvalue_single() {
