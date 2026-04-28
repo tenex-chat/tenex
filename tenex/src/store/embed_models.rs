@@ -1,0 +1,229 @@
+//! Embedding-model catalog for `tenex config embed`.
+//!
+//! Source: `src/commands/config/embed.ts:14-50` — the three top-level
+//! constants `EMBEDDING_CAPABLE_PROVIDERS`, `PROVIDER_DISPLAY_NAMES`,
+//! and `EMBEDDING_MODELS`. These are pure data lookups consumed by
+//! the standalone `tenex config embed` command (which is a separate
+//! flow from `tenex onboard`'s Step 6 — see QUESTIONS.md).
+//!
+//! Important: this is the FULL list (3 OpenAI models including
+//! ada-002, 3 OpenRouter models including ada-002, 4 Ollama models).
+//! The onboard Step 6 flow has a smaller list (no ada-002, three
+//! Xenova local models) and lives in `crate::onboard::embeddings` —
+//! do not unify the two until the project-scope persistence and
+//! Ollama embedding adapter substrates land.
+
+/// One row in the picker. Mirrors the `{ name, value }` objects in the
+/// TS source's `Array<{ name: string; value: string }>`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EmbeddingModelChoice {
+    /// Visible label (left side of the picker row).
+    pub name: &'static str,
+    /// Stable model ID persisted to disk.
+    pub value: &'static str,
+}
+
+/// Mirror `EMBEDDING_CAPABLE_PROVIDERS` (`embed.ts:17-20`).
+///
+/// The two providers `tenex config embed` lets the user pick between
+/// (in addition to ollama, which is a separate code-path). OpenAI and
+/// OpenRouter both speak the OpenAI-compatible embeddings API.
+pub const EMBEDDING_CAPABLE_PROVIDERS: &[&str] = &["openai", "openrouter"];
+
+/// Mirror `PROVIDER_DISPLAY_NAMES` (`embed.ts:25-28`).
+///
+/// Note: this is *distinct* from the broader `provider_display_name`
+/// in `crate::store::provider_ids` — that one returns the full
+/// "OpenRouter (300+ models)" / "Anthropic (Claude)" flavour-text
+/// labels. The embed flow uses bare provider names because the screen
+/// already says "Embedding provider" — the flavour text would be
+/// noise.
+pub fn embed_provider_display_name(provider: &str) -> Option<&'static str> {
+    match provider {
+        "openai" => Some("OpenAI"),
+        "openrouter" => Some("OpenRouter"),
+        _ => None,
+    }
+}
+
+/// Mirror `EMBEDDING_MODELS` (`embed.ts:33-50`).
+///
+/// Returns the canonical model list for a provider, in TS source
+/// order. Empty for unknown providers.
+///
+/// Per-provider counts:
+/// - `openai`: 3 (incl. `text-embedding-ada-002` legacy)
+/// - `openrouter`: 3 (incl. `openai/text-embedding-ada-002`)
+/// - `ollama`: 4 (`nomic-embed-text`, `mxbai-embed-large`, `all-minilm`,
+///   `snowflake-arctic-embed`)
+pub fn embedding_models(provider: &str) -> &'static [EmbeddingModelChoice] {
+    match provider {
+        "openai" => &OPENAI_MODELS,
+        "openrouter" => &OPENROUTER_MODELS,
+        "ollama" => &OLLAMA_MODELS,
+        _ => &[],
+    }
+}
+
+const OPENAI_MODELS: [EmbeddingModelChoice; 3] = [
+    EmbeddingModelChoice {
+        name: "text-embedding-3-small (fast, good quality)",
+        value: "text-embedding-3-small",
+    },
+    EmbeddingModelChoice {
+        name: "text-embedding-3-large (slower, best quality)",
+        value: "text-embedding-3-large",
+    },
+    EmbeddingModelChoice {
+        name: "text-embedding-ada-002 (legacy)",
+        value: "text-embedding-ada-002",
+    },
+];
+
+const OPENROUTER_MODELS: [EmbeddingModelChoice; 3] = [
+    EmbeddingModelChoice {
+        name: "openai/text-embedding-3-small",
+        value: "openai/text-embedding-3-small",
+    },
+    EmbeddingModelChoice {
+        name: "openai/text-embedding-3-large",
+        value: "openai/text-embedding-3-large",
+    },
+    EmbeddingModelChoice {
+        name: "openai/text-embedding-ada-002",
+        value: "openai/text-embedding-ada-002",
+    },
+];
+
+const OLLAMA_MODELS: [EmbeddingModelChoice; 4] = [
+    EmbeddingModelChoice {
+        name: "nomic-embed-text (recommended, 768-dim)",
+        value: "nomic-embed-text",
+    },
+    EmbeddingModelChoice {
+        name: "mxbai-embed-large (higher quality, 1024-dim)",
+        value: "mxbai-embed-large",
+    },
+    EmbeddingModelChoice {
+        name: "all-minilm (fast, 384-dim)",
+        value: "all-minilm",
+    },
+    EmbeddingModelChoice {
+        name: "snowflake-arctic-embed (high quality, 1024-dim)",
+        value: "snowflake-arctic-embed",
+    },
+];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── EMBEDDING_CAPABLE_PROVIDERS ─────────────────────────────────────
+
+    #[test]
+    fn capable_providers_match_ts_in_order() {
+        // Source: embed.ts:17-20 — exactly two entries, OpenAI then
+        // OpenRouter. Don't add ollama here; the TS source uses a
+        // separate code-path for the local provider.
+        assert_eq!(EMBEDDING_CAPABLE_PROVIDERS, &["openai", "openrouter"]);
+    }
+
+    // ── embed_provider_display_name ─────────────────────────────────────
+
+    #[test]
+    fn display_name_returns_bare_label_for_known_providers() {
+        assert_eq!(embed_provider_display_name("openai"), Some("OpenAI"));
+        assert_eq!(
+            embed_provider_display_name("openrouter"),
+            Some("OpenRouter"),
+        );
+    }
+
+    #[test]
+    fn display_name_returns_none_for_unknown_or_local() {
+        // The TS map only has openai + openrouter — anything else
+        // (including ollama) returns undefined. Mirror with None.
+        assert_eq!(embed_provider_display_name("ollama"), None);
+        assert_eq!(embed_provider_display_name("anthropic"), None);
+        assert_eq!(embed_provider_display_name("totally-unknown"), None);
+        assert_eq!(embed_provider_display_name(""), None);
+    }
+
+    #[test]
+    fn display_name_distinct_from_full_provider_label() {
+        // Sanity: this map intentionally returns 'OpenAI', NOT
+        // 'OpenAI (GPT)'. The full label belongs to the broader
+        // provider_display_name in store::provider_ids; using it here
+        // would be a regression.
+        assert_eq!(embed_provider_display_name("openai"), Some("OpenAI"));
+        // This is not a test of the OTHER function, but a pin: the
+        // embed-flow display name for OpenAI must be exactly 6 chars,
+        // not the full label.
+        assert_eq!(embed_provider_display_name("openai").unwrap().len(), 6);
+    }
+
+    // ── embedding_models ────────────────────────────────────────────────
+
+    #[test]
+    fn openai_models_match_ts_verbatim() {
+        let m = embedding_models("openai");
+        assert_eq!(m.len(), 3);
+        assert_eq!(m[0].value, "text-embedding-3-small");
+        assert_eq!(m[0].name, "text-embedding-3-small (fast, good quality)");
+        assert_eq!(m[1].value, "text-embedding-3-large");
+        assert_eq!(m[1].name, "text-embedding-3-large (slower, best quality)");
+        assert_eq!(m[2].value, "text-embedding-ada-002");
+        assert_eq!(m[2].name, "text-embedding-ada-002 (legacy)");
+    }
+
+    #[test]
+    fn openrouter_models_match_ts_verbatim() {
+        let m = embedding_models("openrouter");
+        assert_eq!(m.len(), 3);
+        assert_eq!(m[0].value, "openai/text-embedding-3-small");
+        assert_eq!(m[0].name, "openai/text-embedding-3-small");
+        assert_eq!(m[1].value, "openai/text-embedding-3-large");
+        assert_eq!(m[2].value, "openai/text-embedding-ada-002");
+    }
+
+    #[test]
+    fn ollama_models_match_ts_verbatim() {
+        let m = embedding_models("ollama");
+        assert_eq!(m.len(), 4);
+        // Order matters — TS lists them in this exact order.
+        assert_eq!(m[0].value, "nomic-embed-text");
+        assert_eq!(m[0].name, "nomic-embed-text (recommended, 768-dim)");
+        assert_eq!(m[1].value, "mxbai-embed-large");
+        assert_eq!(m[1].name, "mxbai-embed-large (higher quality, 1024-dim)");
+        assert_eq!(m[2].value, "all-minilm");
+        assert_eq!(m[2].name, "all-minilm (fast, 384-dim)");
+        assert_eq!(m[3].value, "snowflake-arctic-embed");
+        assert_eq!(m[3].name, "snowflake-arctic-embed (high quality, 1024-dim)");
+    }
+
+    #[test]
+    fn embedding_models_returns_empty_for_unknown_provider() {
+        assert!(embedding_models("anthropic").is_empty());
+        assert!(embedding_models("codex").is_empty());
+        assert!(embedding_models("claude-code").is_empty());
+        assert!(embedding_models("").is_empty());
+    }
+
+    #[test]
+    fn every_model_value_renders_inside_its_name() {
+        // Light invariant: the picker's `name` ALWAYS contains the
+        // `value` as a substring (TS template `${value} (...)` for
+        // descriptive labels, or bare `value` for the openrouter rows).
+        // Catches drift where someone updates one but not the other.
+        for provider in ["openai", "openrouter", "ollama"] {
+            for choice in embedding_models(provider) {
+                assert!(
+                    choice.name.contains(choice.value),
+                    "label `{}` does not contain value `{}` for provider `{provider}`",
+                    choice.name,
+                    choice.value,
+                );
+            }
+        }
+    }
+}

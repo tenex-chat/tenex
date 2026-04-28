@@ -24,6 +24,7 @@ pub mod api_keys;
 pub mod atomic;
 pub mod conversation_disk_reader;
 pub mod embed;
+pub mod embed_models;
 pub mod event_ids;
 pub mod llm_config_options;
 pub mod llms;
