@@ -4,7 +4,6 @@ User-facing CLI commands. Thin wrappers that parse input, delegate to services, 
 
 ## Contents
 
-- `daemon.ts` — Daemon start/stop
 - `doctor.ts` — System health diagnostics
 - `agent/` — Agent management subcommands
 - `setup/` — Onboarding flows (interactive setup, LLM config, embedding config)
