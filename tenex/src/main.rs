@@ -6,6 +6,7 @@ mod doctor;
 mod mcp_cmd;
 mod nostr_pub;
 mod onboard;
+mod runtime_cmd;
 mod store;
 mod tui;
 mod types;
@@ -45,6 +46,10 @@ enum Command {
     /// runtime (`tenex-boot`) for each project that receives a kind:1 or
     /// kind:24000 trigger from a whitelisted pubkey, restart on crash.
     Daemon(daemon::DaemonArgs),
+
+    /// Run a per-project Nostr orchestrator: subscribe, dispatch inbound
+    /// kind:1 events to the right agent, publish completions.
+    Runtime(runtime_cmd::RuntimeArgs),
 }
 
 #[tokio::main]
@@ -60,6 +65,7 @@ async fn main() -> Result<()> {
         Command::Mcp(args) => mcp_cmd::run(args).await,
         Command::Cron(args) => cron_cmd::run(args).await,
         Command::Daemon(args) => daemon::run(args).await,
+        Command::Runtime(args) => runtime_cmd::run(args).await,
     }
 }
 

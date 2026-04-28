@@ -9,6 +9,7 @@ name = "tenex"
 path = "src/main.rs"
 
 [dependencies]
+nostr = "0.44"
 nostr-sdk = "0.44"
 tokio = { version = "1.40", features = ["macros", "rt-multi-thread", "process", "signal", "sync", "time"] }
 clap = { version = "4.5", features = ["derive"] }
@@ -30,3 +31,4 @@ dirs-next = "2"
 tenex-whitelist = { path = "../whitelist" }
 tenex-llm-config = { path = "../crates/tenex-llm-config" }
 tenex-identity = { path = "../crates/tenex-identity" }
+tenex-project = { path = "../crates/tenex-project" }
