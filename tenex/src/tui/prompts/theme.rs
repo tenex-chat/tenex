@@ -41,12 +41,21 @@ pub const INQUIRER_AMBER: Color = Color::Rgb {
 /// freely. Use via [`super::input`] / [`super::password`] / etc., or pass
 /// directly to inquire prompts via `.with_render_config(theme())`.
 pub fn theme() -> RenderConfig<'static> {
-    RenderConfig::default_colored()
+    let mut cfg = RenderConfig::default_colored()
         .with_prompt_prefix(Styled::new("?").with_fg(INQUIRER_AMBER))
         .with_answered_prompt_prefix(Styled::new("✓").with_fg(Color::DarkGreen))
         .with_highlighted_option_prefix(Styled::new("❯").with_fg(INQUIRER_AMBER))
         .with_selected_option(Some(StyleSheet::new().with_fg(INQUIRER_AMBER)))
-        .with_answer(StyleSheet::new().with_fg(INQUIRER_AMBER))
+        .with_answer(StyleSheet::new().with_fg(INQUIRER_AMBER));
+    // TS @inquirer/core's default `theme.style.message` is
+    // `styleText('bold', text)` (`@inquirer/core/dist/lib/theme.js:14`)
+    // and the TENEX inquirerTheme doesn't override it — so prompt
+    // messages render bold. Inquire's default `prompt` stylesheet is
+    // empty (no styling); set it bold to match TS. There's no
+    // `with_prompt` builder on `RenderConfig`, so assign the field
+    // directly.
+    cfg.prompt = StyleSheet::new().with_attr(inquire::ui::Attributes::BOLD);
+    cfg
 }
 
 #[cfg(test)]
@@ -99,5 +108,21 @@ mod tests {
         let cfg = theme();
         let selected = cfg.selected_option.expect("selected_option set");
         assert_eq!(selected.fg, Some(INQUIRER_AMBER));
+    }
+
+    /// Pin the prompt-message bold attribute to match
+    /// `@inquirer/core/dist/lib/theme.js:14`'s default
+    /// `theme.style.message = (text) => styleText('bold', text)`.
+    /// The TENEX inquirerTheme doesn't override `style.message`, so
+    /// prompt messages render bold across every stock select / input /
+    /// password / confirm in TS.
+    #[test]
+    fn theme_renders_prompt_message_bold() {
+        let cfg = theme();
+        assert!(
+            cfg.prompt.att.contains(inquire::ui::Attributes::BOLD),
+            "prompt message must be bold to match TS @inquirer/core default; got: {:?}",
+            cfg.prompt,
+        );
     }
 }

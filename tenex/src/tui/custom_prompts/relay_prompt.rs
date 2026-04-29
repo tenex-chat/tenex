@@ -18,7 +18,7 @@ use std::io::{self, Write};
 
 use crossterm::cursor::{MoveTo, MoveToColumn, MoveUp};
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
-use crossterm::style::{Color, Print, ResetColor, SetForegroundColor};
+use crossterm::style::{Attribute, Color, Print, ResetColor, SetAttribute, SetForegroundColor};
 use crossterm::terminal::{Clear, ClearType};
 use crossterm::{queue, QueueableCommand};
 
@@ -317,7 +317,17 @@ fn render_frame<W: Write>(
     // Header: "<amber ?> <message>"
     queue!(stdout, MoveToColumn(0))?;
     style_amber(stdout, "?")?;
-    queue!(stdout, Print(format!(" {}\r\n", cfg.message)))?;
+    // TS at onboard.ts:89,114 wraps message in
+    //   theme.style.message(config.message, status)
+    // → `styleText('bold', text)`. Mirror byte-for-byte: bold the message.
+    queue!(
+        stdout,
+        Print(" "),
+        SetAttribute(Attribute::Bold),
+        Print(cfg.message),
+        SetAttribute(Attribute::Reset),
+        Print("\r\n"),
+    )?;
 
     // TS at commands/onboard.ts:104,109 wraps each description in
     // chalk.gray ALWAYS — whether the row is active or not. The active
@@ -373,11 +383,23 @@ fn clear_frame<W: Write>(stdout: &mut W, height: u16) -> io::Result<()> {
 }
 
 fn render_done<W: Write>(stdout: &mut W, message: &str, answer: &str) -> io::Result<()> {
-    // Final line: "<green ✓> <message> <amber answer>"
+    // TS at onboard.ts:91-94 emits
+    //   `${prefix} ${message} ${theme.style.answer(answer)}`
+    // where prefix is the answered-state green-✓, message is bold (per
+    // `theme.style.message(...)` default at `@inquirer/core/dist/lib/theme.js:14`),
+    // and the answer is amber (per inquirerTheme at cli-theme.ts:11).
+    // Mirror byte-for-byte.
     queue!(stdout, SetForegroundColor(Color::DarkGreen))?;
     queue!(stdout, Print("✓"))?;
     queue!(stdout, ResetColor)?;
-    queue!(stdout, Print(format!(" {message} ")))?;
+    queue!(
+        stdout,
+        Print(" "),
+        SetAttribute(Attribute::Bold),
+        Print(message),
+        SetAttribute(Attribute::Reset),
+        Print(" "),
+    )?;
     queue!(stdout, SetForegroundColor(AMBER))?;
     queue!(stdout, Print(answer))?;
     queue!(stdout, ResetColor)?;
