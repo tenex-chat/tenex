@@ -1,6 +1,6 @@
 # TENEX Rust Adoption Status
 
-_Last updated: 2026-04-29 (seventeenth pass). Auto-maintained by scheduled debt check._
+_Last updated: 2026-04-29 (eighteenth pass). Auto-maintained by scheduled debt check._
 
 ---
 
@@ -177,7 +177,9 @@ Note: `conversation_get`, `conversation_list`, `kill` (scheduled tasks only), `s
 
 ## Compilation Status
 
-**As of 2026-04-29 (seventeenth debt check pass): workspace compiles clean — zero errors. ~290 dead-code warnings exist from porting-in-progress code (TUI glyphs, onboard LLM test substrate, Codex config enums, etc.); none are orphaned — all are waiting for caller wiring.**
+**As of 2026-04-29 (eighteenth debt check pass): workspace compiles clean — zero errors, zero `unreachable!`/`todo!`/`unimplemented!` macros. ~290 dead-code warnings from porting-in-progress code (TUI glyphs, onboard LLM test substrate, Codex config enums); all waiting for caller wiring, none orphaned.**
+
+**MILESTONE: Every tool in `tenex-agent` is now verified end-to-end (see `RUST_REPORT.md`).** RAG (real embedding API), skills_set, delegate_crossproject, multi-turn context projection — all passing. `cargo test --workspace` clean: 27 tests across 4 crates.
 
 **MILESTONE: tenex-agent is live-tested end-to-end (see `RUST_REPORT.md`)**:
 - Basic completion ✅, streaming (kind:24135 deltas) ✅, final ConversationIntent ✅
@@ -186,6 +188,12 @@ Note: `conversation_get`, `conversation_list`, `kill` (scheduled tasks only), `s
 - Conversation history persistence (10 convs, 20 history entries) ✅
 - Supervision (worker todo block) ✅
 - FK bug fixed: ensure_conversation() on store open
+
+Resolved between seventeenth and eighteenth passes:
+- **All tools verified end-to-end**: RAG add_documents + search (real OpenRouter embedding API, SQLite store, cosine similarity), skills_set, delegate_crossproject, multi-turn context projection all confirmed passing. Open items cleared.
+- **`cargo test --workspace` clean**: 27 tests across tenex-context (5), tenex-system-prompt (4), tenex-supervision (13), tenex-identity (5) — 0 failures.
+- **Leftover `.bak` file removed**: `src/tools/implementations/agents_write.ts.bak` deleted (gitignored working copy from agents_write refactor).
+- **No orphaned code found**: All ~290 dead-code warnings are porting-in-progress items with clear landing paths.
 
 Resolved between sixteenth and seventeenth passes:
 - **Architecture fix — `tenex daemon` default**: Previously required `--rust` or `--ts` flag (clap `required(true)` ArgGroup with no default). Since Rust is the canonical path, removed the required ArgGroup and made Rust the default; `--ts <CMD>` remains as the escape hatch. Removes the `unreachable!()` fallback.
