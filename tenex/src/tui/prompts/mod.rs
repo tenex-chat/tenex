@@ -210,4 +210,29 @@ mod tests {
         // `é` is 1 codepoint (U+00E9 NFC) → 1 star.
         assert_eq!(formatter("café"), "****");
     }
+
+    /// Pin the stock-Select help-message override to TS @inquirer/select's
+    /// auto-helpLine `↑↓ navigate • ⏎ select` (per
+    /// `@inquirer/select/dist/index.js:148-151`). Without the override
+    /// inquire would emit its longer default
+    /// `\"↑↓ to move, enter to select, type to filter\"` — verbose and
+    /// non-TS.
+    #[test]
+    fn select_help_message_matches_ts_inquirer_select() {
+        let prompt = select("Choose:", vec!["a", "b"]);
+        assert_eq!(prompt.help_message, Some("↑↓ navigate • ⏎ select"));
+    }
+
+    /// Pin the stock-MultiSelect help-message override to TS
+    /// @inquirer/checkbox's auto-helpLine
+    /// `↑↓ navigate • space select • ⏎ submit` (per
+    /// `@inquirer/checkbox/dist/index.js:188-196`).
+    #[test]
+    fn multi_select_help_message_matches_ts_inquirer_checkbox() {
+        let prompt = multi_select("Choose:", vec!["a", "b"]);
+        assert_eq!(
+            prompt.help_message,
+            Some("↑↓ navigate • space select • ⏎ submit"),
+        );
+    }
 }
