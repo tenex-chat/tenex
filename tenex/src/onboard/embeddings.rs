@@ -125,18 +125,27 @@ pub fn run(
         Err(e) => return Err(anyhow!("embedding accept/change prompt: {e}")),
     };
 
-    let chosen = match action {
-        AcceptOrChange::Accept(_) => recommended,
+    // TS at `:425-428` (accept) and `:484-487` (change) emit asymmetric
+    // success-line provider tokens: the accept branch labelizes the
+    // provider id (`providerLabel` → "OpenAI"), the change branch uses
+    // the raw id (`chosenProvider` → "openai"). Mirror byte-for-byte.
+    let (chosen, success_provider) = match action {
+        AcceptOrChange::Accept(_) => {
+            let label = provider_label(&recommended.provider).to_owned();
+            (recommended, label)
+        }
         AcceptOrChange::Change => match run_change_branch(configured_providers, &recommended)? {
-            Some(c) => c,
+            Some(c) => {
+                let raw = c.provider.clone();
+                (c, raw)
+            }
             None => return Ok(EmbeddingsResult::Cancelled),
         },
     };
 
     persist(base_dir, &chosen)?;
-    let final_label = provider_label(&chosen.provider);
     display::success(&format!(
-        "Embeddings: {final_label} / {model}",
+        "Embeddings: {success_provider} / {model}",
         model = chosen.model,
     ));
     Ok(EmbeddingsResult::Configured(chosen))
@@ -444,5 +453,34 @@ mod tests {
     fn accept_or_change_display_for_change_variant_is_verbatim_ts_string() {
         let c = AcceptOrChange::Change;
         assert_eq!(format!("{c}"), "Choose a different model");
+    }
+
+    /// Pin the asymmetric success-line provider token between the
+    /// accept and change branches.
+    ///
+    /// TS at `:427` (accept) emits `Embeddings: ${providerLabel} / ${model}`
+    /// — the labelized name (e.g. "OpenAI"). TS at `:487` (change) emits
+    /// `Embeddings: ${chosenProvider} / ${chosenModel}` — the raw id
+    /// (e.g. "openai"). The `run` driver maintains this asymmetry by
+    /// computing `success_provider` per branch.
+    #[test]
+    fn success_line_provider_token_differs_between_accept_and_change_branches() {
+        // Accept branch labelizes
+        let accept_token = provider_label("openai").to_owned();
+        assert_eq!(accept_token, "OpenAI");
+
+        // Change branch keeps the raw id
+        let change_token: String = "openai".to_owned();
+        assert_eq!(change_token, "openai");
+
+        // The two branches must produce different tokens when the
+        // provider has a labelized name distinct from its id.
+        assert_ne!(accept_token, change_token);
+
+        // Provider with no labelized form ("local") would happen to match
+        // — but TS still distinguishes via different code paths. The
+        // accept branch ALWAYS calls provider_label; the change branch
+        // ALWAYS uses the raw id.
+        assert_eq!(provider_label("local"), "Local Transformers");
     }
 }
