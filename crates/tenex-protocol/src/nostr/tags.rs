@@ -31,6 +31,10 @@ pub fn e_reply_tag(event_id: &EventId) -> Result<Tag, EncodeError> {
     tag(["e", &event_id.to_hex(), "", "reply"])
 }
 
+pub fn delegation_parent_tag(root_id: &EventId) -> Result<Tag, EncodeError> {
+    tag(["delegation", &root_id.to_hex()])
+}
+
 pub fn p_tag(principal: &PrincipalRef) -> Result<Tag, EncodeError> {
     let PrincipalRef::Nostr { pubkey, .. } = principal;
     tag(["p", &pubkey.to_hex()])

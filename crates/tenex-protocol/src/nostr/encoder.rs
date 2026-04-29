@@ -16,8 +16,9 @@ use crate::refs::{ConversationRef, MessageRef};
 
 use super::kinds;
 use super::tags::{
-    add_llm_metadata_tags, add_llm_usage_tags, add_standard_tags, e_agent_definition_tag,
-    e_reply_tag, e_root_tag, forward_branch_team, p_tag, project_a_tag, q_tag, tag,
+    add_llm_metadata_tags, add_llm_usage_tags, add_standard_tags, delegation_parent_tag,
+    e_agent_definition_tag, e_reply_tag, e_root_tag, forward_branch_team, p_tag, project_a_tag,
+    q_tag, tag,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -129,6 +130,10 @@ fn encode_delegation(
             // Fresh delegations start a new conversation without any e-tag.
             if let Some(MessageRef::Nostr { event_id }) = d.followup_of.as_ref() {
                 builder = builder.tag(e_reply_tag(event_id)?);
+            } else if let Some(ConversationRef::Nostr { root_event_id }) =
+                ctx.conversation_root.as_ref()
+            {
+                builder = builder.tag(delegation_parent_tag(root_event_id)?);
             }
 
             builder = builder.tag(p_tag(&d.recipient)?);
@@ -480,8 +485,7 @@ mod tests {
 
     #[test]
     fn delegation_omits_e_root_and_prepends_label() {
-        let mut ctx = test_ctx();
-        ctx.conversation_root = None;
+        let ctx = test_ctx();
         ctx.triggering_message = None;
         let recipient_keys = Keys::generate();
         let intent = DelegationIntent {
@@ -509,6 +513,7 @@ mod tests {
         let tags: Vec<Vec<String>> = event.tags.iter().map(|t| t.clone().to_vec()).collect();
         assert!(!tags.iter().any(|t| t[0] == "e"));
         assert!(tags.iter().any(|t| t[0] == "p"));
+        assert!(tags.iter().any(|t| t[0] == "delegation"));
         assert_eq!(event.content, "@architect: Please review");
     }
 }

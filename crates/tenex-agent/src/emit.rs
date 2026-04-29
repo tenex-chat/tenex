@@ -27,6 +27,7 @@ pub struct EmitState {
     pub triggering_principal: PrincipalRef,
     pub triggering_message: Option<MessageRef>,
     pub conversation_root: Option<ConversationRef>,
+    pub completion_recipient: Option<PrincipalRef>,
     pub model: String,
     /// Team scope from the inbound event's `["team", ...]` tag.
     pub team: Option<String>,
@@ -46,7 +47,7 @@ impl EmitState {
             project: self.project.clone(),
             conversation_root: self.conversation_root.clone(),
             triggering_message: self.triggering_message.clone(),
-            completion_recipient: None,
+            completion_recipient: self.completion_recipient.clone(),
             triggering_principal: self.triggering_principal.clone(),
             ral,
             model: Some(self.model.clone()),

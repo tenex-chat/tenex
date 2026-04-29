@@ -42,7 +42,8 @@ use tenex_protocol::{
     nostr::{read_one_from_stdin, NostrChannel},
     sink::StdoutNdjsonSink,
     Channel, CompletionIntent, ConversationRef, Intent, ListShellTasksRequest, LlmUsage,
-    MessageRef, PrincipalRef, ProjectRef, RuntimeControlRequest, RuntimeControlResponse,
+    MessageRef, PrincipalKind, PrincipalRef, ProjectRef, RuntimeControlRequest,
+    RuntimeControlResponse,
 };
 use tenex_rag::{EmbedConfig, RagStore};
 use tenex_supervision::heuristics::default_supervisor;
@@ -614,9 +615,13 @@ async fn run() -> Result<()> {
     };
 
     // Open the conversation store for todo persistence and history projection.
-    let conversation_id = match &envelope.root {
+    let envelope_conversation_id = match &envelope.root {
         MessageRef::Nostr { event_id } => event_id.to_hex(),
     };
+    let conversation_id = std::env::var("TENEX_CONVERSATION_ID")
+        .ok()
+        .filter(|id| nostr::EventId::from_hex(id).is_ok())
+        .unwrap_or(envelope_conversation_id);
     let conv_store = (|| -> Option<ConversationStore> {
         let base_dir = tenex_conversations::paths::default_base_dir();
         let d_tag = tenex_conversations::normalize_project_id(&project_id).ok()?;
@@ -841,11 +846,17 @@ async fn run() -> Result<()> {
     let todos: Arc<Mutex<Vec<TodoItem>>> = Arc::new(Mutex::new(initial_todos));
 
     let model_string = format!("{}:{}", resolved.provider, resolved.model);
-    let conversation_root = match &envelope.root {
-        MessageRef::Nostr { event_id } => Some(ConversationRef::Nostr {
-            root_event_id: *event_id,
-        }),
-    };
+    let conversation_root = nostr::EventId::from_hex(&conversation_id)
+        .ok()
+        .map(|root_event_id| ConversationRef::Nostr { root_event_id });
+    let completion_recipient = std::env::var("TENEX_COMPLETION_RECIPIENT_PUBKEY")
+        .ok()
+        .and_then(|pubkey| nostr::PublicKey::from_hex(&pubkey).ok())
+        .map(|pubkey| PrincipalRef::Nostr {
+            pubkey,
+            kind: PrincipalKind::Human,
+            display_name: None,
+        });
 
     let emit_state = Arc::new(EmitState {
         channel: channel.clone(),
@@ -853,6 +864,7 @@ async fn run() -> Result<()> {
         triggering_principal: envelope.principal.clone(),
         triggering_message: Some(envelope.message.clone()),
         conversation_root,
+        completion_recipient,
         model: model_string.clone(),
         team: envelope.metadata.team.clone(),
         meta: Arc::new(Mutex::new(AgentMeta::new())),
