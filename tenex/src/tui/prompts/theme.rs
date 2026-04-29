@@ -72,7 +72,16 @@ pub fn theme() -> RenderConfig<'static> {
         // black. Inquire's own default `default_colored()` paints the
         // help line `LightCyan` (a bright highlight); overriding to
         // DarkGrey is the best byte-fidelity we can achieve here.
-        .with_help_message(StyleSheet::new().with_fg(Color::DarkGrey));
+        .with_help_message(StyleSheet::new().with_fg(Color::DarkGrey))
+        // TS @inquirer/core's `theme.style.defaultAnswer`
+        // (`@inquirer/core/dist/lib/theme.js:16`) is
+        //   (text) => styleText('dim', `(${text})`)
+        // — the `(value)` wrapping is identical to inquire's
+        // `print_default_value` (`ui/backend.rs:163-167`), so we just
+        // need to dim it. Same SGR-2 caveat as `style.help` above —
+        // approximate with DarkGrey. Inquire's default is empty
+        // (plain text), which makes default values blend in too much.
+        .with_default_value(StyleSheet::new().with_fg(Color::DarkGrey));
     // TS @inquirer/core's default `theme.style.message` is
     // `styleText('bold', text)` (`@inquirer/core/dist/lib/theme.js:14`)
     // and the TENEX inquirerTheme doesn't override it — so prompt
@@ -176,6 +185,22 @@ mod tests {
             cfg.help_message.fg,
             Some(Color::DarkGrey),
             "help_message must use DarkGrey to approximate chalk.dim",
+        );
+    }
+
+    /// Pin the default-value style to DarkGrey. TS @inquirer/core's
+    /// `theme.style.defaultAnswer` wraps the value in `(...)` and dims
+    /// it; inquire's `print_default_value` already does the `(...)`
+    /// wrapping (`ui/backend.rs:163-167`), so we just need DarkGrey
+    /// styling to approximate chalk.dim (same SGR-2 caveat as
+    /// help_message — inquire 0.7 can't emit SGR 2).
+    #[test]
+    fn theme_uses_dark_grey_for_default_value_approximating_chalk_dim() {
+        let cfg = theme();
+        assert_eq!(
+            cfg.default_value.fg,
+            Some(Color::DarkGrey),
+            "default_value must use DarkGrey to approximate chalk.dim",
         );
     }
 }
