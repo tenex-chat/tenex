@@ -1,6 +1,6 @@
 # TENEX Rust Agent — Test Report
 
-Last updated: 2026-04-28 (session 2)
+Last updated: 2026-04-28 (session 3)
 
 ---
 
@@ -23,8 +23,16 @@ Last updated: 2026-04-28 (session 2)
 | schedule_task tool | ✅ PASS | Task written to schedules.json, correct ID format |
 | Supervision (worker pre-tool block) | ✅ PASS | 5 unit tests pass; ToolCallHookAction::skip wired in EmitHook |
 | Supervision (pending todos post-completion) | ✅ PASS | 4 unit tests pass; runner loop re-engages on pending todos |
+| kill tool | ✅ PASS | Cancels scheduled tasks, removes from schedules.json |
+| Self-delegate end-to-end | ✅ PASS | Step1 delegates, step2 re-invocation executes and writes file |
+| conversation_list tool | ✅ PASS | Returns 20 conversations with IDs and metadata |
+| conversation_get tool | ✅ PASS | Returns messages for a given conversation ID |
+| change_model tool | ✅ PASS | Writes model override to agent_context_state; takes effect on re-invocation |
+| project_list tool | ✅ PASS | Lists 37 projects with agents and repo URLs |
+| ask tool | ✅ PASS | Emits AskIntent (kind:1) with title/question/p tags |
+| skill_list tool | ✅ PASS | Lists available project skills |
+| delegate_followup tool | ✅ PASS | Emits delegate + delegate_followup events in sequence |
 | RAG tools | 🔲 TODO | Requires embed config |
-| kill tool | 🔲 TODO | Not yet tested |
 
 ---
 
@@ -126,11 +134,34 @@ The harness also accepts an optional third argument (a fixed `root_id`) to reuse
 
 ---
 
+### Run 3 — 2026-04-28 Full Tool Coverage + Bug Fixes
+
+**Bug fixed: model string parsing for `provider/model:tag` format**
+
+`resolve_from_string` in `crates/tenex-agent/src/config.rs` checked `provider:model` before `provider/model`. For a model like `ollama/deepseek-v4-flash:cloud`, the colon-split fired first, giving provider=`ollama/deepseek-v4-flash` and model=`cloud`. This caused "No API key found for provider 'ollama/deepseek-v4-flash'" on `change_model`-triggered re-invocations.
+
+Fix: swapped the check order — `provider/model` (slash-separated, with known-provider guard) is now checked before `provider:model` (colon-separated). The `provider:model` format still works as a fallback for truly colon-separated identifiers.
+
+| Test | Elapsed | Tools | Result |
+|---|---|---|---|
+| kill-tool | 4s | 1 | ✅ Cancelled `task-1777416948136-f71d4b`, verified removed from schedules.json |
+| self-delegate-end-to-end | 12s | 2 | ✅ Step1 delegated; step2 re-invoked wrote `test_output.txt` (verified: `TENEX Rust test`) |
+| conversation-list | 5s | 1 | ✅ Listed 20 conversations |
+| conversation-get | 6s | 1 | ✅ Returned messages for conversation ID |
+| change-model | 13s | 1 | ✅ Wrote `ollama/deepseek-v4-flash:cloud` to agent_context_state |
+| change-model-verify (after fix) | 5s | 0 | ✅ provider: ollama model: deepseek-v4-flash:cloud |
+| project-list | 18s | 1 | ✅ Listed 37 projects with agents |
+| ask-tool | 6s | 1 | ✅ Emitted AskIntent with p-tag, title, question tags |
+| skill-list | 11s | 1 | ✅ Returned project skills |
+| delegate-followup | ~10s | 2 | ✅ Used delegate + delegate_followup in sequence |
+
+**All previously passing tests confirmed still pass after config.rs change.**
+
+---
+
 ## Open Items
 
 1. **RAG add + search** — Requires `~/.tenex/embed.json` with embedding API key. Skip until key available.
-
-2. **Kill tool** — Verify stop signal (kind:24134) is emitted on kill_tool call.
 
 ---
 
