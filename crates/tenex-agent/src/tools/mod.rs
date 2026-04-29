@@ -1,7 +1,9 @@
+pub mod agents_write;
 pub mod ask;
 pub mod change_model;
 pub mod conversation_get;
 pub mod conversation_list;
+pub mod conversation_search;
 pub mod delegate;
 pub mod delegate_crossproject;
 pub mod delegate_followup;
@@ -20,10 +22,12 @@ pub mod skill_list;
 pub mod skills_set;
 pub mod todo;
 
+pub use agents_write::AgentsWriteTool;
 pub use ask::AskTool;
 pub use change_model::ChangeModelTool;
 pub use conversation_get::ConversationGetTool;
 pub use conversation_list::ConversationListTool;
+pub use conversation_search::ConversationSearchTool;
 pub use delegate::DelegateTool;
 pub use delegate_crossproject::DelegateCrossProjectTool;
 pub use delegate_followup::DelegateFollowupTool;

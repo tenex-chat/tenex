@@ -33,7 +33,8 @@ use tenex_protocol::{
 use rig::OneOrMany;
 use rig::tool::ToolDyn;
 use tools::{
-    AskTool, ChangeModelTool, ConversationGetTool, ConversationListTool,
+    AgentsWriteTool, AskTool, ChangeModelTool, ConversationGetTool, ConversationListTool,
+    ConversationSearchTool,
     DelegateCrossProjectTool, DelegateFollowupTool, DelegateTool,
     FsEditTool, FsGlobTool, FsGrepTool, FsReadTool, FsWriteTool,
     HomeFsEditTool, HomeFsGlobTool, HomeFsGrepTool, HomeFsReadTool, HomeFsWriteTool,
@@ -195,6 +196,7 @@ fn build_extra_tools(
         Box::new(ProjectListTool::new(input.base_dir.to_path_buf())),
         Box::new(ConversationGetTool::new(input.conv_db_path.clone())),
         Box::new(ConversationListTool::new(input.conv_db_path.clone())),
+        Box::new(ConversationSearchTool::new(input.conv_db_path.clone())),
         Box::new(ChangeModelTool::new(
             input.conv_db_path.clone(),
             input.conversation_id.clone(),
@@ -223,6 +225,9 @@ fn build_extra_tools(
     tools.push(Box::new(ReportPublishTool::new(
         input.emit_state.clone(),
         input.project_base.clone(),
+    )));
+    tools.push(Box::new(AgentsWriteTool::new(
+        tenex_project::paths::agents_dir(input.base_dir),
     )));
 
     tools

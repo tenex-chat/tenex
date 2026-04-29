@@ -479,6 +479,20 @@ Publish markdown files as NIP-23 long-form articles (kind:30023) to Nostr, signe
 
 For a single file: `d_tag` = filename, `document_tag` = file stem. For a directory: `d_tag` = `dirName/relative/path`, `document_tag` = directory name. Path-traversal protection via `canonicalize() + starts_with(project_root)`. Returns `{ success, published: [d_tags], summary }`. Each file emits a `PublishArticleIntent` (→ `Intent::PublishArticle`) over the standard NDJSON-stdout channel with tags `[d]`, `[document]`, `[a]` (project link).
 
+### `agents_write`
+Create or update a backend-local agent identity stored at `~/.tenex/agents/<pubkey>.json`. Pure file I/O — no SQLite, no network. Matches the TS `StoredAgent` JSON shape exactly (`nsec`, `slug`, `name`, `role`, `instructions`, `useCriteria`, `status`, `default.model`).
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `slug` | string | Agent slug identifier (used as the lookup key) |
+| `name` | string | Display name |
+| `role` | string | Role/function label |
+| `instructions` | string | System instructions |
+| `useCriteria` | string | Criteria for when this agent should be selected |
+| `llmConfig` | string \| null | Optional model identifier; written to `default.model` |
+
+Behavior: scans `~/.tenex/agents/*.json` for an existing record whose `slug` matches. If found, the file is updated in place — `nsec`, the `<pubkey>.json` filename, and any unknown fields (e.g. `category`, `eventId`, `mcpServers`, `telegram`) are preserved across read-modify-write. If not found, `nostr::Keys::generate()` produces a fresh keypair; the bech32 nsec is stored under `nsec`, and the file is written as `<pubkey_hex>.json` with `status = "active"`. Writes are atomic via temp-file + rename. Returns `{ success, agent: { slug, name, pubkey } }`. Newly created agents are not assigned to the current project — that requires a 31933 event p-tagging the new pubkey.
+
 ## Supervision Heuristics
 
 `tenex-supervision` is wired into the hook layer. It runs two kinds of checks:
@@ -552,4 +566,4 @@ API keys are resolved from provider-specific env vars (`ANTHROPIC_API_KEY`, `OPE
 ## Future Work (not yet implemented)
 
 - **ToolResult in history**: Projection filters out `ToolResult` messages because assistant records currently have empty `tool_calls`. Once `record_turn` captures tool calls inline, paired tool-call/result sequences can flow to providers.
-- **TS-only tools**: `conversation_search`, `send_message`, MCP tools (`mcp_list_resources`, `mcp_resource_read`, `mcp_subscribe`, `mcp_subscription_stop`), `agents_write`, RAG subscription tools (`rag_subscription_create/delete/get/list`), RAG collection management tools (`rag_collection_create/delete/list`).
+- **TS-only tools**: `conversation_search`, `send_message`, MCP tools (`mcp_list_resources`, `mcp_resource_read`, `mcp_subscribe`, `mcp_subscription_stop`), RAG subscription tools (`rag_subscription_create/delete/get/list`), RAG collection management tools (`rag_collection_create/delete/list`).
