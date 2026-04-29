@@ -109,13 +109,22 @@ async fn scan_once(cfg: &Config, state: &SummaryStateStore, publisher: &Publishe
         }
     }
 
-    info!(
-        projects = projects.len(),
-        candidates = total_candidates,
-        processed = total_processed,
-        skipped = total_skipped,
-        "scan cycle complete",
-    );
+    if total_processed > 0 {
+        info!(
+            projects = projects.len(),
+            candidates = total_candidates,
+            processed = total_processed,
+            skipped = total_skipped,
+            "scan cycle complete",
+        );
+    } else {
+        debug!(
+            projects = projects.len(),
+            candidates = total_candidates,
+            skipped = total_skipped,
+            "scan cycle complete",
+        );
+    }
     Ok(())
 }
 
