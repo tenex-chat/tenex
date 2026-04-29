@@ -1,6 +1,6 @@
 # TENEX Rust Agent — Test Report
 
-Last updated: 2026-04-29 (session 9)
+Last updated: 2026-04-29 (session 10)
 
 ---
 
@@ -47,10 +47,28 @@ Last updated: 2026-04-29 (session 9)
 | Compaction strategy unit tests (4 new) | ✅ PASS | below-threshold, zero-max-tokens, collapses-middle, keep-tail sentinel |
 | Reminders strategy unit tests (6 new) | ✅ PASS | absent/done todos, appends to last message, counts breakdown, system-only noop, tool-result tail |
 | report_publish tool | ✅ PASS | Ports TS report_publish; emits kind:30023 NIP-23 articles via PublishArticleIntent; path-traversal protection + directory recursion; 4 unit tests + 1 encoder test |
+| report_publish — single file | ✅ PASS | kind:30023 emitted with d=test-article.md, document=test-article, a=31933:... |
+| report_publish — directory recursive | ✅ PASS | 2 articles: test-docs/guide.md + test-docs/intro.md, document=test-docs |
+| write-access skill end-to-end | ✅ PASS | Turn 1 activates skill; turn 2 FsWriteTool available and writes rust-write-test.txt to project dir |
+| no_response loop bug (fixed) | ✅ FIXED | GLM called no_response 22× in one turn; added swap-based guard + stronger stop messages; now tools=1 |
 
 ---
 
 ## Run Log
+
+### Run 10 — 2026-04-29 Session 10
+
+**Tests run:** report_publish (single + directory), write-access skill, no_response loop
+
+| Test | Result | Notes |
+|---|---|---|
+| report_publish single file | ✅ PASS | kind:30023 with correct d/document/a tags |
+| report_publish directory recursive | ✅ PASS | 2 articles, d_tags prefixed with dir name |
+| write-access skill (2-turn) | ✅ PASS | FsWriteTool unlocked after re-invocation |
+| no_response loop (regression) | ✅ FIXED | GLM called tool 22× → fixed with swap guard |
+
+**Bug found and fixed:**
+- `crates/tenex-agent/src/tools/no_response.rs`: GLM model called `no_response` 22 times in a single turn (repeating after getting tool result). Fixed by using `AtomicBool::swap` to detect repeat calls and returning a more emphatic "STOP" message; also updated tool description to say "call EXACTLY ONCE". Now tools=1 as expected.
 
 ### Run 1 — 2026-04-28 Initial Setup
 
