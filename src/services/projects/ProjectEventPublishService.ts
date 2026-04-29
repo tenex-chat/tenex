@@ -306,7 +306,7 @@ export class ProjectEventPublishService {
         const applyTagField = (
             metadataKey: Exclude<ProjectMetadataKey, "description">,
             tagName: "title" | "repo" | "picture",
-        ) => {
+        ): void => {
             const nextValue = params.set?.[metadataKey];
             if (nextValue === undefined) {
                 return;

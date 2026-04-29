@@ -473,7 +473,7 @@ export class ProjectStatusService {
                 return;
             }
 
-            // Build slug→agents mapping from agent mcpAccess
+            // Build slug→agents mapping from resolved agent MCP access
             const serverAgentMap = new Map<string, Set<string>>();
             for (const slug of serverSlugs) {
                 serverAgentMap.set(slug, new Set());

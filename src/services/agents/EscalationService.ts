@@ -29,6 +29,7 @@
 import type { AgentRegistry } from "@/agents/AgentRegistry";
 import { agentStorage, deriveAgentPubkeyFromNsec } from "@/agents/AgentStorage";
 import { createAgentInstance } from "@/agents/agent-loader";
+import type { AgentInstance } from "@/agents/types";
 import { resolveRecipientToPubkey } from "@/services/agents/AgentResolution";
 import { config as configService } from "@/services/ConfigService";
 import { getProjectContext } from "@/services/projects";
@@ -174,7 +175,7 @@ async function ensureEscalationAgentInRegistry(
     agentRegistry: AgentRegistry,
     projectDTag: string,
     escalationAgentSlug: string
-) {
+): Promise<AgentInstance | null> {
     const existingAgent = agentRegistry.getAgent(escalationAgentSlug);
     if (existingAgent) {
         return existingAgent;

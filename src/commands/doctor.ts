@@ -187,7 +187,7 @@ async function checkConversationIndexingStatus(): Promise<void> {
         const embeddingInfo = await conversationEmbeddingService.getEmbeddingInfo();
 
         console.log(chalk.bold("RAG Collection:"));
-        console.log(chalk.gray(`  Collection: conversation_embeddings`));
+        console.log(chalk.gray("  Collection: conversation_embeddings"));
         console.log(chalk.gray(`  Total indexed: ${stats.totalCount}`));
         console.log(chalk.gray(`  Has content: ${hasIndexed ? "yes" : "no"}`));
         console.log(chalk.gray(`  Embedding provider: ${embeddingInfo}`));

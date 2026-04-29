@@ -478,10 +478,11 @@ export function renderConversationsReminderDelta(
             continue;
         }
 
-        if (currentRecent.has(conversationId)) {
+        const recentEntry = currentRecent.get(conversationId);
+        if (recentEntry) {
             lines.push(
                 `Active conversation moved to recent: ${renderConversationReference(
-                    currentRecent.get(conversationId)!
+                    recentEntry
                 )}.`
             );
             continue;

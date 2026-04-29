@@ -213,7 +213,7 @@ export function pickMergeSurvivor(agents: ManagedAgent[]): ManagedAgent {
         throw new Error("pickMergeSurvivor requires at least one agent");
     }
 
-    return [...agents].sort((a, b) => {
+    const [survivor] = [...agents].sort((a, b) => {
         const projectDelta = b.projects.length - a.projects.length;
         if (projectDelta !== 0) {
             return projectDelta;
@@ -226,7 +226,11 @@ export function pickMergeSurvivor(agents: ManagedAgent[]): ManagedAgent {
         }
 
         return a.storedAgent.slug.localeCompare(b.storedAgent.slug);
-    })[0]!;
+    });
+    if (!survivor) {
+        throw new Error("pickMergeSurvivor requires at least one agent");
+    }
+    return survivor;
 }
 
 export function findDuplicateSlugGroups(agents: ManagedAgent[]): ManagedAgent[][] {

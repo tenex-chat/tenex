@@ -14,7 +14,7 @@ function silenceConsole(): () => void {
     const origWarn = console.warn;
     const origError = console.error;
     const origInfo = console.info;
-    const noop = () => {};
+    const noop = (): void => {};
     console.log = noop;
     console.warn = noop;
     console.error = noop;

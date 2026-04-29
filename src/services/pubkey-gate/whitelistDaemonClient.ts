@@ -39,7 +39,7 @@ export function checkPubkey(pubkey: string, dtag: string): Promise<boolean> {
             reject(new WhitelistDaemonError(`whitelist daemon timed out after ${QUERY_TIMEOUT_MS}ms`));
         }, QUERY_TIMEOUT_MS);
 
-        const finish = (action: () => void) => {
+        const finish = (action: () => void): void => {
             if (settled) return;
             settled = true;
             clearTimeout(timer);

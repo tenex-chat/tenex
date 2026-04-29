@@ -88,14 +88,14 @@ export class MockLLMService implements MockLLMServiceContract {
             ? response.toolCalls.map((tc) => {
                   // Convert our mock format to LlmToolCallInfo format
                   let functionName: string;
-                  let args: Record<string, unknown> = {};
+                  let args: Record<string, unknown>;
 
                   if (typeof tc === "object" && "function" in tc) {
                       // Format with function as string
                       if (!tc.function) {
-                      throw new Error("[MockLLMService] Missing tool function name in mock response.");
-                  }
-                  functionName = tc.function;
+                          throw new Error("[MockLLMService] Missing tool function name in mock response.");
+                      }
+                      functionName = tc.function;
                       try {
                           const argsStr = typeof tc.args === "string" ? tc.args : JSON.stringify(tc.args);
                           args = JSON.parse(argsStr || "{}");
@@ -105,9 +105,9 @@ export class MockLLMService implements MockLLMServiceContract {
                   } else if (typeof tc === "object" && "name" in tc) {
                       // Direct ToolCall format
                       if (!tc.name) {
-                      throw new Error("[MockLLMService] Missing tool name in mock response.");
-                  }
-                  functionName = tc.name;
+                          throw new Error("[MockLLMService] Missing tool name in mock response.");
+                      }
+                      functionName = tc.name;
                       args = tc.params || {};
                   } else {
                       throw new Error("[MockLLMService] Unknown tool call format in mock response.");

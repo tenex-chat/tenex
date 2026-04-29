@@ -383,10 +383,13 @@ export class RALStateRegistry {
 
     // Driver is unheld (verified above) and no awaits separate that check
     // from this acquire — the JS event loop guarantees atomicity, so this
-    // always succeeds. The non-null assertion below mirrors that invariant.
+    // should always succeed unless the invariant above is broken.
     this.tryAcquireDriver(agentPubkey, conversationId, ralNumber);
 
-    const ral = this.getRAL(agentPubkey, conversationId, ralNumber)!;
+    const ral = this.getRAL(agentPubkey, conversationId, ralNumber);
+    if (!ral) {
+      throw new Error("Failed to read concurrent RAL after driver acquisition.");
+    }
     const claimToken = crypto.randomUUID();
     ral.executionClaimToken = claimToken;
     ral.lastActivityAt = Date.now();

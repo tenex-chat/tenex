@@ -120,7 +120,7 @@ function request(payload: Record<string, unknown>): Promise<LlmConfigResponse> {
             );
         }, TIMEOUT_MS);
 
-        const finish = (action: () => void) => {
+        const finish = (action: () => void): void => {
             if (settled) return;
             settled = true;
             clearTimeout(timer);

@@ -12,7 +12,7 @@ function buildSigner(nsec: string): NDKPrivateKeySigner {
         return new NDKPrivateKeySigner(nsec.trim());
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        throw new Error(`Could not load owner nsec: ${message}`);
+        throw new Error(`Could not load owner nsec: ${message}`, { cause: error });
     }
 }
 

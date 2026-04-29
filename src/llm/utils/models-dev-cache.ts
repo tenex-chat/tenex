@@ -6,8 +6,8 @@
  */
 
 import * as path from "node:path";
+import { getTenexBasePath } from "@/constants";
 import { ensureDirectory, fileExists, readJsonFile, writeJsonFile, getFileStats } from "@/lib/fs";
-import { config } from "@/services/ConfigService";
 import { logger } from "@/utils/logger";
 
 const MODELS_DEV_API_URL = "https://models.dev/api.json";
@@ -83,7 +83,7 @@ const PROVIDER_MAPPING: Record<string, string | null> = {
  * Get the cache file path
  */
 function getCacheFilePath(): string {
-    return path.join(config.getConfigPath("cache"), CACHE_FILE_NAME);
+    return path.join(getTenexBasePath(), "cache", CACHE_FILE_NAME);
 }
 
 /**

@@ -13,7 +13,7 @@ function writeWarnLog(entry: Record<string, unknown>): void {
     }
 }
 
-export function createMessageSanitizerMiddleware() {
+export function createMessageSanitizerMiddleware(): ReturnType<typeof createSanitizer> {
     return createSanitizer({
         onFix: writeWarnLog,
     });

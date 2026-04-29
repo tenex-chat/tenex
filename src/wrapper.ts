@@ -95,7 +95,7 @@ class DaemonWrapper {
         });
 
         // Handle SIGTERM/SIGINT - shutdown gracefully
-        const handleTermination = (signal: string) => {
+        const handleTermination = (signal: string): void => {
             if (this.isShuttingDown) {
                 console.log(`[Wrapper] ${signal} received during shutdown - forcing exit`);
                 process.exit(1);

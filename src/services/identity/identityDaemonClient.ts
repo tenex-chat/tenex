@@ -55,7 +55,7 @@ export function resolveIdentity(pubkey: string): Promise<ResolvedIdentity | null
             );
         }, QUERY_TIMEOUT_MS);
 
-        const finish = (action: () => void) => {
+        const finish = (action: () => void): void => {
             if (settled) return;
             settled = true;
             clearTimeout(timer);

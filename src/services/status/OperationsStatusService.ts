@@ -52,7 +52,7 @@ export class OperationsStatusService {
         }
 
         // Subscribe to registry 'updated' events - filter by projectId for multi-project isolation
-        const handler = (eventProjectId: string, conversationId: string) => {
+        const handler = (eventProjectId: string, conversationId: string): void => {
             // CRITICAL: Only process events for THIS project
             if (eventProjectId !== this.projectId) {
                 return;

@@ -147,7 +147,7 @@ export interface TelegramBotIdentity {
     username?: string;
 }
 
-export interface TelegramChatFullInfo extends TelegramChat {}
+export type TelegramChatFullInfo = TelegramChat;
 
 export interface TelegramChatMemberAdministrator {
     status: "administrator" | "creator" | (string & {});

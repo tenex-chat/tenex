@@ -113,7 +113,7 @@ async function executeDelegateFollowup(
   // Handles supported input formats: 10-char prefixes and full 64-char hex IDs.
   // All formats are canonicalized to the original delegation conversation ID.
   const ralRegistry = RALRegistry.getInstance();
-  let delegation_conversation_id = trimmedConversationId;
+  let delegation_conversation_id: string;
 
   // Step 1: Handle 10-char hex prefix resolution
   if (isHexPrefix(trimmedConversationId)) {

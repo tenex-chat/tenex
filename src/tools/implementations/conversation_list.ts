@@ -580,18 +580,18 @@ function resolveWithParameter(withValue: string, isAllProjects: boolean): WithFi
         normalized.startsWith("nprofile1")
     ) {
         throw new Error(
-            `Failed to resolve 'with' parameter: "${withValue}". ` +
-            `The value looks like a pubkey but could not be parsed. ` +
-            `Please provide a valid 64-character hex pubkey or npub format.`
+            `Failed to resolve "with" parameter: "${withValue}". ` +
+            "The value looks like a pubkey but could not be parsed. " +
+            "Please provide a valid 64-character hex pubkey or npub format."
         );
     }
 
     // It looks like a slug - check if we're in all-projects mode
     if (isAllProjects) {
         throw new Error(
-            `Agent slugs are not supported when projectId='all'. ` +
+            "Agent slugs are not supported when projectId='all'. " +
             `The slug "${withValue}" can only be resolved within the current project. ` +
-            `Please provide a pubkey (hex, short hex prefix, or npub format) instead.`
+            "Please provide a pubkey (hex, short hex prefix, or npub format) instead."
         );
     }
 
@@ -666,14 +666,20 @@ async function executeConversationList(
     const graph = buildConversationGraph(indexedConversations);
     const memoizedSubtreeTimes = new Map<string, number>();
 
-    const rootsWithSubtreeActivity = graph.rootConversationIds.map((conversationId) => ({
-        conversation: graph.conversationsById.get(conversationId)!,
-        subtreeLastActivity: computeIndexedSubtreeLastActivity(
-            conversationId,
-            graph,
-            memoizedSubtreeTimes
-        ),
-    }));
+    const rootsWithSubtreeActivity = graph.rootConversationIds.map((conversationId) => {
+        const conversation = graph.conversationsById.get(conversationId);
+        if (!conversation) {
+            throw new Error(`Missing root conversation ${conversationId}`);
+        }
+        return {
+            conversation,
+            subtreeLastActivity: computeIndexedSubtreeLastActivity(
+                conversationId,
+                graph,
+                memoizedSubtreeTimes
+            ),
+        };
+    });
 
     // Apply date range filter based on subtree activity
     let filteredRoots = rootsWithSubtreeActivity;

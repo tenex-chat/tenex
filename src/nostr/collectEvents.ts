@@ -32,7 +32,7 @@ export function collectEvents(
         let eoseReceived = false;
         let timer: ReturnType<typeof setTimeout> | undefined;
 
-        const finish = () => {
+        const finish = (): void => {
             if (settled) return;
             settled = true;
             if (timer) clearTimeout(timer);

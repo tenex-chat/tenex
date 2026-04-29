@@ -16,10 +16,10 @@ import { PUBKEY_DISPLAY_LENGTH } from "@/utils/nostr-entity-parser";
 function shortenEventIdentifier(value: string | FullEventId): ShortEventId {
     // Handle Telegram conversation IDs (e.g., tg_599309204_123)
     // Use cryptographic hash to avoid collisions between similar numeric patterns
-    if (typeof value === 'string' && value.startsWith('tg_')) {
+    if (typeof value === "string" && value.startsWith("tg_")) {
         // Hash the full ID to get deterministic 10-char hex prefix
         // SHA-256 provides strong collision resistance even with truncation
-        const hash = createHash('sha256').update(value).digest('hex');
+        const hash = createHash("sha256").update(value).digest("hex");
         return hash.substring(0, 10).toLowerCase() as ShortEventId;
     }
 
