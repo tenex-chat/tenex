@@ -211,7 +211,9 @@ either be a stub (forbidden) or a partial port that skips data.
 
 The Rust port's `doctor migrate` reads `config.version`, prints the TS
 "Current migration version: X (latest: 3)" line verbatim, and:
-- emits "No pending migrations." + "Final migration version: 3" if at v3,
+- emits "No pending migrations." (TS at `commands/doctor.ts:117-119`
+  prints just that one line and `return`s — no "Final migration version"
+  line in this branch; matches TS byte-for-byte per commit `628fe0ad`),
 - otherwise surfaces an honest hint and exits 1, telling the user to run
   the TS binary's `tenex doctor migrate` to advance the on-disk state.
 
