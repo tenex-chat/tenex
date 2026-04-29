@@ -3,8 +3,8 @@ mod acp_process;
 #[path = "home.rs"]
 mod home;
 
-use acp_config::{AcpAgentConfig, AgentRuntimeConfig};
-use acp_process::{AcpProcess, AcpUpdates};
+use acp_config::{load_acp_config, AcpAgentConfig};
+use acp_process::{AcpProcess, AcpUpdate, AcpUpdates};
 use anyhow::{Context, Result};
 use serde_json::{json, Value};
 use std::sync::Arc;
@@ -17,8 +17,8 @@ use tenex_project::Project;
 use tenex_protocol::{
     nostr::{read_one_from_stdin, NostrChannel},
     sink::StdoutNdjsonSink,
-    Channel, CompletionIntent, ConversationRef, EncodingContext, LlmMetadata, MessageRef,
-    PrincipalKind, PrincipalRef, ProjectRef,
+    Channel, CompletionIntent, ConversationRef, EncodingContext, Intent, LlmMetadata, MessageRef,
+    PrincipalKind, PrincipalRef, ProjectRef, StreamTextDeltaIntent,
 };
 use tenex_telegram::composite::CompositeChannel;
 use tenex_telegram::delivery::TelegramContext;
@@ -40,13 +40,15 @@ async fn run() -> Result<()> {
     let project_id = std::env::var("TENEX_PROJECT_ID")
         .context("TENEX_PROJECT_ID environment variable is required")?;
     let agent_config = AcpAgentConfig::load(&args[1])?;
-    let acp_config = match agent_config.runtime.as_ref() {
-        Some(AgentRuntimeConfig::Acp(cfg)) => cfg.clone(),
-        Some(AgentRuntimeConfig::Tenex) => {
-            anyhow::bail!("agent runtime.kind is tenex; tenex-agent-acp requires acp")
-        }
-        None => anyhow::bail!("agent runtime config is missing; tenex-agent-acp requires acp"),
-    };
+    let default_model = agent_config
+        .default_model()
+        .ok_or_else(|| anyhow::anyhow!(
+            "agent '{}' has no default.model; tenex-agent-acp requires a named ACP config in llms.json",
+            agent_config.identity_name()
+        ))?;
+    let base_dir = tenex_project::paths::default_base_dir();
+    let acp_config = load_acp_config(&base_dir, default_model)
+        .with_context(|| format!("loading ACP config '{default_model}'"))?;
 
     let envelope = read_one_from_stdin()
         .await
@@ -214,14 +216,64 @@ async fn run() -> Result<()> {
         }
     }
 
+    let completion_recipient = std::env::var("TENEX_COMPLETION_RECIPIENT_PUBKEY")
+        .ok()
+        .and_then(|pubkey| nostr::PublicKey::from_hex(&pubkey).ok())
+        .map(|pubkey| PrincipalRef::Nostr {
+            pubkey,
+            kind: PrincipalKind::Human,
+            display_name: None,
+        });
+    let conversation_root = nostr::EventId::from_hex(&conversation_id)
+        .ok()
+        .map(|root_event_id| ConversationRef::Nostr { root_event_id });
+    let stream_ctx = EncodingContext {
+        project: project_ref.clone(),
+        conversation_root: conversation_root.clone(),
+        triggering_message: Some(envelope.message.clone()),
+        completion_recipient: completion_recipient.clone(),
+        triggering_principal: envelope.principal.clone(),
+        ral: 0,
+        model: Some(format!("acp:{}", acp_config.backend)),
+        cost_usd: None,
+        execution_time_ms: None,
+        llm_runtime_ms: None,
+        llm_runtime_total_ms: None,
+        branch: None,
+        team: envelope.metadata.team.clone(),
+    };
+    let mut stream_sequence = 0_u64;
     let prompt_result = acp
-        .request(
+        .request_with_update_handler(
             "session/prompt",
             json!({
                 "sessionId": session_id,
                 "prompt": [{"type": "text", "text": prompt}]
             }),
             &mut updates,
+            |update| {
+                stream_sequence += 1;
+                let sequence = stream_sequence;
+                let channel = channel.clone();
+                let ctx = stream_ctx.clone();
+                async move {
+                    match update {
+                        AcpUpdate::AgentMessageChunk { text } => {
+                            let intent = StreamTextDeltaIntent {
+                                delta: text,
+                                sequence,
+                            };
+                            if let Err(err) =
+                                channel.send(Intent::StreamTextDelta(intent), &ctx).await
+                            {
+                                eprintln!(
+                                    "[tenex-agent-acp] warn: stream delta emit failed: {err}"
+                                );
+                            }
+                        }
+                    }
+                }
+            },
         )
         .await?;
     let stop_reason = prompt_result
@@ -251,17 +303,6 @@ async fn run() -> Result<()> {
         }
     }
 
-    let completion_recipient = std::env::var("TENEX_COMPLETION_RECIPIENT_PUBKEY")
-        .ok()
-        .and_then(|pubkey| nostr::PublicKey::from_hex(&pubkey).ok())
-        .map(|pubkey| PrincipalRef::Nostr {
-            pubkey,
-            kind: PrincipalKind::Human,
-            display_name: None,
-        });
-    let conversation_root = nostr::EventId::from_hex(&conversation_id)
-        .ok()
-        .map(|root_event_id| ConversationRef::Nostr { root_event_id });
     let ctx = EncodingContext {
         project: project_ref,
         conversation_root,

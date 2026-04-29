@@ -147,15 +147,6 @@ enum AgentRuntimeKind {
     Acp,
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(tag = "kind", rename_all = "kebab-case")]
-enum AgentRuntimeConfig {
-    Tenex,
-    Acp {
-        #[serde(flatten)]
-        _extra: Map<String, Value>,
-    },
-}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -1770,7 +1761,7 @@ async fn run_agent(shared: Arc<RuntimeShared>, job: DispatchJob, key: DispatchKe
         anyhow::bail!("agent JSON not found: {}", job.agent_json.display());
     }
 
-    let runtime_kind = agent_runtime_kind(&job.agent)?;
+    let runtime_kind = agent_runtime_kind(&job.agent, &shared.base_dir)?;
     let binary = match runtime_kind {
         AgentRuntimeKind::Tenex => &shared.agent_binary,
         AgentRuntimeKind::Acp => &shared.agent_acp_binary,
@@ -1923,16 +1914,25 @@ fn refresh_job_agent(shared: &RuntimeShared, mut job: DispatchJob) -> Result<Dis
     Ok(job)
 }
 
-fn agent_runtime_kind(agent: &Agent) -> Result<AgentRuntimeKind> {
-    let Some(raw) = agent.runtime_config_json.as_deref() else {
+fn agent_runtime_kind(agent: &Agent, base_dir: &std::path::Path) -> Result<AgentRuntimeKind> {
+    let Some(default_json) = agent.default_config_json.as_deref() else {
         return Ok(AgentRuntimeKind::Tenex);
     };
-    let config: AgentRuntimeConfig =
-        serde_json::from_str(raw).with_context(|| format!("parsing runtime for {}", agent.slug))?;
-    Ok(match config {
-        AgentRuntimeConfig::Tenex => AgentRuntimeKind::Tenex,
-        AgentRuntimeConfig::Acp { .. } => AgentRuntimeKind::Acp,
-    })
+    let default: Value = serde_json::from_str(default_json)
+        .with_context(|| format!("parsing default config for {}", agent.slug))?;
+    let Some(model_name) = default.get("model").and_then(Value::as_str) else {
+        return Ok(AgentRuntimeKind::Tenex);
+    };
+    let llms = tenex_llm_config::resolver::load_llms(base_dir)
+        .with_context(|| "loading llms.json")?;
+    let Some(config) = llms.configurations.get(model_name) else {
+        return Ok(AgentRuntimeKind::Tenex);
+    };
+    if config.get("provider").and_then(Value::as_str) == Some("acp") {
+        Ok(AgentRuntimeKind::Acp)
+    } else {
+        Ok(AgentRuntimeKind::Tenex)
+    }
 }
 
 async fn start_mcp_bridge_for_run(
@@ -2212,7 +2212,6 @@ mod tests {
             default_config_json: None,
             telegram_config_json: None,
             mcp_servers_json: None,
-            runtime_config_json: None,
         }
     }
 

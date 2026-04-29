@@ -232,6 +232,5 @@ fn try_read_agent_file(
         default_config_json: raw.default_config_json,
         telegram_config_json: raw.telegram_config_json,
         mcp_servers_json: raw.mcp_servers_json,
-        runtime_config_json: raw.runtime_config_json,
     })
 }

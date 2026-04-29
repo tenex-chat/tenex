@@ -48,7 +48,6 @@ fn agent(slug: &str, model: Option<&str>) -> Agent {
         default_config_json,
         telegram_config_json: None,
         mcp_servers_json: None,
-        runtime_config_json: None,
     }
 }
 
