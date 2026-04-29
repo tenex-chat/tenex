@@ -15,19 +15,14 @@ use clap::Parser;
 use tracing::{error, info};
 
 #[derive(Parser, Clone)]
-#[command(group(clap::ArgGroup::new("runtime-mode").required(true)))]
 pub struct DaemonArgs {
     /// TENEX base directory (default: $TENEX_BASE_DIR or ~/.tenex).
     #[arg(long, value_name = "PATH")]
     pub base_dir: Option<PathBuf>,
 
-    /// Use the Rust orchestrator (`tenex runtime <d-tag>`) for per-project runtimes.
-    #[arg(long, group = "runtime-mode")]
-    pub rust: bool,
-
-    /// Use this TypeScript command as the per-project runtime; the d-tag is
-    /// appended as a positional argument.
-    #[arg(long, value_name = "CMD", group = "runtime-mode")]
+    /// Use this TypeScript command as the per-project runtime instead of the
+    /// default Rust orchestrator; the d-tag is appended as a positional argument.
+    #[arg(long, value_name = "CMD")]
     pub ts: Option<String>,
 
     /// Boot the project whose d-tag starts with this prefix as soon as it is
@@ -90,11 +85,7 @@ pub async fn run(args: DaemonArgs) -> Result<()> {
     }
     info!("llm-config IPC server started");
 
-    let boot_argv = if args.rust {
-        let argv = default_boot_argv();
-        info!(boot_command = %argv.join(" "), "boot command resolved (--rust)");
-        argv
-    } else if let Some(cmd) = args.ts {
+    let boot_argv = if let Some(cmd) = args.ts {
         info!(boot_command = %cmd, "boot command resolved (--ts)");
         let argv = shell_words::split(&cmd)
             .with_context(|| format!("parsing --ts: {cmd}"))?;
@@ -103,7 +94,9 @@ pub async fn run(args: DaemonArgs) -> Result<()> {
         }
         argv
     } else {
-        unreachable!("clap ArgGroup requires --rust or --ts")
+        let argv = default_boot_argv();
+        info!(boot_command = %argv.join(" "), "boot command resolved (default Rust runtime)");
+        argv
     };
 
     let supervisor = supervisor::Supervisor::new(boot_argv, base_dir.clone());
