@@ -412,7 +412,7 @@ fn project_dtag_from_schedule_path_with_projects_dir(
     projects_dir: &Path,
     path: &Path,
 ) -> Option<String> {
-    let rel = path.strip_prefix(&projects_dir).ok()?;
+    let rel = path.strip_prefix(projects_dir).ok()?;
     let mut components = rel.components();
     let d_tag = components.next()?.as_os_str().to_str()?.to_string();
     let file_name = components.next()?.as_os_str().to_str()?;

@@ -60,9 +60,7 @@ fn resolve_identity_display_name(socket_path: &Path, pubkey: &str) -> Option<Str
     }
 
     let identity: tenex_identity::IdentityView = serde_json::from_str(trimmed).ok()?;
-    if identity.event_id.is_none() {
-        return None;
-    }
+    identity.event_id.as_ref()?;
 
     let name = identity.best_name().trim();
     if name.is_empty() {
