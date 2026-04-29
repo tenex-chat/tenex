@@ -153,7 +153,7 @@ Pre-tool and post-completion contexts are missing fields that the two unimplemen
 - [ ] **System prompt fragments for Telegram** — Fragment 33 (chat context) and Fragment 34 (delivery rules) are not injected into the Rust agent system prompt (see §2.1)
 - ✅ **`send_message` tool** — proactive messaging to bound channels (see §1.1)
 - [ ] **Identity binding validation for DMs** — TypeScript checks `AuthorizedIdentityService` before accepting DMs; Rust accepts all DMs that pass the `allows_dms()` config flag
-- [ ] **Persistent pending project selection** — TypeScript persists pending channel-to-project selection state to disk; Rust stores it in-memory only (lost on daemon restart)
+- ✅ **Persistent pending project selection** — `PendingSelectionStore` in `pending_selection_store.rs` persists pending channel-to-project selection state to `{base_dir}/data/pending-channel-selections.json` with 24-hour TTL; atomic writes via `.tmp` + rename; expired entries pruned on load and access
 
 ---
 

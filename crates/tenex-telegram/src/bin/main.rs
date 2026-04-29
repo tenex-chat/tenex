@@ -25,6 +25,7 @@ use anyhow::{Context, Result};
 use nostr_sdk::prelude::Keys;
 use tenex_telegram::binding::BindingStore;
 use tenex_telegram::discovery::discover_registrations;
+use tenex_telegram::pending_selection_store::PendingSelectionStore;
 use tenex_telegram::poller::Poller;
 use tracing::{error, info, warn};
 
@@ -78,6 +79,10 @@ async fn main() -> Result<()> {
         base_dir.join("data").join("transport-bindings.json"),
     )));
 
+    let pending_selections = Arc::new(Mutex::new(PendingSelectionStore::open(
+        base_dir.join("data").join("pending-channel-selections.json"),
+    )));
+
     // One bot token identifies exactly one agent. Project routing is resolved
     // later from the Telegram channel binding.
     let mut pollers: HashMap<String, Poller> = HashMap::new();
@@ -103,6 +108,7 @@ async fn main() -> Result<()> {
             base_dir.clone(),
             session_path,
             Arc::clone(&channel_bindings),
+            Arc::clone(&pending_selections),
         )
         .await
         {

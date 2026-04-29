@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
@@ -11,6 +10,7 @@ use crate::client::BotClient;
 use crate::discovery::{AgentRegistration, ProjectRoute};
 use crate::event_synth::{synthesize_telegram_event, TelegramEventInput};
 use crate::forward::{send_to_telegram, telegram_text_for_event, TelegramChatRef};
+use crate::pending_selection_store::{PendingProjectOption, PendingSelectionStore};
 use crate::runtime_client::{dispatch_via_runtime, DispatchOutcome};
 use crate::selection::{parse_project_selection, project_selection_prompt};
 use crate::session::SessionStore;
@@ -28,7 +28,7 @@ pub struct Poller {
     base_dir: PathBuf,
     sessions: Arc<Mutex<SessionStore>>,
     channel_bindings: Arc<Mutex<BindingStore>>,
-    pending_project_selection: HashMap<String, Vec<ProjectRoute>>,
+    pending_selections: Arc<Mutex<PendingSelectionStore>>,
     next_offset: Option<i64>,
 }
 
@@ -39,6 +39,7 @@ impl Poller {
         base_dir: PathBuf,
         session_path: PathBuf,
         channel_bindings: Arc<Mutex<BindingStore>>,
+        pending_selections: Arc<Mutex<PendingSelectionStore>>,
     ) -> Result<Self> {
         let client = BotClient::new(
             registration.config.bot_token.clone(),
@@ -52,7 +53,7 @@ impl Poller {
             base_dir,
             sessions: Arc::new(Mutex::new(SessionStore::open(session_path))),
             channel_bindings,
-            pending_project_selection: HashMap::new(),
+            pending_selections,
             next_offset: None,
         })
     }
@@ -138,7 +139,11 @@ impl Poller {
         let is_new = text == "/new" || text.starts_with("/new ") || text.starts_with("/new@");
         if is_new {
             let _ = self.clear_session(&channel_id);
-            self.pending_project_selection.remove(&channel_id);
+            let _ = self
+                .pending_selections
+                .lock()
+                .unwrap()
+                .clear(&self.registration.pubkey, &channel_id);
             if let Err(e) = self
                 .client
                 .send_message(
@@ -204,6 +209,28 @@ impl Poller {
             thread_id: thread_id.as_deref(),
         };
 
+        // Pulse the "typing…" indicator while the agent is processing. Bot API
+        // chat actions auto-expire after ~5 seconds, so re-send on a short
+        // interval. The task is aborted as soon as `dispatch_via_runtime`
+        // returns (terminal frame received or transport error).
+        let typing_handle = {
+            let bot_client = bot_client.clone();
+            let chat_id = chat_id.clone();
+            let thread_id = thread_id.clone();
+            tokio::spawn(async move {
+                let mut tick = tokio::time::interval(std::time::Duration::from_secs(4));
+                loop {
+                    tick.tick().await;
+                    if let Err(e) = bot_client
+                        .send_chat_action(&chat_id, "typing", thread_id.as_deref())
+                        .await
+                    {
+                        tracing::debug!(error = %e, "typing chat action failed");
+                    }
+                }
+            })
+        };
+
         let outcome = dispatch_via_runtime(
             &self.base_dir,
             &project.project_id,
@@ -227,7 +254,9 @@ impl Poller {
                 }
             },
         )
-        .await?;
+        .await;
+        typing_handle.abort();
+        let outcome = outcome?;
 
         match outcome {
             DispatchOutcome::Completed => {
@@ -263,10 +292,29 @@ impl Poller {
         message_id: &str,
         thread_id: Option<&str>,
     ) -> Result<Option<ProjectRoute>> {
-        if let Some(pending) = self.pending_project_selection.get(channel_id).cloned() {
-            if let Some(selected) = parse_project_selection(text, &pending) {
+        let pending_opts = self
+            .pending_selections
+            .lock()
+            .unwrap()
+            .get(&self.registration.pubkey, channel_id);
+
+        if let Some(opts) = pending_opts {
+            let pending_routes: Vec<ProjectRoute> = opts
+                .iter()
+                .map(|o| ProjectRoute {
+                    project_id: o.project_id.clone(),
+                    title: o.title.clone(),
+                    owner_pubkey: None,
+                })
+                .collect();
+
+            if let Some(selected) = parse_project_selection(text, &pending_routes) {
                 self.remember_channel_binding(channel_id, &selected.project_id)?;
-                self.pending_project_selection.remove(channel_id);
+                let _ = self
+                    .pending_selections
+                    .lock()
+                    .unwrap()
+                    .clear(&self.registration.pubkey, channel_id);
                 let _ = self.clear_session(channel_id);
                 let response = format!(
                     "Bound this chat to project \"{}\". Send your next message to continue.",
@@ -278,8 +326,14 @@ impl Poller {
                 return Ok(None);
             }
 
-            self.send_project_selection_prompt(chat_id, message_id, thread_id, &pending, true)
-                .await?;
+            self.send_project_selection_prompt(
+                chat_id,
+                message_id,
+                thread_id,
+                &pending_routes,
+                true,
+            )
+            .await?;
             return Ok(None);
         }
 
@@ -310,13 +364,22 @@ impl Poller {
                 Ok(Some(project.clone()))
             }
             projects => {
-                let projects = projects.to_vec();
+                let opts: Vec<PendingProjectOption> = projects
+                    .iter()
+                    .map(|p| PendingProjectOption {
+                        project_id: p.project_id.clone(),
+                        title: p.title.clone(),
+                    })
+                    .collect();
+                let routes = projects.to_vec();
                 self.send_project_selection_prompt(
-                    chat_id, message_id, thread_id, &projects, false,
+                    chat_id, message_id, thread_id, &routes, false,
                 )
                 .await?;
-                self.pending_project_selection
-                    .insert(channel_id.to_string(), projects);
+                self.pending_selections
+                    .lock()
+                    .unwrap()
+                    .set(&self.registration.pubkey, channel_id, opts)?;
                 Ok(None)
             }
         }

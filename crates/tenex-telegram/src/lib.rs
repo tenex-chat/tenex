@@ -5,6 +5,7 @@ pub mod daemon_client;
 pub mod discovery;
 pub mod event_synth;
 pub mod forward;
+pub mod pending_selection_store;
 pub mod poller;
 pub mod render;
 pub mod runtime_client;
