@@ -1,3 +1,4 @@
+mod agent_loop_hook;
 mod cassette;
 mod cassette_client;
 mod cassette_request;
@@ -7,12 +8,14 @@ mod home;
 mod hook;
 mod injections;
 mod mock_llm;
+mod progress_monitor;
 mod runtime_control;
 mod runtime_state;
 mod runtime_state_json;
 mod skills;
 mod tools;
 
+use agent_loop_hook::AgentLoopHook;
 use anyhow::{Context, Result};
 use cassette::CassetteRecorder;
 use cassette_client::RecordingClient;
@@ -20,16 +23,17 @@ use config::{LlmsConfig, ResolvedModel};
 use emit::{AgentMeta, EmitState};
 use hook::EmitHook;
 use injections::MessageInjectionTracker;
-use rig::OneOrMany;
-use rig::client::{CompletionClient, Nothing};
+use progress_monitor::RIG_AGENT_TURN_FUSE;
+use rig::client::Nothing;
 use rig::completion::message::{ToolResult, ToolResultContent, UserContent};
 use rig::completion::{AssistantContent, Message as RigMessage};
 use rig::providers::{anthropic, ollama, openai, openrouter};
 use rig::tool::ToolDyn;
+use rig::OneOrMany;
 use runtime_state::RuntimeStateHandle;
 use std::sync::{
-    Arc, Mutex,
     atomic::{AtomicBool, Ordering},
+    Arc, Mutex,
 };
 use std::time::{SystemTime, UNIX_EPOCH};
 use tenex_context::{
@@ -39,11 +43,11 @@ use tenex_context::{
 use tenex_conversations::{AgentContextState, ConversationStore, NewToolMessage};
 use tenex_project::Project;
 use tenex_protocol::{
+    nostr::{read_one_from_stdin, NostrChannel},
+    sink::StdoutNdjsonSink,
     Channel, CompletionIntent, ConversationRef, Intent, ListShellTasksRequest, LlmUsage,
     MessageRef, PrincipalKind, PrincipalRef, ProjectRef, RuntimeControlRequest,
     RuntimeControlResponse,
-    nostr::{NostrChannel, read_one_from_stdin},
-    sink::StdoutNdjsonSink,
 };
 use tenex_rag::{EmbedConfig, RagStore};
 use tenex_supervision::heuristics::default_supervisor;
@@ -60,7 +64,7 @@ use tools::{
     ReportPublishTool, ScheduleTaskTool, SelfDelegateTool, ShellTool, SkillListTool, SkillsSetTool,
     TodoItem, TodoStatus, TodoWriteTool, ToolRecorder,
 };
-use tracing::{Instrument, info_span};
+use tracing::{info_span, Instrument};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 /// Convert a `tenex_context::Message` to `rig::completion::Message` for passing
@@ -127,17 +131,20 @@ fn ctx_msg_to_rig(msg: CtxMessage) -> RigMessage {
 macro_rules! run_agent {
     ($client:expr, $model:expr, $system:expr, $message:expr, $history:expr, $hook:expr, $tools:expr) => {{
         use ::futures::StreamExt as _;
+        use ::rig::client::CompletionClient as _;
         use ::rig::streaming::StreamingChat as _;
 
+        let __review_model = $client.completion_model($model.to_string());
+        let __hook = AgentLoopHook::new($hook, __review_model);
         let mut __stream = $client
             .agent($model)
             .preamble($system)
             .max_tokens(16384)
-            .default_max_turns(25)
+            .default_max_turns(RIG_AGENT_TURN_FUSE)
             .tools($tools)
             .build()
             .stream_chat($message, $history)
-            .with_hook($hook)
+            .with_hook(__hook)
             .await;
 
         let mut __final = ::rig::agent::FinalResponse::empty();
