@@ -60,16 +60,6 @@ pub const DISPLAY_SELECTED_CROSSTERM: crossterm::style::Color =
 pub const DISPLAY_MUTED_CROSSTERM: crossterm::style::Color =
     crossterm::style::Color::AnsiValue(240);
 
-/// `chalk.gray` visual match in [`crossterm::style::Color`] form —
-/// xterm-256 index 8 (palette bright black, `\x1b[38;5;8m`). The
-/// terminal-rendered colour matches TS chalk.gray (raw `\x1b[90m`)
-/// in any reasonable terminal; the wire bytes differ from chalk's
-/// (xterm-256 form here vs raw ANSI 90 there) but visually it's the
-/// same bright black. For golden-file byte parity, use the raw
-/// [`CHALK_GRAY_OPEN`] / [`CHALK_GRAY_CLOSE`] escapes directly.
-pub const CHALK_GRAY_CROSSTERM: crossterm::style::Color =
-    crossterm::style::Color::AnsiValue(8);
-
 // ---------------------------------------------------------------------------
 // Display palette (xterm-256). Banner gradient, section headers, hints.
 // `src/commands/config/display.ts:3-12`

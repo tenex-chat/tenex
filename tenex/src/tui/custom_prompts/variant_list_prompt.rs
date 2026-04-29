@@ -386,12 +386,17 @@ fn render_frame<W: Write>(
             .map(|v| v.model.as_str())
             .unwrap_or("");
         queue!(stdout, Print(format!("{name} ")))?;
-        // gray model
+        // TS at `variant-list-prompt.ts:128`:
+        //   chalk.gray(`[${variant.model}]`)  → \x1b[90m[<model>]\x1b[39m
+        // chalk.gray emits the basic 16-colour SGR-90 (bright black).
+        // crossterm's `Color::DarkGrey` would emit 256-colour palette
+        // index 8 (\x1b[38;5;8m) — visually similar but byte-different
+        // and palette-dependent. Use the raw SGR constants.
         queue!(
             stdout,
-            SetForegroundColor(Color::DarkGrey),
+            Print(crate::tui::theme::CHALK_GRAY_OPEN),
             Print(format!("[{model}]")),
-            ResetColor,
+            Print(crate::tui::theme::FG_RESET),
         )?;
         if *name == state.default_variant {
             queue!(
@@ -762,6 +767,17 @@ mod tests {
             !s.contains("\x1b[38;2;255;193;7m› \x1b[0m")
                 && !s.contains("\x1b[38;2;255;193;7m› \x1b[39m"),
             "must not wrap the cursor's trailing space inside the amber span; got {s:?}",
+        );
+        // The `[<model>]` badge uses chalk.gray SGR-90, not 256-colour
+        // palette index 8. TS `variant-list-prompt.ts:128`:
+        //   chalk.gray(`[${variant.model}]`) → \x1b[90m[<model>]\x1b[39m
+        assert!(
+            s.contains("\x1b[90m[m-fast]\x1b[39m"),
+            "model badge must be wrapped in chalk.gray SGR-90; got {s:?}",
+        );
+        assert!(
+            !s.contains("\x1b[38;5;8m["),
+            "must not emit 256-colour palette grey for the model badge; got {s:?}",
         );
     }
 

@@ -346,11 +346,18 @@ fn render_frame<W: Write>(
             queue!(stdout, Print(label))?;
         }
         if !desc.is_empty() {
+            // TS at `onboard.ts:104,109`:
+            //   const desc = `  ${chalk.gray(typedUrl|item.description)}`
+            // chalk.gray emits basic 16-colour SGR-90 (bright black).
+            // Routing through `Color::AnsiValue(8)` would emit 256-colour
+            // palette index 8 (\x1b[38;5;8m) — visually similar but
+            // byte-different. Use the raw SGR constants for byte-perfect
+            // chalk.gray match.
             queue!(
                 stdout,
-                SetForegroundColor(crate::tui::theme::CHALK_GRAY_CROSSTERM),
+                Print(crate::tui::theme::CHALK_GRAY_OPEN),
                 Print(desc),
-                ResetColor,
+                Print(crate::tui::theme::FG_RESET),
             )?;
         }
         queue!(stdout, Print("\r\n"))?;

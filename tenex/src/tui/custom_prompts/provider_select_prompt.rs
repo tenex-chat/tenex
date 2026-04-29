@@ -680,15 +680,19 @@ fn render_browse<W: Write>(
             let count = creds.api_key.entries().len();
             if count > 0 {
                 let plural = if count == 1 { "key" } else { "keys" };
-                // TS provider-select-prompt.ts:67 uses chalk.gray (bright
-                // black, ANSI 90 / xterm-256 index 8), NOT chalk.dim.
-                // Use the shared theme constant so the badge renders
-                // the same muted-grey as TS without an inline literal.
+                // TS at `provider-select-prompt.ts:67`:
+                //   chalk.gray(` [${count} key${plural}]`)
+                //     → \x1b[90m [<n> key(s)]\x1b[39m
+                // chalk.gray emits the basic 16-colour SGR-90 (bright
+                // black). Routing through crossterm `Color::AnsiValue(8)`
+                // would emit `\x1b[38;5;8m` (256-colour palette index 8) —
+                // visually similar but byte-different. Use the raw SGR
+                // constants for byte-perfect chalk.gray match.
                 queue!(
                     stdout,
-                    SetForegroundColor(crate::tui::theme::CHALK_GRAY_CROSSTERM),
+                    Print(crate::tui::theme::CHALK_GRAY_OPEN),
                     Print(format!(" [{count} {plural}]")),
-                    ResetColor,
+                    Print(crate::tui::theme::FG_RESET),
                 )?;
             }
         } else {
