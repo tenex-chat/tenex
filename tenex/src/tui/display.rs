@@ -438,35 +438,24 @@ mod tests {
         assert_eq!(strip_ansi_codes(&provider_check("X")).into_owned(), "[✓] X");
     }
 
-    /// Pin the bold/no-bold split between the two display_accent
-    /// helpers. `display.ts:23` uses `ACCENT.bold(...)` for the step
-    /// header; `display.ts:24,48` uses plain `ACCENT(...)` for the
-    /// rule and the hint arrow. The two helpers must produce
-    /// different ANSI sequences.
+    /// `display_accent()` must emit bold — it's used by cron_cmd and banner
+    /// where TS emits `ACCENT.bold(...)`. Regression guard so the helper
+    /// can't silently lose the bold attribute.
     #[test]
-    fn display_accent_helpers_differ_on_bold_attribute() {
+    fn display_accent_emits_bold_and_xterm_214_fg() {
         use crate::tui::theme;
-        let bold_form = theme::display_accent()
+        let styled = theme::display_accent()
             .force_styling(true)
             .apply_to("x")
             .to_string();
-        let plain_form = theme::display_accent_plain()
-            .force_styling(true)
-            .apply_to("x")
-            .to_string();
-        // The bold form must contain the bold-open SGR (`\x1b[1m`).
         assert!(
-            bold_form.contains("\x1b[1m"),
-            "display_accent should emit bold open; got {bold_form:?}",
+            styled.contains("\x1b[1m"),
+            "display_accent should emit bold open (SGR 1); got {styled:?}",
         );
-        // The plain form must NOT contain bold-open.
         assert!(
-            !plain_form.contains("\x1b[1m"),
-            "display_accent_plain should NOT emit bold open; got {plain_form:?}",
+            styled.contains("\x1b[38;5;214m"),
+            "display_accent should emit xterm-256 #214 fg; got {styled:?}",
         );
-        // Both should contain the xterm-256 #214 fg sequence.
-        assert!(bold_form.contains("\x1b[38;5;214m"));
-        assert!(plain_form.contains("\x1b[38;5;214m"));
     }
 
     #[test]
