@@ -231,11 +231,24 @@ describe("TENEX context management integration", () => {
             slug: "executor",
             pubkey: AGENT_PUBKEY,
         } as AgentInstance;
+        const generateCompactionText = async ({ messages }: { messages: Array<{ content: unknown }> }) => ({
+            text: [
+                "Task: debug parser regression.",
+                "Completed: identified middleware ordering issue and stale cache layer.",
+                "Important Findings: preserve failing test coverage.",
+                "Failures And Dead Ends: none beyond reproduced stale cache issue.",
+                "Tool Use And Side Effects: inspected parser entrypoint and middleware ordering.",
+                "Open Issues: implement the fix.",
+                "Next Steps: patch the parser and rerun tests.",
+                `Persistent Facts: steering=${String(messages.at(-1)?.content).includes("preserve failing test coverage")}.`,
+            ].join("\n"),
+        });
         const contextManagement = createExecutionContextManagement({
             providerId: "openrouter",
             conversationId: CONVERSATION_ID,
             agent,
             conversationStore: store,
+            generateTextImpl: generateCompactionText as any,
         });
 
         const compactContextTool = contextManagement?.optionalTools.compact_context as {

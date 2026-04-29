@@ -5,7 +5,13 @@ import { getToolsObject } from "../registry";
 import { CORE_AGENT_TOOLS } from "@/agents/constants";
 
 describe("Skill Tool Permissions", () => {
-    const mockContext = createMockExecutionEnvironment();
+    const mockContext = createMockExecutionEnvironment({
+        triggeringEnvelope: {
+            principal: {
+                linkedPubkey: "mock-human-pubkey",
+            },
+        } as any,
+    });
 
     describe("skill-provided tool filtering (token savings)", () => {
         it("should filter out shell even when it's in agent's configured tools", () => {

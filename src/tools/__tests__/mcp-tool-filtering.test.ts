@@ -1,100 +1,93 @@
 import { describe, expect, it } from "bun:test";
-import { createMockExecutionEnvironment } from "@/test-utils";
-import { getToolsObject } from "../registry";
+import { createMockAgent, createMockExecutionEnvironment } from "@/test-utils";
 import type { MCPManager } from "@/services/mcp/MCPManager";
 import type { Tool as CoreTool } from "ai";
+import { getToolsObject } from "../registry";
 
 describe("MCP Tool Filtering in getToolsObject", () => {
-    // Mock MCP tools
     const mockMcpTools: Record<string, CoreTool<unknown, unknown>> = {
-        "mcp__server1__tool_a": {
+        mcp__server1__tool_a: {
             description: "Tool A from server1",
             parameters: { type: "object", properties: {} },
             execute: async () => "result_a",
         } as CoreTool<unknown, unknown>,
-        "mcp__server1__tool_b": {
+        mcp__server1__tool_b: {
             description: "Tool B from server1",
             parameters: { type: "object", properties: {} },
             execute: async () => "result_b",
         } as CoreTool<unknown, unknown>,
-        "mcp__server2__tool_c": {
+        mcp__server2__tool_c: {
             description: "Tool C from server2",
             parameters: { type: "object", properties: {} },
             execute: async () => "result_c",
         } as CoreTool<unknown, unknown>,
+        mcp__tenex__internal_tool: {
+            description: "Internal TENEX tool",
+            parameters: { type: "object", properties: {} },
+            execute: async () => "internal",
+        } as CoreTool<unknown, unknown>,
     };
 
-    // Create a mock MCPManager
     const mockMcpManager = {
         getCachedTools: () => mockMcpTools,
     } as unknown as MCPManager;
 
-    // Create context with mock MCPManager
-    const mockContext = createMockExecutionEnvironment({
-        mcpManager: mockMcpManager,
-    });
+    it("includes MCP tools from server-level agent access", () => {
+        const context = createMockExecutionEnvironment({
+            agent: createMockAgent({ mcpAccess: ["server1"] }),
+            mcpManager: mockMcpManager,
+        });
 
-    it("should only include MCP tools that are explicitly requested in names array", () => {
-        // Request only one specific MCP tool
-        const requestedTools = ["fs_read", "mcp__server1__tool_a"];
+        const tools = getToolsObject([], context);
 
-        const tools = getToolsObject(requestedTools, mockContext);
-
-        // Should include the requested static tool
-        expect(tools.fs_read).toBeDefined();
-
-        // Should include ONLY the requested MCP tool
         expect(tools.mcp__server1__tool_a).toBeDefined();
-
-        // Should NOT include MCP tools that weren't requested
-        expect(tools.mcp__server1__tool_b).toBeUndefined();
+        expect(tools.mcp__server1__tool_b).toBeDefined();
         expect(tools.mcp__server2__tool_c).toBeUndefined();
     });
 
-    it("should include no MCP tools when none are requested", () => {
-        // Request only static tools, no MCP tools
-        const requestedTools = ["fs_read", "shell"];
+    it("does not include MCP tools when no server access is configured", () => {
+        const context = createMockExecutionEnvironment({
+            mcpManager: mockMcpManager,
+        });
 
-        const tools = getToolsObject(requestedTools, mockContext);
+        const tools = getToolsObject(["mcp__server1__tool_a"], context);
 
-        // Should include the requested static tools
-        expect(tools.fs_read).toBeDefined();
-        expect(tools.shell).toBeDefined();
-
-        // Should NOT include any MCP tools
         expect(tools.mcp__server1__tool_a).toBeUndefined();
         expect(tools.mcp__server1__tool_b).toBeUndefined();
         expect(tools.mcp__server2__tool_c).toBeUndefined();
     });
 
-    it("should include multiple requested MCP tools but exclude unrequested ones", () => {
-        // Request two MCP tools from the same server
-        const requestedTools = ["mcp__server1__tool_a", "mcp__server1__tool_b"];
+    it("skips MCP tools from inaccessible servers", () => {
+        const context = createMockExecutionEnvironment({
+            agent: createMockAgent({ mcpAccess: ["server2"] }),
+            mcpManager: mockMcpManager,
+        });
 
-        const tools = getToolsObject(requestedTools, mockContext);
+        const tools = getToolsObject([], context);
 
-        // Should include the requested MCP tools
-        expect(tools.mcp__server1__tool_a).toBeDefined();
-        expect(tools.mcp__server1__tool_b).toBeDefined();
-
-        // Should NOT include unrequested MCP tools
-        expect(tools.mcp__server2__tool_c).toBeUndefined();
-
-        // Note: Core tools (fs_*, shell, etc.) will also be present due to auto-injection
-        // when conversation context is available, but unrequested MCP tools are still excluded
+        expect(tools.mcp__server1__tool_a).toBeUndefined();
+        expect(tools.mcp__server1__tool_b).toBeUndefined();
+        expect(tools.mcp__server2__tool_c).toBeDefined();
     });
 
-    it("should handle context without mcpManager gracefully", () => {
-        // Create context without mcpManager
-        const contextWithoutMcp = createMockExecutionEnvironment();
+    it("skips internal tenex MCP tools from external MCP access injection", () => {
+        const context = createMockExecutionEnvironment({
+            agent: createMockAgent({ mcpAccess: ["tenex"] }),
+            mcpManager: mockMcpManager,
+        });
 
-        const requestedTools = ["fs_read", "mcp__server1__tool_a"];
-        const tools = getToolsObject(requestedTools, contextWithoutMcp);
+        const tools = getToolsObject([], context);
 
-        // Should include the static tool
-        expect(tools.fs_read).toBeDefined();
+        expect(tools.mcp__tenex__internal_tool).toBeUndefined();
+    });
 
-        // Should NOT include MCP tools (no mcpManager available)
+    it("handles context without mcpManager gracefully", () => {
+        const context = createMockExecutionEnvironment({
+            agent: createMockAgent({ mcpAccess: ["server1"] }),
+        });
+
+        const tools = getToolsObject([], context);
+
         expect(tools.mcp__server1__tool_a).toBeUndefined();
     });
 });

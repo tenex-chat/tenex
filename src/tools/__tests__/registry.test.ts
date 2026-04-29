@@ -148,8 +148,14 @@ describe("Tool Registry", () => {
             expect(telegramTools.no_response).toBeDefined();
         });
 
-        it("auto-injects self_delegate as a core tool", async () => {
-            const tools = await getToolsObject([], mockContext);
+        it("auto-injects self_delegate as a core tool for external principals", async () => {
+            const tools = await getToolsObject([], createMockExecutionEnvironment({
+                triggeringEnvelope: {
+                    principal: {
+                        linkedPubkey: "mock-human-pubkey",
+                    },
+                } as any,
+            }));
             expect(tools.self_delegate).toBeDefined();
         });
 
@@ -158,11 +164,21 @@ describe("Tool Registry", () => {
                 agent: createMockAgent({
                     category: "orchestrator",
                 }),
+                triggeringEnvelope: {
+                    principal: {
+                        linkedPubkey: "mock-human-pubkey",
+                    },
+                } as any,
             }));
 
             expect(tools.skill_list).toBeUndefined();
             expect(tools.skills_set).toBeUndefined();
             expect(tools.self_delegate).toBeDefined();
+        });
+
+        it("does not auto-inject self_delegate when the triggering principal is the same agent", async () => {
+            const tools = await getToolsObject([], mockContext);
+            expect(tools.self_delegate).toBeUndefined();
         });
 
         it("keeps change_model auto-injected for meta-model agents", async () => {

@@ -1,16 +1,12 @@
 import { describe, expect, it, mock } from "bun:test";
 import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 import { createStoredAgent, deriveAgentPubkeyFromNsec, type StoredAgent } from "@/agents/AgentStorage";
+import { backfillAgentCategories } from "@/agents/backfillAgentCategories";
+import type { AgentCategory } from "@/agents/role-categories";
 
-let categorizeResult: string | undefined = "worker";
+let categorizeResult: AgentCategory | undefined = "worker";
 
 const categorizeAgentMock = mock(async () => categorizeResult);
-
-mock.module("@/agents/categorizeAgent", () => ({
-    categorizeAgent: categorizeAgentMock,
-}));
-
-const backfillModulePromise = import("../backfillAgentCategories");
 
 function createAgent(params: {
     slug: string;
@@ -37,7 +33,6 @@ function createAgent(params: {
 
 describe("backfillAgentCategories", () => {
     it("categorizes uncategorized agents and skips agents that already have a category", async () => {
-        const { backfillAgentCategories } = await backfillModulePromise;
         const uncategorized = createAgent({
             slug: "needs-category",
             name: "Needs Category",
@@ -61,7 +56,9 @@ describe("backfillAgentCategories", () => {
         };
 
         categorizeResult = "orchestrator";
-        const result = await backfillAgentCategories(storage);
+        const result = await backfillAgentCategories(storage, {
+            categorize: categorizeAgentMock,
+        });
 
         expect(result).toEqual({
             processed: 1,
@@ -75,7 +72,6 @@ describe("backfillAgentCategories", () => {
     });
 
     it("supports dry runs without persisting changes", async () => {
-        const { backfillAgentCategories } = await backfillModulePromise;
         const uncategorized = createAgent({
             slug: "dry-run-target",
             name: "Dry Run Target",
@@ -90,7 +86,10 @@ describe("backfillAgentCategories", () => {
         };
 
         categorizeResult = "reviewer";
-        const result = await backfillAgentCategories(storage, { dryRun: true });
+        const result = await backfillAgentCategories(storage, {
+            dryRun: true,
+            categorize: categorizeAgentMock,
+        });
 
         expect(result).toEqual({
             processed: 1,

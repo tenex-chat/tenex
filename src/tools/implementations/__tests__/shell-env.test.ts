@@ -8,7 +8,6 @@ import { createMockAgent, createMockExecutionEnvironment } from "@/test-utils";
 import { createShellTool } from "../shell";
 
 describe("shellTool env resolution", () => {
-    const originalTenexBaseDir = process.env.TENEX_BASE_DIR;
     let tempDir: string;
     let projectDir: string;
 
@@ -16,16 +15,9 @@ describe("shellTool env resolution", () => {
         tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "tenex-shell-env-"));
         projectDir = path.join(tempDir, "project");
         await fs.mkdir(projectDir, { recursive: true });
-        process.env.TENEX_BASE_DIR = tempDir;
     });
 
     afterEach(async () => {
-        if (originalTenexBaseDir === undefined) {
-            process.env.TENEX_BASE_DIR = undefined;
-        } else {
-            process.env.TENEX_BASE_DIR = originalTenexBaseDir;
-        }
-
         await fs.rm(tempDir, { recursive: true, force: true });
     });
 
@@ -43,6 +35,8 @@ describe("shellTool env resolution", () => {
                 agent,
                 workingDirectory: projectDir,
                 projectBasePath: projectDir,
+                projectId: projectId ?? undefined,
+                tenexBasePath: tempDir,
                 getConversation: projectId
                     ? () => ({ getProjectId: () => projectId } as any)
                     : () => undefined,
@@ -61,7 +55,7 @@ describe("shellTool env resolution", () => {
 
         expect(typeof result).toBe("string");
         const output = (result as string).trimEnd().split("\n");
-        const agentHome = getAgentHomeDirectory(signer.pubkey);
+        const agentHome = getAgentHomeDirectory(signer.pubkey, tempDir);
 
         // HOME should NOT be the agent home - tools like gh rely on user's real home
         expect(output[0]).not.toBe(agentHome);
@@ -79,7 +73,8 @@ describe("shellTool env resolution", () => {
         const shellTool = createShellTool(context);
 
         await fs.mkdir(path.join(tempDir, "projects", "proj-1"), { recursive: true });
-        await fs.mkdir(getAgentHomeDirectory(signer.pubkey), { recursive: true });
+        const agentHome = getAgentHomeDirectory(signer.pubkey, tempDir);
+        await fs.mkdir(agentHome, { recursive: true });
         await fs.writeFile(path.join(tempDir, ".env"), "VALUE=global\n", "utf-8");
         await fs.writeFile(
             path.join(tempDir, "projects", "proj-1", ".env"),
@@ -87,7 +82,7 @@ describe("shellTool env resolution", () => {
             "utf-8"
         );
         await fs.writeFile(
-            path.join(getAgentHomeDirectory(signer.pubkey), ".env"),
+            path.join(agentHome, ".env"),
             "VALUE=agent\n",
             "utf-8"
         );
@@ -116,6 +111,8 @@ describe("shellTool env resolution", () => {
                 agent,
                 workingDirectory: projectWorkingDir,
                 projectBasePath,
+                projectId: "proj-1",
+                tenexBasePath: tempDir,
                 getConversation: () => ({ getProjectId: () => "proj-1" } as any),
             })
         );

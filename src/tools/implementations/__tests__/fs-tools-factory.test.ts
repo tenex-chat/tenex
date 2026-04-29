@@ -7,7 +7,6 @@ import { createMockAgent, createMockExecutionEnvironment } from "@/test-utils";
 import { getOrCreateTenexFsTools } from "../fs-tools-factory";
 
 describe("TENEX fs tools path expansion", () => {
-    const originalTenexBaseDir = process.env.TENEX_BASE_DIR;
     let tempDir: string;
     let projectDir: string;
 
@@ -15,16 +14,9 @@ describe("TENEX fs tools path expansion", () => {
         tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "tenex-fs-tools-"));
         projectDir = path.join(tempDir, "project");
         await fs.mkdir(projectDir, { recursive: true });
-        process.env.TENEX_BASE_DIR = tempDir;
     });
 
     afterEach(async () => {
-        if (originalTenexBaseDir === undefined) {
-            process.env.TENEX_BASE_DIR = undefined;
-        } else {
-            process.env.TENEX_BASE_DIR = originalTenexBaseDir;
-        }
-
         await fs.rm(tempDir, { recursive: true, force: true });
     });
 
@@ -39,6 +31,8 @@ describe("TENEX fs tools path expansion", () => {
             agent,
             workingDirectory: projectDir,
             projectBasePath: projectDir,
+            projectId,
+            tenexBasePath: tempDir,
             getConversation: () => ({ getProjectId: () => projectId } as any),
         });
     }

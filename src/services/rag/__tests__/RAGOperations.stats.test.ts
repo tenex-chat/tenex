@@ -10,10 +10,6 @@ mock.module("@/utils/logger", () => ({
     },
 }));
 
-mock.module("@/utils/error-handler", () => ({
-    handleError: () => {},
-}));
-
 /**
  * Create a mock VectorStore with configurable countDocuments behavior.
  * The mock supports multiple collections, each with a total count

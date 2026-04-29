@@ -4,7 +4,6 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 import * as projectsModule from "@/services/projects";
-import { RAGService } from "@/services/rag/RAGService";
 import { createMockAgent, createMockExecutionEnvironment } from "@/test-utils";
 import type { ToolExecutionContext } from "@/tools/types";
 import { createRAGAddDocumentsTool } from "../rag_add_documents";
@@ -24,9 +23,12 @@ mock.module("@/utils/logger", () => ({
 // by creating documents with various metadata types
 
 let captureAddDocuments: (collection: string, docs: unknown[]) => Promise<void> = async () => {};
+const mockRagService = {
+    addDocuments: (collection: string, docs: unknown[]) => captureAddDocuments(collection, docs),
+};
 
 // Create minimal mock context
-const createMockContext = (): ToolExecutionContext => ({
+const createMockContext = (tenexBasePath: string): ToolExecutionContext => ({
     agent: {
         name: "test-agent",
         slug: "test-agent",
@@ -36,21 +38,21 @@ const createMockContext = (): ToolExecutionContext => ({
         eventId: "test-event-id",
     },
     workingDirectory: "/test/working/dir",
+    projectBasePath: "/test/working/dir",
+    currentBranch: "main",
+    tenexBasePath,
     conversationId: "test-conv-id",
     conversation: {} as any,
-});
+} as ToolExecutionContext);
 
 describe("rag_add_documents metadata handling", () => {
-    const originalTenexBaseDir = process.env.TENEX_BASE_DIR;
     let isProjectContextInitializedSpy: ReturnType<typeof spyOn>;
     let getProjectContextSpy: ReturnType<typeof spyOn>;
-    let getInstanceSpy: ReturnType<typeof spyOn>;
     let tempDir: string;
 
     beforeEach(async () => {
         captureAddDocuments = async () => {};
         tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "tenex-rag-add-docs-"));
-        process.env.TENEX_BASE_DIR = tempDir;
         isProjectContextInitializedSpy = spyOn(
             projectsModule,
             "isProjectContextInitialized"
@@ -60,23 +62,12 @@ describe("rag_add_documents metadata handling", () => {
                 throw new Error("Not initialized");
             }
         );
-        getInstanceSpy = spyOn(RAGService, "getInstance").mockReturnValue({
-            addDocuments: (collection: string, docs: unknown[]) =>
-                captureAddDocuments(collection, docs),
-        } as never);
     });
 
     afterEach(async () => {
-        if (originalTenexBaseDir === undefined) {
-            process.env.TENEX_BASE_DIR = undefined;
-        } else {
-            process.env.TENEX_BASE_DIR = originalTenexBaseDir;
-        }
-
         await fs.rm(tempDir, { recursive: true, force: true });
         isProjectContextInitializedSpy?.mockRestore();
         getProjectContextSpy?.mockRestore();
-        getInstanceSpy?.mockRestore();
     });
 
     describe("coerceToDocumentMetadata (through tool execution)", () => {
@@ -85,7 +76,9 @@ describe("rag_add_documents metadata handling", () => {
             captureAddDocuments = async (_col: string, docs: unknown[]) => {
                 capturedDocs.push(...docs);
             };
-            const tool = createRAGAddDocumentsTool(createMockContext());
+            const tool = createRAGAddDocumentsTool(createMockContext(tempDir), {
+                ragService: mockRagService,
+            });
 
             await tool.execute({
                 description: "Add test documents with string metadata",
@@ -107,7 +100,9 @@ describe("rag_add_documents metadata handling", () => {
             captureAddDocuments = async (_col: string, docs: unknown[]) => {
                 capturedDocs.push(...docs);
             };
-            const tool = createRAGAddDocumentsTool(createMockContext());
+            const tool = createRAGAddDocumentsTool(createMockContext(tempDir), {
+                ragService: mockRagService,
+            });
 
             await tool.execute({
                 description: "Add test documents with numeric metadata",
@@ -129,7 +124,9 @@ describe("rag_add_documents metadata handling", () => {
             captureAddDocuments = async (_col: string, docs: unknown[]) => {
                 capturedDocs.push(...docs);
             };
-            const tool = createRAGAddDocumentsTool(createMockContext());
+            const tool = createRAGAddDocumentsTool(createMockContext(tempDir), {
+                ragService: mockRagService,
+            });
 
             await tool.execute({
                 description: "Add test documents with boolean metadata",
@@ -151,7 +148,9 @@ describe("rag_add_documents metadata handling", () => {
             captureAddDocuments = async (_col: string, docs: unknown[]) => {
                 capturedDocs.push(...docs);
             };
-            const tool = createRAGAddDocumentsTool(createMockContext());
+            const tool = createRAGAddDocumentsTool(createMockContext(tempDir), {
+                ragService: mockRagService,
+            });
 
             await tool.execute({
                 description: "Add test documents with null metadata",
@@ -172,7 +171,9 @@ describe("rag_add_documents metadata handling", () => {
             captureAddDocuments = async (_col: string, docs: unknown[]) => {
                 capturedDocs.push(...docs);
             };
-            const tool = createRAGAddDocumentsTool(createMockContext());
+            const tool = createRAGAddDocumentsTool(createMockContext(tempDir), {
+                ragService: mockRagService,
+            });
 
             await tool.execute({
                 description: "Add test documents with nested metadata",
@@ -195,7 +196,9 @@ describe("rag_add_documents metadata handling", () => {
             captureAddDocuments = async (_col: string, docs: unknown[]) => {
                 capturedDocs.push(...docs);
             };
-            const tool = createRAGAddDocumentsTool(createMockContext());
+            const tool = createRAGAddDocumentsTool(createMockContext(tempDir), {
+                ragService: mockRagService,
+            });
 
             await tool.execute({
                 description: "Add test documents with array metadata",
@@ -218,8 +221,10 @@ describe("rag_add_documents metadata handling", () => {
             captureAddDocuments = async (_col: string, docs: unknown[]) => {
                 capturedDocs.push(...docs);
             };
-            const context = createMockContext();
-            const tool = createRAGAddDocumentsTool(context);
+            const context = createMockContext(tempDir);
+            const tool = createRAGAddDocumentsTool(context, {
+                ragService: mockRagService,
+            });
 
             await tool.execute({
                 description: "Add test documents for agent pubkey injection",
@@ -240,8 +245,10 @@ describe("rag_add_documents metadata handling", () => {
             captureAddDocuments = async (_col: string, docs: unknown[]) => {
                 capturedDocs.push(...docs);
             };
-            const context = createMockContext();
-            const tool = createRAGAddDocumentsTool(context);
+            const context = createMockContext(tempDir);
+            const tool = createRAGAddDocumentsTool(context, {
+                ragService: mockRagService,
+            });
 
             // User explicitly provides their own agent_pubkey
             await tool.execute({
@@ -285,11 +292,14 @@ describe("rag_add_documents metadata handling", () => {
                     }),
                     workingDirectory: projectDir,
                     projectBasePath: projectDir,
+                    projectId: "proj-1",
+                    tenexBasePath: tempDir,
                     getConversation: () => ({ getProjectId: () => "proj-1" } as any),
-                }) as unknown as ToolExecutionContext
+                }) as unknown as ToolExecutionContext,
+                { ragService: mockRagService }
             );
 
-            await tool.execute({
+            const result = await tool.execute({
                 description: "Add a document from env-expanded file_path",
                 collection: "test",
                 documents: [{
@@ -301,6 +311,7 @@ describe("rag_add_documents metadata handling", () => {
                 }],
             });
 
+            expect(JSON.parse(result as string)).toEqual(expect.objectContaining({ success: true }));
             expect(capturedDocs.length).toBeGreaterThan(0);
             expect(capturedDocs[0].content).toBe("expanded rag document");
         });

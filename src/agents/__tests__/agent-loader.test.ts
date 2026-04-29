@@ -4,11 +4,7 @@ import { agentStorage, createStoredAgent } from "@/agents/AgentStorage";
 import { loadStoredAgentIntoRegistry } from "@/agents/agent-loader";
 import { SkillService } from "@/services/skill/SkillService";
 
-// Hoisted by Bun's bundler — runs before any import is resolved
 const categorizeAgentMock = mock(async () => "worker" as const);
-mock.module("@/agents/categorizeAgent", () => ({
-    categorizeAgent: categorizeAgentMock,
-}));
 
 describe("loadStoredAgentIntoRegistry - lazy categorization", () => {
     function makeRegistry() {
@@ -39,7 +35,11 @@ describe("loadStoredAgentIntoRegistry - lazy categorization", () => {
             listAvailableSkills: mock(async () => []),
         } as never);
 
-        const instance = await loadStoredAgentIntoRegistry(signer.pubkey, makeRegistry());
+        const instance = await loadStoredAgentIntoRegistry(
+            signer.pubkey,
+            makeRegistry(),
+            categorizeAgentMock
+        );
 
         // Category must be resolved and reflected in the instance
         expect(instance.category).toBe("domain-expert");
@@ -76,7 +76,11 @@ describe("loadStoredAgentIntoRegistry - lazy categorization", () => {
             listAvailableSkills: mock(async () => []),
         } as never);
 
-        const instance = await loadStoredAgentIntoRegistry(signer.pubkey, makeRegistry());
+        const instance = await loadStoredAgentIntoRegistry(
+            signer.pubkey,
+            makeRegistry(),
+            categorizeAgentMock
+        );
 
         expect(instance.category).toBe("domain-expert");
         expect(instance.tools).not.toContain("delegate");
@@ -110,7 +114,11 @@ describe("loadStoredAgentIntoRegistry - lazy categorization", () => {
             listAvailableSkills: mock(async () => []),
         } as never);
 
-        const instance = await loadStoredAgentIntoRegistry(signer.pubkey, makeRegistry());
+        const instance = await loadStoredAgentIntoRegistry(
+            signer.pubkey,
+            makeRegistry(),
+            categorizeAgentMock
+        );
 
         expect(instance.category).toBe("worker");
         expect(instance.tools).not.toContain("delegate");
@@ -145,7 +153,11 @@ describe("loadStoredAgentIntoRegistry - lazy categorization", () => {
             listAvailableSkills: mock(async () => []),
         } as never);
 
-        const instance = await loadStoredAgentIntoRegistry(signer.pubkey, makeRegistry());
+        const instance = await loadStoredAgentIntoRegistry(
+            signer.pubkey,
+            makeRegistry(),
+            categorizeAgentMock
+        );
 
         expect(instance.category).toBe("orchestrator");
         expect(instance.tools).not.toContain("skill_list");
@@ -174,7 +186,7 @@ describe("loadStoredAgentIntoRegistry - lazy categorization", () => {
         } as never);
 
         // Must not throw even though categorization fails
-        await loadStoredAgentIntoRegistry(signer.pubkey, makeRegistry());
+        await loadStoredAgentIntoRegistry(signer.pubkey, makeRegistry(), categorizeAgentMock);
         // Flush microtasks so the background catch handler runs
         await new Promise((r) => setTimeout(r, 0));
 
@@ -205,14 +217,14 @@ describe("loadStoredAgentIntoRegistry - lazy categorization", () => {
         } as never);
 
         // First load — triggers background categorization that will reject (timeout)
-        await loadStoredAgentIntoRegistry(pubkey, makeRegistry());
+        await loadStoredAgentIntoRegistry(pubkey, makeRegistry(), categorizeAgentMock);
         // Allow the background promise to reject and `finally` to clean up the in-flight entry
         await new Promise((r) => setTimeout(r, 50));
 
         expect(categorizeAgentMock).toHaveBeenCalledTimes(1);
 
         // Second load — in-flight set must be cleared, so categorization triggers again
-        await loadStoredAgentIntoRegistry(pubkey, makeRegistry());
+        await loadStoredAgentIntoRegistry(pubkey, makeRegistry(), categorizeAgentMock);
         await new Promise((r) => setTimeout(r, 50));
 
         expect(categorizeAgentMock).toHaveBeenCalledTimes(2);
@@ -245,8 +257,8 @@ describe("loadStoredAgentIntoRegistry - lazy categorization", () => {
 
         const registry = makeRegistry();
         // Fire both loads before awaiting — second call sees first's in-flight entry
-        const p1 = loadStoredAgentIntoRegistry(pubkey, registry);
-        const p2 = loadStoredAgentIntoRegistry(pubkey, registry);
+        const p1 = loadStoredAgentIntoRegistry(pubkey, registry, categorizeAgentMock);
+        const p2 = loadStoredAgentIntoRegistry(pubkey, registry, categorizeAgentMock);
         await Promise.all([p1, p2]);
         // Allow background tasks to settle
         await new Promise((r) => setTimeout(r, 20));
