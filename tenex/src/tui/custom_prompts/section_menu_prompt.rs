@@ -34,11 +34,11 @@ use crossterm::{queue, QueueableCommand};
 use super::raw_mode::RawMode;
 use crate::tui::glyphs;
 
-const AMBER: Color = Color::Rgb {
-    r: 0xFF,
-    g: 0xC1,
-    b: 0x07,
-};
+// Truecolor `#FFC107` — sourced from the canonical
+// `crate::tui::theme::INQUIRER_AMBER_CROSSTERM` constant so all bespoke
+// prompts share a single source of truth. Local `const` re-export keeps
+// existing call sites short.
+const AMBER: Color = crate::tui::theme::INQUIRER_AMBER_CROSSTERM;
 
 /// One selectable menu entry.
 #[derive(Debug, Clone, PartialEq, Eq)]

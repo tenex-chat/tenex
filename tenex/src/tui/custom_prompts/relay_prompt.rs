@@ -28,6 +28,10 @@ use crate::tui::glyphs;
 const DEFAULT_INPUT_PREFIX: &str = "wss://";
 const DEFAULT_INPUT_PLACEHOLDER: &str = "Type a relay URL";
 
+// Truecolor `#FFC107` from the shared theme module — single source of
+// truth for the inquirer-amber palette across all bespoke prompts.
+const AMBER: Color = crate::tui::theme::INQUIRER_AMBER_CROSSTERM;
+
 /// One row in the prompt: either a fixed choice with a `value`, or the
 /// free-text `Input` row.
 #[derive(Debug, Clone)]
@@ -325,7 +329,7 @@ fn render_frame<W: Write>(
     for (i, (label, desc)) in segments.iter().enumerate() {
         let is_active = i == state.active;
         if is_active {
-            queue!(stdout, SetForegroundColor(Color::Rgb { r: 0xFF, g: 0xC1, b: 0x07 }))?;
+            queue!(stdout, SetForegroundColor(AMBER))?;
             queue!(stdout, Print(label))?;
             queue!(stdout, ResetColor)?;
         } else {
@@ -374,7 +378,7 @@ fn render_done<W: Write>(stdout: &mut W, message: &str, answer: &str) -> io::Res
     queue!(stdout, Print("✓"))?;
     queue!(stdout, ResetColor)?;
     queue!(stdout, Print(format!(" {message} ")))?;
-    queue!(stdout, SetForegroundColor(Color::Rgb { r: 0xFF, g: 0xC1, b: 0x07 }))?;
+    queue!(stdout, SetForegroundColor(AMBER))?;
     queue!(stdout, Print(answer))?;
     queue!(stdout, ResetColor)?;
     queue!(stdout, Print("\r\n"))?;
@@ -382,7 +386,7 @@ fn render_done<W: Write>(stdout: &mut W, message: &str, answer: &str) -> io::Res
 }
 
 fn style_amber<W: Write>(stdout: &mut W, s: &str) -> io::Result<()> {
-    queue!(stdout, SetForegroundColor(Color::Rgb { r: 0xFF, g: 0xC1, b: 0x07 }))?;
+    queue!(stdout, SetForegroundColor(AMBER))?;
     queue!(stdout, Print(s))?;
     queue!(stdout, ResetColor)?;
     Ok(())

@@ -32,11 +32,9 @@ use indexmap::IndexMap;
 use super::raw_mode::RawMode;
 use crate::tui::glyphs;
 
-const AMBER: Color = Color::Rgb {
-    r: 0xFF,
-    g: 0xC1,
-    b: 0x07,
-};
+// Truecolor `#FFC107` from the shared theme module — single source of
+// truth for the inquirer-amber palette across all bespoke prompts.
+const AMBER: Color = crate::tui::theme::INQUIRER_AMBER_CROSSTERM;
 const ANSI214_ACCENT: Color = Color::AnsiValue(214);
 const ANSI240_MUTED: Color = Color::AnsiValue(240);
 

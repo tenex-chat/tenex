@@ -32,6 +32,14 @@ pub fn inquirer_amber() -> Style {
 /// exact `#FFC107` should use this and the matching reset.
 pub const INQUIRER_AMBER_FG: &str = "\x1b[38;2;255;193;7m";
 
+/// Inquirer-prompt amber as a [`crossterm::style::Color::Rgb`] value.
+/// All bespoke crossterm-rendered prompts (provider-select, role menu,
+/// LLM menu, agent-select, variant-list, relay) use this for their
+/// active-row cursor and amber-highlight foreground. Defined in one
+/// place here so the truecolor value lives at a single source of truth.
+pub const INQUIRER_AMBER_CROSSTERM: crossterm::style::Color =
+    crossterm::style::Color::Rgb { r: 0xFF, g: 0xC1, b: 0x07 };
+
 // ---------------------------------------------------------------------------
 // Display palette (xterm-256). Banner gradient, section headers, hints.
 // `src/commands/config/display.ts:3-12`
