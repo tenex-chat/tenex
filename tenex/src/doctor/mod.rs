@@ -238,10 +238,12 @@ fn find_orphaned_agents(purge: bool) -> Result<()> {
         return Ok(());
     }
 
-    println!();
+    // TS at doctor.ts:100 — `chalk.blue(\`\\nPurging ${N} orphaned
+    // agent(s)...\`)` — the leading `\n` is INSIDE the blue wrap, not
+    // a separate empty println.
     println!(
         "{}",
-        blue.apply_to(format!("Purging {} orphaned agent(s)...", orphans.len()))
+        blue.apply_to(format!("\nPurging {} orphaned agent(s)...", orphans.len()))
     );
     // TS source (`doctor.ts:101-105`) prints "  ✓ deleted <slug>" inside
     // the loop unconditionally and reports `orphans.length` on the final
