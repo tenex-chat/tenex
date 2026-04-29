@@ -38,7 +38,7 @@ use tools::{
     FsEditTool, FsGlobTool, FsGrepTool, FsReadTool, FsWriteTool,
     HomeFsEditTool, HomeFsGlobTool, HomeFsGrepTool, HomeFsReadTool, HomeFsWriteTool,
     KillTool, LearnTool, NoResponseTool, ProjectListTool, RagAddDocumentsTool,
-    RagSearchTool, ScheduleTaskTool, SelfDelegateTool, ShellTool,
+    RagSearchTool, ReportPublishTool, ScheduleTaskTool, SelfDelegateTool, ShellTool,
     SkillListTool, SkillsSetTool, TodoItem, TodoStatus, TodoWriteTool,
 };
 
@@ -220,6 +220,10 @@ fn build_extra_tools(
     }
 
     tools.push(Box::new(NoResponseTool::new(input.suppress_response.clone())));
+    tools.push(Box::new(ReportPublishTool::new(
+        input.emit_state.clone(),
+        input.project_base.clone(),
+    )));
 
     tools
 }
@@ -240,6 +244,7 @@ struct ExtraToolsInput<'a> {
     agent_slug: String,
     project_id: String,
     suppress_response: Arc<AtomicBool>,
+    project_base: String,
 }
 
 fn load_todos_from_store(
@@ -724,6 +729,7 @@ async fn main() -> Result<()> {
         agent_slug: agent_slug.clone(),
         project_id: project_id.clone(),
         suppress_response: suppress_response.clone(),
+        project_base: working_dir.clone(),
     };
 
     // Keep a handle with shared Arc refs so we can read the pending final turn

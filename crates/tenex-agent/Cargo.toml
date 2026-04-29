@@ -30,3 +30,6 @@ regex = "1"
 dirs-next = "2"
 futures = "0.3"
 chrono = { version = "0.4", features = ["serde"] }
+
+[dev-dependencies]
+tempfile = "3"
