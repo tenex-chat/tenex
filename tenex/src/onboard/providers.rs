@@ -205,6 +205,25 @@ fn display_name_for(provider_id: &str) -> String {
         .to_owned()
 }
 
+/// TS at `provider-setup.ts:89` emits:
+///
+/// ```ts
+/// console.log(chalk.dim(`  Run ${chalk.bold("claude setup-token")} in another terminal, then paste the key (sk-ant-...) here.`))
+/// ```
+///
+/// Chalk's literal output is
+/// `\x1b[2m  Run \x1b[1mclaude setup-token\x1b[22m in another terminal, then paste the key (sk-ant-...) here.\x1b[22m`
+/// — `chalk.bold`'s close (`\x1b[22m`) is the SGR-22 reset that turns
+/// OFF both bold AND dim, so the trailing tail after `claude setup-token`
+/// renders plain (not dim) and the outer `chalk.dim` close is a no-op.
+/// Mirror byte-for-byte.
+fn format_claude_setup_token_hint() -> String {
+    use crate::tui::theme::{BOLD_CLOSE, BOLD_OPEN, DIM_CLOSE, DIM_OPEN};
+    format!(
+        "{DIM_OPEN}  Run {BOLD_OPEN}claude setup-token{BOLD_CLOSE} in another terminal, then paste the key (sk-ant-...) here.{DIM_CLOSE}",
+    )
+}
+
 /// Open the appropriate input prompt for `provider_id`. Returns
 /// `Some(serialized)` if the user entered a value (key + optional label
 /// joined by a single space, per `serializeApiKeyEntry`), or `None` if the
@@ -230,16 +249,7 @@ pub fn ask_for_key(
         }
     } else {
         if let Some(_h) = hint {
-            // Verbatim TS wording (`provider-setup.ts:89`):
-            //   "Run claude setup-token in another terminal, then paste the
-            //    key (sk-ant-...) here."
-            // The TS renders the whole line via chalk.dim with `claude
-            // setup-token` in chalk.bold. We don't try to compose bold-in-dim
-            // (terminals diverge); just dim the line so the visual emphasis
-            // matches "an aside".
-            crate::tui::display::context(
-                "Run claude setup-token in another terminal, then paste the key (sk-ant-...) here.",
-            );
+            println!("{}", format_claude_setup_token_hint());
         }
         let msg = format!("{display_name} API key:");
         let raw = prompts::password(&msg)
@@ -441,5 +451,27 @@ mod tests {
         // And mirror back — output should preserve the same order.
         let updated = mirror_into_doc(ProvidersDoc::new(), &st.providers);
         assert_eq!(updated.provider_ids(), vec!["openrouter", "ollama", "anthropic"]);
+    }
+
+    /// Pin the `claude setup-token` hint line byte-for-byte against the
+    /// chalk output of `provider-setup.ts:89`.
+    #[test]
+    fn claude_setup_token_hint_matches_ts_chalk_byte_sequence() {
+        let s = format_claude_setup_token_hint();
+        assert_eq!(
+            s,
+            "\x1b[2m  Run \x1b[1mclaude setup-token\x1b[22m in another terminal, then paste the key (sk-ant-...) here.\x1b[22m",
+        );
+    }
+
+    #[test]
+    fn claude_setup_token_hint_ansi_stripped_text_is_verbatim_ts() {
+        use console::strip_ansi_codes;
+        let s = format_claude_setup_token_hint();
+        let plain = strip_ansi_codes(&s).into_owned();
+        assert_eq!(
+            plain,
+            "  Run claude setup-token in another terminal, then paste the key (sk-ant-...) here.",
+        );
     }
 }
