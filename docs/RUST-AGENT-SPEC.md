@@ -15,8 +15,9 @@ TENEX_PROJECT_ID=<project-id> cargo run -p tenex-agent -- <agent.json> < trigger
 **stdin** — one JSON object: a complete Nostr event (id, pubkey, created_at, kind, tags, content, sig).
 
 **stdout** — newline-delimited JSON objects (NDJSON):
-- Zero or more `tool-use` events (kind:1111) emitted before and after each tool call.
-- Zero or more intermediate `conversation` events (kind:1, no p-tag, no status tag) emitted after each LLM turn.
+- Zero or more `tool-use` events (kind:1, `["tool", name]` tag) emitted before each tool call.
+- Zero or more streaming text delta events (kind:24135) emitted per token chunk during each LLM turn.
+- Zero or more intermediate `conversation` events (kind:1, no p-tag, no status tag) emitted after each LLM turn (multi-turn tool sequences only).
 - Exactly one `completion` event (kind:1, with p-tag and `status=completed`) as the final line.
 
 **stderr** — human-readable progress/debug output. Never parsed.
@@ -494,8 +495,9 @@ Uses `rig-core`'s `Agent::stream_chat()` with projected history and an `EmitHook
 **Inner loop (inside `rig`)** — tool call iteration:
 - `rig` sends messages to the provider, receives tool calls, executes them, feeds results back — looping until the provider returns a final text response.
 - `rig` enforces `default_max_turns(25)`.
+- **Per token chunk**: `EmitHook::on_text_delta` accumulates text and emits a `StreamTextDeltaIntent` (kind:24135) per chunk with a monotonic `sequence` counter.
 - **Before each tool call**: `EmitHook::on_tool_call` runs pre-tool supervision checks. If blocked, returns `skip(reason)`. Otherwise emits a `ToolUseIntent` event (except `delegate`, which emits its own).
-- **After each LLM turn**: `EmitHook::on_completion_response` emits a `ConversationIntent` event with the turn text and token usage.
+- **After each LLM turn**: `EmitHook::on_stream_completion_response_finish` resets the delta counter and swaps the pending `ConversationIntent` — intermediate turns are emitted immediately; the final turn is held and emitted by `main.rs` after the stream ends (with `FinalResponse` usage attached).
 
 ## Model Resolution
 
@@ -533,7 +535,6 @@ API keys are resolved from provider-specific env vars (`ANTHROPIC_API_KEY`, `OPE
 
 ## Future Work (not yet implemented)
 
-- **Streaming intermediate events**: `ConversationIntent` events are emitted once per LLM turn. Per-chunk streaming to the relay is not yet implemented.
 - **ToolResult in history**: Projection filters out `ToolResult` messages because assistant records currently have empty `tool_calls`. Once `record_turn` captures tool calls inline, paired tool-call/result sequences can flow to providers.
 - **`no_response` tool**: Suppress the completion event when the agent decides no reply is needed.
-- **TS-only tools**: `conversation_search`, `send_message`, MCP tools (`mcp_list_resources`, `mcp_resource_read`, `mcp_subscribe`, `mcp_subscription_stop`), `report_publish`, `agents_write`, RAG subscription tools (`rag_subscription_create/delete/get/list`).
+- **TS-only tools**: `conversation_search`, `send_message`, MCP tools (`mcp_list_resources`, `mcp_resource_read`, `mcp_subscribe`, `mcp_subscription_stop`), `report_publish`, `agents_write`, RAG subscription tools (`rag_subscription_create/delete/get/list`), RAG collection management tools (`rag_collection_create/delete/list`).
