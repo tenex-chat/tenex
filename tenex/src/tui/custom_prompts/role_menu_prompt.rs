@@ -148,9 +148,7 @@ pub enum RoleInput {
 
 impl RoleInput {
     pub fn from_key_event(ev: KeyEvent) -> Self {
-        if ev.modifiers.contains(KeyModifiers::CONTROL)
-            && matches!(ev.code, KeyCode::Char('c'))
-        {
+        if ev.modifiers.contains(KeyModifiers::CONTROL) && matches!(ev.code, KeyCode::Char('c')) {
             return RoleInput::CtrlC;
         }
         match ev.code {
@@ -214,11 +212,7 @@ pub fn compose_lines(state: &RoleMenuState, message: &str) -> Vec<String> {
     out.push(String::new());
 
     for (i, role) in ROLES.iter().enumerate() {
-        let assigned = state
-            .assignments
-            .get(role)
-            .cloned()
-            .unwrap_or_default();
+        let assigned = state.assignments.get(role).cloned().unwrap_or_default();
         let pfx = if i == state.active {
             cursor_active.clone()
         } else {
@@ -305,7 +299,12 @@ fn render_frame<W: Write>(
     // TS `inquirerTheme.prefix.idle = chalk.hex("#FFC107")("?")` —
     // closes with SGR 39 (FG default), not SGR 0 (full reset). Use the
     // raw FG_RESET constant for byte-perfect chalk-prefix match.
-    queue!(stdout, SetForegroundColor(AMBER), Print("?"), Print(crate::tui::theme::FG_RESET))?;
+    queue!(
+        stdout,
+        SetForegroundColor(AMBER),
+        Print("?"),
+        Print(crate::tui::theme::FG_RESET)
+    )?;
     queue!(
         stdout,
         Print(" "),
@@ -469,23 +468,44 @@ mod tests {
 
     #[test]
     fn role_labels_match_ts_verbatim() {
-        // Source: roles.ts:22-29
+        // Source: roles.ts:23-28 — every label byte-for-byte.
         assert_eq!(RoleKey::Default.label(), "Default");
+        assert_eq!(RoleKey::Summarization.label(), "Summarization");
+        assert_eq!(RoleKey::Supervision.label(), "Supervision");
         assert_eq!(RoleKey::PromptCompilation.label(), "Prompt Compilation");
+        assert_eq!(RoleKey::Categorization.label(), "Categorization");
         assert_eq!(RoleKey::ContextDiscovery.label(), "Context Discovery");
     }
 
     #[test]
     fn role_recommendations_match_ts_verbatim() {
-        // Spot-check a couple of the verbatim strings to guard against
-        // accidental rewording.
+        // Source: `src/commands/config/roles.ts:23-28`. Each recommendation
+        // must be byte-for-byte identical (including the em-dash and
+        // sentence casing) so the role-menu prompt's hint lines render
+        // exactly as the TS user sees them.
         assert_eq!(
             RoleKey::Default.recommendation(),
-            "The default model all agents get — pick your best all-rounder"
+            "The default model all agents get — pick your best all-rounder",
+        );
+        assert_eq!(
+            RoleKey::Summarization.recommendation(),
+            "Used for conversation metadata (summaries, titles) — choose a cheap model with a large context window",
+        );
+        assert_eq!(
+            RoleKey::Supervision.recommendation(),
+            "Evaluates agent work and decides next steps — choose a model with strong reasoning",
+        );
+        assert_eq!(
+            RoleKey::PromptCompilation.recommendation(),
+            "Distills lessons into system prompts — choose a smart model with a large context window",
+        );
+        assert_eq!(
+            RoleKey::Categorization.recommendation(),
+            "Classifies agent roles — choose a cheap, fast model",
         );
         assert_eq!(
             RoleKey::ContextDiscovery.recommendation(),
-            "Plans proactive memory searches — choose a cheap, fast model with reliable JSON output"
+            "Plans proactive memory searches — choose a cheap, fast model with reliable JSON output",
         );
     }
 
@@ -545,19 +565,28 @@ mod tests {
     #[test]
     fn ctrl_c_cancels() {
         let mut state = RoleMenuState::new(assignments_all("cfg-x"));
-        assert_eq!(handle_key(&mut state, RoleInput::CtrlC), RoleOutcome::Cancel);
+        assert_eq!(
+            handle_key(&mut state, RoleInput::CtrlC),
+            RoleOutcome::Cancel
+        );
     }
 
     #[test]
     fn esc_cancels() {
         let mut state = RoleMenuState::new(assignments_all("cfg-x"));
-        assert_eq!(handle_key(&mut state, RoleInput::Escape), RoleOutcome::Cancel);
+        assert_eq!(
+            handle_key(&mut state, RoleInput::Escape),
+            RoleOutcome::Cancel
+        );
     }
 
     #[test]
     fn other_input_continues() {
         let mut state = RoleMenuState::new(assignments_all("cfg-x"));
-        assert_eq!(handle_key(&mut state, RoleInput::Other), RoleOutcome::Continue);
+        assert_eq!(
+            handle_key(&mut state, RoleInput::Other),
+            RoleOutcome::Continue
+        );
     }
 
     #[test]
@@ -569,7 +598,10 @@ mod tests {
             .iter()
             .find(|l| l.contains("Prompt Compilation"))
             .unwrap();
-        assert!(prompt_compilation_row.contains("my-cfg"), "got: {prompt_compilation_row}");
+        assert!(
+            prompt_compilation_row.contains("my-cfg"),
+            "got: {prompt_compilation_row}"
+        );
     }
 
     #[test]
@@ -585,7 +617,10 @@ mod tests {
         state.active = 2; // Supervision
         let lines = compose_lines(&state, "Roles");
         let supervision_row = lines.iter().find(|l| l.contains("Supervision")).unwrap();
-        assert!(supervision_row.starts_with(glyphs::CURSOR_THIN), "got: {supervision_row}");
+        assert!(
+            supervision_row.starts_with(glyphs::CURSOR_THIN),
+            "got: {supervision_row}"
+        );
     }
 
     /// Pin: the active-row cursor's trailing space must land OUTSIDE the
@@ -665,12 +700,9 @@ mod tests {
         // Cursor wrap → colour close → literal space → ansi256-#214 + bold
         // for "  Done". Tolerates either FG closer per the systemic
         // crossterm-vs-chalk divergence noted above.
-        let with_full_reset = s.contains(
-            "\x1b[38;2;255;193;7m›\x1b[0m \x1b[38;5;214m\x1b[1m  Done",
-        );
-        let with_fg_reset = s.contains(
-            "\x1b[38;2;255;193;7m›\x1b[39m \x1b[38;5;214m\x1b[1m  Done",
-        );
+        let with_full_reset =
+            s.contains("\x1b[38;2;255;193;7m›\x1b[0m \x1b[38;5;214m\x1b[1m  Done");
+        let with_fg_reset = s.contains("\x1b[38;2;255;193;7m›\x1b[39m \x1b[38;5;214m\x1b[1m  Done");
         assert!(
             with_full_reset || with_fg_reset,
             "Done row must emit cursor + close + literal space + ansi256(214)+bold for the label; got {s:?}",
@@ -683,22 +715,45 @@ mod tests {
         let lines = compose_lines(&state, "Roles");
         // Find the position of "Default" row, then verify the very next line
         // is the Default's recommendation (which contains "all-rounder").
-        let pos = lines.iter().position(|l| l.contains("Default") && l.contains("x")).unwrap();
-        assert!(lines[pos + 1].contains("all-rounder"), "got: {}", lines[pos + 1]);
+        let pos = lines
+            .iter()
+            .position(|l| l.contains("Default") && l.contains("x"))
+            .unwrap();
+        assert!(
+            lines[pos + 1].contains("all-rounder"),
+            "got: {}",
+            lines[pos + 1]
+        );
     }
 
     #[test]
     fn from_key_event_maps_arrows_enter_esc_ctrl_c() {
-        fn ke(c: KeyCode) -> KeyEvent { KeyEvent::new(c, KeyModifiers::NONE) }
-        fn ke_ctrl(c: KeyCode) -> KeyEvent { KeyEvent::new(c, KeyModifiers::CONTROL) }
+        fn ke(c: KeyCode) -> KeyEvent {
+            KeyEvent::new(c, KeyModifiers::NONE)
+        }
+        fn ke_ctrl(c: KeyCode) -> KeyEvent {
+            KeyEvent::new(c, KeyModifiers::CONTROL)
+        }
         assert_eq!(RoleInput::from_key_event(ke(KeyCode::Up)), RoleInput::Up);
-        assert_eq!(RoleInput::from_key_event(ke(KeyCode::Down)), RoleInput::Down);
-        assert_eq!(RoleInput::from_key_event(ke(KeyCode::Enter)), RoleInput::Enter);
-        assert_eq!(RoleInput::from_key_event(ke(KeyCode::Esc)), RoleInput::Escape);
+        assert_eq!(
+            RoleInput::from_key_event(ke(KeyCode::Down)),
+            RoleInput::Down
+        );
+        assert_eq!(
+            RoleInput::from_key_event(ke(KeyCode::Enter)),
+            RoleInput::Enter
+        );
+        assert_eq!(
+            RoleInput::from_key_event(ke(KeyCode::Esc)),
+            RoleInput::Escape
+        );
         assert_eq!(
             RoleInput::from_key_event(ke_ctrl(KeyCode::Char('c'))),
             RoleInput::CtrlC,
         );
-        assert_eq!(RoleInput::from_key_event(ke(KeyCode::Tab)), RoleInput::Other);
+        assert_eq!(
+            RoleInput::from_key_event(ke(KeyCode::Tab)),
+            RoleInput::Other
+        );
     }
 }
