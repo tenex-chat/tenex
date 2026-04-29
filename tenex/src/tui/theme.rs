@@ -172,8 +172,23 @@ pub fn chalk_gray() -> Style {
 /// xterm-256 form that's visually identical but byte-different.
 pub const CHALK_GRAY_OPEN: &str = "\x1b[90m";
 
-/// Raw chalk.gray close code — `\x1b[39m` (default foreground).
-pub const CHALK_GRAY_CLOSE: &str = "\x1b[39m";
+/// Raw chalk.gray close code — `\x1b[39m` (default foreground reset).
+/// Aliases [`FG_RESET`] for callers who paired the open with [`CHALK_GRAY_OPEN`].
+pub const CHALK_GRAY_CLOSE: &str = FG_RESET;
+
+/// Raw `\x1b[39m` — default foreground reset (SGR 39). Closes any
+/// `SetForegroundColor`-style open code (chalk.gray, the truecolor
+/// amber, xterm-256 palette colors). Pair with whichever open code
+/// you emitted.
+pub const FG_RESET: &str = "\x1b[39m";
+
+/// Raw `\x1b[1m` — bold open (SGR 1). Pair with [`BOLD_CLOSE`].
+pub const BOLD_OPEN: &str = "\x1b[1m";
+
+/// Raw `\x1b[22m` — bold close (cancels SGR 1, also SGR 2 dim). The
+/// same byte sequence cancels both bold and dim — that's why this
+/// constant aliases [`DIM_CLOSE`].
+pub const BOLD_CLOSE: &str = DIM_CLOSE;
 
 /// Raw chalk.dim open code — `\x1b[2m` (SGR 2, dim attribute). Use
 /// when embedding dim-styled segments inside a label string that's

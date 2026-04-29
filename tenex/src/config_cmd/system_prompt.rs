@@ -94,9 +94,9 @@ fn run_show(base_dir: &Path) -> Result<()> {
     // xterm-256 #214). Emit raw `\x1b[38;2;255;193;7m` so the wire
     // bytes match TS chalk.hex output exactly.
     let amber_open = crate::tui::theme::INQUIRER_AMBER_FG;
-    let amber_close = "\x1b[39m";
-    let bold_open = "\x1b[1m";
-    let bold_close = "\x1b[22m";
+    let amber_close = crate::tui::theme::FG_RESET;
+    let bold_open = crate::tui::theme::BOLD_OPEN;
+    let bold_close = crate::tui::theme::BOLD_CLOSE;
     let label = if enabled { "enabled" } else { "disabled" };
     println!(
         "{amber_open}{bold_open}Global System Prompt ({label}):{bold_close}{amber_close}"
@@ -123,9 +123,9 @@ fn run_edit(base_dir: &Path) -> Result<()> {
     // (chalk.hex('#FFC107').bold) — INQUIRER-amber truecolor, not the
     // display palette's xterm-256 #214. Emit raw truecolor escape.
     let amber_open = crate::tui::theme::INQUIRER_AMBER_FG;
-    let amber_close = "\x1b[39m";
-    let bold_open = "\x1b[1m";
-    let bold_close = "\x1b[22m";
+    let amber_close = crate::tui::theme::FG_RESET;
+    let bold_open = crate::tui::theme::BOLD_OPEN;
+    let bold_close = crate::tui::theme::BOLD_CLOSE;
     let gray = crate::tui::theme::chalk_gray();
     println!(
         "{amber_open}{bold_open}Opening editor to configure global system prompt...{bold_close}{amber_close}"

@@ -266,7 +266,7 @@ fn run_llm_submenu(base_dir: &std::path::Path) -> Result<()> {
         let red = console::Style::new().red();
         let bold = console::Style::new().bold();
         let amber_open = crate::tui::theme::INQUIRER_AMBER_FG;
-        let amber_close = "\x1b[39m";
+        let amber_close = crate::tui::theme::FG_RESET;
         eprintln!("{}", red.apply_to("❌ No providers configured."));
         eprintln!(
             "{amber_open}→{amber_close}{}",
