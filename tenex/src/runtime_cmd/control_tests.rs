@@ -14,7 +14,7 @@ async fn foreground_shell_runs_through_runtime_control() {
 
     let response = state
         .clone()
-        .handle_request(RuntimeControlRequest::RunShell(RunShellRequest {
+        .handle_one_shot_request(RuntimeControlRequest::RunShell(RunShellRequest {
             command: "printf runtime-ok".to_string(),
             run_in_background: false,
             timeout_secs: Some(5),
@@ -39,7 +39,7 @@ async fn background_shell_can_be_listed_and_killed() {
 
     let task_id = match state
         .clone()
-        .handle_request(RuntimeControlRequest::RunShell(RunShellRequest {
+        .handle_one_shot_request(RuntimeControlRequest::RunShell(RunShellRequest {
             command: "sleep 30".to_string(),
             run_in_background: true,
             timeout_secs: Some(5),
@@ -53,7 +53,7 @@ async fn background_shell_can_be_listed_and_killed() {
 
     let listed = state
         .clone()
-        .handle_request(RuntimeControlRequest::ListShellTasks(
+        .handle_one_shot_request(RuntimeControlRequest::ListShellTasks(
             ListShellTasksRequest {
                 project_id: "proj".to_string(),
                 conversation_id: "conversation123456".to_string(),
@@ -71,7 +71,7 @@ async fn background_shell_can_be_listed_and_killed() {
     }
 
     let killed = state
-        .handle_request(RuntimeControlRequest::Kill(KillRequest {
+        .handle_one_shot_request(RuntimeControlRequest::Kill(KillRequest {
             target: task_id,
             reason: "test cleanup".to_string(),
             caller_conversation_id: "conversation123456".to_string(),
@@ -95,10 +95,12 @@ fn test_state() -> (Arc<RuntimeControlState>, PathBuf) {
         uuid::Uuid::new_v4().simple()
     ));
     std::fs::create_dir_all(&base_dir).unwrap();
+    let (transport_tx, _transport_rx) = tokio::sync::mpsc::unbounded_channel();
     (
         Arc::new(RuntimeControlState::new(
             base_dir.clone(),
             "proj".to_string(),
+            transport_tx,
         )),
         base_dir,
     )

@@ -1,12 +1,13 @@
 pub mod binding;
 pub mod client;
-pub mod composite;
 pub mod config;
-pub mod delivery;
+pub mod daemon_client;
 pub mod discovery;
+pub mod event_synth;
+pub mod forward;
 pub mod poller;
-pub mod publisher;
 pub mod render;
+pub mod runtime_client;
 pub mod selection;
 pub mod session;
 pub mod tool_publications;

@@ -2,7 +2,6 @@ use anyhow::{Context, Result};
 use serde::Deserialize;
 use std::{collections::HashMap, path::Path};
 use tenex_supervision::types::AgentCategory;
-use tenex_telegram::config::TelegramAgentConfig;
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct AcpAgentConfig {
@@ -12,7 +11,6 @@ pub(crate) struct AcpAgentConfig {
     pub category: Option<String>,
     pub instructions: Option<String>,
     pub working_directory: Option<String>,
-    pub telegram: Option<TelegramAgentConfig>,
     pub default: Option<AgentDefaultConfig>,
 }
 

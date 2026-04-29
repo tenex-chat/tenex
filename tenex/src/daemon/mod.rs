@@ -3,6 +3,7 @@
 //! events a-tagging a known project, restart on crash.
 
 pub mod config;
+pub mod control_socket;
 pub mod lockfile;
 pub mod nostr;
 pub mod supervisor;
@@ -132,6 +133,18 @@ pub async fn run(args: DaemonArgs) -> Result<()> {
                 }
             }
         }
+    }
+
+    // Bind the daemon control socket so transport bridges (tenex-telegram)
+    // can request a per-project runtime boot on demand.
+    {
+        let supervisor = supervisor.clone();
+        let base_dir = base_dir.clone();
+        tokio::spawn(async move {
+            if let Err(e) = control_socket::serve(base_dir, supervisor).await {
+                error!(error = %e, "daemon control socket exited");
+            }
+        });
     }
 
     if !args.boot.is_empty() {

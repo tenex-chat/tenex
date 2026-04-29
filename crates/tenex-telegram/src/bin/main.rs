@@ -1,14 +1,20 @@
-//! `tenex-telegram` daemon — polls Telegram Bot API and publishes backend-signed
-//! kind:1 Nostr events addressed to the appropriate agent.
+//! `tenex-telegram` daemon — polls Telegram Bot API and bridges each inbound
+//! user message into the per-project runtime via the streaming control socket.
 //!
 //! Lifecycle:
-//!   1. Load ~/.tenex/config.json (backend nsec + relays).
+//!   1. Load ~/.tenex/config.json (backend nsec for signing the synthesized
+//!      event passed to the runtime; relays are no longer used here).
 //!   2. Scan installed agents for `telegram` blocks.
-//!   3. Scan project events only to map Telegram-enabled agents to candidate projects.
+//!   3. Scan project events to map Telegram-enabled agents to candidate
+//!      projects.
 //!   4. For each agent, start one polling loop under that bot token.
 //!   5. On each inbound user message, look up the session store to find (or
-//!      start) a conversation, then publish a backend-signed kind:1 Nostr event
-//!      p-tagging the agent and carrying `telegram-*` tags.
+//!      start) a conversation, synthesize a backend-signed Nostr event
+//!      (p-tagging the agent, carrying `telegram-*` tags) and send it to the
+//!      per-project runtime over `runtime-control.sock`. If the runtime is
+//!      not yet up, ask the daemon control socket to boot it. Stream the
+//!      agent's emitted events back, render each to a Telegram message, and
+//!      reply on the originating chat.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -24,7 +30,6 @@ use tracing::{error, info, warn};
 
 #[derive(Debug)]
 struct DaemonConfig {
-    relays: Vec<String>,
     backend_nsec: String,
 }
 
@@ -40,28 +45,7 @@ fn load_config(base_dir: &Path) -> Result<DaemonConfig> {
         .context("no tenexPrivateKey in ~/.tenex/config.json")?
         .to_string();
 
-    let relays: Vec<String> = val
-        .get("relays")
-        .and_then(|v| v.as_array())
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|v| v.as_str())
-                .filter(|s| s.starts_with("ws://") || s.starts_with("wss://"))
-                .map(|s| s.to_string())
-                .collect()
-        })
-        .unwrap_or_default();
-
-    let relays = if relays.is_empty() {
-        vec!["wss://relay.tenex.chat".to_string()]
-    } else {
-        relays
-    };
-
-    Ok(DaemonConfig {
-        relays,
-        backend_nsec,
-    })
+    Ok(DaemonConfig { backend_nsec })
 }
 
 #[tokio::main]
@@ -116,7 +100,7 @@ async fn main() -> Result<()> {
         match Poller::new(
             registration.clone(),
             backend_keys.clone(),
-            &cfg.relays,
+            base_dir.clone(),
             session_path,
             Arc::clone(&channel_bindings),
         )

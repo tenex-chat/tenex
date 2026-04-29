@@ -5,6 +5,7 @@ use crate::types::{
     parse_response, TelegramBotCommand, TelegramBotInfo, TelegramMessage, TelegramUpdate,
 };
 
+#[derive(Clone)]
 pub struct BotClient {
     token: String,
     base_url: String,

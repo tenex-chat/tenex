@@ -4,6 +4,7 @@ mod control_process;
 mod control_shell;
 #[cfg(test)]
 mod control_tests;
+mod transport;
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
@@ -139,6 +140,10 @@ struct DispatchJob {
     agent_json: PathBuf,
     allow_driver_preempt: bool,
     completion_recipient_pubkey: Option<String>,
+    /// Set when this dispatch was triggered via the transport-bridge socket
+    /// (`tenex-telegram` etc). Each event the agent emits is also forwarded
+    /// to the bridge so it can render the reply on the originating channel.
+    response_tee: Option<transport::TransportTee>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -432,9 +437,12 @@ pub async fn run(args: RuntimeArgs) -> Result<()> {
         info!(servers = %configured_mcp_servers.join(", "), "project MCP servers configured");
     }
     let coordinator = Arc::new(Mutex::new(DispatchCoordinator::default()));
+    let (transport_dispatch_tx, mut transport_dispatch_rx) =
+        tokio::sync::mpsc::unbounded_channel::<control::TransportDispatchRequest>();
     let control = Arc::new(RuntimeControlState::new(
         base_dir.clone(),
         meta.d_tag.clone(),
+        transport_dispatch_tx,
     ));
     let shared = Arc::new(RuntimeShared {
         client: client.clone(),
@@ -587,6 +595,7 @@ pub async fn run(args: RuntimeArgs) -> Result<()> {
                                     agent_json,
                                     allow_driver_preempt: false,
                                     completion_recipient_pubkey,
+                                    response_tee: None,
                                 };
                                 if let Err(e) = accept_dispatch(shared.clone(), job).await {
                                     warn!(event_id = short, agent = %agent.slug, error = %e, "dispatch failed");
@@ -602,6 +611,9 @@ pub async fn run(args: RuntimeArgs) -> Result<()> {
                         warn!(error = %e, "relay notification error");
                     }
                 }
+            }
+            Some(req) = transport_dispatch_rx.recv() => {
+                handle_transport_dispatch(shared.clone(), req).await;
             }
             _ = tokio::signal::ctrl_c() => {
                 info!("shutting down (SIGINT)");
@@ -999,6 +1011,82 @@ async fn publish_project_status_now(shared: &RuntimeShared, meta: &ProjectMetada
     }
 }
 
+/// Handle a `DispatchTransport` request that arrived on the control socket.
+///
+/// Parses the synthesized event, runs `select_dispatch_target`, attaches the
+/// caller's `TransportTee` to the resulting `DispatchJob`, and feeds it into
+/// the same `accept_dispatch` path as a relay-originated event. Terminal
+/// frames are emitted on the tee for any error path; on success, the tee
+/// rides through to `run_agent` which fires `Event` frames per agent output
+/// and a final `Done`/`Error` when the run exits.
+async fn handle_transport_dispatch(
+    shared: Arc<RuntimeShared>,
+    req: control::TransportDispatchRequest,
+) {
+    let control::TransportDispatchRequest { event_json, tee } = req;
+    let event = match Event::from_json(&event_json) {
+        Ok(ev) => ev,
+        Err(e) => {
+            tee.send_error(format!("invalid event JSON: {e}"));
+            return;
+        }
+    };
+
+    if !mark_seen(&shared.seen, event.id) {
+        tee.send_error("event already dispatched in this runtime".to_string());
+        return;
+    }
+
+    let agent_pubkeys = shared.agent_pubkeys();
+    if let Err(e) =
+        register_delegation_route_if_needed(&shared.store, &event, &agent_pubkeys, None)
+    {
+        warn!(error = %e, "failed to register delegation route for transport dispatch");
+    }
+
+    let (agent, conv_id, completion_recipient_pubkey) =
+        match select_dispatch_target(&shared, &event) {
+            Ok(target) => target,
+            Err(e) => {
+                tee.send_error(format!("no dispatch target: {e}"));
+                return;
+            }
+        };
+
+    if is_agent_blocked(&shared.store, &conv_id, &agent.pubkey) {
+        tee.send_error(format!(
+            "agent {} is blocked in conversation {conv_id}",
+            agent.slug
+        ));
+        return;
+    }
+
+    tee.send_accepted(conv_id.clone(), agent.pubkey.clone());
+
+    let agent_json = shared
+        .base_dir
+        .join("agents")
+        .join(format!("{}.json", agent.pubkey));
+    let job = DispatchJob {
+        event,
+        agent,
+        conv_id,
+        agent_json,
+        allow_driver_preempt: false,
+        completion_recipient_pubkey,
+        response_tee: Some(tee.clone()),
+    };
+    if let Err(e) = accept_dispatch(shared, job).await {
+        // Job is dropped here without ever reaching `run_agent`. Mark the
+        // tee terminal explicitly with an Error frame so the bridge sees
+        // an accurate reason rather than the default `Superseded` that
+        // `TransportTeeInner::Drop` would otherwise emit.
+        let msg = format!("dispatch failed: {e}");
+        warn!(error = %e, "transport dispatch failed");
+        tee.send_error(msg);
+    }
+}
+
 async fn accept_dispatch(shared: Arc<RuntimeShared>, mut job: DispatchJob) -> Result<()> {
     persist_user_message(&shared.store, &job.event, &job.conv_id)?;
     if is_agent_blocked(&shared.store, &job.conv_id, &job.agent.pubkey) {
@@ -1166,6 +1254,7 @@ async fn dispatch_project_agent_target(
             agent_json,
             allow_driver_preempt: false,
             completion_recipient_pubkey,
+            response_tee: None,
         },
     )
     .await
@@ -1824,7 +1913,7 @@ async fn run_agent(shared: Arc<RuntimeShared>, job: DispatchJob, key: DispatchKe
         None
     };
 
-    let agent_result = async {
+    let agent_result: Result<()> = async {
         let mut child = command
             .spawn()
             .with_context(|| format!("failed to spawn {}", binary.display()))?;
@@ -1856,6 +1945,9 @@ async fn run_agent(shared: Arc<RuntimeShared>, job: DispatchJob, key: DispatchKe
             }
             match Event::from_json(&line) {
                 Ok(ev) => {
+                    if let Some(tee) = job.response_tee.as_ref() {
+                        tee.send_event(line.clone());
+                    }
                     handle_agent_runtime_signal(shared.clone(), &key, &ev).await;
                     if let Err(e) =
                         dispatch_project_agent_target(shared.clone(), &ev, Some(&job)).await
@@ -1917,6 +2009,13 @@ async fn run_agent(shared: Arc<RuntimeShared>, job: DispatchJob, key: DispatchKe
 
     if let Some(bridge) = mcp_bridge {
         bridge.shutdown().await;
+    }
+
+    if let Some(tee) = job.response_tee.as_ref() {
+        match agent_result.as_ref() {
+            Ok(()) => tee.send_done(),
+            Err(e) => tee.send_error(e.to_string()),
+        }
     }
 
     agent_result
@@ -2248,6 +2347,7 @@ mod tests {
             agent_json: PathBuf::from("agent.json"),
             allow_driver_preempt: false,
             completion_recipient_pubkey: None,
+            response_tee: None,
         }
     }
 
@@ -2498,6 +2598,7 @@ mod tests {
             agent_json: PathBuf::from("agent.json"),
             allow_driver_preempt: false,
             completion_recipient_pubkey: None,
+            response_tee: None,
         };
         let delegation = signed_event_from(
             &parent_keys,

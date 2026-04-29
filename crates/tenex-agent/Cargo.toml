@@ -21,7 +21,6 @@ tenex-llm-config = { path = "../tenex-llm-config" }
 tenex-mcp = { path = "../tenex-mcp" }
 tenex-rag = { path = "../tenex-rag" }
 tenex-supervision = { path = "../tenex-supervision" }
-tenex-telegram = { path = "../tenex-telegram" }
 tenex-scheduler = { path = "../tenex-scheduler" }
 tenex-system-prompt = { path = "../tenex-system-prompt" }
 rig-core = { version = "0.35", features = ["reqwest-middleware"] }

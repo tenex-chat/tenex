@@ -2,14 +2,16 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use nostr_sdk::prelude::*;
 use tracing::{info, warn};
 
 use crate::binding::BindingStore;
 use crate::client::BotClient;
 use crate::discovery::{AgentRegistration, ProjectRoute};
-use crate::publisher::{publish_telegram_message, TelegramPublishRequest};
+use crate::event_synth::{synthesize_telegram_event, TelegramEventInput};
+use crate::forward::{send_to_telegram, telegram_text_for_event, TelegramChatRef};
+use crate::runtime_client::{dispatch_via_runtime, DispatchOutcome};
 use crate::selection::{parse_project_selection, project_selection_prompt};
 use crate::session::SessionStore;
 use crate::types::{TelegramBotCommand, TelegramMessage};
@@ -22,8 +24,8 @@ const NEW_CONVERSATION_MSG: &str =
 pub struct Poller {
     registration: AgentRegistration,
     client: BotClient,
-    nostr: Client,
     backend_keys: Keys,
+    base_dir: PathBuf,
     sessions: Arc<Mutex<SessionStore>>,
     channel_bindings: Arc<Mutex<BindingStore>>,
     pending_project_selection: HashMap<String, Vec<ProjectRoute>>,
@@ -34,7 +36,7 @@ impl Poller {
     pub async fn new(
         registration: AgentRegistration,
         backend_keys: Keys,
-        relays: &[String],
+        base_dir: PathBuf,
         session_path: PathBuf,
         channel_bindings: Arc<Mutex<BindingStore>>,
     ) -> Result<Self> {
@@ -43,20 +45,11 @@ impl Poller {
             registration.config.api_base_url.clone(),
         );
 
-        let nostr = Client::new(backend_keys.clone());
-        for relay in relays {
-            nostr
-                .add_relay(relay.as_str())
-                .await
-                .with_context(|| format!("add relay {relay}"))?;
-        }
-        nostr.connect().await;
-
         Ok(Self {
             registration,
             client,
-            nostr,
             backend_keys,
+            base_dir,
             sessions: Arc::new(Mutex::new(SessionStore::open(session_path))),
             channel_bindings,
             pending_project_selection: HashMap::new(),
@@ -175,11 +168,10 @@ impl Poller {
             return Ok(());
         };
 
-        let outcome = publish_telegram_message(TelegramPublishRequest {
+        let synthesized = synthesize_telegram_event(TelegramEventInput {
             agent_pubkey: &self.registration.pubkey,
             project: &project,
             backend_keys: &self.backend_keys,
-            nostr: &self.nostr,
             root_event_id: self.session_root(&channel_id),
             sender_first_name: &sender.first_name,
             sender_username: sender.username.as_deref(),
@@ -189,19 +181,75 @@ impl Poller {
             thread_id: thread_id.as_deref(),
             channel_id: &channel_id,
             text: &text,
-        })
-        .await?;
+        })?;
 
+        let event_id = synthesized.event.id.to_hex();
         info!(
             agent = %self.registration.pubkey,
-            event_id = %outcome.event_id,
+            event_id = %event_id,
             channel = %&channel_id,
             project = %project.project_id,
-            "published Telegram message to Nostr"
+            "dispatching Telegram message to runtime"
         );
 
-        if outcome.new_root {
-            let _ = self.set_session_root(channel_id, outcome.event_id);
+        let publish_conversation = self
+            .registration
+            .config
+            .publish_conversation_to_telegram
+            .unwrap_or(false);
+        let bot_client = self.client.clone();
+        let chat = TelegramChatRef {
+            chat_id: &chat_id,
+            message_id: &message_id,
+            thread_id: thread_id.as_deref(),
+        };
+
+        let outcome = dispatch_via_runtime(
+            &self.base_dir,
+            &project.project_id,
+            &synthesized.event,
+            |ev| {
+                if let Some(text) = telegram_text_for_event(ev, publish_conversation) {
+                    let bot_client = bot_client.clone();
+                    let chat_id = chat.chat_id.to_string();
+                    let message_id = chat.message_id.to_string();
+                    let thread_id = chat.thread_id.map(str::to_string);
+                    tokio::spawn(async move {
+                        let chat = TelegramChatRef {
+                            chat_id: &chat_id,
+                            message_id: &message_id,
+                            thread_id: thread_id.as_deref(),
+                        };
+                        if let Err(e) = send_to_telegram(&bot_client, &chat, &text).await {
+                            warn!(error = %e, "Telegram delivery failed");
+                        }
+                    });
+                }
+            },
+        )
+        .await?;
+
+        match outcome {
+            DispatchOutcome::Completed => {
+                if synthesized.new_root {
+                    let _ = self.set_session_root(channel_id, event_id);
+                }
+            }
+            DispatchOutcome::Superseded => {
+                info!(
+                    agent = %self.registration.pubkey,
+                    project = %project.project_id,
+                    "transport dispatch superseded by newer message"
+                );
+            }
+            DispatchOutcome::Failed(message) => {
+                warn!(
+                    agent = %self.registration.pubkey,
+                    project = %project.project_id,
+                    error = %message,
+                    "transport dispatch failed"
+                );
+            }
         }
 
         Ok(())

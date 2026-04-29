@@ -38,8 +38,6 @@ use tenex_protocol::{
     Channel, CompletionIntent, ConversationIntent, ConversationRef, EncodingContext, Intent,
     LlmMetadata, MessageRef, PrincipalKind, PrincipalRef, ProjectRef, StreamTextDeltaIntent,
 };
-use tenex_telegram::composite::CompositeChannel;
-use tenex_telegram::delivery::TelegramContext;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -80,27 +78,12 @@ async fn run() -> Result<()> {
 
     let stdout_sink = SharedStdoutEventSink::new();
     let pending_external_work = Arc::new(AtomicBool::new(false));
-    let nostr_channel = Arc::new(
+    // Telegram delivery used to live here via CompositeChannel; that path is
+    // now owned by `tenex-telegram`.
+    let channel: Arc<dyn Channel> = Arc::new(
         NostrChannel::from_nsec(&agent_config.nsec, stdout_sink.clone())
             .context("Failed to initialize Nostr channel")?,
     );
-    let channel: Arc<dyn Channel> = if let (Some(tg_cfg), Some(tg_meta)) =
-        (&agent_config.telegram, &envelope.metadata.telegram)
-    {
-        let tg_ctx = TelegramContext {
-            chat_id: tg_meta.chat_id.clone(),
-            message_id: tg_meta.message_id.clone(),
-            thread_id: tg_meta.thread_id.clone(),
-        };
-        Arc::new(CompositeChannel::new(
-            nostr_channel,
-            tg_cfg.clone(),
-            tg_ctx,
-            tg_cfg.publish_conversation_to_telegram.unwrap_or(false),
-        ))
-    } else {
-        nostr_channel
-    };
     let pubkey_hex = match channel.identity() {
         PrincipalRef::Nostr { pubkey, .. } => pubkey.to_hex(),
     };
