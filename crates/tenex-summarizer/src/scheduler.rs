@@ -2,9 +2,8 @@
 //! conversations that meet the policy:
 //!
 //!   - last_activity is at least DEBOUNCE_SECS old (10s after-quiet)
-//!   - last_activity has advanced since our last summarize, OR
-//!     it's been at least MAX_DELAY_MS since our last summarize for this
-//!     conversation (5min hard cap)
+//!   - last_activity has advanced since our last summarize
+//!   - at least MIN_INTERVAL_MS has passed since our last summarize (rate limit)
 //!
 //! Equivalent to the bun runtime's `MetadataDebounceManager` policy without
 //! an in-process scheduler.
@@ -24,7 +23,7 @@ use crate::summarize::{self, Summary};
 
 const SCAN_INTERVAL: Duration = Duration::from_secs(5);
 const DEBOUNCE_SECS: i64 = 10;
-const MAX_DELAY_MS: i64 = 5 * 60 * 1000;
+const MIN_INTERVAL_MS: i64 = 5 * 60 * 1000;
 
 pub async fn run(cfg: Config, state: SummaryStateStore) -> Result<()> {
     let publisher = Publisher::new(&cfg.backend_secret_key, &cfg.relays).await?;
@@ -134,7 +133,7 @@ fn should_process(
         None => Decision::Process,
         Some(s) => {
             if last_activity > s.last_activity_summarized
-                || now_ms - s.last_summarized_at_ms >= MAX_DELAY_MS
+                && now_ms - s.last_summarized_at_ms >= MIN_INTERVAL_MS
             {
                 Decision::Process
             } else {
