@@ -27,6 +27,7 @@ pub(crate) fn write_turn(
     }
 
     let cache_observed_json = serde_json::to_value(&turn.cache_observed)?;
+    let breakpoint_hints_json = serde_json::to_value(&turn.breakpoint_hints)?;
     let reminders_json = serde_json::to_value(&turn.reminders_applied)?;
     let compaction_json = serde_json::to_value(&turn.compaction_decisions)?;
 
@@ -52,6 +53,7 @@ pub(crate) fn write_turn(
     state.compaction_state = Some(serde_json::json!({
         "decisions": compaction_json,
         "cache_observed": cache_observed_json,
+        "breakpoint_hints": breakpoint_hints_json,
     }));
     state.reminder_state = Some(serde_json::json!({
         "applied": reminders_json,

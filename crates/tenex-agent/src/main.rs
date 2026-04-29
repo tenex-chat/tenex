@@ -38,8 +38,8 @@ use std::sync::{
 };
 use std::time::{SystemTime, UNIX_EPOCH};
 use tenex_context::{
-    CacheObservation, Message as CtxMessage, ModelProfile, ToolCall as CtxToolCall, ToolDef,
-    TurnRecord,
+    BreakpointHint, BreakpointKind, CacheObservation, Message as CtxMessage, ModelProfile,
+    ToolCall as CtxToolCall, ToolDef, TurnRecord,
 };
 use tenex_conversations::{AgentContextState, ConversationStore, NewToolMessage};
 use tenex_project::Project;
@@ -1033,23 +1033,36 @@ async fn run() -> Result<()> {
                     arguments: r.args.clone(),
                 })
                 .collect();
+            let hit_tokens = stream_usage.cached_input_tokens as u64;
+            let messages_visible = vec![
+                CtxMessage::User {
+                    content: current_message.clone(),
+                },
+                CtxMessage::Assistant {
+                    content: final_response.response().to_string(),
+                    tool_calls: assistant_tool_calls,
+                },
+            ];
+            // When the provider reports a cache hit, record the position of
+            // the assistant response as the live cache anchor for this turn.
+            let breakpoint_hints = if hit_tokens > 0 {
+                vec![BreakpointHint {
+                    position: 1,
+                    kind: BreakpointKind::MessageStream,
+                }]
+            } else {
+                Vec::new()
+            };
             let turn = TurnRecord {
-                messages_visible: vec![
-                    CtxMessage::User {
-                        content: current_message.clone(),
-                    },
-                    CtxMessage::Assistant {
-                        content: final_response.response().to_string(),
-                        tool_calls: assistant_tool_calls,
-                    },
-                ],
+                messages_visible,
                 reminders_applied: Vec::new(),
                 compaction_decisions: Vec::new(),
                 cache_observed: CacheObservation {
-                    hit_tokens: stream_usage.cached_input_tokens as u64,
+                    hit_tokens,
                     miss_tokens: 0,
-                    written_tokens: 0,
+                    written_tokens: stream_usage.cache_creation_input_tokens as u64,
                 },
+                breakpoint_hints,
             };
             if let Err(e) = tenex_context::record_turn(store, &conversation_id, &pubkey_hex, turn) {
                 eprintln!("[tenex-agent] Failed to record turn: {e}");

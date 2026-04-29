@@ -276,6 +276,7 @@ fn record_turn_round_trip_writes_prompt_history() {
             miss_tokens: 5,
             written_tokens: 5,
         },
+        breakpoint_hints: Vec::new(),
     };
 
     record_turn(&store, CONVO_ID, AGENT_PUBKEY, turn).expect("record");

@@ -132,6 +132,11 @@ pub struct TurnRecord {
     pub reminders_applied: Vec<String>,
     pub compaction_decisions: Vec<String>,
     pub cache_observed: CacheObservation,
+    /// Cache breakpoint hints observed during this turn. Non-empty only when
+    /// the provider reported a cache hit (`hit_tokens > 0`), recording the
+    /// position in `messages_visible` where the cache anchor was live.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub breakpoint_hints: Vec<BreakpointHint>,
 }
 
 /// Cache outcome from a single provider call.

@@ -343,6 +343,7 @@ async fn run() -> Result<()> {
             reminders_applied: Vec::new(),
             compaction_decisions: Vec::new(),
             cache_observed: CacheObservation::default(),
+            breakpoint_hints: Vec::new(),
         };
         if let Err(err) = tenex_context::record_turn(store, &conversation_id, &pubkey_hex, turn) {
             eprintln!("[tenex-agent-acp] warn: failed to record ACP turn: {err}");
