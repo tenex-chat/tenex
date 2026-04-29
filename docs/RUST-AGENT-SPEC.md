@@ -74,6 +74,7 @@ No p-tag, no status tag.
 | `working_directory` | no       | Base directory for file/shell tools. Defaults to process cwd |
 | `default.model`     | no       | Model ID (named preset, `provider:model`, or bare Anthropic model). Defaults to the llms.json default or `claude-sonnet-4-6` |
 | `default.skills`    | no       | Array of skill IDs to preload on every invocation (always-on skills). Merged with conversation-scoped self-applied skills. |
+| `telegram`          | no       | `TelegramAgentConfig` object — per-agent Telegram bot configuration (token, chat IDs). Set via `tenex config telegram`. |
 
 Note: `role` and `description` exist in the agent JSON files (written by `agents_write`) but are not read by `AgentConfig` — they are stored-only metadata consumed by other parts of the system (UI, discovery).
 
@@ -395,14 +396,19 @@ Search the RAG vector store for relevant content. Always searches across all thr
 Disabled (returns error message) when embedding is not configured.
 
 ### `kill`
-Cancel a scheduled task by its task ID. Agent conversation kills and shell task kills are not available in this context — those require in-process TypeScript state (RALRegistry, CooldownRegistry, AgentDispatchService).
+Cancel a scheduled task, terminate a shell task, or kill an active agent execution. Supports three target types based on ID format:
+
+1. **Scheduled task** — ID matches `task-{timestamp}-{random}`. Handled locally via `tenex-scheduler` storage.
+2. **Shell task** — ID matches `shell-*`. Routed to the `tenex-runtime` control socket.
+3. **Agent execution** — Full or 10-character conversation/delegation event ID. Routed to the runtime control socket.
 
 | Param | Type | Description |
 |-------|------|-------------|
-| `target` | string | Scheduled task ID (format: `task-{timestamp}-{random}`) |
-| `reason` | string | Reason for cancellation |
+| `target` | string? | Target ID (scheduled task, shell task, or conversation/delegation event ID) |
+| `conv` | string? | Alias for `target` when killing an agent conversation |
+| `reason` | string | Reason for cancellation or termination |
 
-Returns a success message on cancellation, or an error if the ID is not a scheduled task format or is not found.
+Either `target` or `conv` is required. For scheduled tasks, returns a success message or error if not found. For shell/agent kills, the response is forwarded from the runtime control socket as JSON.
 
 ### `schedule_task`
 Schedule a task to run in the future. Writes to `schedules.json` via `tenex-scheduler`'s storage module using the canonical `ScheduledTask` format. The task is picked up by the `tenex-scheduler` daemon.
@@ -493,6 +499,15 @@ Create or update a backend-local agent identity stored at `~/.tenex/agents/<pubk
 
 Behavior: opens `tenex-agent-registry`, finds an existing record whose `slug` matches, and saves the normalized `AgentDoc` through the shared mutation API. If found, `nsec`, the `<pubkey>.json` filename, and unknown fields (e.g. `category`, `eventId`, `mcpServers`, `telegram`) are preserved across read-modify-write. If not found, the registry crate generates a fresh nsec, derives the pubkey, and writes `<pubkey_hex>.json` with `status = "active"`. Writes are atomic via temp-file + rename and update the installed-agent index. Returns `{ success, agent: { slug, name, pubkey } }`. Newly created agents are not assigned to the current project — that requires a 31933 event p-tagging the new pubkey.
 
+### MCP proxy tools
+When `TENEX_MCP_MANIFEST` and `TENEX_MCP_SOCKET` are set by `tenex-runtime`, `tenex-agent` loads a dynamic set of `McpProxyTool` instances at startup — one per entry in the manifest. Each proxy tool:
+
+- Implements `ToolDyn` directly (not the typed `Tool` trait) so it can be added to the tool set without a compile-time type.
+- Exposes the MCP tool's name, description, and JSON schema `inputSchema` to the LLM as a normal tool definition.
+- On call: serializes the call arguments as `McpToolCallRequest`, writes it as a single NDJSON line over the Unix socket at `TENEX_MCP_SOCKET`, reads back one `McpToolCallResponse` line, and returns the result string (or propagates the error field as a `ToolError`).
+
+stdout remains reserved for signed Nostr NDJSON; MCP calls use the side-channel socket.
+
 ## Supervision Heuristics
 
 `tenex-supervision` is wired into the hook layer. It runs two kinds of checks:
@@ -562,6 +577,7 @@ API keys are resolved from provider-specific env vars (`ANTHROPIC_API_KEY`, `OPE
 | `tenex-conversations` | Conversation SQLite store (todos + self-applied skills via `AgentContextState`) |
 | `tenex-context` | Conversation history projection (compaction/decay/reminders); `record_turn` write-back |
 | `tenex-mcp` | Runtime-provided MCP tool manifest and call frame types |
+| `tenex-telegram` | `TelegramAgentConfig` type; consumed by `AgentConfig` to forward per-agent Telegram settings |
 | `tenex-system-prompt` | System prompt assembly (`build_system_prompt`); `InjectedFile`, `HomeDirectoryInfo` types |
 | `tenex-rag` | RAG: SQLite vector store + embedding client |
 | `tenex-supervision` | Heuristic pre-tool and post-completion checks; `AgentCategory` enum |
