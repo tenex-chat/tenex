@@ -85,12 +85,25 @@ fn format_success_line(text: &str) -> String {
 }
 
 /// `display.hint(text)` — `:47-49`. `  <ACCENT →> <ACCENT text>`.
-/// TS uses plain `ACCENT(...)` (no `.bold`). Use the plain variant.
+/// TS uses plain `ACCENT(...)` (no `.bold`).
 pub fn hint(text: &str) {
-    let accent = theme::display_accent_plain();
-    let arrow = accent.apply_to("→");
-    let body = accent.apply_to(text);
-    println!("  {arrow} {body}");
+    println!("{}", format_hint_line(text));
+}
+
+/// Returns the styled hint line — extracted so tests can pin exact bytes.
+///
+/// TS chalk wire bytes: `chalk.ansi256(214)("→")` emits
+/// `\x1b[38;5;214m→\x1b[39m` — open with xterm-256 #214, close with
+/// SGR 39 (default fg). The TS template at `display.ts:48` is
+/// `  ${ACCENT("→")} ${ACCENT(text)}`.
+///
+/// Console-rs would emit `\x1b[38;5;214m→\x1b[0m` (single SGR-0
+/// full-reset). Use raw escapes so wire bytes match TS exactly.
+fn format_hint_line(text: &str) -> String {
+    use crate::tui::theme::FG_RESET;
+    // ansi256 #214 open code matches `chalk.ansi256(214)` byte-for-byte.
+    const ACCENT_OPEN: &str = "\x1b[38;5;214m";
+    format!("  {ACCENT_OPEN}→{FG_RESET} {ACCENT_OPEN}{text}{FG_RESET}")
 }
 
 /// `display.blank()` — `:54-56`. Prints a single empty line.
@@ -201,6 +214,29 @@ mod tests {
         assert!(
             !s.contains("\x1b[0m"),
             "success() should use SGR 22 + SGR 39 (TS chalk), not SGR 0; got: {s:?}",
+        );
+    }
+
+    /// Pin display.hint's wire bytes to match TS chalk exactly:
+    /// `chalk.ansi256(214)("→")` emits `\x1b[38;5;214m→\x1b[39m` —
+    /// SGR 39 close (not SGR 0). Per `display.ts:48` the template is
+    /// `  ${ACCENT("→")} ${ACCENT(text)}` — both arrow and body wrapped
+    /// individually.
+    #[test]
+    fn hint_line_matches_ts_chalk_byte_sequence() {
+        let s = format_hint_line("Tip: try this");
+        assert_eq!(
+            s,
+            "  \x1b[38;5;214m→\x1b[39m \x1b[38;5;214mTip: try this\x1b[39m",
+        );
+    }
+
+    #[test]
+    fn hint_line_does_not_emit_sgr_0_full_reset() {
+        let s = format_hint_line("x");
+        assert!(
+            !s.contains("\x1b[0m"),
+            "hint() should use SGR 39 (TS chalk), not SGR 0; got: {s:?}",
         );
     }
 
