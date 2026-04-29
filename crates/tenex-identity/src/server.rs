@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use nostr_sdk::Client;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{UnixListener, UnixStream};
 use tracing::{error, warn};
@@ -9,14 +10,14 @@ use crate::model::IdentityView;
 use crate::protocol::{parse_request, Request};
 use crate::resolve::resolve;
 
-pub async fn serve(listener: UnixListener, cache: Arc<IdentityCache>, relays: Arc<[String]>) {
+pub async fn serve(listener: UnixListener, cache: Arc<IdentityCache>, client: Client) {
     loop {
         match listener.accept().await {
             Ok((stream, _addr)) => {
                 let cache = cache.clone();
-                let relays = relays.clone();
+                let client = client.clone();
                 tokio::spawn(async move {
-                    if let Err(e) = handle_client(stream, cache, relays).await {
+                    if let Err(e) = handle_client(stream, cache, client).await {
                         warn!("[identity] client error: {e:#}");
                     }
                 });
@@ -31,7 +32,7 @@ pub async fn serve(listener: UnixListener, cache: Arc<IdentityCache>, relays: Ar
 async fn handle_client(
     stream: UnixStream,
     cache: Arc<IdentityCache>,
-    relays: Arc<[String]>,
+    client: Client,
 ) -> anyhow::Result<()> {
     let (reader_half, mut writer_half) = stream.into_split();
     let mut reader = BufReader::new(reader_half);
@@ -51,7 +52,7 @@ async fn handle_client(
                     // Still return an object shape with ERR so callers know.
                     "ERR\n".to_string()
                 } else {
-                    match resolve(&normalized, relays.clone(), cache.clone()).await {
+                    match resolve(&normalized, client.clone(), cache.clone()).await {
                         Ok(Some(view)) => {
                             let mut json =
                                 serde_json::to_string(&view).unwrap_or_else(|_| "ERR".to_string());

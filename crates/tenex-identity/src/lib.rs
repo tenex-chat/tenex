@@ -35,6 +35,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result as AnyResult};
+use nostr_sdk::Client;
 use serde::Deserialize;
 
 const DEFAULT_RELAYS: &[&str] = &["wss://relay.damus.io", "wss://relay.nostr.band"];
@@ -121,7 +122,14 @@ async fn run_daemon_async() -> AnyResult<()> {
             .with_context(|| format!("open identity cache at {}", db_path.display()))?,
     );
 
-    let relays: Arc<[String]> = load_relays().into();
+    let client = Client::default();
+    for relay in &load_relays() {
+        client
+            .add_relay(relay.as_str())
+            .await
+            .with_context(|| format!("add relay {relay}"))?;
+    }
+    client.connect().await;
 
     let socket_path = paths::socket_path();
     if socket_path.exists() {
@@ -135,7 +143,7 @@ async fn run_daemon_async() -> AnyResult<()> {
         .with_context(|| format!("chmod 600 {}", socket_path.display()))?;
 
     eprintln!("[identity] listening on {}", socket_path.display());
-    server::serve(listener, cache, relays).await;
+    server::serve(listener, cache, client).await;
     Ok(())
 }
 

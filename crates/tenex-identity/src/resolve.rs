@@ -18,7 +18,7 @@ use crate::model::IdentityView;
 /// a background task to silently refetch and upsert.
 pub async fn resolve(
     pubkey: &str,
-    relays: Arc<[String]>,
+    client: Client,
     cache: Arc<IdentityCache>,
 ) -> Result<Option<IdentityView>> {
     // Fresh cache hit — return immediately.
@@ -30,10 +30,10 @@ pub async fn resolve(
     if let Some(stale_view) = cache.get_any(pubkey)? {
         if cache.is_stale(&stale_view) {
             let pk = pubkey.to_string();
-            let relays_bg = relays.clone();
+            let client_bg = client.clone();
             let cache_bg = cache.clone();
             tokio::spawn(async move {
-                match fetch_identity(&pk, &relays_bg).await {
+                match fetch_identity(&pk, &client_bg).await {
                     Ok(Some(fresh)) => {
                         if let Err(e) = cache_bg.upsert(&fresh) {
                             tracing::warn!(pubkey = %pk, error = %e, "background identity upsert failed");
@@ -50,7 +50,7 @@ pub async fn resolve(
     }
 
     // Cache miss — fetch synchronously, upsert, return.
-    let view = fetch_identity(pubkey, &relays).await?;
+    let view = fetch_identity(pubkey, &client).await?;
     if let Some(ref v) = view {
         cache.upsert(v)?;
     }
@@ -66,7 +66,7 @@ pub async fn resolve(
 /// was found; missing pubkeys are silently omitted.
 pub async fn batch_resolve(
     pubkeys: &[&str],
-    relays: Arc<[String]>,
+    client: &Client,
     cache: Arc<IdentityCache>,
 ) -> Result<HashMap<String, IdentityView>> {
     let mut results: HashMap<String, IdentityView> = HashMap::new();
@@ -104,21 +104,6 @@ pub async fn batch_resolve(
         return Ok(results);
     }
 
-    let effective_relays: Vec<&str> = if relays.is_empty() {
-        vec!["wss://relay.tenex.chat"]
-    } else {
-        relays.iter().map(String::as_str).collect()
-    };
-
-    let client = Client::default();
-    for relay in &effective_relays {
-        client
-            .add_relay(*relay)
-            .await
-            .map_err(|e| IdentityError::Relay(format!("add relay {relay}: {e}")))?;
-    }
-    client.connect().await;
-
     let authors: Vec<PublicKey> = parsed.iter().map(|(_, pk)| *pk).collect();
     let filter = Filter::new().authors(authors).kind(Kind::Metadata);
 
@@ -126,8 +111,6 @@ pub async fn batch_resolve(
         .fetch_events(filter, Duration::from_secs(8))
         .await
         .map_err(|e| IdentityError::Relay(format!("fetch_events: {e}")))?;
-
-    client.disconnect().await;
 
     let fetched_at = now_secs();
 

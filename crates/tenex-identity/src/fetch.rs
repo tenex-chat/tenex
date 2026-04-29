@@ -8,30 +8,13 @@ use nostr_sdk::Client;
 use crate::error::{IdentityError, Result};
 use crate::model::IdentityView;
 
-/// Default relays used when none are specified.
-const DEFAULT_RELAYS: &[&str] = &["wss://relay.tenex.chat"];
-
-/// Fetch kind:0 metadata from relays and return an [`IdentityView`].
+/// Fetch kind:0 metadata using the provided relay client and return an [`IdentityView`].
 ///
 /// Does **not** write to the cache. Returns `None` when no event is found.
-pub async fn fetch_identity(pubkey: &str, relays: &[String]) -> Result<Option<IdentityView>> {
+/// The caller is responsible for the client's lifecycle (connecting, disconnecting).
+pub async fn fetch_identity(pubkey: &str, client: &Client) -> Result<Option<IdentityView>> {
     let public_key = PublicKey::parse(pubkey)
         .map_err(|e| IdentityError::InvalidPubkey(format!("{pubkey}: {e}")))?;
-
-    let effective_relays: Vec<&str> = if relays.is_empty() {
-        DEFAULT_RELAYS.to_vec()
-    } else {
-        relays.iter().map(String::as_str).collect()
-    };
-
-    let client = Client::default();
-    for relay in &effective_relays {
-        client
-            .add_relay(*relay)
-            .await
-            .map_err(|e| IdentityError::Relay(format!("add relay {relay}: {e}")))?;
-    }
-    client.connect().await;
 
     let filter = Filter::new()
         .author(public_key)
@@ -42,8 +25,6 @@ pub async fn fetch_identity(pubkey: &str, relays: &[String]) -> Result<Option<Id
         .fetch_events(filter, Duration::from_secs(8))
         .await
         .map_err(|e| IdentityError::Relay(format!("fetch_events: {e}")))?;
-
-    client.disconnect().await;
 
     let event = match events.first() {
         Some(e) => e,
