@@ -1,3 +1,9 @@
+mod control;
+mod control_process;
+mod control_shell;
+#[cfg(test)]
+mod control_tests;
+
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -13,12 +19,18 @@ use serde_json::{Map, Value};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter};
 use tracing::{info, info_span, warn, Instrument};
 
-use tenex_conversations::{ConversationStore, NewMessage, Project as ConversationsProject};
+use control::{serve_control_socket, RuntimeControlState};
+use tenex_conversations::{
+    AgentContextState, ConversationStore, NewMessage, Project as ConversationsProject,
+};
+use tenex_mcp::{ProjectMcpRuntime, SocketServerConfig};
 use tenex_project::{models::ProjectAgent, Agent, Project};
 
 use crate::daemon::config;
 use crate::nostr_pub::{backend_signer, operations_status, project_status};
 use crate::store::resolve_base_dir;
+
+const DRIVER_STALE_AFTER_MS: i64 = 10 * 60 * 1000;
 
 #[derive(Parser, Clone)]
 pub struct RuntimeArgs {
@@ -42,8 +54,10 @@ struct RuntimeShared {
     agents: Arc<Vec<Agent>>,
     project_agents: Arc<Vec<ProjectAgent>>,
     agent_pubkeys: Arc<HashSet<String>>,
+    mcp_runtime: Arc<ProjectMcpRuntime>,
     store: Arc<Mutex<ConversationStore>>,
     coordinator: Arc<Mutex<DispatchCoordinator>>,
+    control: Arc<RuntimeControlState>,
     seen: Arc<Mutex<HashSet<EventId>>>,
 }
 
@@ -53,6 +67,22 @@ struct DispatchJob {
     agent: Agent,
     conv_id: String,
     agent_json: PathBuf,
+}
+
+struct ActiveMcpBridge {
+    manifest_path: PathBuf,
+    socket_path: PathBuf,
+    shutdown: tokio::sync::oneshot::Sender<()>,
+    task: tokio::task::JoinHandle<()>,
+}
+
+impl ActiveMcpBridge {
+    async fn shutdown(self) {
+        let _ = self.shutdown.send(());
+        let _ = tokio::time::timeout(Duration::from_secs(2), self.task).await;
+        let _ = tokio::fs::remove_file(self.manifest_path).await;
+        let _ = tokio::fs::remove_file(self.socket_path).await;
+    }
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
@@ -114,6 +144,12 @@ impl DispatchCoordinator {
             return;
         };
         entry.driver_busy = false;
+    }
+
+    fn sync_driver_busy(&mut self, key: &DispatchKey, driver_busy: bool) {
+        if let Some(entry) = self.entries.get_mut(key) {
+            entry.driver_busy = driver_busy;
+        }
     }
 
     fn drop_queued_matching(
@@ -256,12 +292,24 @@ pub async fn run(args: RuntimeArgs) -> Result<()> {
         .authors(p_authors)
         .pubkeys(agent_keys)
         .since(since);
+    let stop_agent_keys: Vec<PublicKey> = agents
+        .iter()
+        .filter_map(|a| PublicKey::from_hex(&a.pubkey).ok())
+        .collect();
+    let filter_stop = Filter::new()
+        .kind(Kind::Custom(tenex_protocol::nostr::kinds::STOP_COMMAND))
+        .authors(authors.clone())
+        .pubkeys(stop_agent_keys)
+        .since(since);
 
     client
         .subscribe_with_id(SubscriptionId::generate(), filter_a, None)
         .await?;
     client
         .subscribe_with_id(SubscriptionId::generate(), filter_p, None)
+        .await?;
+    client
+        .subscribe_with_id(SubscriptionId::generate(), filter_stop, None)
         .await?;
     info!("subscriptions active");
 
@@ -296,7 +344,18 @@ pub async fn run(args: RuntimeArgs) -> Result<()> {
     }
 
     let agent_binary = find_agent_binary();
+    let project_dir = std::env::current_dir().context("resolving project working directory")?;
+    let mcp_runtime = ProjectMcpRuntime::load(&project_dir)
+        .with_context(|| format!("loading project MCP config from {}", project_dir.display()))?;
+    let configured_mcp_servers = mcp_runtime.configured_server_names();
+    if !configured_mcp_servers.is_empty() {
+        info!(servers = %configured_mcp_servers.join(", "), "project MCP servers configured");
+    }
     let coordinator = Arc::new(Mutex::new(DispatchCoordinator::default()));
+    let control = Arc::new(RuntimeControlState::new(
+        base_dir.clone(),
+        meta.d_tag.clone(),
+    ));
     let shared = Arc::new(RuntimeShared {
         client: client.clone(),
         backend_keys: backend_keys.clone(),
@@ -308,10 +367,14 @@ pub async fn run(args: RuntimeArgs) -> Result<()> {
         agents: Arc::new(agents.clone()),
         project_agents: Arc::new(project_agents.clone()),
         agent_pubkeys: Arc::new(agent_pubkeys.clone()),
+        mcp_runtime,
         store: store.clone(),
         coordinator,
+        control: control.clone(),
         seen: Arc::new(Mutex::new(HashSet::new())),
     });
+    let control_socket_path = control.socket_path();
+    let control_task = tokio::spawn(serve_control_socket(control, control_socket_path.clone()));
 
     let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
     let mut notifications = client.notifications();
@@ -322,6 +385,12 @@ pub async fn run(args: RuntimeArgs) -> Result<()> {
                 match result {
                     Ok(RelayPoolNotification::Event { event, .. }) => {
                         if !mark_seen(&shared.seen, event.id) {
+                            continue;
+                        }
+                        if event.kind == Kind::Custom(tenex_protocol::nostr::kinds::STOP_COMMAND) {
+                            if let Err(e) = handle_stop_command(shared.clone(), &event).await {
+                                warn!(event_id = %event.id.to_hex()[..8], error = %e, "stop command failed");
+                            }
                             continue;
                         }
                         if shared.agent_pubkeys.contains(&event.pubkey.to_hex())
@@ -335,6 +404,15 @@ pub async fn run(args: RuntimeArgs) -> Result<()> {
                             Ok(agent) => {
                                 info!(event_id = short, agent = %agent.slug, "dispatching");
                                 let conv_id = conversation_id_from_event(&event);
+                                if is_agent_blocked(&shared.store, &conv_id, &agent.pubkey) {
+                                    warn!(
+                                        event_id = short,
+                                        agent = %agent.slug,
+                                        conversation_id = %conv_id,
+                                        "agent is blocked in conversation"
+                                    );
+                                    continue;
+                                }
                                 let agent_json = base_dir
                                     .join("agents")
                                     .join(format!("{}.json", agent.pubkey));
@@ -370,14 +448,28 @@ pub async fn run(args: RuntimeArgs) -> Result<()> {
         }
     }
 
+    shared.mcp_runtime.shutdown().await;
+    control_task.abort();
+    let _ = tokio::fs::remove_file(control_socket_path).await;
     client.disconnect().await;
     Ok(())
 }
 
 async fn accept_dispatch(shared: Arc<RuntimeShared>, job: DispatchJob) -> Result<()> {
     persist_user_message(&shared.store, &job.event, &job.conv_id)?;
+    if is_agent_blocked(&shared.store, &job.conv_id, &job.agent.pubkey) {
+        warn!(
+            conversation_id = %job.conv_id,
+            agent = %job.agent.slug,
+            "skipping dispatch to blocked agent"
+        );
+        return Ok(());
+    }
+    let key = DispatchKey::new(job.agent.pubkey.clone(), job.conv_id.clone());
+    let driver_busy = persisted_driver_busy(&shared.store, &key);
     let maybe_start = {
         let mut coordinator = shared.coordinator.lock().unwrap();
+        coordinator.sync_driver_busy(&key, driver_busy);
         coordinator.dispatch_inbound(job)
     };
 
@@ -476,6 +568,40 @@ async fn dispatch_project_agent_target(shared: Arc<RuntimeShared>, event: &Event
         },
     )
     .await
+}
+
+async fn handle_stop_command(shared: Arc<RuntimeShared>, event: &Event) -> Result<()> {
+    let conversation_ids = e_tag_event_ids(event);
+    let agent_pubkeys = p_tag_pubkeys(event);
+    if conversation_ids.is_empty() || agent_pubkeys.is_empty() {
+        warn!(
+            event_id = %event.id.to_hex()[..8],
+            e_tags = conversation_ids.len(),
+            p_tags = agent_pubkeys.len(),
+            "stop command missing target tags"
+        );
+        return Ok(());
+    }
+
+    let reason = format!("stop signal from {}", &event.pubkey.to_hex()[..8]);
+    for conversation_id in conversation_ids {
+        for agent_pubkey in &agent_pubkeys {
+            set_agent_blocked(&shared.store, &conversation_id, agent_pubkey)?;
+            let result = shared.control.kill_agent_conversation(
+                &conversation_id,
+                Some(agent_pubkey),
+                &reason,
+            );
+            info!(
+                conversation_id = %conversation_id,
+                agent_pubkey = %agent_pubkey,
+                killed_count = result.killed_count,
+                "processed stop command"
+            );
+        }
+        publish_active_status(&shared, &conversation_id).await;
+    }
+    Ok(())
 }
 
 fn mark_seen(seen: &Arc<Mutex<HashSet<EventId>>>, event_id: EventId) -> bool {
@@ -644,6 +770,72 @@ fn p_tag_pubkeys(event: &Event) -> Vec<String> {
         .collect()
 }
 
+fn e_tag_event_ids(event: &Event) -> Vec<String> {
+    event
+        .tags
+        .iter()
+        .filter_map(|tag| {
+            let parts = tag.as_slice();
+            if parts.first().is_some_and(|head| head == "e") {
+                parts.get(1).cloned()
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+fn is_agent_blocked(
+    store: &Arc<Mutex<ConversationStore>>,
+    conversation_id: &str,
+    agent_pubkey: &str,
+) -> bool {
+    store
+        .lock()
+        .unwrap()
+        .get_agent_context_state(conversation_id, agent_pubkey)
+        .ok()
+        .flatten()
+        .is_some_and(|state| state.is_blocked)
+}
+
+fn set_agent_blocked(
+    store: &Arc<Mutex<ConversationStore>>,
+    conversation_id: &str,
+    agent_pubkey: &str,
+) -> Result<()> {
+    let store = store.lock().unwrap();
+    let existing = store.get_agent_context_state(conversation_id, agent_pubkey)?;
+    let state = AgentContextState {
+        conversation_id: conversation_id.to_string(),
+        agent_pubkey: agent_pubkey.to_string(),
+        next_prompt_sequence: existing
+            .as_ref()
+            .map(|s| s.next_prompt_sequence)
+            .unwrap_or(0),
+        cache_anchored: existing.as_ref().is_some_and(|s| s.cache_anchored),
+        seen_message_ids: existing
+            .as_ref()
+            .map(|s| s.seen_message_ids.clone())
+            .unwrap_or_default(),
+        compaction_state: existing.as_ref().and_then(|s| s.compaction_state.clone()),
+        reminder_state: existing.as_ref().and_then(|s| s.reminder_state.clone()),
+        reminder_delta_state: existing
+            .as_ref()
+            .and_then(|s| s.reminder_delta_state.clone()),
+        todos: existing.as_ref().and_then(|s| s.todos.clone()),
+        self_applied_skills: existing
+            .as_ref()
+            .and_then(|s| s.self_applied_skills.clone()),
+        meta_model_variant: existing.as_ref().and_then(|s| s.meta_model_variant.clone()),
+        is_blocked: true,
+        todo_nudged: existing.as_ref().is_some_and(|s| s.todo_nudged),
+        updated_at: now_ms(),
+    };
+    store.upsert_agent_context_state(&state)?;
+    Ok(())
+}
+
 fn consumed_message_event_ids(
     store: &Arc<Mutex<ConversationStore>>,
     conv_id: &str,
@@ -679,6 +871,36 @@ fn consumed_message_event_ids(
                 .collect()
         })
         .unwrap_or_default()
+}
+
+fn persisted_driver_busy(store: &Arc<Mutex<ConversationStore>>, key: &DispatchKey) -> bool {
+    let Ok(conversation) = store.lock().unwrap().get_conversation(&key.conversation_id) else {
+        return false;
+    };
+    let Some(conversation) = conversation else {
+        return false;
+    };
+    runtime_state_driver_busy(&conversation.runtime_state, key)
+}
+
+fn runtime_state_driver_busy(state: &Value, key: &DispatchKey) -> bool {
+    let Some(driver) = state.get("rustRuntime").and_then(|v| v.get("driver")) else {
+        return false;
+    };
+    let same_agent = driver
+        .get("agentPubkey")
+        .and_then(serde_json::Value::as_str)
+        == Some(key.agent_pubkey.as_str());
+    let same_conversation = driver
+        .get("conversationId")
+        .and_then(serde_json::Value::as_str)
+        == Some(key.conversation_id.as_str());
+    let stale = driver
+        .get("acquiredAt")
+        .and_then(serde_json::Value::as_i64)
+        .is_some_and(|ts| now_ms().saturating_sub(ts) > DRIVER_STALE_AFTER_MS);
+
+    same_agent && same_conversation && !stale
 }
 
 async fn handle_agent_runtime_signal(shared: Arc<RuntimeShared>, key: &DispatchKey, event: &Event) {
@@ -760,91 +982,174 @@ async fn run_agent(shared: Arc<RuntimeShared>, job: DispatchJob, key: DispatchKe
         .env("TENEX_PROJECT_ID", &shared.project_id)
         .env("TENEX_BASE_DIR", &shared.base_dir)
         .env("TENEX_EXECUTION_ID", &execution_id)
+        .env("TENEX_RUNTIME_CONTROL_SOCKET", shared.control.socket_path())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::inherit());
+        .stderr(Stdio::inherit())
+        .process_group(0)
+        .kill_on_drop(false);
     if let Some(carrier) = tenex_telemetry::current_trace_context() {
         command.env("TRACEPARENT", carrier.traceparent);
         if let Some(tracestate) = carrier.tracestate {
             command.env("TRACESTATE", tracestate);
         }
     }
-    let mut child = command.spawn().context("failed to spawn tenex-agent")?;
+    let mcp_bridge = start_mcp_bridge_for_run(&shared, &job, &execution_id, &mut command).await?;
 
-    // Write the triggering event JSON to stdin; closing stdin signals EOF to the agent.
-    {
-        let stdin = child.stdin.take().context("child has no stdin")?;
-        let mut w = BufWriter::new(stdin);
-        w.write_all(job.event.as_json().as_bytes()).await?;
-        w.write_all(b"\n").await?;
-        w.flush().await?;
-    }
+    let agent_result = async {
+        let mut child = command.spawn().context("failed to spawn tenex-agent")?;
+        let pid = child.id().context("tenex-agent child has no pid")?;
+        let _run_guard = shared.control.register_agent_run(
+            job.conv_id.clone(),
+            job.agent.pubkey.clone(),
+            execution_id.clone(),
+            pid,
+        );
 
-    // Forward each signed event from the agent's stdout to the relay,
-    // and persist it to the conversation store.
-    let stdout = child.stdout.take().context("child has no stdout")?;
-    let mut lines = BufReader::new(stdout).lines();
-    while let Some(line) = lines.next_line().await? {
-        let line = line.trim().to_string();
-        if line.is_empty() {
-            continue;
+        // Write the triggering event JSON to stdin; closing stdin signals EOF to the agent.
+        {
+            let stdin = child.stdin.take().context("child has no stdin")?;
+            let mut w = BufWriter::new(stdin);
+            w.write_all(job.event.as_json().as_bytes()).await?;
+            w.write_all(b"\n").await?;
+            w.flush().await?;
         }
-        match Event::from_json(&line) {
-            Ok(ev) => {
-                handle_agent_runtime_signal(shared.clone(), &key, &ev).await;
-                if let Err(e) = dispatch_project_agent_target(shared.clone(), &ev).await {
-                    warn!(error = %e, "failed to dispatch agent-targeted event");
-                }
 
-                if !should_persist_agent_message(&ev, &job.conv_id) {
+        // Forward each signed event from the agent's stdout to the relay,
+        // and persist it to the conversation store.
+        let stdout = child.stdout.take().context("child has no stdout")?;
+        let mut lines = BufReader::new(stdout).lines();
+        while let Some(line) = lines.next_line().await? {
+            let line = line.trim().to_string();
+            if line.is_empty() {
+                continue;
+            }
+            match Event::from_json(&line) {
+                Ok(ev) => {
+                    handle_agent_runtime_signal(shared.clone(), &key, &ev).await;
+                    if let Err(e) = dispatch_project_agent_target(shared.clone(), &ev).await {
+                        warn!(error = %e, "failed to dispatch agent-targeted event");
+                    }
+
+                    if !should_persist_agent_message(&ev, &job.conv_id) {
+                        if let Err(e) = shared.client.send_event(&ev).await {
+                            warn!(error = %e, "relay publish failed");
+                        }
+                        continue;
+                    }
+                    {
+                        let s = shared.store.lock().unwrap();
+                        let agent_ts = ev.created_at.as_secs() as i64;
+                        if let Err(e) = s.append_message(
+                            &job.conv_id,
+                            &NewMessage {
+                                record_id: format!("event:{}", ev.id.to_hex()),
+                                nostr_event_id: Some(ev.id.to_hex()),
+                                author_pubkey: ev.pubkey.to_hex(),
+                                sender_pubkey: None,
+                                ral: None,
+                                message_type: "text".to_string(),
+                                role: Some("assistant".to_string()),
+                                content: ev.content.clone(),
+                                timestamp: Some(agent_ts),
+                                targeted_pubkeys: None,
+                                sender_principal: None,
+                                targeted_principals: None,
+                                tool_data: None,
+                                delegation_marker: None,
+                                human_readable: None,
+                                transcript_tool_attributes: None,
+                            },
+                        ) {
+                            warn!(error = %e, "failed to persist agent event");
+                        }
+                    }
                     if let Err(e) = shared.client.send_event(&ev).await {
                         warn!(error = %e, "relay publish failed");
                     }
-                    continue;
                 }
-                {
-                    let s = shared.store.lock().unwrap();
-                    let agent_ts = ev.created_at.as_secs() as i64;
-                    if let Err(e) = s.append_message(
-                        &job.conv_id,
-                        &NewMessage {
-                            record_id: format!("event:{}", ev.id.to_hex()),
-                            nostr_event_id: Some(ev.id.to_hex()),
-                            author_pubkey: ev.pubkey.to_hex(),
-                            sender_pubkey: None,
-                            ral: None,
-                            message_type: "text".to_string(),
-                            role: Some("assistant".to_string()),
-                            content: ev.content.clone(),
-                            timestamp: Some(agent_ts),
-                            targeted_pubkeys: None,
-                            sender_principal: None,
-                            targeted_principals: None,
-                            tool_data: None,
-                            delegation_marker: None,
-                            human_readable: None,
-                            transcript_tool_attributes: None,
-                        },
-                    ) {
-                        warn!(error = %e, "failed to persist agent event");
-                    }
+                Err(e) => {
+                    warn!(error = %e, "ignoring unparseable agent output line");
                 }
-                if let Err(e) = shared.client.send_event(&ev).await {
-                    warn!(error = %e, "relay publish failed");
-                }
-            }
-            Err(e) => {
-                warn!(error = %e, "ignoring unparseable agent output line");
             }
         }
+
+        let status = child.wait().await?;
+        if !status.success() {
+            warn!(code = ?status.code(), "tenex-agent exited non-zero");
+        }
+
+        Ok(())
+    }
+    .await;
+
+    if let Some(bridge) = mcp_bridge {
+        bridge.shutdown().await;
     }
 
-    let status = child.wait().await?;
-    if !status.success() {
-        warn!(code = ?status.code(), "tenex-agent exited non-zero");
+    agent_result
+}
+
+async fn start_mcp_bridge_for_run(
+    shared: &Arc<RuntimeShared>,
+    job: &DispatchJob,
+    execution_id: &str,
+    command: &mut tokio::process::Command,
+) -> Result<Option<ActiveMcpBridge>> {
+    let allowed_slugs =
+        tenex_mcp::mcp_access_from_default_json(job.agent.default_config_json.as_deref())
+            .with_context(|| format!("reading MCP access for agent '{}'", job.agent.slug))?;
+    let manifest = shared
+        .mcp_runtime
+        .prepare_manifest(&allowed_slugs)
+        .await
+        .with_context(|| format!("preparing MCP tools for agent '{}'", job.agent.slug))?;
+    if manifest.is_empty() {
+        return Ok(None);
     }
 
-    Ok(())
+    let run_id: String = execution_id
+        .chars()
+        .filter(|ch| *ch != '-')
+        .take(16)
+        .collect();
+    let run_dir = shared.base_dir.join("runtime").join("mcp");
+    tokio::fs::create_dir_all(&run_dir).await?;
+    let manifest_path = run_dir.join(format!("{run_id}.manifest.json"));
+    let socket_path = run_dir.join(format!("{run_id}.sock"));
+    tokio::fs::write(&manifest_path, serde_json::to_vec(&manifest)?).await?;
+
+    let server = match tenex_mcp::bind_socket(SocketServerConfig {
+        socket_path: socket_path.clone(),
+        allowed_tools: manifest.tool_names(),
+    })
+    .await
+    {
+        Ok(server) => server,
+        Err(error) => {
+            let _ = tokio::fs::remove_file(&manifest_path).await;
+            return Err(error);
+        }
+    };
+
+    let (shutdown, shutdown_rx) = tokio::sync::oneshot::channel();
+    let runtime = shared.mcp_runtime.clone();
+    let task = tokio::spawn(async move {
+        if let Err(error) = server.serve(runtime, shutdown_rx).await {
+            warn!(error = %error, "MCP bridge socket stopped with error");
+        }
+    });
+
+    command
+        .env("TENEX_MCP_MANIFEST", &manifest_path)
+        .env("TENEX_MCP_SOCKET", &socket_path);
+
+    Ok(Some(ActiveMcpBridge {
+        manifest_path,
+        socket_path,
+        shutdown,
+        task,
+    }))
 }
 
 fn should_persist_agent_message(event: &Event, conversation_id: &str) -> bool {
@@ -1134,6 +1439,54 @@ mod tests {
             coordinator.dispatch_inbound(second).unwrap().event.content,
             "second"
         );
+    }
+
+    #[test]
+    fn dispatch_queues_when_persisted_driver_was_reacquired() {
+        let mut coordinator = DispatchCoordinator::default();
+        let first = dispatch_job("agent1", "conv1", "first");
+        let second = dispatch_job("agent1", "conv1", "second");
+        let key = DispatchKey::new("agent1", "conv1");
+
+        assert!(coordinator.dispatch_inbound(first).is_some());
+        coordinator.mark_driver_free(&key);
+        coordinator.sync_driver_busy(&key, true);
+
+        assert!(coordinator.dispatch_inbound(second).is_none());
+    }
+
+    #[test]
+    fn runtime_state_driver_busy_matches_current_agent_conversation() {
+        let key = DispatchKey::new("agent1", "conv1");
+        let state = serde_json::json!({
+            "rustRuntime": {
+                "driver": {
+                    "agentPubkey": "agent1",
+                    "conversationId": "conv1",
+                    "executionId": "exec1",
+                    "acquiredAt": now_ms()
+                }
+            }
+        });
+
+        assert!(runtime_state_driver_busy(&state, &key));
+    }
+
+    #[test]
+    fn runtime_state_driver_busy_ignores_stale_driver() {
+        let key = DispatchKey::new("agent1", "conv1");
+        let state = serde_json::json!({
+            "rustRuntime": {
+                "driver": {
+                    "agentPubkey": "agent1",
+                    "conversationId": "conv1",
+                    "executionId": "exec1",
+                    "acquiredAt": now_ms() - DRIVER_STALE_AFTER_MS - 1
+                }
+            }
+        });
+
+        assert!(!runtime_state_driver_busy(&state, &key));
     }
 
     #[test]

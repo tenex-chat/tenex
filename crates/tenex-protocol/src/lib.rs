@@ -29,6 +29,7 @@ pub mod context;
 pub mod intent;
 pub mod nostr;
 pub mod refs;
+pub mod runtime_control;
 pub mod sink;
 
 pub use channel::{Channel, ChannelError, InboundEnvelope, InboundMetadata, InboundSource};
@@ -39,3 +40,8 @@ pub use intent::{
     LlmUsage, PublishArticleIntent, StreamTextDeltaIntent, ToolUseIntent,
 };
 pub use refs::{ConversationRef, MessageRef, PrincipalKind, PrincipalRef, ProjectRef};
+pub use runtime_control::{
+    ErrorResponse, KillRequest, KillResponse, KillTargetType, ListShellTasksRequest,
+    RunShellRequest, RuntimeControlRequest, RuntimeControlResponse, ShellBackgroundResponse,
+    ShellCompletedResponse, ShellTaskMode, ShellTaskSummary, ShellTasksResponse,
+};
