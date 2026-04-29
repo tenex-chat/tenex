@@ -29,7 +29,7 @@ impl Pubkey {
         if input.len() != 64 {
             return Err(PubkeyError::Hex64WrongLength { len: input.len() });
         }
-        if !input.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f' | b'A'..=b'F')) {
+        if !input.bytes().all(|b: u8| b.is_ascii_hexdigit()) {
             return Err(PubkeyError::Hex64NotHex);
         }
         Ok(Self(input.to_ascii_lowercase()))

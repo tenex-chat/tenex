@@ -1,6 +1,6 @@
 # TENEX Rust Agent — Test Report
 
-Last updated: 2026-04-29 (session 10)
+Last updated: 2026-04-29 (session 11)
 
 ---
 
@@ -51,10 +51,26 @@ Last updated: 2026-04-29 (session 10)
 | report_publish — directory recursive | ✅ PASS | 2 articles: test-docs/guide.md + test-docs/intro.md, document=test-docs |
 | write-access skill end-to-end | ✅ PASS | Turn 1 activates skill; turn 2 FsWriteTool available and writes rust-write-test.txt to project dir |
 | no_response loop bug (fixed) | ✅ FIXED | GLM called no_response 22× in one turn; added swap-based guard + stronger stop messages; now tools=1 |
+| conversation_search tool | ✅ PASS | Semantic RAG search against "conversations" collection; no mode parameter; falls back to "not configured" if embed not set up |
 
 ---
 
 ## Run Log
+
+### Run 11 — 2026-04-29 Session 11
+
+**Tests run:** conversation_search (keyword mode, full-text mode)
+
+| Test | Result | Notes |
+|---|---|---|
+| conversation_search keyword mode | ✅ PASS | tools=1, correctly returned 0 results for "rust" (no header match) |
+| conversation_search full-text mode | ✅ PASS | tools=1, found 5 conversations with "hello" in message content |
+| conversation_search unit tests (3) | ✅ PASS | keyword_matches_title_and_summary, full_text_also_searches_messages, respects_limit |
+
+**New capability added:**
+- `crates/tenex-agent/src/tools/conversation_search.rs`: Ports the TS `conversation-search` skill's `conversation_search` tool. Uses RAG semantic search against the `"conversations"` collection via `RagStore`; no mode parameter. If embedding is not configured, returns a helpful "run tenex config embed" message. `rag_store` added to `ExtraToolsInput` so the tool shares the same initialized store as `rag_search` and `rag_add_documents`.
+
+Total workspace tests: 1350 (net +6 from session start).
 
 ### Run 10 — 2026-04-29 Session 10
 

@@ -50,8 +50,9 @@ pub fn is_short_event_id(id: &str) -> bool {
 /// `^[a-z0-9]{7}$` — case-sensitive lowercase alphanumeric.
 pub fn is_shell_task_id(id: &str) -> bool {
     id.len() == SHELL_TASK_ID_LENGTH
-        && id.bytes()
-            .all(|b| b.is_ascii_digit() || (b'a'..=b'z').contains(&b))
+        && id
+            .bytes()
+            .all(|b: u8| b.is_ascii_digit() || b.is_ascii_lowercase())
 }
 
 /// Mirror `detectIdType` (`event-ids.ts:123-139`):

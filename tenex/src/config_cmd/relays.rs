@@ -187,10 +187,7 @@ fn prompt_relay_url(message: &str) -> Option<String> {
 }
 
 fn prompt_select_relay(message: &str, options: &[String]) -> Option<String> {
-    match prompts::select(message, options.to_vec()).prompt() {
-        Ok(s) => Some(s),
-        Err(_) => None,
-    }
+    prompts::select(message, options.to_vec()).prompt().ok()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

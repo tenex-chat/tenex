@@ -68,19 +68,10 @@ pub struct AgentItem {
     pub pubkey: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct AgentSelectState {
     pub active: usize,
     pub selected_pubkeys: Vec<String>,
-}
-
-impl Default for AgentSelectState {
-    fn default() -> Self {
-        Self {
-            active: 0,
-            selected_pubkeys: Vec::new(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -598,7 +589,7 @@ mod tests {
         let actions = actions_sample();
         let items = items_sample(2);
         let mut state = empty_state();
-        let mut last = actions.len() + 1 + items.len() - 1;
+        let last = actions.len() + 1 + items.len() - 1;
         handle_key(&mut state, &actions, &items, AgentInput::Up);
         assert_eq!(state.active, last);
         let _ = last;

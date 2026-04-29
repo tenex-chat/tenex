@@ -307,7 +307,7 @@ async fn run_inner(args: OnboardArgs) -> Result<()> {
             &npub,
             &identity.whitelisted_pubkeys[0],
             &committed.projects_base,
-            &[relay.clone()],
+            std::slice::from_ref(&relay),
             identity.generated_nsec.as_deref(),
             identity.new_identity_username.as_deref(),
             &providers_doc.provider_ids(),
@@ -321,7 +321,7 @@ async fn run_inner(args: OnboardArgs) -> Result<()> {
             &npub,
             identity.generated_nsec.as_deref(),
             &committed.projects_base,
-            &[relay.clone()],
+            std::slice::from_ref(&relay),
         );
         let _ = (
             claude_hint_present,

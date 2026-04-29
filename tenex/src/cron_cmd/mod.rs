@@ -263,9 +263,7 @@ fn cron_tui(mut tasks: Vec<TaskEntry>) -> Result<()> {
                 break;
             }
             TuiInput::Up => {
-                if selected > 0 {
-                    selected -= 1;
-                }
+                selected = selected.saturating_sub(1);
             }
             TuiInput::Down => {
                 if !tasks.is_empty() && selected < tasks.len() - 1 {
@@ -464,7 +462,7 @@ fn render<W: Write>(
     let projects: std::collections::HashSet<&str> =
         tasks.iter().map(|e| e.d_tag.as_str()).collect();
     let summary = if count == 1 {
-        format!(" 1 task in 1 project")
+        " 1 task in 1 project".to_string()
     } else {
         format!(" {count} tasks across {} projects", projects.len())
     };

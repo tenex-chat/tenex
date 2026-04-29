@@ -35,7 +35,7 @@ pub fn configured_providers(doc: &ProvidersDoc) -> Vec<String> {
                 None => return false,
             };
             let has_real = entry.api_keys().iter().any(|raw| {
-                let head = raw.trim().split_whitespace().next().unwrap_or("");
+                let head = raw.split_whitespace().next().unwrap_or("");
                 !head.is_empty() && head != "none"
             });
             if has_real {

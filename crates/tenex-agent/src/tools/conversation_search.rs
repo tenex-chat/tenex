@@ -27,7 +27,6 @@ pub struct ConversationSearchTool {
     embed_config: Option<EmbedConfig>,
     /// `~/.tenex` base directory.
     base_dir: PathBuf,
-    current_project_id: String,
 }
 
 impl ConversationSearchTool {
@@ -35,9 +34,9 @@ impl ConversationSearchTool {
         store: Option<Arc<RagStore>>,
         embed_config: Option<EmbedConfig>,
         base_dir: PathBuf,
-        current_project_id: String,
+        _current_project_id: String,
     ) -> Self {
-        Self { store, embed_config, base_dir, current_project_id }
+        Self { store, embed_config, base_dir }
     }
 }
 

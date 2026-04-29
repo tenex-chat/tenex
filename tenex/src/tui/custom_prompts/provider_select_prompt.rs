@@ -343,10 +343,11 @@ fn delete_key(state: &mut ProviderState, pid: &str, index: usize, keys: &[String
     if let Some(entry) = state.providers.get_mut(pid) {
         entry.api_key = new_value;
     }
-    let new_len = match state.providers.get(pid).map(|e| e.api_key.entries().len()) {
-        Some(n) => n,
-        None => 0,
-    };
+    let new_len = state
+        .providers
+        .get(pid)
+        .map(|e| e.api_key.entries().len())
+        .unwrap_or_default();
     if new_len == 0 {
         state.keys_active = 0;
     } else {

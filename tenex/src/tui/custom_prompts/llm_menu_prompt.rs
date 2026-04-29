@@ -80,23 +80,12 @@ pub struct TestResult {
     pub error: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct LlmMenuState {
     pub active: usize,
     pub testing: Option<String>,
     pub spinner_frame: usize,
     pub results: HashMap<String, TestResult>,
-}
-
-impl Default for LlmMenuState {
-    fn default() -> Self {
-        Self {
-            active: 0,
-            testing: None,
-            spinner_frame: 0,
-            results: HashMap::new(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -130,7 +130,7 @@ pub fn apply_mutation(
     base_content: &str,
     params: &PublishProjectMutationParams,
 ) -> AppliedProjectMutation {
-    let mut tags: Vec<Vec<String>> = base_tags.iter().cloned().collect();
+    let mut tags: Vec<Vec<String>> = base_tags.to_vec();
     let mut content = base_content.to_owned();
 
     let mut added_pubkeys: Vec<String> = Vec::new();

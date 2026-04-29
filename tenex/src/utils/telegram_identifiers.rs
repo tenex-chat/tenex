@@ -103,9 +103,7 @@ pub fn get_telegram_thread_target_validation_error(
     if !is_valid_chat_id(normalized_chat) {
         return Some(format!("Invalid Telegram chat ID: {normalized_chat}"));
     }
-    let Some(thread) = message_thread_id else {
-        return None;
-    };
+    let thread = message_thread_id?;
     let normalized_thread = thread.trim();
     if normalized_thread.is_empty() {
         return None;

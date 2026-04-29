@@ -246,7 +246,7 @@ fn apply_assignments(doc: &mut LlmsDoc, assignments: &IndexMap<RoleKey, String>)
     }
 }
 
-fn get_role<'a>(doc: &'a LlmsDoc, role: RoleKey) -> Option<&'a str> {
+fn get_role(doc: &LlmsDoc, role: RoleKey) -> Option<&str> {
     match role {
         RoleKey::Default => doc.default_config(),
         RoleKey::Summarization => doc.summarization(),
