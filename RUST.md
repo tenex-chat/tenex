@@ -1,6 +1,6 @@
 # TENEX Rust Adoption Status
 
-_Last updated: 2026-04-28 (fifteenth pass). Auto-maintained by scheduled debt check._
+_Last updated: 2026-04-29 (sixteenth pass). Auto-maintained by scheduled debt check._
 
 ---
 
@@ -177,7 +177,7 @@ Note: `conversation_get`, `conversation_list`, `kill` (scheduled tasks only), `s
 
 ## Compilation Status
 
-**As of 2026-04-28 (fifteenth debt check pass): workspace compiles clean — zero errors.**
+**As of 2026-04-29 (sixteenth debt check pass): workspace compiles clean — zero errors, zero unused-import/unused-variable warnings.**
 
 **MILESTONE: tenex-agent is live-tested end-to-end (see `RUST_REPORT.md`)**:
 - Basic completion ✅, streaming (kind:24135 deltas) ✅, final ConversationIntent ✅
@@ -186,6 +186,13 @@ Note: `conversation_get`, `conversation_list`, `kill` (scheduled tasks only), `s
 - Conversation history persistence (10 convs, 20 history entries) ✅
 - Supervision (worker todo block) ✅
 - FK bug fixed: ensure_conversation() on store open
+
+Resolved between fifteenth and sixteenth passes:
+- **Ollama model ID parsing bug**: `config.rs` now checks `provider/model` slash format before `provider:model` colon format; `ollama/mistral:latest` was previously mis-split at the colon into provider=`ollama/mistral`, model=`latest`
+- **Cron TUI title display bug**: `{title:<title$}` format string shadowed the local `title` variable with the named arg `title = COL_TITLE`, showing the column-width integer instead of task title text; fixed by renaming width arg to `title_w`
+- **Dead import removed**: `use crate::tui::display` removed from `telegram.rs`
+- **9 more tools verified end-to-end** (RUST_REPORT.md session 3): kill, self-delegate, conversation_list/get, change_model, project_list, ask, skill_list, delegate_followup
+- **chalk.gray ANSI parity**: `theme::chalk_gray()` helper added (`\x1b[90m` bright-black) distinct from `muted_gray()` (`\x1b[38;5;244m`); wired into openclaw preview output
 
 Resolved between fourteenth and fifteenth passes:
 - **Post-completion re-engagement loop**: `'agent_loop` in `tenex-agent/src/main.rs`; `Supervisor::check_post_completion` called after each LLM turn; `PostCompletionOutcome::ReEngage` pushes the prior exchange into history and loops with a supervision nudge; `Accept` breaks the loop; `MAX_RETRIES = 3` prevents runaway re-engagement
