@@ -73,6 +73,15 @@ pub struct InboundEnvelope {
     pub metadata: InboundMetadata,
 }
 
+/// Telegram context carried on inbound events routed via the Telegram daemon.
+#[derive(Debug, Clone)]
+pub struct TelegramTransportMetadata {
+    pub chat_id: String,
+    pub message_id: String,
+    /// Set only for group/supergroup threads.
+    pub thread_id: Option<String>,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct InboundMetadata {
     pub event_kind: Option<u32>,
@@ -86,4 +95,6 @@ pub struct InboundMetadata {
     pub delegation_parent_conversation: Option<ConversationRef>,
     pub is_kill_signal: bool,
     pub project_a_tags: Vec<String>,
+    /// Populated when the event was injected by the Telegram daemon.
+    pub telegram: Option<TelegramTransportMetadata>,
 }

@@ -2,6 +2,11 @@ mod config;
 mod emit;
 mod home;
 mod hook;
+mod injections;
+mod mock_llm;
+mod runtime_control;
+mod runtime_state;
+mod runtime_state_json;
 mod skills;
 mod tools;
 
@@ -9,16 +14,19 @@ use anyhow::{Context, Result};
 use config::{LlmsConfig, ResolvedModel};
 use emit::{AgentMeta, EmitState};
 use hook::EmitHook;
+use injections::MessageInjectionTracker;
 use rig::client::{CompletionClient, Nothing};
 use rig::completion::message::{ToolResult, ToolResultContent, UserContent};
 use rig::completion::{AssistantContent, Message as RigMessage};
 use rig::providers::{anthropic, ollama, openai, openrouter};
 use rig::tool::ToolDyn;
 use rig::OneOrMany;
+use runtime_state::RuntimeStateHandle;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc, Mutex,
 };
+use std::time::{SystemTime, UNIX_EPOCH};
 use tenex_context::{
     CacheObservation, Message as CtxMessage, ModelProfile, ToolCall as CtxToolCall, ToolDef,
     TurnRecord,
@@ -28,21 +36,23 @@ use tenex_project::Project;
 use tenex_protocol::{
     nostr::{read_one_from_stdin, NostrChannel},
     sink::StdoutNdjsonSink,
-    Channel, ConversationIntent, ConversationRef, Intent, LlmUsage, MessageRef, PrincipalRef,
-    ProjectRef,
+    Channel, CompletionIntent, ConversationRef, Intent, ListShellTasksRequest, LlmUsage,
+    MessageRef, PrincipalRef, ProjectRef, RuntimeControlRequest, RuntimeControlResponse,
 };
 use tenex_rag::{EmbedConfig, RagStore};
 use tenex_supervision::heuristics::default_supervisor;
 use tenex_supervision::supervisor::PostCompletionOutcome;
 use tenex_supervision::types::{TodoEntry as SupTodoEntry, TodoStatus as SupTodoStatus};
+use tenex_telegram::composite::CompositeChannel;
+use tenex_telegram::delivery::TelegramContext;
 use tools::{
     AgentsWriteTool, AskTool, ChangeModelTool, ConversationGetTool, ConversationListTool,
     ConversationSearchTool, DelegateCrossProjectTool, DelegateFollowupTool, DelegateTool,
     FsEditTool, FsGlobTool, FsGrepTool, FsReadTool, FsWriteTool, HomeFsEditTool, HomeFsGlobTool,
-    HomeFsGrepTool, HomeFsReadTool, HomeFsWriteTool, KillTool, LearnTool, NoResponseTool,
-    ProjectListTool, RagAddDocumentsTool, RagSearchTool, RecordingTool, ReportPublishTool,
-    ScheduleTaskTool, SelfDelegateTool, ShellTool, SkillListTool, SkillsSetTool, TodoItem,
-    TodoStatus, TodoWriteTool, ToolRecorder,
+    HomeFsGrepTool, HomeFsReadTool, HomeFsWriteTool, KillTool, LearnTool, McpProxyTool,
+    NoResponseTool, ProjectListTool, RagAddDocumentsTool, RagSearchTool, RecordingTool,
+    ReportPublishTool, ScheduleTaskTool, SelfDelegateTool, ShellTool, SkillListTool, SkillsSetTool,
+    TodoItem, TodoStatus, TodoWriteTool, ToolRecorder,
 };
 use tracing::{info_span, Instrument};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
@@ -148,7 +158,12 @@ fn build_recorded_tools(
     let mut tools: Vec<Box<dyn ToolDyn>> = Vec::new();
 
     let push = |tools: &mut Vec<Box<dyn ToolDyn>>, t: Box<dyn ToolDyn>| {
-        tools.push(RecordingTool::wrap_dyn(t, recorder.clone()));
+        tools.push(RecordingTool::wrap_dyn(
+            t,
+            recorder.clone(),
+            input.runtime_state.clone(),
+            Some(input.message_injections.clone()),
+        ));
     };
 
     push(
@@ -156,6 +171,10 @@ fn build_recorded_tools(
         Box::new(ShellTool::new(
             input.working_dir.to_string(),
             input.shell_env.clone(),
+            input.project_id.to_string(),
+            input.conversation_id.to_string(),
+            input.agent_pubkey.to_string(),
+            input.execution_id.to_string(),
         )),
     );
 
@@ -219,6 +238,9 @@ fn build_recorded_tools(
     );
     push(&mut tools, Box::new(input.skill_list.clone()));
     push(&mut tools, Box::new(input.skills_set.clone()));
+    for tool in &input.mcp_proxy_tools {
+        push(&mut tools, Box::new(tool.clone()));
+    }
 
     if let Some(d) = &input.delegate {
         push(&mut tools, Box::new(d.clone()));
@@ -273,7 +295,11 @@ fn build_recorded_tools(
     );
     push(
         &mut tools,
-        Box::new(KillTool::new(input.project_d_tag.to_string())),
+        Box::new(KillTool::new(
+            input.project_d_tag.to_string(),
+            input.conversation_id.to_string(),
+            input.agent_pubkey.to_string(),
+        )),
     );
     push(
         &mut tools,
@@ -317,9 +343,7 @@ fn build_recorded_tools(
     );
     push(
         &mut tools,
-        Box::new(AgentsWriteTool::new(tenex_project::paths::agents_dir(
-            input.base_dir,
-        ))),
+        Box::new(AgentsWriteTool::new(input.base_dir.to_path_buf())),
     );
 
     tools
@@ -341,6 +365,7 @@ struct AgentToolsInput<'a> {
     project_d_tag: &'a str,
     agent_slug: &'a str,
     project_id: &'a str,
+    execution_id: &'a str,
     suppress_response: Arc<AtomicBool>,
     rag_store: Option<Arc<RagStore>>,
     embed_config: Option<EmbedConfig>,
@@ -351,9 +376,12 @@ struct AgentToolsInput<'a> {
     todos: Arc<Mutex<Vec<TodoItem>>>,
     skill_list: SkillListTool,
     skills_set: SkillsSetTool,
+    mcp_proxy_tools: Vec<McpProxyTool>,
     delegate: Option<DelegateTool>,
     rag_add_documents: RagAddDocumentsTool,
     rag_search: RagSearchTool,
+    runtime_state: Option<RuntimeStateHandle>,
+    message_injections: Arc<Mutex<MessageInjectionTracker>>,
 }
 
 fn load_todos_from_store(
@@ -368,6 +396,27 @@ fn load_todos_from_store(
         return Vec::new();
     };
     serde_json::from_value(todos_val).unwrap_or_default()
+}
+
+fn load_mcp_proxy_tools() -> Result<Vec<McpProxyTool>> {
+    let manifest_path = match std::env::var("TENEX_MCP_MANIFEST") {
+        Ok(path) if !path.is_empty() => std::path::PathBuf::from(path),
+        Ok(_) => return Ok(Vec::new()),
+        Err(std::env::VarError::NotPresent) => return Ok(Vec::new()),
+        Err(e) => return Err(e).context("reading TENEX_MCP_MANIFEST"),
+    };
+    let socket_path = std::env::var("TENEX_MCP_SOCKET")
+        .context("TENEX_MCP_SOCKET is required when TENEX_MCP_MANIFEST is set")?;
+    let bytes = std::fs::read(&manifest_path)
+        .with_context(|| format!("reading MCP manifest {}", manifest_path.display()))?;
+    let manifest: tenex_mcp::ToolManifest = serde_json::from_slice(&bytes)
+        .with_context(|| format!("parsing MCP manifest {}", manifest_path.display()))?;
+    let socket_path = std::path::PathBuf::from(socket_path);
+    Ok(manifest
+        .tools
+        .into_iter()
+        .map(|entry| McpProxyTool::new(entry, socket_path.clone()))
+        .collect())
 }
 
 /// Unified save for both todos and self_applied_skills in a single read-modify-write.
@@ -426,6 +475,46 @@ fn save_context_state(
     }
 }
 
+async fn render_active_shell_tasks_reminder(
+    project_id: &str,
+    conversation_id: &str,
+    agent_pubkey: &str,
+) -> Option<String> {
+    let socket = runtime_control::socket_path()?;
+    let request = RuntimeControlRequest::ListShellTasks(ListShellTasksRequest {
+        project_id: project_id.to_string(),
+        conversation_id: conversation_id.to_string(),
+        agent_pubkey: agent_pubkey.to_string(),
+    });
+    let response = runtime_control::request(socket, request).await.ok()?;
+    let RuntimeControlResponse::ShellTasks(tasks) = response else {
+        return None;
+    };
+    if tasks.tasks.is_empty() {
+        return None;
+    }
+
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0);
+    let lines = tasks
+        .tasks
+        .into_iter()
+        .map(|task| {
+            let age = ((now - task.started_at_ms).max(0) / 1000).to_string();
+            format!(
+                "- {} ({:?}) running {}s, pid {}, output {}, command: {}",
+                task.task_id, task.mode, age, task.pid, task.output_file, task.command
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    Some(format!(
+        "<system-reminder type=\"active-shell-tasks\">\nActive shell tasks from this agent in this conversation can be stopped with kill(target=<task id>, reason=<reason>).\n{lines}\n</system-reminder>"
+    ))
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let telemetry = tenex_telemetry::init("tenex-agent");
@@ -458,10 +547,28 @@ async fn run() -> Result<()> {
         .context("Failed to parse triggering event from stdin")?;
 
     // Initialize channel (parses nsec, derives pubkey, signs to NDJSON-stdout)
-    let channel: Arc<dyn Channel> = Arc::new(
+    let nostr_channel = Arc::new(
         NostrChannel::from_nsec(&agent_config.nsec, StdoutNdjsonSink::new())
             .context("Failed to initialize Nostr channel")?,
     );
+    let channel: Arc<dyn Channel> = if let (Some(tg_cfg), Some(tg_meta)) =
+        (&agent_config.telegram, &envelope.metadata.telegram)
+    {
+        let tg_ctx = TelegramContext {
+            chat_id: tg_meta.chat_id.clone(),
+            message_id: tg_meta.message_id.clone(),
+            thread_id: tg_meta.thread_id.clone(),
+        };
+        let publish_conversation = tg_cfg.publish_conversation_to_telegram.unwrap_or(false);
+        Arc::new(CompositeChannel::new(
+            nostr_channel,
+            tg_cfg.clone(),
+            tg_ctx,
+            publish_conversation,
+        ))
+    } else {
+        nostr_channel
+    };
     let pubkey_hex = match channel.identity() {
         PrincipalRef::Nostr { pubkey, .. } => pubkey.to_hex(),
     };
@@ -485,6 +592,11 @@ async fn run() -> Result<()> {
         .context("Failed to read project metadata")?
         .context("Project metadata is missing — has the project been ingested?")?;
     let project_agents = Arc::new(project.agents().context("Failed to read project agents")?);
+    let is_pm_agent = project
+        .project_agents()
+        .context("Failed to read project membership")?
+        .iter()
+        .any(|pa| pa.agent_pubkey == pubkey_hex && pa.is_pm);
 
     let owner_pubkey_hex = project_meta
         .owner_pubkey
@@ -520,6 +632,19 @@ async fn run() -> Result<()> {
             eprintln!("[tenex-agent] Failed to ensure conversation row: {e}");
         }
     }
+
+    let conv_db_path = {
+        let conv_base = tenex_conversations::paths::default_base_dir();
+        tenex_conversations::paths::conversation_db_path(&conv_base, &project_meta.d_tag)
+    };
+    let execution_id =
+        std::env::var("TENEX_EXECUTION_ID").unwrap_or_else(|_| uuid::Uuid::new_v4().to_string());
+    let runtime_state = Some(RuntimeStateHandle::new(
+        conv_db_path.clone(),
+        conversation_id.clone(),
+        pubkey_hex.clone(),
+        execution_id.clone(),
+    ));
 
     // Load TENEX configuration files for model/key resolution
     let llms = LlmsConfig::load();
@@ -565,6 +690,14 @@ async fn run() -> Result<()> {
         &trigger_event_id[..8],
         &trigger_pubkey_hex[..8]
     );
+    let injection_tracker = Arc::new(Mutex::new(MessageInjectionTracker::new(
+        conv_db_path.clone(),
+        conversation_id.clone(),
+        pubkey_hex.clone(),
+        trigger_event_id.clone(),
+        is_pm_agent,
+        runtime_state.clone(),
+    )));
 
     // Load teams (global + project-specific) and compute the prompt fragment.
     let base_dir = tenex_project::paths::default_base_dir();
@@ -722,7 +855,13 @@ async fn run() -> Result<()> {
         .and_then(|s| s.parse().ok());
     let supervisor = Arc::new(Mutex::new(default_supervisor()));
     let supervisor_ref = supervisor.clone();
-    let hook = EmitHook::new(emit_state.clone(), supervisor, todos.clone(), sup_category);
+    let hook = EmitHook::new(
+        emit_state.clone(),
+        supervisor,
+        todos.clone(),
+        sup_category,
+        runtime_state.clone(),
+    );
     let allows_delegation = sup_category.map(|c| c.allows_delegation()).unwrap_or(true);
     let delegate_tool: Option<DelegateTool> = if allows_delegation {
         Some(DelegateTool::new(
@@ -736,6 +875,7 @@ async fn run() -> Result<()> {
 
     let skill_list_tool = SkillListTool::new(skill_ctx.clone());
     let skills_set_tool = SkillsSetTool::new(skill_ctx.clone(), self_applied_skills.clone());
+    let mcp_proxy_tools = load_mcp_proxy_tools()?;
 
     // Initialize RAG store for the embedding tools.
     let embed_config: Option<EmbedConfig> = EmbedConfig::load_from_base_dir(&base_dir);
@@ -795,6 +935,19 @@ async fn run() -> Result<()> {
         }
     }
 
+    if let Some(state) = &runtime_state {
+        if let Some(active_tools) = state.render_active_tools_reminder() {
+            system_prompt.push_str("\n\n");
+            system_prompt.push_str(&active_tools);
+        }
+    }
+    if let Some(active_shell_tasks) =
+        render_active_shell_tasks_reminder(&project_id, &conversation_id, &pubkey_hex).await
+    {
+        system_prompt.push_str("\n\n");
+        system_prompt.push_str(&active_shell_tasks);
+    }
+
     // Project conversation history. The projection produces interleaved
     // assistant + tool-result messages; the system prompt is dropped here
     // because rig handles it via `preamble`.
@@ -843,12 +996,6 @@ async fn run() -> Result<()> {
 
     let agent_home_str = agent_home.display().to_string();
 
-    // Compute paths for tool injection from the already-resolved project d_tag.
-    let conv_db_path = {
-        let conv_base = tenex_conversations::paths::default_base_dir();
-        tenex_conversations::paths::conversation_db_path(&conv_base, &project_meta.d_tag)
-    };
-
     let agent_slug = agent_config.identity_name().to_string();
     let suppress_response = Arc::new(AtomicBool::new(false));
     let agent_tools_input = AgentToolsInput {
@@ -867,6 +1014,7 @@ async fn run() -> Result<()> {
         project_d_tag: &project_meta.d_tag,
         agent_slug: &agent_slug,
         project_id: &project_id,
+        execution_id: &execution_id,
         suppress_response: suppress_response.clone(),
         project_base: &working_dir,
         rag_store: rag_store.clone(),
@@ -877,9 +1025,12 @@ async fn run() -> Result<()> {
         todos: todos.clone(),
         skill_list: skill_list_tool.clone(),
         skills_set: skills_set_tool.clone(),
+        mcp_proxy_tools,
         delegate: delegate_tool.clone(),
         rag_add_documents: rag_add_documents.clone(),
         rag_search: rag_search.clone(),
+        runtime_state: runtime_state.clone(),
+        message_injections: injection_tracker.clone(),
     };
 
     // Keep a handle with shared Arc refs so we can read the pending final turn
@@ -903,6 +1054,12 @@ async fn run() -> Result<()> {
         // tool call so the inner loop's invocations all land here.
         let recorder = ToolRecorder::new();
         let tools = build_recorded_tools(&agent_tools_input, recorder.clone());
+        let injected = injection_tracker.lock().unwrap().take_new_messages();
+        let turn_message = if let Some(injected) = injected {
+            format!("{current_message}\n\n{injected}")
+        } else {
+            current_message.clone()
+        };
 
         let turn_span = info_span!(
             "tenex.agent.turn",
@@ -926,7 +1083,7 @@ async fn run() -> Result<()> {
                         client,
                         &resolved.model,
                         &system_prompt,
-                        &current_message,
+                        &turn_message,
                         current_history,
                         hook.clone(),
                         tools
@@ -942,7 +1099,7 @@ async fn run() -> Result<()> {
                         client,
                         &resolved.model,
                         &system_prompt,
-                        &current_message,
+                        &turn_message,
                         current_history,
                         hook.clone(),
                         tools
@@ -958,7 +1115,19 @@ async fn run() -> Result<()> {
                         client,
                         &resolved.model,
                         &system_prompt,
-                        &current_message,
+                        &turn_message,
+                        current_history,
+                        hook.clone(),
+                        tools
+                    )
+                }
+                "mock" => {
+                    let client = mock_llm::MockClient::from_env(&agent_slug)?;
+                    run_agent!(
+                        client,
+                        &resolved.model,
+                        &system_prompt,
+                        &turn_message,
                         current_history,
                         hook.clone(),
                         tools
@@ -977,7 +1146,7 @@ async fn run() -> Result<()> {
                         client,
                         &resolved.model,
                         &system_prompt,
-                        &current_message,
+                        &turn_message,
                         current_history,
                         hook.clone(),
                         tools
@@ -988,6 +1157,10 @@ async fn run() -> Result<()> {
         }
         .instrument(turn_span)
         .await?;
+
+        if let Some(state) = &runtime_state {
+            state.release_driver();
+        }
 
         let recorded_calls = recorder.take_records();
 
@@ -1067,9 +1240,8 @@ async fn run() -> Result<()> {
         if let Some((final_content, final_ral)) = hook_handle.take_pending() {
             if !suppressed {
                 let final_ctx = emit_state.build_ctx(final_ral);
-                let intent = ConversationIntent {
+                let intent = CompletionIntent {
                     content: final_content,
-                    is_reasoning: false,
                     usage: Some(LlmUsage {
                         input_tokens: Some(stream_usage.input_tokens),
                         output_tokens: Some(stream_usage.output_tokens),
@@ -1080,9 +1252,9 @@ async fn run() -> Result<()> {
                     metadata: None,
                 };
                 channel
-                    .send(Intent::Conversation(intent), &final_ctx)
+                    .send(Intent::Completion(intent), &final_ctx)
                     .await
-                    .context("Failed to emit final conversation event")?;
+                    .context("Failed to emit final completion event")?;
             }
         }
 

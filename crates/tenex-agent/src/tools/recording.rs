@@ -19,6 +19,9 @@ use rig::tool::{ToolDyn, ToolError};
 use rig::wasm_compat::WasmBoxedFuture;
 use tracing::{info_span, Instrument};
 
+use crate::injections::MessageInjectionTracker;
+use crate::runtime_state::RuntimeStateHandle;
+
 /// One captured tool invocation for a single agent turn.
 #[derive(Debug, Clone)]
 pub struct ToolCallRecord {
@@ -59,14 +62,23 @@ impl ToolRecorder {
 pub struct RecordingTool {
     inner: Box<dyn ToolDyn>,
     recorder: Arc<ToolRecorder>,
+    runtime_state: Option<RuntimeStateHandle>,
+    message_injections: Option<Arc<Mutex<MessageInjectionTracker>>>,
 }
 
 impl RecordingTool {
     /// Wrap an erased tool so its calls are captured into `recorder`.
-    pub fn wrap_dyn(tool: Box<dyn ToolDyn>, recorder: Arc<ToolRecorder>) -> Box<dyn ToolDyn> {
+    pub fn wrap_dyn(
+        tool: Box<dyn ToolDyn>,
+        recorder: Arc<ToolRecorder>,
+        runtime_state: Option<RuntimeStateHandle>,
+        message_injections: Option<Arc<Mutex<MessageInjectionTracker>>>,
+    ) -> Box<dyn ToolDyn> {
         Box::new(Self {
             inner: tool,
             recorder,
+            runtime_state,
+            message_injections,
         })
     }
 }
@@ -91,11 +103,32 @@ impl ToolDyn for RecordingTool {
                 .map(|d| d.as_millis() as i64)
                 .unwrap_or(0);
 
-            let result = self
+            if let Some(state) = &self.runtime_state {
+                state.start_tool(&call_id, &tool_name, &args_json);
+            }
+
+            let mut result = self
                 .inner
                 .call(args)
                 .instrument(info_span!("tenex.agent.tool_call", tool.name = %tool_name))
                 .await;
+
+            if let Some(state) = &self.runtime_state {
+                state.finish_tool(&call_id);
+                if let Ok(output) = &mut result {
+                    if let Some(reminder) = state.render_active_tools_reminder() {
+                        append_tool_result_reminder(output, &reminder);
+                    }
+                }
+            }
+            if let Some(injections) = &self.message_injections {
+                if let Ok(output) = &mut result {
+                    let reminder = injections.lock().unwrap().take_new_messages();
+                    if let Some(reminder) = reminder {
+                        append_tool_result_reminder(output, &reminder);
+                    }
+                }
+            }
 
             let (result_json, is_error) = match &result {
                 Ok(s) => {
@@ -118,4 +151,11 @@ impl ToolDyn for RecordingTool {
             result
         })
     }
+}
+
+fn append_tool_result_reminder(output: &mut String, reminder: &str) {
+    if !output.is_empty() {
+        output.push_str("\n\n");
+    }
+    output.push_str(reminder);
 }

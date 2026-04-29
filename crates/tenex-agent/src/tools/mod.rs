@@ -10,6 +10,7 @@ pub mod delegate_followup;
 pub mod fs;
 pub mod kill;
 pub mod learn;
+pub mod mcp;
 pub mod no_response;
 pub mod project_list;
 pub mod rag_add_documents;
@@ -38,6 +39,7 @@ pub use fs::{
 };
 pub use kill::KillTool;
 pub use learn::LearnTool;
+pub use mcp::McpProxyTool;
 pub use no_response::NoResponseTool;
 pub use project_list::ProjectListTool;
 pub use rag_add_documents::RagAddDocumentsTool;

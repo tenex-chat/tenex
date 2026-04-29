@@ -1,7 +1,11 @@
+use crate::runtime_control;
 use rig::{completion::ToolDefinition, tool::Tool};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::time::Duration;
+use tenex_protocol::{
+    RunShellRequest, RuntimeControlRequest, RuntimeControlResponse, ShellBackgroundResponse,
+};
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct ShellArgs {
@@ -9,6 +13,7 @@ pub struct ShellArgs {
     pub description: String,
     pub cwd: Option<String>,
     pub timeout: Option<u64>,
+    pub run_in_background: Option<bool>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -18,13 +23,28 @@ pub struct ShellError(String);
 pub struct ShellTool {
     working_dir: String,
     extra_env: Vec<(String, String)>,
+    project_id: String,
+    conversation_id: String,
+    agent_pubkey: String,
+    execution_id: String,
 }
 
 impl ShellTool {
-    pub fn new(working_dir: String, extra_env: Vec<(String, String)>) -> Self {
+    pub fn new(
+        working_dir: String,
+        extra_env: Vec<(String, String)>,
+        project_id: String,
+        conversation_id: String,
+        agent_pubkey: String,
+        execution_id: String,
+    ) -> Self {
         Self {
             working_dir,
             extra_env,
+            project_id,
+            conversation_id,
+            agent_pubkey,
+            execution_id,
         }
     }
 }
@@ -79,6 +99,10 @@ Commands run with a timeout in seconds (default 30, max 600)."
                     "timeout": {
                         "type": "integer",
                         "description": "Timeout in seconds (default: 30, max: 600)"
+                    },
+                    "run_in_background": {
+                        "type": "boolean",
+                        "description": "Set true to start the command and return immediately with a shell task ID."
                     }
                 },
                 "required": ["command", "description"]
@@ -87,6 +111,38 @@ Commands run with a timeout in seconds (default 30, max 600)."
     }
 
     async fn call(&self, args: ShellArgs) -> Result<Self::Output, ShellError> {
+        if let Some(socket) = runtime_control::socket_path() {
+            let request = RuntimeControlRequest::RunShell(RunShellRequest {
+                command: args.command.clone(),
+                description: args.description.clone(),
+                cwd: args.cwd.clone(),
+                timeout_secs: Some(args.timeout.unwrap_or(30).min(600)),
+                run_in_background: args.run_in_background.unwrap_or(false),
+                working_dir: self.working_dir.clone(),
+                extra_env: self.extra_env.clone(),
+                project_id: self.project_id.clone(),
+                conversation_id: self.conversation_id.clone(),
+                agent_pubkey: self.agent_pubkey.clone(),
+                execution_id: self.execution_id.clone(),
+            });
+            return match runtime_control::request(socket, request).await {
+                Ok(RuntimeControlResponse::ShellCompleted(response)) => Ok(response.output),
+                Ok(RuntimeControlResponse::ShellBackground(response)) => {
+                    Ok(format_background_response(response))
+                }
+                Ok(RuntimeControlResponse::Error(error)) => Ok(format!("Error: {}", error.message)),
+                Ok(other) => Ok(format!("Error: unexpected runtime response: {other:?}")),
+                Err(error) => Ok(format!("Error: runtime control request failed: {error}")),
+            };
+        }
+
+        if args.run_in_background.unwrap_or(false) {
+            return Ok(
+                "Error: background shell commands require the Rust project runtime control socket."
+                    .to_string(),
+            );
+        }
+
         let cwd = args.cwd.as_deref().unwrap_or(&self.working_dir);
         let timeout_secs = args.timeout.unwrap_or(30).min(600);
 
@@ -136,4 +192,16 @@ Commands run with a timeout in seconds (default 30, max 600)."
             }
         }
     }
+}
+
+fn format_background_response(response: ShellBackgroundResponse) -> String {
+    json!({
+        "type": "background-task",
+        "taskId": response.task_id,
+        "command": response.command,
+        "description": response.description,
+        "outputFile": response.output_file,
+        "message": response.message,
+    })
+    .to_string()
 }

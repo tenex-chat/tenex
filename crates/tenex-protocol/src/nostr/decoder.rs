@@ -6,7 +6,7 @@
 
 use nostr::{Event, EventId};
 
-use crate::channel::{InboundEnvelope, InboundMetadata};
+use crate::channel::{InboundEnvelope, InboundMetadata, TelegramTransportMetadata};
 use crate::refs::{ConversationRef, MessageRef, PrincipalKind, PrincipalRef};
 
 use super::kinds;
@@ -35,6 +35,9 @@ pub fn decode(event: &Event) -> Result<InboundEnvelope, DecodeError> {
     let mut recipients: Vec<PrincipalRef> = Vec::new();
     let mut root_event_id: Option<EventId> = None;
     let mut reply_to: Option<MessageRef> = None;
+    let mut telegram_chat_id: Option<String> = None;
+    let mut telegram_message_id: Option<String> = None;
+    let mut telegram_thread_id: Option<String> = None;
 
     for tag in event.tags.iter() {
         let parts: Vec<String> = tag.clone().to_vec();
@@ -92,9 +95,21 @@ pub fn decode(event: &Event) -> Result<InboundEnvelope, DecodeError> {
                     }
                 }
             }
+            "telegram-chat-id" => telegram_chat_id = parts.get(1).cloned(),
+            "telegram-message-id" => telegram_message_id = parts.get(1).cloned(),
+            "telegram-thread-id" => telegram_thread_id = parts.get(1).cloned(),
             _ => {}
         }
     }
+
+    let telegram = match (telegram_chat_id, telegram_message_id) {
+        (Some(chat_id), Some(message_id)) => Some(TelegramTransportMetadata {
+            chat_id,
+            message_id,
+            thread_id: telegram_thread_id,
+        }),
+        _ => None,
+    };
 
     let root_id = root_event_id.unwrap_or(event.id);
     let conversation = ConversationRef::Nostr {
@@ -121,6 +136,7 @@ pub fn decode(event: &Event) -> Result<InboundEnvelope, DecodeError> {
         delegation_parent_conversation,
         is_kill_signal: kind_u16 == kinds::STOP_COMMAND,
         project_a_tags,
+        telegram,
     };
 
     Ok(InboundEnvelope {

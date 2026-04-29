@@ -10,7 +10,7 @@
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use rusqlite::{params, Connection, OptionalExtension, Row};
+use rusqlite::{params, Connection, OptionalExtension, Row, TransactionBehavior};
 
 use crate::error::{ConversationsError, Result};
 use crate::model::{
@@ -222,6 +222,57 @@ impl ConversationStore {
             params![conversation_id, now],
         )?;
         Ok(())
+    }
+
+    /// Replace the opaque per-conversation runtime state blob.
+    pub fn set_runtime_state(
+        &self,
+        conversation_id: &str,
+        runtime_state: &serde_json::Value,
+    ) -> Result<()> {
+        self.ensure_conversation(conversation_id)?;
+        let now = now_ms();
+        self.conn.execute(
+            "UPDATE conversations
+                SET runtime_state_json = ?2,
+                    updated_at = ?3
+              WHERE id = ?1",
+            params![conversation_id, runtime_state.to_string(), now],
+        )?;
+        Ok(())
+    }
+
+    /// Atomically read, mutate, and replace the opaque runtime state blob.
+    pub fn update_runtime_state<T>(
+        &mut self,
+        conversation_id: &str,
+        f: impl FnOnce(&mut serde_json::Value) -> T,
+    ) -> Result<T> {
+        self.ensure_conversation(conversation_id)?;
+        let tx = self
+            .conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let mut runtime_state = tx.query_row(
+            "SELECT runtime_state_json
+               FROM conversations
+              WHERE id = ?1",
+            [conversation_id],
+            |row| {
+                let raw: String = row.get(0)?;
+                Ok(serde_json::from_str(&raw).unwrap_or_else(|_| serde_json::json!({})))
+            },
+        )?;
+        let result = f(&mut runtime_state);
+        let now = now_ms();
+        tx.execute(
+            "UPDATE conversations
+                SET runtime_state_json = ?2,
+                    updated_at = ?3
+              WHERE id = ?1",
+            params![conversation_id, runtime_state.to_string(), now],
+        )?;
+        tx.commit()?;
+        Ok(result)
     }
 
     // ==========================================================================

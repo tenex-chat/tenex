@@ -4,6 +4,7 @@ use std::fs;
 use tenex_llm_config::resolver::{load_providers, ProviderDocs};
 
 pub use tenex_supervision::types::AgentCategory;
+pub use tenex_telegram::config::TelegramAgentConfig;
 
 #[derive(Debug, Deserialize)]
 pub struct AgentDefault {
@@ -21,6 +22,7 @@ pub struct AgentConfig {
     pub instructions: Option<String>,
     pub working_directory: Option<String>,
     pub default: Option<AgentDefault>,
+    pub telegram: Option<TelegramAgentConfig>,
 }
 
 impl AgentConfig {

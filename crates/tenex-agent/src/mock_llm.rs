@@ -1,6 +1,8 @@
 use std::collections::HashMap;
+use std::io::Write;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
 use rig::client::CompletionClient;
@@ -12,7 +14,7 @@ use rig::streaming::{
     RawStreamingChoice, RawStreamingToolCall, StreamingCompletionResponse, StreamingResult,
 };
 use rig::OneOrMany;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 #[derive(Clone)]
 pub struct MockClient {
@@ -38,6 +40,8 @@ struct MockScenario {
     responses: Vec<MockResponse>,
     #[serde(default)]
     default_content: Option<String>,
+    #[serde(default)]
+    default_delay_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -50,9 +54,13 @@ struct MockResponse {
     #[serde(default)]
     contains: Option<String>,
     #[serde(default)]
+    contains_all: Vec<String>,
+    #[serde(default)]
     content: Option<String>,
     #[serde(default)]
     tool_calls: Vec<MockToolCall>,
+    #[serde(default)]
+    delay_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -60,6 +68,28 @@ struct MockToolCall {
     name: String,
     #[serde(default)]
     args: serde_json::Value,
+}
+
+struct MockSelection {
+    turn: usize,
+    matched_index: Option<usize>,
+    request_text: String,
+    response: MockResponse,
+    delay_ms: u64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MockRequestRecord<'a> {
+    agent: &'a str,
+    model: &'a str,
+    turn: usize,
+    matched_index: Option<usize>,
+    delay_ms: u64,
+    timestamp_ms: u64,
+    request_debug: &'a str,
+    content: Option<&'a str>,
+    tool_calls: Vec<&'a str>,
 }
 
 impl MockClient {
@@ -108,8 +138,11 @@ impl CompletionModel for MockModel {
         &self,
         request: CompletionRequest,
     ) -> Result<CompletionResponse<Self::Response>, CompletionError> {
-        let response = self.next_response(&request);
-        let choice = response_to_choice(&response);
+        let selection = self.next_response(&request);
+        self.record_request(&selection);
+        sleep_if_configured(selection.delay_ms).await;
+
+        let choice = response_to_choice(&selection.response);
         Ok(CompletionResponse {
             choice,
             usage: Usage {
@@ -128,10 +161,13 @@ impl CompletionModel for MockModel {
         &self,
         request: CompletionRequest,
     ) -> Result<StreamingCompletionResponse<Self::StreamingResponse>, CompletionError> {
-        let response = self.next_response(&request);
+        let selection = self.next_response(&request);
+        self.record_request(&selection);
+        sleep_if_configured(selection.delay_ms).await;
+
         let mut items = Vec::new();
 
-        for (idx, tool_call) in response.tool_calls.iter().enumerate() {
+        for (idx, tool_call) in selection.response.tool_calls.iter().enumerate() {
             items.push(Ok(RawStreamingChoice::ToolCall(RawStreamingToolCall::new(
                 format!("mock-tool-{idx}"),
                 tool_call.name.clone(),
@@ -139,7 +175,12 @@ impl CompletionModel for MockModel {
             ))));
         }
 
-        if let Some(content) = response.content.as_ref().filter(|s| !s.is_empty()) {
+        if let Some(content) = selection
+            .response
+            .content
+            .as_ref()
+            .filter(|s| !s.is_empty())
+        {
             items.push(Ok(RawStreamingChoice::Message(content.clone())));
         }
 
@@ -150,7 +191,7 @@ impl CompletionModel for MockModel {
 }
 
 impl MockModel {
-    fn next_response(&self, request: &CompletionRequest) -> MockResponse {
+    fn next_response(&self, request: &CompletionRequest) -> MockSelection {
         let agent = self.inner.agent_slug.clone();
         let turn = {
             let mut turns = self.inner.turns.lock().unwrap();
@@ -164,36 +205,122 @@ impl MockModel {
             eprintln!("[tenex-agent mock] agent={agent} turn={turn}");
         }
 
-        self.inner
+        let (matched_index, response) = self
+            .inner
             .scenario
             .responses
             .iter()
+            .enumerate()
             .find(|candidate| {
-                candidate
+                let response = candidate.1;
+                response
                     .agent
                     .as_ref()
                     .is_none_or(|expected| expected == &agent)
-                    && candidate.turn.is_none_or(|expected| expected == turn)
-                    && candidate
+                    && response.turn.is_none_or(|expected| expected == turn)
+                    && response
                         .contains
                         .as_ref()
                         .is_none_or(|needle| request_text.contains(needle))
+                    && response
+                        .contains_all
+                        .iter()
+                        .all(|needle| request_text.contains(needle))
             })
-            .cloned()
-            .unwrap_or_else(|| MockResponse {
-                agent: Some(agent.clone()),
-                turn: Some(turn),
-                contains: None,
-                content: Some(
-                    self.inner
-                        .scenario
-                        .default_content
-                        .clone()
-                        .unwrap_or_else(|| format!("Mock response from {agent} turn {turn}.")),
-                ),
-                tool_calls: Vec::new(),
-            })
+            .map(|(idx, response)| (Some(idx), response.clone()))
+            .unwrap_or_else(|| {
+                (
+                    None,
+                    MockResponse {
+                        agent: Some(agent.clone()),
+                        turn: Some(turn),
+                        contains: None,
+                        contains_all: Vec::new(),
+                        content: Some(
+                            self.inner
+                                .scenario
+                                .default_content
+                                .clone()
+                                .unwrap_or_else(|| {
+                                    format!("Mock response from {agent} turn {turn}.")
+                                }),
+                        ),
+                        tool_calls: Vec::new(),
+                        delay_ms: None,
+                    },
+                )
+            });
+
+        let delay_ms = response
+            .delay_ms
+            .or(self.inner.scenario.default_delay_ms)
+            .unwrap_or(0);
+
+        MockSelection {
+            turn,
+            matched_index,
+            request_text,
+            response,
+            delay_ms,
+        }
     }
+
+    fn record_request(&self, selection: &MockSelection) {
+        let Ok(path) = std::env::var("TENEX_MOCK_LLM_RECORD_PATH") else {
+            return;
+        };
+
+        let tool_calls = selection
+            .response
+            .tool_calls
+            .iter()
+            .map(|tool_call| tool_call.name.as_str())
+            .collect();
+        let timestamp_ms = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+        let record = MockRequestRecord {
+            agent: self.inner.agent_slug.as_str(),
+            model: self.model.as_str(),
+            turn: selection.turn,
+            matched_index: selection.matched_index,
+            delay_ms: selection.delay_ms,
+            timestamp_ms,
+            request_debug: selection.request_text.as_str(),
+            content: selection.response.content.as_deref(),
+            tool_calls,
+        };
+
+        let line = match serde_json::to_string(&record) {
+            Ok(line) => line,
+            Err(err) => {
+                eprintln!("[tenex-agent mock] failed to serialize request record: {err}");
+                return;
+            }
+        };
+        if let Err(err) = append_request_record(Path::new(&path), &line) {
+            eprintln!("[tenex-agent mock] failed to append request record {path}: {err}");
+        }
+    }
+}
+
+async fn sleep_if_configured(delay_ms: u64) {
+    if delay_ms > 0 {
+        tokio::time::sleep(Duration::from_millis(delay_ms)).await;
+    }
+}
+
+fn append_request_record(path: &Path, line: &str) -> std::io::Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)?;
+    writeln!(file, "{line}")?;
+    Ok(())
 }
 
 fn response_to_choice(response: &MockResponse) -> OneOrMany<AssistantContent> {

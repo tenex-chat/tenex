@@ -4,6 +4,7 @@ use std::sync::{
 };
 
 use crate::emit::EmitState;
+use crate::runtime_state::RuntimeStateHandle;
 use crate::tools::{TodoItem, TodoStatus};
 use rig::agent::{HookAction, PromptHook, ToolCallHookAction};
 use rig::completion::{CompletionModel, Message};
@@ -42,6 +43,7 @@ pub struct EmitHook {
     /// Intermediate turns are emitted when the next turn starts; the final turn
     /// is emitted by main.rs (with usage from FinalResponse).
     pending: Arc<Mutex<Option<(String, u32)>>>,
+    runtime_state: Option<RuntimeStateHandle>,
 }
 
 impl EmitHook {
@@ -50,6 +52,7 @@ impl EmitHook {
         supervisor: Arc<Mutex<Supervisor>>,
         todos: Arc<Mutex<Vec<TodoItem>>>,
         agent_category: Option<AgentCategory>,
+        runtime_state: Option<RuntimeStateHandle>,
     ) -> Self {
         Self {
             state,
@@ -59,6 +62,7 @@ impl EmitHook {
             accumulated_text: Arc::new(Mutex::new(String::new())),
             sequence: Arc::new(AtomicU64::new(0)),
             pending: Arc::new(Mutex::new(None)),
+            runtime_state,
         }
     }
 
@@ -98,6 +102,20 @@ impl<M: CompletionModel> PromptHook<M> for EmitHook {
         }
     }
 
+    fn on_completion_call(
+        &self,
+        _prompt: &Message,
+        _history: &[Message],
+    ) -> impl std::future::Future<Output = HookAction> + Send {
+        let runtime_state = self.runtime_state.clone();
+        async move {
+            if let Some(state) = runtime_state {
+                state.acquire_driver().await;
+            }
+            HookAction::cont()
+        }
+    }
+
     fn on_stream_completion_response_finish(
         &self,
         _prompt: &Message,
@@ -125,8 +143,12 @@ impl<M: CompletionModel> PromptHook<M> for EmitHook {
 
         let state = self.state.clone();
         let channel = self.state.channel.clone();
+        let runtime_state = self.runtime_state.clone();
 
         async move {
+            if let Some(state) = runtime_state {
+                state.release_driver();
+            }
             if let Some((prev_content, prev_ral)) = prev_pending {
                 let ctx = state.build_ctx(prev_ral);
                 let intent = ConversationIntent {
@@ -173,10 +195,14 @@ impl<M: CompletionModel> PromptHook<M> for EmitHook {
             self.state.build_ctx(meta.ral)
         };
         let channel = self.state.channel.clone();
+        let runtime_state = self.runtime_state.clone();
 
         async move {
             if let Some(reason) = block_reason {
                 return ToolCallHookAction::skip(reason);
+            }
+            if let Some(state) = runtime_state {
+                state.release_driver();
             }
             if !is_delegate {
                 let intent = ToolUseIntent {

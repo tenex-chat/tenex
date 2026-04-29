@@ -18,13 +18,15 @@ Canonical spec: `docs/RUST-AGENT-SPEC.md`. Fleet context: `docs/plans/2026-04-28
 
 **`TENEX_PROJECT_ID` env var:** required. Set by the daemon before spawning. Accepts a NIP-33 coordinate or bare dTag (passed to `tenex-project::Project::open_default`).
 
+**`TENEX_MCP_MANIFEST` + `TENEX_MCP_SOCKET` env vars:** optional. Set together by the runtime when a project-scoped MCP bridge is active. The agent only registers proxy tools from this manifest; it never starts MCP servers.
+
 ## Critical invariants
 
 - **NDJSON-over-stdio generalizes to NDJSON-over-Unix-socket.** The same frame format must remain valid when the runtime orchestrator wraps this process over a socket. Protect this property in any spec edits.
 - **Exactly one completion event.** The final stdout line is always the signed completion. Intermediate events may be zero or many; never more than one completion.
 - **Root event ID derivation** (`src/nostr.rs`): first `["e", id, _, "root"]` tag → else first `["e", id, ...]` tag → else the triggering event's own ID.
 - **Project context via `tenex-project`.** Agent definitions, model resolution, and project metadata come from `tenex-project::Project`. Do not parse agent JSON files directly.
-- **Tools in `src/tools/`.** `shell`, `fs_read`, `fs_write`, `fs_edit`, `fs_glob`, `fs_grep`, `todo_write`, `delegate`. Add new tools as separate files in that directory; register them in `main.rs` via the `run_agent!` macro.
+- **Tools in `src/tools/`.** `shell`, `fs_read`, `fs_write`, `fs_edit`, `fs_glob`, `fs_grep`, `todo_write`, `delegate`, and MCP proxy tools. Add new static tools as separate files in that directory; register them in `main.rs` via the `run_agent!` macro.
 - **No relay connections.** This binary never opens a relay. Signing and publishing happen only to stdout.
 
 ## How to approach changes
