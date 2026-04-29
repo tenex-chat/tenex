@@ -837,6 +837,33 @@ impl ConversationStore {
     }
 
     // ==========================================================================
+    // Delegation
+    // ==========================================================================
+
+    /// Returns `true` when the given conversation has at least one child
+    /// delegation that has not yet received a completion record.
+    ///
+    /// Child conversations store their delegation route in
+    /// `runtime_state_json -> $.rustRuntime.delegation.parent_conversation_id`.
+    /// A child is considered still in flight when no row exists in `completions`
+    /// for it.
+    pub fn has_active_delegation(&self, conversation_id: &str) -> Result<bool> {
+        let count: i64 = self.conn.query_row(
+            "SELECT COUNT(*)
+               FROM conversations c
+              WHERE json_extract(c.runtime_state_json,
+                        '$.rustRuntime.delegation.parent_conversation_id') = ?1
+                AND NOT EXISTS (
+                        SELECT 1 FROM completions cmp
+                         WHERE cmp.conversation_id = c.id
+                    )",
+            [conversation_id],
+            |row| row.get(0),
+        )?;
+        Ok(count > 0)
+    }
+
+    // ==========================================================================
     // Maintenance
     // ==========================================================================
 

@@ -224,7 +224,7 @@ Rust (`tenex-llm-config`) is a credential resolver only; all provider protocol w
 ## 11. Intervention (`tenex-intervention`)
 
 ### 11.1 Delegation Check (Pending)
-- [ ] Interim `DelegationChecker` stub returns `false` unconditionally — will produce false-positive interventions when agents have active delegations. Swap to SQLite query when `tenex-conversations` integration lands.
+- ✅ Active-delegation check now queries the project's `conversation.db`: `ConversationStore::has_active_delegation` scans child conversations whose `runtime_state_json -> $.rustRuntime.delegation.parent_conversation_id` matches the completing conversation and have no completion record. The intervention timer is silently cleared when an active delegation is found.
 
 ---
 
