@@ -1,10 +1,9 @@
-use nostr::{nips::nip19::ToBech32, Keys};
+use indexmap::IndexMap;
 use rig::{completion::ToolDefinition, tool::Tool};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Map, Value};
-use std::fs;
-use std::io::Write;
+use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
+use tenex_agent_storage::{AgentDoc, AgentStorage};
 
 #[derive(Debug, thiserror::Error)]
 #[error("{0}")]
@@ -38,152 +37,64 @@ pub struct AgentsWriteOutput {
     pub error: Option<String>,
 }
 
-/// Persisted agent record matching the TS `~/.tenex/agents/<pubkey>.json` shape.
-///
-/// Unknown fields are preserved across read-modify-write so we don't clobber
-/// data written by TS code paths (e.g. `category`, `inferredCategory`,
-/// `description`, `mcpServers`, `telegram`, `eventId`, etc.). We only normalize
-/// the fields this tool owns.
-#[derive(Debug, Deserialize, Serialize)]
-struct StoredAgent {
-    nsec: String,
-    slug: String,
-    name: String,
-    role: String,
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    instructions: String,
-    #[serde(
-        default,
-        rename = "useCriteria",
-        skip_serializing_if = "String::is_empty"
-    )]
-    use_criteria: String,
-    #[serde(default = "default_status")]
-    status: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    default: Option<AgentDefaultConfig>,
-    #[serde(flatten)]
-    extra: Map<String, Value>,
-}
-
-fn default_status() -> String {
-    "active".to_string()
-}
-
-#[derive(Debug, Default, Deserialize, Serialize)]
-struct AgentDefaultConfig {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    model: Option<String>,
-    #[serde(flatten)]
-    extra: Map<String, Value>,
-}
-
 pub struct AgentsWriteTool {
-    agents_dir: PathBuf,
+    base_dir: PathBuf,
 }
 
 impl AgentsWriteTool {
-    pub fn new(agents_dir: PathBuf) -> Self {
-        Self { agents_dir }
+    pub fn new(base_dir: PathBuf) -> Self {
+        Self { base_dir }
     }
 }
 
-/// Locate an existing stored agent by its `slug` field. Scans all `*.json` files
-/// in `agents_dir` and returns the first match.
-fn find_agent_by_slug(
-    agents_dir: &Path,
-    slug: &str,
-) -> Result<Option<(PathBuf, StoredAgent)>, AgentsWriteError> {
-    let read_dir = match fs::read_dir(agents_dir) {
-        Ok(rd) => rd,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(e) => {
-            return Err(AgentsWriteError(format!(
-                "Failed to read agents dir {}: {e}",
-                agents_dir.display()
-            )))
-        }
-    };
-
-    for entry in read_dir.flatten() {
-        let path = entry.path();
-        if path.extension().and_then(|s| s.to_str()) != Some("json") {
-            continue;
-        }
-        let Ok(text) = fs::read_to_string(&path) else {
-            continue;
-        };
-        let Ok(parsed) = serde_json::from_str::<StoredAgent>(&text) else {
-            continue;
-        };
-        if parsed.slug == slug {
-            return Ok(Some((path, parsed)));
-        }
-    }
-    Ok(None)
+fn storage_error(action: &str, error: anyhow::Error) -> AgentsWriteError {
+    AgentsWriteError(format!("Failed to {action}: {error}"))
 }
 
-/// Write JSON atomically: write to `<path>.tmp` then rename onto `<path>`.
-fn write_json_atomic(path: &Path, agent: &StoredAgent) -> Result<(), AgentsWriteError> {
-    let parent = path
-        .parent()
-        .ok_or_else(|| AgentsWriteError(format!("Agent path has no parent: {}", path.display())))?;
-    fs::create_dir_all(parent)
-        .map_err(|e| AgentsWriteError(format!("Failed to create dir {}: {e}", parent.display())))?;
-
-    let serialized = serde_json::to_vec_pretty(agent)
-        .map_err(|e| AgentsWriteError(format!("Failed to serialize agent: {e}")))?;
-
-    let mut tmp = path.as_os_str().to_owned();
-    tmp.push(".tmp");
-    let tmp_path = PathBuf::from(tmp);
-
-    {
-        let mut f = fs::File::create(&tmp_path).map_err(|e| {
-            AgentsWriteError(format!(
-                "Failed to create temp file {}: {e}",
-                tmp_path.display()
-            ))
-        })?;
-        f.write_all(&serialized).map_err(|e| {
-            AgentsWriteError(format!(
-                "Failed to write temp file {}: {e}",
-                tmp_path.display()
-            ))
-        })?;
-        f.sync_all().map_err(|e| {
-            AgentsWriteError(format!(
-                "Failed to fsync temp file {}: {e}",
-                tmp_path.display()
-            ))
-        })?;
-    }
-
-    fs::rename(&tmp_path, path).map_err(|e| {
-        AgentsWriteError(format!(
-            "Failed to rename {} -> {}: {e}",
-            tmp_path.display(),
-            path.display()
-        ))
-    })?;
-    Ok(())
-}
-
-fn apply_llm_config(agent: &mut StoredAgent, llm_config: Option<String>) {
+fn apply_llm_config(agent: &mut AgentDoc, llm_config: Option<String>) {
     let Some(model) = llm_config else { return };
     let trimmed = model.trim();
     let default = agent
-        .default
-        .get_or_insert_with(AgentDefaultConfig::default);
+        .raw_mut()
+        .entry("default".to_string())
+        .or_insert_with(|| Value::Object(serde_json::Map::new()));
+
+    if !default.is_object() {
+        *default = Value::Object(serde_json::Map::new());
+    }
+    let Some(default) = default.as_object_mut() else {
+        return;
+    };
+
     if trimmed.is_empty() {
-        default.model = None;
+        default.shift_remove("model");
     } else {
-        default.model = Some(trimmed.to_string());
+        default.insert("model".to_string(), Value::String(trimmed.to_string()));
     }
 }
 
+fn build_agent(args: &AgentsWriteArgs) -> Result<AgentDoc, AgentsWriteError> {
+    let nsec = tenex_agent_storage::generate_nsec_bech32()
+        .map_err(|e| AgentsWriteError(format!("Failed to generate nsec: {e}")))?;
+    let mut raw = IndexMap::<String, Value>::new();
+    raw.insert("nsec".to_string(), Value::String(nsec));
+    raw.insert("slug".to_string(), Value::String(args.slug.clone()));
+    raw.insert("name".to_string(), Value::String(args.name.clone()));
+    raw.insert("role".to_string(), Value::String(args.role.clone()));
+    raw.insert(
+        "instructions".to_string(),
+        Value::String(args.instructions.clone()),
+    );
+    raw.insert(
+        "useCriteria".to_string(),
+        Value::String(args.use_criteria.clone()),
+    );
+    raw.insert("status".to_string(), Value::String("active".to_string()));
+    Ok(AgentDoc::from_raw(raw))
+}
+
 fn perform_write(
-    agents_dir: &Path,
+    base_dir: &Path,
     args: AgentsWriteArgs,
 ) -> Result<AgentsWriteOutput, AgentsWriteError> {
     if args.slug.trim().is_empty() {
@@ -208,63 +119,45 @@ fn perform_write(
         });
     }
 
-    if let Some((path, mut existing)) = find_agent_by_slug(agents_dir, &args.slug)? {
-        existing.name = args.name.clone();
-        existing.role = args.role.clone();
-        existing.instructions = args.instructions;
-        existing.use_criteria = args.use_criteria;
-        apply_llm_config(&mut existing, args.llm_config);
+    let mut storage =
+        AgentStorage::open(base_dir).map_err(|e| storage_error("open agent storage", e))?;
+    let existing = storage
+        .get_all_stored_agents()
+        .map_err(|e| storage_error("list agents", e))?
+        .into_iter()
+        .find(|(_, agent)| agent.slug() == Some(args.slug.as_str()));
 
-        write_json_atomic(&path, &existing)?;
-
-        let pubkey_hex = path
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .map(|s| s.to_string())
-            .ok_or_else(|| {
-                AgentsWriteError(format!("Agent file has no valid stem: {}", path.display()))
-            })?;
-
-        return Ok(AgentsWriteOutput {
-            success: true,
-            agent: Some(AgentsWriteAgent {
-                slug: args.slug,
-                name: args.name,
-                pubkey: pubkey_hex,
-            }),
-            error: None,
-        });
-    }
-
-    let keys = Keys::generate();
-    let pubkey_hex = keys.public_key().to_hex();
-    let nsec_bech32 = keys
-        .secret_key()
-        .to_bech32()
-        .map_err(|e| AgentsWriteError(format!("Failed to encode nsec: {e}")))?;
-
-    let mut agent = StoredAgent {
-        nsec: nsec_bech32,
-        slug: args.slug.clone(),
-        name: args.name.clone(),
-        role: args.role,
-        instructions: args.instructions,
-        use_criteria: args.use_criteria,
-        status: default_status(),
-        default: None,
-        extra: Map::new(),
+    let mut agent_doc = if let Some((_, mut existing)) = existing {
+        existing
+            .raw_mut()
+            .insert("name".to_string(), Value::String(args.name.clone()));
+        existing
+            .raw_mut()
+            .insert("role".to_string(), Value::String(args.role.clone()));
+        existing.raw_mut().insert(
+            "instructions".to_string(),
+            Value::String(args.instructions.clone()),
+        );
+        existing.raw_mut().insert(
+            "useCriteria".to_string(),
+            Value::String(args.use_criteria.clone()),
+        );
+        existing
+    } else {
+        build_agent(&args)?
     };
-    apply_llm_config(&mut agent, args.llm_config);
 
-    let target = agents_dir.join(format!("{pubkey_hex}.json"));
-    write_json_atomic(&target, &agent)?;
+    apply_llm_config(&mut agent_doc, args.llm_config);
+    let pubkey = storage
+        .save_agent(&agent_doc)
+        .map_err(|e| storage_error("save agent", e))?;
 
     Ok(AgentsWriteOutput {
         success: true,
         agent: Some(AgentsWriteAgent {
             slug: args.slug,
             name: args.name,
-            pubkey: pubkey_hex,
+            pubkey,
         }),
         error: None,
     })
@@ -321,7 +214,7 @@ impl Tool for AgentsWriteTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        perform_write(&self.agents_dir, args)
+        perform_write(&self.base_dir, args)
     }
 }
 
@@ -357,7 +250,7 @@ mod tests {
         assert_eq!(agent.name, "Alpha");
         assert_eq!(agent.pubkey.len(), 64);
 
-        let path = dir.join(format!("{}.json", agent.pubkey));
+        let path = dir.join("agents").join(format!("{}.json", agent.pubkey));
         let raw = std::fs::read_to_string(&path).unwrap();
         let v: Value = serde_json::from_str(&raw).unwrap();
         assert_eq!(v["slug"], "alpha");
@@ -377,7 +270,7 @@ mod tests {
 
         let first = perform_write(&dir, args("beta", "Beta", None)).unwrap();
         let pubkey = first.agent.unwrap().pubkey;
-        let path = dir.join(format!("{pubkey}.json"));
+        let path = dir.join("agents").join(format!("{pubkey}.json"));
         let original_nsec = {
             let raw = std::fs::read_to_string(&path).unwrap();
             let v: Value = serde_json::from_str(&raw).unwrap();
@@ -405,10 +298,11 @@ mod tests {
         assert_eq!(v["useCriteria"], "for code review");
         assert_eq!(v["default"]["model"], "openai:gpt-4o");
 
-        let entries: Vec<_> = std::fs::read_dir(&dir)
+        let entries: Vec<_> = std::fs::read_dir(dir.join("agents"))
             .unwrap()
             .filter_map(|e| e.ok())
             .filter(|e| e.path().extension().and_then(|s| s.to_str()) == Some("json"))
+            .filter(|e| e.file_name().to_str() != Some("index.json"))
             .collect();
         assert_eq!(entries.len(), 1, "update must not create a second file");
     }
@@ -419,7 +313,7 @@ mod tests {
         let dir = tmp.path().to_path_buf();
         let first = perform_write(&dir, args("gamma", "Gamma", None)).unwrap();
         let pubkey = first.agent.unwrap().pubkey;
-        let path = dir.join(format!("{pubkey}.json"));
+        let path = dir.join("agents").join(format!("{pubkey}.json"));
 
         let raw = std::fs::read_to_string(&path).unwrap();
         let mut v: Value = serde_json::from_str(&raw).unwrap();
@@ -443,7 +337,7 @@ mod tests {
     #[test]
     fn missing_dir_creates_on_first_write() {
         let tmp = tempfile::tempdir().unwrap();
-        let dir = tmp.path().join("nested").join("agents");
+        let dir = tmp.path().join("nested");
         assert!(!dir.exists());
         let out = perform_write(&dir, args("delta", "Delta", None)).unwrap();
         assert!(out.success);

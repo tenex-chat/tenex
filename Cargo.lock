@@ -2965,6 +2965,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "shell-words",
+ "tenex-agent-storage",
  "tenex-conversations",
  "tenex-identity",
  "tenex-llm-config",
@@ -2987,12 +2988,14 @@ dependencies = [
  "dirs-next",
  "futures",
  "glob",
+ "indexmap",
  "nostr",
  "regex",
  "rig-core",
  "serde",
  "serde_json",
  "tempfile",
+ "tenex-agent-storage",
  "tenex-context",
  "tenex-conversations",
  "tenex-llm-config",
@@ -3009,6 +3012,18 @@ dependencies = [
  "tracing-opentelemetry",
  "uuid",
  "walkdir",
+]
+
+[[package]]
+name = "tenex-agent-storage"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "indexmap",
+ "nostr-sdk",
+ "serde",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]
@@ -3101,6 +3116,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+ "tenex-agent-storage",
  "thiserror 2.0.18",
  "tracing",
  "tracing-subscriber",

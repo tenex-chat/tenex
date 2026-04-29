@@ -90,8 +90,8 @@ async fn run_manage() -> Result<()> {
     manager_actions::show_main_menu(&base_dir).await
 }
 
-/// Mirror `tenex agent delete <pubkey>` (`src/commands/agent/index.ts:75-83,
-/// 101-106`). Flow:
+/// Mirror `tenex agent delete <pubkey>` (`src/commands/agent/index.ts:26-34`,
+/// command registration at `:44-49`). Flow:
 ///
 /// 1. Load AgentStorage and call `delete_agent(pubkey)` (local file +
 ///    index removal — see [`AgentStorage::delete_agent`]).
@@ -114,7 +114,7 @@ async fn run_delete(pubkey: &str) -> Result<()> {
             "{}",
             crate::tui::theme::chalk_red(&format!("Error: agent {pubkey} not found")),
         );
-        // Mirror TS `process.exit(1)` (`commands/agent/index.ts:79-80`)
+        // Mirror TS `process.exit(1)` (`commands/agent/index.ts:31`)
         // which exits silently — no anyhow wrapper line on stderr.
         std::process::exit(1);
     }

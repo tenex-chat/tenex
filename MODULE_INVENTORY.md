@@ -14,6 +14,11 @@ This file is the canonical architecture reference for TENEX. Update it the momen
 - **`src/tenex.ts`, `src/cli.ts`, `src/index.ts`**: Wire telemetry, Commander commands, and `tenex` binary exports. They must stay dependency-light and only delegate to `commands/*`. Any new runtime flags belong here, not inside domain modules.
 - **`src/boot.ts`**: Single-project boot wrapper that initializes telemetry/config/NDK, waits for project discovery, and starts one runtime through `src/daemon`. The Rust supervisor uses this as the daemon startup entrypoint.
 
+### Rust Workspace Crates (`crates/` + `tenex/`)
+- **`crates/tenex-agent-storage`**: Library crate that owns global installed-agent JSON storage under `<base_dir>/agents`: `index.json`, `<pubkey>.json`, key generation/derivation, sanitization, category literals, read projections, and write-side mutation APIs. This is the only Rust crate that should mutate installed-agent JSON.
+- **`crates/tenex-project`**: Read-side project view. Reads project metadata and membership from `projects/<dTag>/event.json`, then loads member-agent projections from global JSON via `tenex-agent-storage`. It must not mutate agent JSON, project events, or installed-agent indexes.
+- **`crates/tenex-agent`**: Rust agent runner and tools. Agent-management tools that write installed-agent files delegate to `tenex-agent-storage` instead of writing JSON directly.
+
 ### Command Layer (`src/commands`)
 - **`agent/`**: User-facing subcommands for listing/removing/operating agents, including the interactive installed-agent manager for 4199 installs and permanent deletions. Orchestrates `agents/` runtimes, `services/ConfigService`, and `nostr` publishers; no business logic should remain inside command handlers.
 - **`config/`**: Interactive settings editors for backend and transport configuration. `config/telegram.ts` is the operator-facing UI for single-bot-per-agent Telegram transport config plus the global Telegram DM allowlist, while remembered chat/topic-to-project bindings remain derived runtime state backed by `AgentStorage`, `TransportBindingStore`, and global `whitelistedIdentities`.

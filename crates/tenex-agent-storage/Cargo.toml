@@ -1,0 +1,19 @@
+[package]
+name = "tenex-agent-storage"
+version = "0.1.0"
+edition = "2021"
+description = "JSON-backed global installed-agent storage for TENEX."
+
+[lib]
+name = "tenex_agent_storage"
+path = "src/lib.rs"
+
+[dependencies]
+anyhow = "1"
+indexmap = { version = "2", features = ["serde"] }
+nostr-sdk = "0.44"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+
+[dev-dependencies]
+tempfile = "3"

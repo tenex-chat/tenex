@@ -10,9 +10,10 @@ before adding, splitting, or merging crates.
   binary, a subsystem of the umbrella daemon. Not a kitchen sink.
 - **Composition through narrow contracts**, not through inheritance or
   shared globals. Two contracts dominate this tree:
-  1. **SQLite schema-as-contract**: storage crates expose a typed read/write
-     API over a versioned schema. Multiple processes (bun TS, Rust binaries)
-     open the same file. No service in front, no IPC layer.
+  1. **Storage contract by substrate**: SQLite crates expose a typed API over
+     a versioned schema; JSON-backed crates expose typed APIs over the shared
+     file layout. Multiple processes (bun TS, Rust binaries) open the same
+     durable state. No service in front, no IPC layer.
   2. **NDJSON over Unix sockets** (and over stdio for one-shots): the
      canonical local IPC. Same frame format whether the peer is a subprocess
      or a long-lived daemon. `tenex-agent` already uses this for stdio.
@@ -43,7 +44,9 @@ independent restart, hot-swap. Otherwise it is a library, not a daemon.
 
 | Want | Make it a … |
 |---|---|
-| Typed read/write of per-project state shared across processes | Library + SQLite (`tenex-conversations`, `tenex-project`) |
+| Typed conversation state shared across processes | Library + SQLite (`tenex-conversations`) |
+| Global installed-agent JSON shared across processes | Library + JSON files (`tenex-agent-storage`) |
+| Read-side project metadata and membership | Library + JSON files (`tenex-project`) |
 | LLM-bound or stateful work that should survive bun-runtime crashes | Daemon (`tenex-summarizer`, future `tenex-cron`, `tenex-intervention`) |
 | Pure compute reachable over a frame protocol | One-shot or long-lived binary (`tenex-agent`) |
 
@@ -58,19 +61,18 @@ These hold across every crate. Violations are bugs.
 - **Project IDs accept either form.** Public APIs that take a project
   identifier accept the full NIP-33 coordinate (`31933:<pubkey>:<dTag>`)
   or the bare dTag. Normalize once at the boundary.
-- **Schema is the contract.** Migrations are forward-only and versioned.
-  A DB whose schema version exceeds `CURRENT_SCHEMA_VERSION` is rejected
-  at open time.
+- **Schema or file layout is the contract.** SQLite migrations are
+  forward-only and versioned. JSON-backed crates must preserve the documented
+  file layout and canonical serialization rules.
 - **Lessons are not in any DB here.** Out of scope for `tenex-project`
   and `tenex-conversations`. They get their own home or no home.
 - **Signing is behind the `Signer` trait.** Today: `nsec:` scheme.
   Tomorrow: `bunker:` (NIP-46). One swap when it lands.
-- **No bun TS imports.** Crates here are Rust-only. The bun runtime
-  consumes the same SQLite schemas via TS bindings; that's the only
-  cross-language surface.
-- **Bun-side data on disk is the legacy source until cutover.** Migration
-  helpers (`migrate_from_legacy`) read it and write to SQLite. They do
-  not delete the originals; that is an operator concern.
+- **No bun TS imports.** Crates here are Rust-only. Cross-language state
+  sharing happens through the same SQLite schemas or JSON file layouts.
+- **Bun-side data on disk is the source until cutover.** Migration helpers
+  read existing files and write the destination substrate for crates that
+  need migration. They do not delete originals; that is an operator concern.
 
 ## When to add a new crate
 

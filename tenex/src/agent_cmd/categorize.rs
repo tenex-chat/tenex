@@ -14,8 +14,10 @@ use anyhow::Result;
 use indexmap::IndexMap;
 use regex::Regex;
 
-use crate::store::agent_storage::{derive_agent_pubkey_from_nsec, AgentDoc, AgentStorage};
-use crate::store::role_categories::{is_valid_category, AgentCategory, VALID_CATEGORIES};
+use tenex_agent_storage::{
+    derive_agent_pubkey_from_nsec, is_valid_category, AgentCategory, AgentDoc, AgentStorage,
+    VALID_CATEGORIES,
+};
 
 /// Mirror of `BackfillResult` (`backfillAgentCategories.ts:9-14`).
 ///
@@ -47,7 +49,7 @@ pub struct AgentMetadata {
 ///
 /// The trailing `Valid categories: <list>` line is generated from
 /// [`VALID_CATEGORIES`] joined with `", "` — keeping the source-of-truth
-/// in [`crate::store::role_categories`] so adding/removing a category
+/// in [`tenex_agent_storage`] so adding/removing a category
 /// updates the prompt automatically. Built lazily because formatting at
 /// item-init isn't available for `static`.
 pub fn system_prompt() -> String {
@@ -266,9 +268,9 @@ const _: fn() = || {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::store::agent_storage::generate_nsec_bech32;
     use serde_json::Value;
     use std::sync::atomic::{AtomicU64, Ordering};
+    use tenex_agent_storage::generate_nsec_bech32;
 
     fn unique_temp() -> std::path::PathBuf {
         static COUNTER: AtomicU64 = AtomicU64::new(0);

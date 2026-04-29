@@ -1,7 +1,7 @@
 //! Signer abstraction.
 //!
-//! The `agents` table stores a signer reference (`signer_ref`) — an opaque
-//! scheme-prefixed handle. The two schemes the spec calls out:
+//! Agent JSON stores a signer reference (`signer_ref`) — an opaque
+//! scheme-prefixed handle projected from the persisted `nsec` field.
 //!
 //! | Scheme  | Form                       | Status     |
 //! |---------|----------------------------|------------|
@@ -60,7 +60,7 @@ pub trait Signer: Send + Sync {
     fn sign(&self, builder: EventBuilder) -> std::result::Result<Event, SignerError>;
 }
 
-/// Resolve the [`Signer`] for an agent row.
+/// Resolve the [`Signer`] for an agent projection.
 ///
 /// Returns `Err(UnsupportedScheme)` for `bunker:` references — the abstraction
 /// is in place, the implementation lands when NIP-46 does.

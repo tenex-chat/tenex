@@ -242,7 +242,10 @@ mod tests {
         .unwrap();
 
         let saved = TenexConfigDoc::load(&base).unwrap();
-        assert_eq!(saved.tenex_private_key().as_deref(), Some(known_key.as_str()));
+        assert_eq!(
+            saved.tenex_private_key().as_deref(),
+            Some(known_key.as_str())
+        );
 
         std::fs::remove_dir_all(&base).ok();
     }

@@ -14,7 +14,7 @@
 use anyhow::Result;
 
 use crate::nostr_pub::installed_agents::publish_installed_agents_inventory;
-use crate::store::agent_storage::AgentStorage;
+use tenex_agent_storage::AgentStorage;
 
 /// Options for [`delete_stored_agent`]. Mirrors the TS option bag
 /// (`AgentProvisioningService.ts:69-75`).
@@ -85,10 +85,10 @@ pub async fn delete_stored_agent(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::store::agent_storage::{generate_nsec_bech32, AgentDoc};
     use indexmap::IndexMap;
     use serde_json::Value;
     use std::sync::atomic::{AtomicU64, Ordering};
+    use tenex_agent_storage::{generate_nsec_bech32, AgentDoc};
 
     fn unique_temp() -> std::path::PathBuf {
         static COUNTER: AtomicU64 = AtomicU64::new(0);

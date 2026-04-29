@@ -17,7 +17,6 @@
 
 use std::path::PathBuf;
 
-pub mod agent_storage;
 pub mod api_keys;
 pub mod atomic;
 pub mod conversation_disk_reader;
@@ -29,7 +28,6 @@ pub mod project_members;
 pub mod project_mutation;
 pub mod provider_ids;
 pub mod providers;
-pub mod role_categories;
 pub mod tenex_config;
 
 #[cfg(test)]

@@ -1,27 +1,30 @@
 # tenex-project
 
-Library crate. Typed SQLite-backed view of a TENEX project's static state: agent definitions, project metadata, membership, transport allowlists, MCP configuration. One file per project, opened directly by every Rust binary that needs project context. No daemon, no socket.
+Library crate. Typed file-backed view of a TENEX project's static state: project
+metadata and project membership come from the persisted project event, while
+agent definitions are read from global JSON files under `<base_dir>/agents`.
+Opened directly by every Rust binary that needs project context. No daemon, no
+socket, no database.
 
-Sits beside `tenex-conversations` (conversation state) as the second pillar of per-project local state. Different file because change rates diverge: conversation rows are written every turn; project rows change only when humans or agent-management commands edit project configuration.
-
-Canonical spec: `docs/plans/2026-04-28-tenex-project-library.md`
+Sits beside `tenex-conversations` (conversation state) as the read-side view of
+project-local state. Conversation rows are stored in SQLite; agents are not.
 
 ## Storage layout
 
 ```
-~/.tenex/projects/<dTag>/project.db
+~/.tenex/projects/<dTag>/event.json
+~/.tenex/agents/<pubkey>.json
 ```
 
 `Project::open(project_id, base_dir)` or `Project::open_default(project_id)` resolves the path. `project_id` may be a NIP-33 coordinate (`31933:<pubkey>:<dTag>`) or a bare dTag — normalization happens at the boundary in `id::normalize_project_id`.
 
 ## Critical invariants
 
-- **Schema is the contract.** `migrations::initialize()` runs at open time. Mismatch with the TS binding is a startup error.
-- **Forward-only migrations.** Never alter or remove existing migrations.
 - **Project-id flexibility.** Every API entry point that accepts a project ID must go through `normalize_project_id`. Do not assume a bare dTag.
-- **`Signer` trait is the only speculative abstraction.** The `agents.signer_ref` column holds `nsec:<bech32>` today. The `Signer` trait (`src/signer.rs`) exists so that the future `bunker:<uri>` scheme is a new impl with no callsite changes. Do not add other speculative traits.
-- **Materialized rows come from relay-event ingestion only.** Local-only augmentation columns (`working_directory`, `signer_ref`, etc.) may be written directly. Rows that mirror relay events must originate from a relay-event ingestion path.
-- **Agents table is global-by-pubkey, per-project-file.** The same agent definition is materialized in every project DB it belongs to. Cross-DB joins are not needed and must not be added.
+- **`Signer` trait is the only speculative abstraction.** The read-side agent projection exposes `signer_ref` as `nsec:<bech32>` from the global JSON record today. The `Signer` trait (`src/signer.rs`) exists so that the future `bunker:<uri>` scheme is a new impl with no callsite changes. Do not add other speculative traits.
+- **Project membership comes from relay-event ingestion.** `Project` derives members from `p` tags in `projects/<dTag>/event.json`; it must not invent membership from local agent files.
+- **Agent definitions are global JSON by pubkey.** `Project` reads `<base_dir>/agents/<pubkey>.json` for each member. Cross-project joins are not needed and must not be added.
+- **Read-side only.** `tenex-project` does not mutate agent JSON, project events, or indexes. Global agent writes belong in the installed-agent storage layer, not here.
 - **No lessons.** Lessons are not stored here and must never be added.
 
 ## Public API
@@ -32,25 +35,21 @@ Canonical spec: `docs/plans/2026-04-28-tenex-project-library.md`
 - `agent_by_pubkey(pubkey)` → `Option<Agent>`
 - `agent_by_slug(slug)` → `Option<Agent>`
 - `project_agents()` → `Vec<ProjectAgent>` (membership + flags)
-- `upsert_metadata(...)`, `upsert_agent(...)`, `upsert_project_agent(...)` — write path
-- `integrity_check()` → `String`
 
 Key types: `Agent`, `ProjectAgent`, `ProjectMetadata`, `Signer`, `NsecSigner`, `SignerScheme`.
 
 ## How to approach changes
 
 1. `cargo test -p tenex-project` before and after edits.
-2. Schema changes go in `src/migrations.rs` as a new versioned entry.
-3. New agent fields: add migration column + update `Agent` struct + update upsert SQL.
-4. The TypeScript binding targets the same migration version. Confirm compatibility before landing schema changes.
-5. Do not add a daemon, socket, or abstract storage backend.
+2. New agent fields: update `RawStoredAgent`, `Agent`, and `read_agent_file`.
+3. New project event fields: update `RawProjectEvent` and the projector helpers.
+4. Do not add a daemon, socket, database, or abstract storage backend.
 
 ## Intentionally absent
 
 - No daemon or socket.
-- No ORM.
-- No backwards-compatible JSON file layout after migration (one-shot via `tenex doctor migrate`).
+- No database, migrations, or ORM.
 - No cross-host replication.
 - No skill catalog table (skills are filesystem-discovered at runtime).
-- No separate MCP server registry table (lives in `mcp_servers_json` on the agent row).
+- No separate MCP server registry (MCP server config is read from the agent JSON).
 - No lessons.

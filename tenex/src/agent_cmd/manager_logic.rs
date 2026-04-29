@@ -26,10 +26,10 @@ use std::cmp::Ordering;
 use anyhow::{anyhow, Result};
 use indexmap::IndexMap;
 
-use crate::store::agent_storage::{derive_agent_pubkey_from_nsec, AgentStorage};
 use crate::store::project_members::{
     get_project_visibility, list_projects_for_agent, ProjectVisibility,
 };
+use tenex_agent_storage::{derive_agent_pubkey_from_nsec, AgentStorage};
 
 /// Mirror of `type ManagedAgent` (`AgentManager.ts:23-27`):
 /// loaded stored-agent + derived pubkey + visible projects.
@@ -451,9 +451,9 @@ mod tests {
 
     // ─────────── load_agents (composition) ───────────
 
-    use crate::store::agent_storage::{generate_nsec_bech32, AgentDoc};
     use serde_json::Value;
     use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
+    use tenex_agent_storage::{generate_nsec_bech32, AgentDoc};
 
     fn unique_temp() -> std::path::PathBuf {
         static COUNTER: AtomicU64 = AtomicU64::new(0);

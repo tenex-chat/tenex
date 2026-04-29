@@ -7,9 +7,9 @@
 //! a screen-level module that consumes these primitives.
 //!
 //! `TelegramAgentConfig` itself (the typed wire shape) is in
-//! [`crate::store::agent_storage`].
+//! [`tenex_agent_storage`].
 
-use crate::store::agent_storage::TelegramAgentConfig;
+use tenex_agent_storage::TelegramAgentConfig;
 
 /// Working-set shape used by the interactive editor. Matches TS
 /// `TelegramDraft` (`telegram.ts:18-22`): every field optional, no

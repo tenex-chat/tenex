@@ -7,7 +7,7 @@
 //!
 //! - [`crate::agent_cmd::provisioning::delete_stored_agent`] — local file +
 //!   index removal + optional kind:24011 inventory publish
-//! - [`crate::store::agent_storage::AgentStorage::add_agent_to_project`] —
+//! - [`tenex_agent_storage::AgentStorage::add_agent_to_project`] —
 //!   local index mutation + status flip
 //! - [`crate::nostr_pub::project_mutation::sync_many_project_memberships`]
 //!   — kind:31933 republish per affected project
@@ -36,13 +36,13 @@ use crate::agent_cmd::manager_logic::{
 use crate::agent_cmd::provisioning::{delete_stored_agent, DeleteOptions};
 use crate::nostr_pub::owner_signer::resolve_owner_signer;
 use crate::nostr_pub::project_mutation::sync_many_project_memberships;
-use crate::store::agent_storage::AgentStorage;
 use crate::store::project_members::list_assignable_project_dtags;
 use crate::tui::custom_prompts::agent_select_prompt::{
     agent_select_prompt, get_agent_list_height, ActionItem, AgentItem,
 };
 use crate::tui::display;
 use crate::tui::prompts;
+use tenex_agent_storage::AgentStorage;
 
 /// Mirror `bulkDeleteAgents` (`AgentManager.ts:456-490`).
 ///
@@ -717,9 +717,9 @@ fn unique_ordered_projects(agents: &[&ManagedAgent]) -> Vec<String> {
 mod tests {
     use super::*;
     use crate::agent_cmd::manager_logic::ManagedAgent;
-    use crate::store::agent_storage::generate_nsec_bech32;
     use nostr_sdk::Keys;
     use std::sync::atomic::{AtomicU64, Ordering};
+    use tenex_agent_storage::generate_nsec_bech32;
 
     fn unique_temp() -> std::path::PathBuf {
         static COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -740,7 +740,7 @@ mod tests {
         // Generate a random pubkey so Set-based dedupe across tests doesn't
         // bleed; we only use this in tests that don't read the storage.
         let nsec = generate_nsec_bech32().unwrap();
-        let pubkey = crate::store::agent_storage::derive_agent_pubkey_from_nsec(&nsec).unwrap();
+        let pubkey = tenex_agent_storage::derive_agent_pubkey_from_nsec(&nsec).unwrap();
         ManagedAgent {
             slug: slug.to_owned(),
             name: format!("{slug}-name"),

@@ -175,60 +175,24 @@ fn first_tag_value(tags: &[Vec<String>], name: &str) -> Option<String> {
     })
 }
 
-#[derive(Debug, Deserialize)]
-struct RawStoredAgent {
-    #[serde(default)]
-    nsec: Option<String>,
-    #[serde(default)]
-    slug: Option<String>,
-    #[serde(default)]
-    name: Option<String>,
-    #[serde(default)]
-    role: Option<String>,
-    #[serde(default)]
-    description: Option<String>,
-    #[serde(default)]
-    instructions: Option<String>,
-    #[serde(default, rename = "useCriteria")]
-    use_criteria: Option<String>,
-    #[serde(default)]
-    category: Option<String>,
-    #[serde(default, rename = "inferredCategory")]
-    inferred_category: Option<String>,
-    #[serde(default)]
-    status: Option<String>,
-    #[serde(default, rename = "eventId")]
-    event_id: Option<String>,
-    #[serde(default)]
-    default: Option<serde_json::Value>,
-    #[serde(default)]
-    telegram: Option<serde_json::Value>,
-    #[serde(default, rename = "mcpServers")]
-    mcp_servers: Option<serde_json::Value>,
-}
-
 fn read_agent_file(path: &Path, pubkey: &str) -> Result<Agent> {
-    let bytes = std::fs::read(path)?;
-    let raw: RawStoredAgent = serde_json::from_slice(&bytes)?;
-    let signer_ref = raw.nsec.as_ref().map(|n| format!("nsec:{n}"));
-    let slug = raw.slug;
-    let name = raw.name.unwrap_or_else(|| slug.clone().unwrap_or_default());
-    let slug = slug.unwrap_or_else(|| pubkey[..8].to_string());
+    let raw = tenex_agent_storage::read_agent_projection_file(path, pubkey)
+        .map_err(|e| Error::Other(format!("read agent file {}: {e}", path.display())))?;
     Ok(Agent {
-        pubkey: pubkey.to_string(),
-        slug,
-        name,
+        pubkey: raw.pubkey,
+        slug: raw.slug,
+        name: raw.name,
         role: raw.role,
         description: raw.description,
         instructions: raw.instructions,
         use_criteria: raw.use_criteria,
         category: raw.category,
         inferred_category: raw.inferred_category,
-        signer_ref,
+        signer_ref: raw.signer_ref,
         event_id: raw.event_id,
         status: raw.status,
-        default_config_json: raw.default.as_ref().map(|v| v.to_string()),
-        telegram_config_json: raw.telegram.as_ref().map(|v| v.to_string()),
-        mcp_servers_json: raw.mcp_servers.as_ref().map(|v| v.to_string()),
+        default_config_json: raw.default_config_json,
+        telegram_config_json: raw.telegram_config_json,
+        mcp_servers_json: raw.mcp_servers_json,
     })
 }
