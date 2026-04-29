@@ -183,11 +183,13 @@ fn format_choice_label(doc: &LlmsDoc, name: &str, source: &dyn ModelInfoSource) 
         None => return name.to_owned(),
     };
 
+    let dim_open = crate::tui::theme::DIM_OPEN;
+    let dim_close = crate::tui::theme::DIM_CLOSE;
     if entry.kind() == LlmConfigKind::Meta {
         let n_variants = entry.variant_names().len();
         // TS: `${name}  ${chalk.dim(\`(multi-modal, ${count} variants)\`)}`
         return format!(
-            "{name}  \x1b[2m(multi-modal, {n_variants} variants)\x1b[22m"
+            "{name}  {dim_open}(multi-modal, {n_variants} variants){dim_close}"
         );
     }
 
@@ -211,7 +213,7 @@ fn format_choice_label(doc: &LlmsDoc, name: &str, source: &dyn ModelInfoSource) 
         name.to_owned()
     } else {
         // TS: `${name}  ${chalk.dim(parts.join(" · "))}`
-        format!("{name}  \x1b[2m{}\x1b[22m", parts.join(" · "))
+        format!("{name}  {dim_open}{}{dim_close}", parts.join(" · "))
     }
 }
 

@@ -175,6 +175,16 @@ pub const CHALK_GRAY_OPEN: &str = "\x1b[90m";
 /// Raw chalk.gray close code — `\x1b[39m` (default foreground).
 pub const CHALK_GRAY_CLOSE: &str = "\x1b[39m";
 
+/// Raw chalk.dim open code — `\x1b[2m` (SGR 2, dim attribute). Use
+/// when embedding dim-styled segments inside a label string that's
+/// later emitted by inquire (which doesn't run our crossterm
+/// rendering pipeline). Pair with [`DIM_CLOSE`].
+pub const DIM_OPEN: &str = "\x1b[2m";
+
+/// Raw chalk.dim close code — `\x1b[22m` (cancels SGR 2). Pair with
+/// [`DIM_OPEN`].
+pub const DIM_CLOSE: &str = "\x1b[22m";
+
 /// Dim modifier (no color, just dimmed). Background instructions, `Back`
 /// labels, separators (`──`), hints, `[ ]`, `(default)`.
 pub fn dim() -> Style {

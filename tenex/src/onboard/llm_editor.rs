@@ -239,7 +239,9 @@ fn compose_display_name(name: &str, detail: &str) -> String {
         return name.to_owned();
     }
     let mut out = String::with_capacity(name.len() + detail.len() + 8);
-    let _ = write!(out, "{name}  \x1b[2m{detail}\x1b[22m");
+    let dim_open = crate::tui::theme::DIM_OPEN;
+    let dim_close = crate::tui::theme::DIM_CLOSE;
+    let _ = write!(out, "{name}  {dim_open}{detail}{dim_close}");
     out
 }
 
@@ -251,14 +253,16 @@ fn compose_display_name(name: &str, detail: &str) -> String {
 /// Embed the dim ANSI codes inline so the picker renders the same
 /// muted suffix without needing a separate styling hook.
 pub fn action_items() -> Vec<ActionItem> {
+    let dim_open = crate::tui::theme::DIM_OPEN;
+    let dim_close = crate::tui::theme::DIM_CLOSE;
     vec![
         ActionItem {
-            name: "Add new configuration \x1b[2m(a)\x1b[22m".to_owned(),
+            name: format!("Add new configuration {dim_open}(a){dim_close}"),
             key: 'a',
             value: "add".to_owned(),
         },
         ActionItem {
-            name: "Add multi-modal configuration \x1b[2m(m)\x1b[22m".to_owned(),
+            name: format!("Add multi-modal configuration {dim_open}(m){dim_close}"),
             key: 'm',
             // TS uses the camelCase token `addMultiModal` (LLMConfigEditor.ts:211).
             value: "addMultiModal".to_owned(),
