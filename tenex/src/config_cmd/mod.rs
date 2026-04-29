@@ -210,9 +210,15 @@ async fn dispatch(base_dir: &std::path::Path, value: &str) -> Result<()> {
             // the same `❌ Failed to <verb> <noun>: <error>` line. The
             // remaining two (`paths`, `context-management`) have NO TS
             // wrapper — let the error propagate untouched.
+            //
+            // Use `theme::chalk_red(...)` (raw SGR 31 + SGR 39) for
+            // byte-perfect TS chalk match — `console::Style.apply_to(...)`
+            // would close with SGR 0 instead.
             if let Some(prefix) = failure_message_prefix(value) {
-                let red = console::Style::new().red();
-                println!("{}", red.apply_to(format!("❌ {prefix}: {e}")));
+                println!(
+                    "{}",
+                    crate::tui::theme::chalk_red(&format!("❌ {prefix}: {e}")),
+                );
             }
             Err(e)
         }
@@ -289,23 +295,15 @@ async fn run_providers_submenu(base_dir: &std::path::Path) -> Result<()> {
             doc.save(base_dir)?;
             // Mirror TS verbatim at `commands/config/providers.ts:18`:
             //   chalk.green("✓") + chalk.bold(` Provider credentials saved to ${path}/providers.json`)
-            // This is NOT the standard `display.success` shape — providers.ts
-            // builds its own success line (no leading indent, green ✓, bold
-            // body INCLUDING the leading space, full path interpolated). The
-            // shared `display::success` helper matches `display.ts:40-42`'s
-            // 2-space-indented green-bold-✓ shape, which is a different
-            // success line used by other modules.
+            // TS at `commands/config/providers.ts:18`:
+            //   chalk.green("✓") + chalk.bold(` Provider credentials saved to ${path}/providers.json`)
+            // This is the same green-✓ + bold-space-text shape every other
+            // config submenu emits — route through the shared helper.
             let providers_json = base_dir.join("providers.json");
-            let green = console::Style::new().green();
-            let bold = console::Style::new().bold();
-            println!(
-                "{}{}",
-                green.apply_to("✓"),
-                bold.apply_to(format!(
-                    " Provider credentials saved to {}",
-                    providers_json.display()
-                )),
-            );
+            display::config_success(&format!(
+                "Provider credentials saved to {}",
+                providers_json.display()
+            ));
         }
         crate::onboard::providers::ProviderSetupResult::Cancelled => {}
     }
@@ -321,19 +319,19 @@ fn run_llm_submenu(base_dir: &std::path::Path) -> Result<()> {
     // doesn't recurse into a broken editor.
     let providers = ProvidersDoc::load(base_dir)?;
     if providers.provider_ids().is_empty() {
-        // TS at commands/config/llm.ts:26 emits:
+        // TS at commands/config/llm.ts:25-26 emits:
+        //   console.log(chalk.red("❌ No providers configured."));
         //   console.log(amber("→") + chalk.bold(" Run tenex config providers first"));
         // where `amber` is INQUIRER-amber truecolor (chalk.hex("#FFC107")),
         // NOT bold and NOT the display palette's xterm-256 #214. Emit
-        // the raw truecolor escape.
-        let red = console::Style::new().red();
-        let bold = console::Style::new().bold();
+        // the raw truecolor escape and route the chalk.red through the
+        // theme helper for byte-perfect SGR-39 close.
         let amber_open = crate::tui::theme::INQUIRER_AMBER_FG;
         let amber_close = crate::tui::theme::FG_RESET;
-        eprintln!("{}", red.apply_to("❌ No providers configured."));
+        eprintln!("{}", crate::tui::theme::chalk_red("❌ No providers configured."));
         eprintln!(
             "{amber_open}→{amber_close}{}",
-            bold.apply_to(" Run tenex config providers first"),
+            crate::tui::theme::chalk_bold(" Run tenex config providers first"),
         );
         std::process::exit(1);
     }
