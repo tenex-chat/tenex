@@ -437,9 +437,7 @@ fn clear_frame<W: Write>(stdout: &mut W, height: u16) -> io::Result<()> {
     if height == 0 {
         return Ok(());
     }
-    if height > 1 {
-        stdout.queue(MoveUp(height - 1))?;
-    }
+    stdout.queue(MoveUp(height))?;
     stdout.queue(MoveToColumn(0))?;
     stdout.queue(Clear(ClearType::FromCursorDown))?;
     stdout.flush()
