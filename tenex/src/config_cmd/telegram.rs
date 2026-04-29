@@ -119,8 +119,10 @@ fn render_listing(telegram: &[String]) {
     println!();
     println!("  Global Telegram DM allowlist:");
     if telegram.is_empty() {
+        // TS at telegram.ts:330 emits `console.log(chalk.dim("    none"))`
+        // — 4 leading spaces are INSIDE the dim wrap. Mirror byte-for-byte.
         let dim = console::Style::new().dim();
-        println!("    {}", dim.apply_to("none"));
+        println!("{}", dim.apply_to("    none"));
     } else {
         for id in telegram {
             println!("    {id}");
