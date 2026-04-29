@@ -162,9 +162,11 @@ Migrated so far (each site is byte-perfect chalk now):
   `role_menu_prompt::tests::render_frame_active_role_cursor_has_space_outside_amber_wrap`
   (asserts the SGR-39 close exactly, forbids SGR-0).
 
+- The outer amber wrap of `section_menu_prompt`'s active Entry and
+  active Back rows → `Print(theme::FG_RESET)`. Pinned by
+  `section_menu_prompt::tests::render_frame_active_back_preserves_dim_styling`.
+
 Still using `ResetColor` and therefore emitting `\x1b[0m`:
-- Inner amber wraps in `section_menu_prompt`'s active Entry / Back
-  rows (single-amber-span pattern around cursor + label).
 - A handful of mixed-attribute closes (e.g. amber + bold "  Done"
   ending with `NormalIntensity, ResetColor`). These have a real
   intensity-close before the foreground close, so SGR-0 here

@@ -27,7 +27,7 @@ use std::io::{self, Write};
 
 use crossterm::cursor::{MoveToColumn, MoveUp};
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
-use crossterm::style::{Attribute, Color, Print, ResetColor, SetAttribute, SetForegroundColor};
+use crossterm::style::{Attribute, Color, Print, SetAttribute, SetForegroundColor};
 use crossterm::terminal::{Clear, ClearType};
 use crossterm::{queue, QueueableCommand};
 
@@ -343,12 +343,16 @@ fn render_frame<W: Write>(
                 let is_active = i == active;
                 let pfx = if is_active { cursor_active.as_str() } else { "  " };
                 if is_active {
+                    // Outer amber wrap is FG-only (no inner bold/dim).
+                    // Close with raw SGR 39 so the wire bytes match TS
+                    // chalk's `theme.style.highlight(`${cursor} ${name}`)`
+                    // foreground close.
                     queue!(
                         stdout,
                         SetForegroundColor(AMBER),
                         Print(pfx),
                         Print(&entry.label),
-                        ResetColor,
+                        Print(crate::tui::theme::FG_RESET),
                         Print("\r\n"),
                     )?;
                 } else {
@@ -394,6 +398,10 @@ fn render_frame<W: Write>(
                 let is_active = i == active;
                 let pfx = if is_active { cursor_active.as_str() } else { "  " };
                 if is_active {
+                    // The inner dim span is already closed by
+                    // `NormalIntensity` (SGR 22) before the outer
+                    // foreground close. Close FG with raw SGR 39 to
+                    // match chalk byte-for-byte.
                     queue!(
                         stdout,
                         SetForegroundColor(AMBER),
@@ -401,7 +409,7 @@ fn render_frame<W: Write>(
                         SetAttribute(Attribute::Dim),
                         Print("  Back"),
                         SetAttribute(Attribute::NormalIntensity),
-                        ResetColor,
+                        Print(crate::tui::theme::FG_RESET),
                         Print("\r\n"),
                     )?;
                 } else {
@@ -690,6 +698,12 @@ mod tests {
         assert!(
             s.contains("\x1b[2m  Back\x1b[22m"),
             "active Back row must keep the dim wrap on the label; got {s:?}",
+        );
+        // The outer amber wrap must close with SGR 39 (FG default),
+        // not SGR 0. The inner dim is closed by SGR 22 just before.
+        assert!(
+            s.contains("\x1b[2m  Back\x1b[22m\x1b[39m"),
+            "active Back row must close FG with SGR 39 (chalk-perfect); got {s:?}",
         );
     }
 
