@@ -12,6 +12,8 @@ use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 use tracing::{debug, error, info, warn};
 
+use tenex_conversations::Project;
+
 use crate::config::Config;
 use crate::detector;
 use crate::model::{InterventionState, NotifiedEntry, PendingIntervention};
@@ -311,6 +313,37 @@ async fn handle_trigger(
         guard.timers.remove(&conv_id);
         return;
     };
+
+    // Skip if the conversation still has in-flight delegations. A parent
+    // completing while a child is still running is expected behaviour, not a
+    // user-silence event that warrants intervention.
+    match Project::new_with_default_base(project_id)
+        .and_then(|p| {
+            tenex_conversations::ConversationStore::open(&p.conversation_db_path())
+                .map_err(Into::into)
+        })
+        .and_then(|store| store.has_active_delegation(&conv_id).map_err(Into::into))
+    {
+        Ok(true) => {
+            debug!(
+                conversation_id = %conv_id,
+                "active delegation in flight, skipping intervention"
+            );
+            let mut guard = ds.lock().await;
+            guard.pending.remove(&conv_id);
+            guard.timers.remove(&conv_id);
+            save_state_for_project(&guard, project_id);
+            return;
+        }
+        Ok(false) => {}
+        Err(e) => {
+            warn!(
+                conversation_id = %conv_id,
+                error = %e,
+                "could not check active delegations, proceeding with intervention"
+            );
+        }
+    }
 
     let intervention_agent_pk = match resolver::resolve_slug(agent_slug) {
         Ok(pk) => pk,

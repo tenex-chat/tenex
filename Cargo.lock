@@ -3113,6 +3113,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+ "tenex-conversations",
  "tenex-project",
  "tenex-protocol",
  "tenex-telemetry",

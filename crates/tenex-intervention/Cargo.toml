@@ -20,6 +20,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tenex-telemetry = { path = "../tenex-telemetry" }
 nostr-sdk = "0.44"
 dirs-next = "2"
+tenex-conversations = { path = "../tenex-conversations" }
 tenex-project = { path = "../tenex-project" }
 tenex-protocol = { path = "../tenex-protocol", features = ["relay"] }
 libc = "0.2"
