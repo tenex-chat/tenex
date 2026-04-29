@@ -144,8 +144,25 @@ the raw-string `chalk_*(text)` helpers (which emit
 `<open>...\x1b[39m`). The bespoke crossterm prompts in
 `tui/custom_prompts/` (`role_menu_prompt`, `provider_select_prompt`,
 `section_menu_prompt`, `variant_list_prompt`, `relay_prompt`,
-`agent_select_prompt`) all `queue!(stdout, ResetColor)` — at runtime
-they emit `\x1b[0m` where TS chalk would emit `\x1b[39m`.
+`agent_select_prompt`) historically used `queue!(stdout, ResetColor)`
+for every foreground-only close — emitting `\x1b[0m` where TS chalk
+emits `\x1b[39m`.
+
+Migrated so far (each site is byte-perfect chalk now):
+- The `?` prefix (`inquirerTheme.prefix.idle`) in all six bespoke
+  prompts → `Print(theme::FG_RESET)`. Pinned by
+  `role_menu_prompt::tests::render_frame_question_prefix_uses_sgr39_close_not_sgr0`.
+- Every `chalk.{red,green,yellow,cyan,gray}` wrap that was previously
+  routed through crossterm's `Color::Dark*` (256-colour) → raw
+  `theme::CHALK_*_OPEN` + `theme::FG_RESET`.
+
+Still using `ResetColor` and therefore emitting `\x1b[0m`:
+- The active-row cursor `${cursor} ` (every bespoke prompt's variant
+  rows / action rows / Done row). The cursor wrap is FG-only so the
+  visual is unchanged; the existing space-position regression tests
+  tolerate either closer.
+- Inner amber wraps in `section_menu_prompt`'s active Entry / Back
+  rows (single-amber-span pattern around cursor + label).
 
 Visually identical for spans that only changed foreground (no bold,
 dim, italic, or background open at the same time — which is the case

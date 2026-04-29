@@ -306,7 +306,10 @@ fn render_frame<W: Write>(
     // `theme.style.message` (`@inquirer/core/dist/lib/theme.js:14` —
     // `styleText('bold', text)`). The TENEX inquirerTheme doesn't
     // override `style.message`, so the message stays bold. Mirror that.
-    queue!(stdout, SetForegroundColor(AMBER), Print("?"), ResetColor)?;
+    // TS `inquirerTheme.prefix.idle = chalk.hex("#FFC107")("?")` —
+    // closes with SGR 39 (FG default), not SGR 0 (full reset). Use the
+    // raw FG_RESET constant for byte-perfect chalk-prefix match.
+    queue!(stdout, SetForegroundColor(AMBER), Print("?"), Print(crate::tui::theme::FG_RESET))?;
     queue!(
         stdout,
         Print(" "),

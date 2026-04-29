@@ -613,7 +613,13 @@ fn render_frame<W: Write>(
     // TS at provider-select-prompt.ts:217-218 builds
     //   const styledMessage = theme.style.message(message, "idle");
     // → `styleText('bold', text)`. Mirror byte-for-byte: bold.
-    queue!(stdout, SetForegroundColor(AMBER), Print("?"), ResetColor)?;
+    // TS `inquirerTheme.prefix.idle = chalk.hex("#FFC107")("?")` →
+    //   \x1b[38;2;255;193;7m?\x1b[39m
+    // chalk closes its colour span with SGR 39 (foreground default);
+    // crossterm's ResetColor would emit SGR 0 (full reset) — visually
+    // identical but byte-different. Use the raw FG_RESET constant for
+    // byte-perfect chalk-prefix match.
+    queue!(stdout, SetForegroundColor(AMBER), Print("?"), Print(crate::tui::theme::FG_RESET))?;
     queue!(
         stdout,
         Print(" "),

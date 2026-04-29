@@ -305,7 +305,10 @@ fn render_frame<W: Write>(
     // TS at AgentManager.ts:129-133 wraps message in
     //   theme.style.message(config.message, "idle")
     // → `styleText('bold', text)`. Mirror byte-for-byte: bold.
-    queue!(stdout, SetForegroundColor(AMBER), Print("?"), ResetColor)?;
+    // TS `inquirerTheme.prefix.idle = chalk.hex("#FFC107")("?")` —
+    // closes with SGR 39 (FG default), not SGR 0 (full reset). Match
+    // byte-for-byte by emitting the raw FG_RESET constant.
+    queue!(stdout, SetForegroundColor(AMBER), Print("?"), Print(crate::tui::theme::FG_RESET))?;
     queue!(
         stdout,
         Print(" "),

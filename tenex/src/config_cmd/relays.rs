@@ -193,10 +193,6 @@ fn prompt_select_relay(message: &str, options: &[String]) -> Option<String> {
     }
 }
 
-/// Render `<green>✓</green><bold> <text></bold>` matching the TS template
-/// `chalk.green("✓") + chalk.bold(" <text>")` (`:67, :81, :99, :113`).
-/// The ✓ is plain green (not bold) — only the body is bold.
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ActionValue {
     Add,

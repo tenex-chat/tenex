@@ -302,7 +302,10 @@ fn render_frame<W: Write>(
     // TS at onboard.ts:318 / roles.ts:177 wraps message in
     //   theme.style.message(promptConfig.message, "idle")
     // → `styleText('bold', text)`. Mirror byte-for-byte: bold.
-    queue!(stdout, SetForegroundColor(AMBER), Print("?"), ResetColor)?;
+    // TS `inquirerTheme.prefix.idle = chalk.hex("#FFC107")("?")` —
+    // closes with SGR 39 (FG default), not SGR 0 (full reset). Use the
+    // raw FG_RESET constant for byte-perfect chalk-prefix match.
+    queue!(stdout, SetForegroundColor(AMBER), Print("?"), Print(crate::tui::theme::FG_RESET))?;
     queue!(
         stdout,
         Print(" "),
@@ -621,6 +624,30 @@ mod tests {
             !s.contains("\x1b[38;2;255;193;7m› \x1b[0m")
                 && !s.contains("\x1b[38;2;255;193;7m› \x1b[39m"),
             "must not wrap the cursor's trailing space inside the amber span; got {s:?}",
+        );
+    }
+
+    /// Pin: the `?` prefix (`inquirerTheme.prefix.idle = chalk.hex("#FFC107")("?")`)
+    /// closes its colour span with SGR 39 (foreground default), exactly
+    /// matching chalk. The previous Rust impl emitted SGR 0 (full reset)
+    /// via crossterm's `ResetColor` — visually identical, byte-different.
+    /// Now that the `?` prefix uses the raw `theme::FG_RESET` constant, the
+    /// wire bytes are byte-perfect chalk match.
+    #[test]
+    fn render_frame_question_prefix_uses_sgr39_close_not_sgr0() {
+        let state = RoleMenuState::new(assignments_all("x"));
+        let mut buf: Vec<u8> = Vec::new();
+        render_frame(&mut buf, "Roles", &state, 0).unwrap();
+        let s = String::from_utf8(buf).expect("render output must be UTF-8");
+        // The `?` prefix must emit `\x1b[38;2;255;193;7m?\x1b[39m` —
+        // chalk.hex("#FFC107")("?") byte-for-byte.
+        assert!(
+            s.contains("\x1b[38;2;255;193;7m?\x1b[39m"),
+            "`?` prefix must close with SGR 39 (FG default) like chalk does; got {s:?}",
+        );
+        assert!(
+            !s.contains("\x1b[38;2;255;193;7m?\x1b[0m"),
+            "`?` prefix must not close with SGR 0 (full reset); got {s:?}",
         );
     }
 

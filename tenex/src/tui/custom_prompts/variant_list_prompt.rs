@@ -340,7 +340,10 @@ fn render_frame<W: Write>(
     // TS at variant-list-prompt.ts:118 wraps message in
     //   theme.style.message(config.message, "idle")
     // → `styleText('bold', text)`. Mirror byte-for-byte: bold.
-    queue!(stdout, SetForegroundColor(AMBER), Print("?"), ResetColor)?;
+    // TS `inquirerTheme.prefix.idle = chalk.hex("#FFC107")("?")` —
+    // closes with SGR 39 (FG default), not SGR 0 (full reset). Use the
+    // raw FG_RESET constant for byte-perfect chalk-prefix match.
+    queue!(stdout, SetForegroundColor(AMBER), Print("?"), Print(crate::tui::theme::FG_RESET))?;
     queue!(
         stdout,
         Print(" "),
