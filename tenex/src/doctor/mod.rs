@@ -146,12 +146,12 @@ async fn run_agents(args: AgentsArgs) -> Result<()> {
 /// surfaces an honest hint identifying the missing LLM substrate.
 ///
 /// The full backfill substrate (`AgentStorage::update_inferred_category`,
-/// the [`crate::agent_cmd::categorize::Categoriser`] trait,
+/// the [`crate::agent_cmd::categorize::Categorizer`] trait,
 /// `backfill_agent_categories`) is already in place. When the LLM service
-/// lands, a `LlmCategoriser` impl drops in and this becomes:
+/// lands, a `LlmCategorizer` impl drops in and this becomes:
 ///
 /// ```ignore
-/// let result = backfill_agent_categories(&mut storage, &llm_categoriser, opts)?;
+/// let result = backfill_agent_categories(&mut storage, &llm_categorizer, opts)?;
 /// println!("{}", blue.apply_to(format!(
 ///     "Processed: {}, Categorized: {}, Skipped: {}, Failed: {}",
 ///     result.processed, result.categorized, result.skipped, result.failed
@@ -192,7 +192,7 @@ fn preview_categorize(dry_run: bool) -> Result<()> {
     display::hint(
         "Agent categorization requires the LLM service \
          (spec doc 04 / categorizeAgent.ts) — pending port. The \
-         AgentStorage scan, the Categoriser trait, the backfill \
+         AgentStorage scan, the Categorizer trait, the backfill \
          orchestrator, and the kebab-literal persistence are all wired; \
          only the per-agent LLM call is missing.",
     );

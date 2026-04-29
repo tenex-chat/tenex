@@ -5,7 +5,7 @@
 //!
 //! The actual classification call (`categorizeAgent` — sends the
 //! agent's metadata to a configured LLM and parses the kebab-case
-//! category from the response) lives behind the [`Categoriser`] trait.
+//! category from the response) lives behind the [`Categorizer`] trait.
 //! When the LLM substrate lands, it implements this trait and the
 //! orchestrator runs unchanged. Tests stub the trait with an in-memory
 //! lookup so every other piece of the flow can be verified in isolation.
@@ -172,7 +172,7 @@ pub fn to_metadata(agent: &AgentDoc) -> AgentMetadata {
 ///   not an error.
 /// - `Err(_)` — hard transport error (connection failure, malformed
 ///   response). Propagates up.
-pub trait Categoriser {
+pub trait Categorizer {
     fn classify(&self, metadata: &AgentMetadata) -> Result<Option<AgentCategory>>;
 }
 
@@ -186,13 +186,13 @@ pub struct BackfillOptions {
 /// Mirror `backfillAgentCategories` (`:26-81`):
 /// 1. Read every canonical-active agent
 /// 2. Filter out any that already have a `category` OR `inferredCategory`
-/// 3. For each remaining: classify via [`Categoriser`]; on success either
+/// 3. For each remaining: classify via [`Categorizer`]; on success either
 ///    skip persist (dry-run) or write via
 ///    [`AgentStorage::update_inferred_category`]
 /// 4. Return [`BackfillResult`] with counters
 pub fn backfill_agent_categories(
     storage: &mut AgentStorage,
-    categoriser: &dyn Categoriser,
+    categorizer: &dyn Categorizer,
     options: BackfillOptions,
 ) -> Result<BackfillResult> {
     let all = storage.get_canonical_active_agents()?;
@@ -225,7 +225,7 @@ pub fn backfill_agent_categories(
 
     for (pubkey, agent) in uncategorized {
         let metadata = to_metadata(&agent);
-        let inferred = match categoriser.classify(&metadata)? {
+        let inferred = match categorizer.classify(&metadata)? {
             Some(c) => c,
             None => {
                 result.failed += 1;
@@ -248,19 +248,19 @@ pub fn backfill_agent_categories(
 /// Test-friendly classification stub: maps `slug → category` from a
 /// supplied table; missing slugs produce `Ok(None)`.
 #[cfg(test)]
-pub struct StubCategoriser {
+pub struct StubCategorizer {
     pub by_name: IndexMap<String, AgentCategory>,
 }
 
 #[cfg(test)]
-impl Categoriser for StubCategoriser {
+impl Categorizer for StubCategorizer {
     fn classify(&self, metadata: &AgentMetadata) -> Result<Option<AgentCategory>> {
         Ok(self.by_name.get(&metadata.name).copied())
     }
 }
 
 // Avoid an "unused import" warning in non-test builds — IndexMap is used
-// only by the cfg(test) StubCategoriser.
+// only by the cfg(test) StubCategorizer.
 const _: fn() = || {
     let _: IndexMap<String, AgentCategory> = IndexMap::new();
 };
@@ -311,12 +311,12 @@ mod tests {
         storage.save_agent(&doc).unwrap()
     }
 
-    fn stub(by_name: &[(&str, AgentCategory)]) -> StubCategoriser {
+    fn stub(by_name: &[(&str, AgentCategory)]) -> StubCategorizer {
         let mut m: IndexMap<String, AgentCategory> = IndexMap::new();
         for (n, c) in by_name {
             m.insert((*n).into(), *c);
         }
-        StubCategoriser { by_name: m }
+        StubCategorizer { by_name: m }
     }
 
     // ── update_inferred_category storage-method check ──────────────────
