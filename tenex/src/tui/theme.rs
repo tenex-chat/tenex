@@ -217,6 +217,66 @@ pub const DIM_OPEN: &str = "\x1b[2m";
 /// [`DIM_OPEN`].
 pub const DIM_CLOSE: &str = "\x1b[22m";
 
+/// Raw chalk.red open code — `\x1b[31m` (basic ANSI red, SGR 31).
+/// Pair with [`FG_RESET`]. Matches `chalk.red(text)` byte-for-byte.
+pub const CHALK_RED_OPEN: &str = "\x1b[31m";
+
+/// Raw chalk.green open code — `\x1b[32m` (basic ANSI green, SGR 32).
+/// Pair with [`FG_RESET`]. Matches `chalk.green(text)` byte-for-byte.
+pub const CHALK_GREEN_OPEN: &str = "\x1b[32m";
+
+/// Raw chalk.yellow open code — `\x1b[33m` (basic ANSI yellow, SGR 33).
+/// Pair with [`FG_RESET`]. Matches `chalk.yellow(text)` byte-for-byte.
+pub const CHALK_YELLOW_OPEN: &str = "\x1b[33m";
+
+/// Raw chalk.blue open code — `\x1b[34m` (basic ANSI blue, SGR 34).
+/// Pair with [`FG_RESET`]. Matches `chalk.blue(text)` byte-for-byte.
+pub const CHALK_BLUE_OPEN: &str = "\x1b[34m";
+
+/// Raw chalk.cyan open code — `\x1b[36m` (basic ANSI cyan, SGR 36).
+/// Pair with [`FG_RESET`]. Matches `chalk.cyan(text)` byte-for-byte.
+pub const CHALK_CYAN_OPEN: &str = "\x1b[36m";
+
+/// Wrap `text` in chalk.red wire bytes:
+/// `\x1b[31m<text>\x1b[39m`.
+///
+/// Console-rs's `Style::new().red().apply_to(text)` would produce
+/// `\x1b[31m<text>\x1b[0m` (SGR-0 full-reset close). This helper emits
+/// the per-attribute SGR-39 close that TS chalk uses.
+pub fn chalk_red(text: &str) -> String {
+    format!("{CHALK_RED_OPEN}{text}{FG_RESET}")
+}
+
+/// Wrap `text` in chalk.green wire bytes: `\x1b[32m<text>\x1b[39m`.
+pub fn chalk_green(text: &str) -> String {
+    format!("{CHALK_GREEN_OPEN}{text}{FG_RESET}")
+}
+
+/// Wrap `text` in chalk.yellow wire bytes: `\x1b[33m<text>\x1b[39m`.
+pub fn chalk_yellow(text: &str) -> String {
+    format!("{CHALK_YELLOW_OPEN}{text}{FG_RESET}")
+}
+
+/// Wrap `text` in chalk.blue wire bytes: `\x1b[34m<text>\x1b[39m`.
+pub fn chalk_blue(text: &str) -> String {
+    format!("{CHALK_BLUE_OPEN}{text}{FG_RESET}")
+}
+
+/// Wrap `text` in chalk.cyan wire bytes: `\x1b[36m<text>\x1b[39m`.
+pub fn chalk_cyan(text: &str) -> String {
+    format!("{CHALK_CYAN_OPEN}{text}{FG_RESET}")
+}
+
+/// Wrap `text` in chalk.dim wire bytes: `\x1b[2m<text>\x1b[22m`.
+pub fn chalk_dim(text: &str) -> String {
+    format!("{DIM_OPEN}{text}{DIM_CLOSE}")
+}
+
+/// Wrap `text` in chalk.bold wire bytes: `\x1b[1m<text>\x1b[22m`.
+pub fn chalk_bold(text: &str) -> String {
+    format!("{BOLD_OPEN}{text}{BOLD_CLOSE}")
+}
+
 /// Dim modifier (no color, just dimmed). Background instructions, `Back`
 /// labels, separators (`──`), hints, `[ ]`, `(default)`.
 pub fn dim() -> Style {
@@ -282,5 +342,42 @@ mod tests {
             .apply_to("x")
             .to_string();
         assert_ne!(cg, mg);
+    }
+
+    /// Pin the basic-ANSI color helpers' wire bytes — must match chalk
+    /// exactly (open SGR 31/32/33/34/36, close SGR 39) so config / agent
+    /// / doctor banners can switch off `console::Style.apply_to(...)`
+    /// (which closes with SGR-0) without losing colour fidelity.
+    #[test]
+    fn chalk_basic_color_helpers_emit_per_attribute_close() {
+        assert_eq!(chalk_red("ERR"), "\x1b[31mERR\x1b[39m");
+        assert_eq!(chalk_green("ok"), "\x1b[32mok\x1b[39m");
+        assert_eq!(chalk_yellow("!"), "\x1b[33m!\x1b[39m");
+        assert_eq!(chalk_blue("info"), "\x1b[34minfo\x1b[39m");
+        assert_eq!(chalk_cyan("●"), "\x1b[36m●\x1b[39m");
+    }
+
+    #[test]
+    fn chalk_dim_and_bold_helpers_emit_per_attribute_close() {
+        assert_eq!(chalk_dim("muted"), "\x1b[2mmuted\x1b[22m");
+        assert_eq!(chalk_bold("loud"), "\x1b[1mloud\x1b[22m");
+    }
+
+    #[test]
+    fn chalk_helpers_never_emit_sgr_0_full_reset() {
+        for s in [
+            chalk_red("x"),
+            chalk_green("x"),
+            chalk_yellow("x"),
+            chalk_blue("x"),
+            chalk_cyan("x"),
+            chalk_dim("x"),
+            chalk_bold("x"),
+        ] {
+            assert!(
+                !s.contains("\x1b[0m"),
+                "chalk-helper output must use per-attribute close, not SGR 0; got {s:?}",
+            );
+        }
     }
 }
