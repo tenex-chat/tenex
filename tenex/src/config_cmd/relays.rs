@@ -266,6 +266,19 @@ mod tests {
         assert_eq!(DEFAULT_IDENTITY_RELAY, "wss://purplepag.es");
     }
 
+    /// Pin the cyan-bullet byte sequence used in the relay listing.
+    /// TS at relays.ts:23,32 emits `chalk.cyan("●")` → `\x1b[36m●\x1b[39m`.
+    /// `theme::chalk_cyan(text)` (raw SGR 36 + SGR 39) matches that
+    /// byte-for-byte; the previous console::Style.cyan().apply_to(...)
+    /// would close with SGR 0 instead.
+    #[test]
+    fn cyan_bullet_byte_sequence_matches_ts_chalk() {
+        assert_eq!(
+            crate::tui::theme::chalk_cyan("●"),
+            "\x1b[36m●\x1b[39m",
+        );
+    }
+
     #[test]
     fn add_persists_relay_to_config_json() {
         let base = unique_temp();
