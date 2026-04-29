@@ -74,36 +74,15 @@ pub const CHALK_GRAY_CROSSTERM: crossterm::style::Color =
 // `src/commands/config/display.ts:3-12`
 // ---------------------------------------------------------------------------
 
-/// Banner row 0 (top apex) — xterm-256 #222 (`#ffd787`).
-pub fn banner_glow() -> Style {
-    Style::new().color256(222).bold()
-}
-
-/// Banner row 1 — xterm-256 #220 (`#ffd700`).
-pub fn banner_bright() -> Style {
-    Style::new().color256(220).bold()
-}
-
 /// Brand accent — xterm-256 #214 (`#ffaf00`) **bold**.
-/// Used by cron_cmd status messages and the banner (`T E N E X` letters,
-/// setup-complete `▲`). TS equivalent: `ACCENT.bold(...)` where
-/// `ACCENT = chalk.ansi256(214)`.
+/// Used by cron_cmd status messages and the "Done" label in bespoke prompts.
+/// TS equivalent: `ACCENT.bold(...)` where `ACCENT = chalk.ansi256(214)`.
 ///
-/// Note: `display.step()` and `display.hint()` emit raw `\x1b[38;5;214m`
-/// escapes directly (for exact byte-matching with TS chalk output) and do
-/// not call this helper.
+/// Note: `display.step()`, `display.hint()`, and the banner rows emit raw
+/// `\x1b[38;5;Nm` escapes directly for byte-exact TS chalk matching; they
+/// do not call this helper.
 pub fn display_accent() -> Style {
     Style::new().color256(214).bold()
-}
-
-/// Banner row 3 — xterm-256 #172 (`#d78700`).
-pub fn banner_mid() -> Style {
-    Style::new().color256(172).bold()
-}
-
-/// Banner row 4 (bottom base) — xterm-256 #130 (`#af5f00`).
-pub fn banner_dark() -> Style {
-    Style::new().color256(130).bold()
 }
 
 /// Info / sky blue — xterm-256 #117 (`#87d7ff`).
