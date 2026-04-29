@@ -9,7 +9,8 @@ use nostr::{EventBuilder, Kind, Tag, Timestamp};
 use crate::context::EncodingContext;
 use crate::intent::{
     AskIntent, AskQuestion, CompletionIntent, ConversationIntent, DelegationIntent, ErrorIntent,
-    Intent, InterventionReviewIntent, LessonIntent, StreamTextDeltaIntent, ToolUseIntent,
+    Intent, InterventionReviewIntent, LessonIntent, PublishArticleIntent, StreamTextDeltaIntent,
+    ToolUseIntent,
 };
 use crate::refs::{ConversationRef, MessageRef};
 
@@ -47,6 +48,7 @@ impl NostrEncoder {
             Intent::ToolUse(i) => Ok(vec![encode_tool_use(i, ctx)?]),
             Intent::StreamTextDelta(i) => Ok(vec![encode_stream_text_delta(i, ctx)?]),
             Intent::InterventionReview(i) => Ok(vec![encode_intervention_review(i, ctx)?]),
+            Intent::PublishArticle(i) => Ok(vec![encode_publish_article(i, ctx)?]),
         }
     }
 }
@@ -304,6 +306,22 @@ fn encode_intervention_review(
     Ok(builder)
 }
 
+fn encode_publish_article(
+    intent: &PublishArticleIntent,
+    ctx: &EncodingContext,
+) -> Result<EventBuilder, EncodeError> {
+    let mut builder =
+        EventBuilder::new(kinds::custom(kinds::LONG_FORM_ARTICLE), &intent.content);
+    builder = builder
+        .tag(Tag::parse(["d", &intent.d_tag]).map_err(|e| EncodeError::Tag(e.to_string()))?);
+    builder = builder.tag(
+        Tag::parse(["document", &intent.document_tag])
+            .map_err(|e| EncodeError::Tag(e.to_string()))?,
+    );
+    builder = builder.tag(project_a_tag(&ctx.project)?);
+    Ok(builder)
+}
+
 fn prepend_recipient_label(content: &str, label: &str) -> String {
     // Don't double-prepend if the content already starts with `nostr:` or `@slug:`.
     let trimmed = content.trim_start();
@@ -452,6 +470,26 @@ mod tests {
         assert_eq!(e_tags.len(), 2, "expected one root and one reply e-tag");
         assert!(e_tags.iter().any(|t| t.len() >= 4 && t[3] == "root"));
         assert!(e_tags.iter().any(|t| t.len() >= 4 && t[3] == "reply"));
+    }
+
+    #[test]
+    fn publish_article_emits_kind_30023_with_required_tags() {
+        let ctx = test_ctx();
+        let intent = crate::intent::PublishArticleIntent {
+            d_tag: "notes/2024-01-01".into(),
+            document_tag: "notes".into(),
+            content: "# Hello\nWorld".into(),
+        };
+        let builders =
+            NostrEncoder::encode(&Intent::PublishArticle(intent), &ctx).expect("encode");
+        assert_eq!(builders.len(), 1);
+        let tags = signed_tags(builders.into_iter().next().unwrap());
+        assert!(tags.iter().any(|t| t[0] == "d" && t[1] == "notes/2024-01-01"));
+        assert!(tags.iter().any(|t| t[0] == "document" && t[1] == "notes"));
+        assert!(tags.iter().any(|t| t[0] == "a" && t[1].starts_with("31933:")));
+        // Must NOT carry conversation threading tags
+        assert!(!tags.iter().any(|t| t[0] == "e"));
+        assert!(!tags.iter().any(|t| t[0] == "p"));
     }
 
     #[test]

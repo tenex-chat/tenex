@@ -36,6 +36,6 @@ pub use context::EncodingContext;
 pub use intent::{
     AskIntent, AskQuestion, CompletionIntent, ConversationIntent, DelegationIntent,
     DelegationRequest, ErrorIntent, Intent, InterventionReviewIntent, LessonIntent, LlmMetadata,
-    LlmUsage, StreamTextDeltaIntent, ToolUseIntent,
+    LlmUsage, PublishArticleIntent, StreamTextDeltaIntent, ToolUseIntent,
 };
 pub use refs::{ConversationRef, MessageRef, PrincipalKind, PrincipalRef, ProjectRef};

@@ -32,6 +32,9 @@ pub const STOP_COMMAND: u16 = 24134;
 /// kind:24135 — TenexStreamTextDelta. Ephemeral live update.
 pub const STREAM_TEXT_DELTA: u16 = 24135;
 
+/// kind:30023 — NIP-23 long-form article (replaceable).
+pub const LONG_FORM_ARTICLE: u16 = 30023;
+
 /// kind:31933 — NIP-33 project event.
 pub const PROJECT: u16 = 31933;
 

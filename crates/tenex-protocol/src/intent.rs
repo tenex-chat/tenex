@@ -133,6 +133,22 @@ pub struct InterventionReviewIntent {
     pub agent_name: String,
 }
 
+/// Publish a markdown file as a NIP-23 long-form article (kind:30023).
+///
+/// Each file in a `report_publish` batch becomes one intent. The encoder
+/// emits a replaceable event keyed on `d_tag` and linked to the project via
+/// an `["a", "31933:…"]` tag.
+#[derive(Debug, Clone)]
+pub struct PublishArticleIntent {
+    /// NIP-33 replaceable event identifier — filename for single files,
+    /// `dirName/relative/path` for directory entries.
+    pub d_tag: String,
+    /// Human-readable document grouping — filename without extension, or
+    /// directory base name when publishing a directory recursively.
+    pub document_tag: String,
+    pub content: String,
+}
+
 /// The full set of intents an agent can emit on a [`Channel`](crate::Channel).
 #[derive(Debug, Clone)]
 pub enum Intent {
@@ -145,6 +161,7 @@ pub enum Intent {
     ToolUse(ToolUseIntent),
     StreamTextDelta(StreamTextDeltaIntent),
     InterventionReview(InterventionReviewIntent),
+    PublishArticle(PublishArticleIntent),
 }
 
 impl Intent {
@@ -159,6 +176,7 @@ impl Intent {
             Intent::ToolUse(_) => "tool_use",
             Intent::StreamTextDelta(_) => "stream_text_delta",
             Intent::InterventionReview(_) => "intervention_review",
+            Intent::PublishArticle(_) => "publish_article",
         }
     }
 }
