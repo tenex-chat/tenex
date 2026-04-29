@@ -166,6 +166,17 @@ pub fn build_config_choices(doc: &LlmsDoc, source: &dyn ModelInfoSource) -> Vec<
         .collect()
 }
 
+/// Format the picker row label for one config name.
+///
+/// Mirror TS `roles.ts:123-139` byte-for-byte:
+/// - Meta config: `<name>  <dim>(multi-modal, N variants)</dim>`
+/// - Standard with info: `<name>  <dim>parts.join(" · ")</dim>` where
+///   parts = `<ctx>K ctx`, `$<cost>/M in` (filtered to non-empty).
+/// - Standard without info: bare `<name>`.
+///
+/// The dim suffix is rendered with embedded ANSI dim codes
+/// (`\x1b[2m...\x1b[22m`) so the inquire `Select` prompt renders the
+/// suffix muted relative to the name.
 fn format_choice_label(doc: &LlmsDoc, name: &str, source: &dyn ModelInfoSource) -> String {
     let entry = match doc.get(name) {
         Some(e) => e,
@@ -174,7 +185,10 @@ fn format_choice_label(doc: &LlmsDoc, name: &str, source: &dyn ModelInfoSource) 
 
     if entry.kind() == LlmConfigKind::Meta {
         let n_variants = entry.variant_names().len();
-        return format!("{name}  (multi-modal, {n_variants} variants)");
+        // TS: `${name}  ${chalk.dim(\`(multi-modal, ${count} variants)\`)}`
+        return format!(
+            "{name}  \x1b[2m(multi-modal, {n_variants} variants)\x1b[22m"
+        );
     }
 
     let provider = entry.provider().unwrap_or("");
@@ -187,15 +201,17 @@ fn format_choice_label(doc: &LlmsDoc, name: &str, source: &dyn ModelInfoSource) 
             let ctx_k = (info.context_window as f64 / 1000.0).round() as u64;
             parts.push(format!("{ctx_k}K ctx"));
         }
-        // Render input cost as "$<n>/M in" — TS uses the bare number.
-        if info.input_cost > 0.0 || info.context_window > 0 {
-            parts.push(format!("${}/M in", strip_trailing_zero(info.input_cost)));
-        }
+        // TS guard: `if (info?.cost)` — only emit when cost is set.
+        // Our ModelsDevSource only constructs ModelInfo when *both*
+        // cost and limit are present in the cache, so a Some(info)
+        // here implies cost is set. Keep the row.
+        parts.push(format!("${}/M in", strip_trailing_zero(info.input_cost)));
     }
     if parts.is_empty() {
         name.to_owned()
     } else {
-        format!("{name}  {}", parts.join(" · "))
+        // TS: `${name}  ${chalk.dim(parts.join(" · "))}`
+        format!("{name}  \x1b[2m{}\x1b[22m", parts.join(" · "))
     }
 }
 
@@ -301,6 +317,8 @@ mod tests {
 
     #[test]
     fn standard_config_with_info_renders_ctx_and_cost() {
+        // TS roles.ts:138 wraps the parts.join(' · ') suffix in
+        // chalk.dim — embed the dim ANSI codes inline.
         let doc = doc_with(&[("Sonnet", "anthropic", "claude-sonnet-4-6")]);
         let source = MockSource::new().with(
             "anthropic",
@@ -311,7 +329,10 @@ mod tests {
             },
         );
         let choices = build_config_choices(&doc, &source);
-        assert_eq!(choices[0].label, "Sonnet  200K ctx · $3/M in");
+        assert_eq!(
+            choices[0].label,
+            "Sonnet  \x1b[2m200K ctx · $3/M in\x1b[22m"
+        );
     }
 
     #[test]
@@ -326,7 +347,10 @@ mod tests {
             },
         );
         let choices = build_config_choices(&doc, &source);
-        assert_eq!(choices[0].label, "Haiku  200K ctx · $0.25/M in");
+        assert_eq!(
+            choices[0].label,
+            "Haiku  \x1b[2m200K ctx · $0.25/M in\x1b[22m"
+        );
     }
 
     #[test]
@@ -356,7 +380,12 @@ mod tests {
         );
         let choices = build_config_choices(&doc, &EmptyModelInfoSource);
         assert_eq!(choices[0].name, "Auto");
-        assert_eq!(choices[0].label, "Auto  (multi-modal, 2 variants)");
+        // TS roles.ts:127 wraps the (multi-modal, N variants) suffix
+        // in chalk.dim — embed the dim ANSI codes inline.
+        assert_eq!(
+            choices[0].label,
+            "Auto  \x1b[2m(multi-modal, 2 variants)\x1b[22m"
+        );
     }
 
     #[test]
