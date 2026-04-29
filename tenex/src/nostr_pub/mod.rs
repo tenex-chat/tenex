@@ -21,3 +21,6 @@ pub mod operations_status;
 pub mod owner_signer;
 pub mod project_mutation;
 pub mod project_status;
+
+#[cfg(test)]
+mod project_status_tests;

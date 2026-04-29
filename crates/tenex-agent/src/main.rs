@@ -1,4 +1,6 @@
 mod cassette;
+mod cassette_client;
+mod cassette_request;
 mod config;
 mod emit;
 mod home;
@@ -12,7 +14,8 @@ mod skills;
 mod tools;
 
 use anyhow::{Context, Result};
-use cassette::{CassetteRecorder, RecordingClient};
+use cassette::CassetteRecorder;
+use cassette_client::RecordingClient;
 use config::{LlmsConfig, ResolvedModel};
 use emit::{AgentMeta, EmitState};
 use hook::EmitHook;

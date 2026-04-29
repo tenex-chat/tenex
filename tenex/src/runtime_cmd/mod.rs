@@ -325,16 +325,25 @@ pub async fn run(args: RuntimeArgs) -> Result<()> {
         let meta_status = meta.clone();
         let agents_status = agents.clone();
         let pa_status = project_agents.clone();
+        let base_dir_status = base_dir.clone();
         let whitelist_status = cfg.whitelisted_pubkeys.clone();
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(Duration::from_secs(30));
             loop {
                 interval.tick().await;
+                let models_status = match crate::store::llms::LlmsDoc::load(&base_dir_status) {
+                    Ok(llms) => project_status::collect_model_access(&llms, &agents_status),
+                    Err(e) => {
+                        warn!(error = %e, "24010 model tag collection failed");
+                        Vec::new()
+                    }
+                };
                 match project_status::build_project_status_event(
                     &keys_status,
                     &meta_status,
                     &agents_status,
                     &pa_status,
+                    &models_status,
                     &whitelist_status,
                 ) {
                     Ok(event) => {

@@ -11,13 +11,14 @@
 //! tags    = ["a", "31933:<owner_pk>:<d_tag>"]
 //!         + ["p", <owner_pk>] (+ ["p", <whitelisted_pk>]..., deduped)
 //!         + ["agent", <pk>, <slug>]  or  ["agent", <pk>, <slug>, "pm"]
+//!         + ["model", <config_slug>, <agent_slug>...]
 //!         + ["skill", <skill_id>, <agent_slug>...]
 //!         + ["mcp", <server_slug>, <agent_slug>...]
 //! ```
 //!
-//! model/tool/branch/scheduled-task tags are not emitted — they require
-//! infrastructure (llm-config IPC, git, scheduler storage) not yet
-//! available in the Rust runtime.
+//! tool/branch/scheduled-task tags are not emitted — they require
+//! infrastructure (tool registry, git, scheduler storage) not yet available
+//! in the Rust runtime.
 //!
 //! Signed with the backend signer.
 
@@ -27,9 +28,70 @@ use anyhow::{anyhow, Result};
 use nostr_sdk::{Event, EventBuilder, Keys, Kind, Tag, TagKind};
 use serde_json::Value;
 
+use crate::store::llms::LlmsDoc;
 use tenex_project::{models::ProjectAgent, Agent, ProjectMetadata};
 
 const KIND: u16 = 24010;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ModelAccess {
+    pub slug: String,
+    pub agents: Vec<String>,
+}
+
+/// Build the `["model", config_slug, agent_slug...]` rows for kind:24010.
+///
+/// Mirrors `ProjectStatusService.gatherModelInfo`: every configured model is
+/// announced, agents map to their `default.model` when it names an existing
+/// config, and otherwise fall back to the global default config when present.
+pub fn collect_model_access(llms: &LlmsDoc, agents: &[Agent]) -> Vec<ModelAccess> {
+    let mut model_names = llms.config_names();
+    model_names.sort();
+
+    let mut config_to_agents: HashMap<String, Vec<String>> = model_names
+        .iter()
+        .map(|name| (name.clone(), Vec::new()))
+        .collect();
+    let global_default = llms
+        .default_config()
+        .filter(|name| config_to_agents.contains_key(*name))
+        .map(str::to_owned);
+
+    for agent in agents {
+        let agent_config = agent_default_model(agent).unwrap_or_else(|| "default".to_string());
+        let selected = if config_to_agents.contains_key(&agent_config) {
+            Some(agent_config)
+        } else {
+            global_default.clone()
+        };
+
+        if let Some(config_name) = selected {
+            if let Some(agent_slugs) = config_to_agents.get_mut(&config_name) {
+                agent_slugs.push(agent.slug.clone());
+            }
+        }
+    }
+
+    model_names
+        .into_iter()
+        .map(|slug| {
+            let mut agents = config_to_agents.remove(&slug).unwrap_or_default();
+            agents.sort();
+            ModelAccess { slug, agents }
+        })
+        .collect()
+}
+
+fn agent_default_model(agent: &Agent) -> Option<String> {
+    let json = agent.default_config_json.as_ref()?;
+    let Value::Object(map) = serde_json::from_str::<Value>(json).ok()? else {
+        return None;
+    };
+    map.get("model")
+        .and_then(Value::as_str)
+        .filter(|model| !model.is_empty())
+        .map(str::to_owned)
+}
 
 /// Build (but do not send) a kind:24010 project status event.
 pub fn build_project_status_event(
@@ -37,6 +99,7 @@ pub fn build_project_status_event(
     meta: &ProjectMetadata,
     agents: &[Agent],
     project_agents: &[ProjectAgent],
+    models: &[ModelAccess],
     whitelisted_pubkeys: &[String],
 ) -> Result<Event> {
     let owner_pk = meta
@@ -99,6 +162,12 @@ pub fn build_project_status_event(
                 }
             }
         }
+    }
+
+    for model in models {
+        let mut vals = vec![model.slug.clone()];
+        vals.extend(model.agents.clone());
+        tags.push(Tag::custom(TagKind::Custom("model".into()), vals));
     }
 
     // skill tags (sorted by id)
