@@ -115,7 +115,8 @@ function isToolAvailableInContext(name: ToolName, context: ToolExecutionContext)
     }
 
     if (name === "self_delegate") {
-        return context.triggeringEnvelope.principal.linkedPubkey !== context.agent.pubkey;
+        const linkedPubkey = context.triggeringEnvelope.principal?.linkedPubkey;
+        return linkedPubkey === undefined || linkedPubkey !== context.agent.pubkey;
     }
 
     return true;
