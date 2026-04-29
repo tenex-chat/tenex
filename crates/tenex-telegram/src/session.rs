@@ -1,7 +1,8 @@
-//! JSON-backed session store mapping Telegram channel IDs to Nostr conversation
-//! root event IDs.
+//! JSON-backed session store mapping canonical Telegram channel IDs to Nostr
+//! conversation root event IDs.
 //!
-//! Key: `<chat_id>` for DMs, `<chat_id>:<thread_id>` for forum threads.
+//! Key: `telegram:chat:<chat_id>` for DMs / whole chats, or
+//! `telegram:group:<chat_id>:topic:<thread_id>` for forum topics.
 //! Value: hex Nostr event ID of the conversation root.
 
 use std::collections::HashMap;
@@ -24,11 +25,11 @@ impl SessionStore {
         Self { path, map }
     }
 
-    /// Channel key for a DM or group thread.
+    /// Canonical channel ID for a DM, whole group, or group topic.
     pub fn channel_key(chat_id: &str, thread_id: Option<&str>) -> String {
         match thread_id {
-            Some(tid) if !tid.is_empty() => format!("{chat_id}:{tid}"),
-            _ => chat_id.to_string(),
+            Some(tid) if !tid.is_empty() => format!("telegram:group:{chat_id}:topic:{tid}"),
+            _ => format!("telegram:chat:{chat_id}"),
         }
     }
 

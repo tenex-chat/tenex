@@ -24,3 +24,6 @@ dirs-next = "2"
 nostr-sdk = "0.44"
 async-trait = "0.1"
 regex = "1"
+
+[dev-dependencies]
+tempfile = "3"
