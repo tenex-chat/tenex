@@ -14,8 +14,6 @@
 //! pin lives in `crate::tui::theme` (single source of truth) so the same
 //! palette can't drift between modules.
 
-use std::fmt::Write as _;
-
 use console::Style;
 
 use crate::tui::theme;
@@ -57,10 +55,20 @@ pub fn step(number: usize, total: usize, title: &str) {
 /// `display.context(text)` — `:31-35`. Splits on `\n`; each line printed as
 /// `  ` + `chalk.dim(line)`.
 pub fn context(text: &str) {
-    let dim = theme::dim();
     for line in text.split('\n') {
-        println!("  {}", dim.apply_to(line));
+        println!("{}", format_context_line(line));
     }
+}
+
+/// Returns one styled context line — extracted so tests can pin exact bytes.
+///
+/// TS at `display.ts:33` emits `  ${chalk.dim(line)}`. Chalk wire bytes
+/// for `chalk.dim(line)` are `\x1b[2m<line>\x1b[22m` — SGR 2 open,
+/// SGR 22 close (\"neither bold nor faint\"). Console-rs's
+/// `Style.dim().apply_to(...)` would emit SGR 0 (full reset) instead.
+fn format_context_line(line: &str) -> String {
+    use crate::tui::theme::{DIM_CLOSE, DIM_OPEN};
+    format!("  {DIM_OPEN}{line}{DIM_CLOSE}")
 }
 
 /// `display.success(text)` — `:40-42`. `  <bold green ✓> <text>`.
@@ -142,26 +150,35 @@ pub fn summary_line(label: &str, value: &str) {
 /// `display.providerCheck(text)` — `:107-109`. Returns the styled fragment
 /// `<SELECTED bold>[✓]</> <text>` for inline composition (e.g. inside
 /// inquire choice labels).
+///
+/// TS chalk wire bytes: `chalk.ansi256(114).bold("[✓]")` emits
+/// `\x1b[38;5;114m\x1b[1m[✓]\x1b[22m\x1b[39m` — SGR 22 + SGR 39 close,
+/// not SGR 0. Use raw escapes to match.
 pub fn provider_check(text: &str) -> String {
-    let selected = theme::display_selected().bold();
-    let mut out = String::new();
-    let _ = write!(out, "{} {}", selected.apply_to("[✓]"), text);
-    out
+    use crate::tui::theme::{BOLD_CLOSE, BOLD_OPEN, FG_RESET};
+    // ansi256 #114 = chalk.ansi256(114) — `display.ts:6` `SELECTED`.
+    const SELECTED_OPEN: &str = "\x1b[38;5;114m";
+    format!("{SELECTED_OPEN}{BOLD_OPEN}[✓]{BOLD_CLOSE}{FG_RESET} {text}")
 }
 
 /// `display.providerUncheck(text)` — `:114-115`. Returns `<dim>[ ]</> <text>`.
+///
+/// TS chalk wire bytes: `chalk.dim("[ ]")` emits `\x1b[2m[ ]\x1b[22m`.
 pub fn provider_uncheck(text: &str) -> String {
-    let dim = theme::dim();
-    let mut out = String::new();
-    let _ = write!(out, "{} {}", dim.apply_to("[ ]"), text);
-    out
+    use crate::tui::theme::{DIM_CLOSE, DIM_OPEN};
+    format!("{DIM_OPEN}[ ]{DIM_CLOSE} {text}")
 }
 
 /// `display.doneLabel()` — `:121-123`. Returns `<ACCENT bold>  Done</>` with
 /// the two leading spaces *inside* the styled span (the TS template inserts
 /// a separate two-space cursor pad outside).
+///
+/// TS chalk wire bytes: `chalk.ansi256(214).bold("  Done")` emits
+/// `\x1b[38;5;214m\x1b[1m  Done\x1b[22m\x1b[39m`.
 pub fn done_label() -> String {
-    theme::display_accent().apply_to("  Done").to_string()
+    use crate::tui::theme::{BOLD_CLOSE, BOLD_OPEN, FG_RESET};
+    const ACCENT_OPEN: &str = "\x1b[38;5;214m";
+    format!("{ACCENT_OPEN}{BOLD_OPEN}  Done{BOLD_CLOSE}{FG_RESET}")
 }
 
 #[cfg(test)]
@@ -240,22 +257,49 @@ mod tests {
         );
     }
 
+    /// Pin context-line wire bytes: `  ${chalk.dim(line)}` →
+    /// `  \x1b[2m<line>\x1b[22m`.
     #[test]
-    fn provider_check_emits_ansi_color() {
-        // Style::apply_to emits ANSI when stdout-likely-styled; force colour
-        // independence by checking that *some* ANSI code appears alongside
-        // the glyph. Not pinning the exact code (terminal-dependent), but
-        // verifying we are not returning bare text.
-        let raw = provider_check("X");
-        let stripped = strip_ansi_codes(&raw);
-        // Either the runtime is colourless (bare text) OR the styled output
-        // is longer than the stripped form (real ANSI codes embedded).
-        if stripped.len() == raw.len() {
-            // Colourless terminal: still functionally correct.
-            assert_eq!(raw, "[✓] X");
-        } else {
-            assert!(raw.contains("[✓] X"), "got: {raw:?}");
-        }
+    fn context_line_matches_ts_chalk_byte_sequence() {
+        assert_eq!(
+            format_context_line("Some hint"),
+            "  \x1b[2mSome hint\x1b[22m",
+        );
+    }
+
+    /// Pin provider_uncheck wire bytes: `chalk.dim("[ ]") + " " + text` →
+    /// `\x1b[2m[ ]\x1b[22m <text>`.
+    #[test]
+    fn provider_uncheck_byte_sequence_matches_ts_chalk() {
+        assert_eq!(
+            provider_uncheck("Anthropic"),
+            "\x1b[2m[ ]\x1b[22m Anthropic",
+        );
+    }
+
+    /// Pin done_label wire bytes: `chalk.ansi256(214).bold("  Done")` →
+    /// `\x1b[38;5;214m\x1b[1m  Done\x1b[22m\x1b[39m`.
+    #[test]
+    fn done_label_byte_sequence_matches_ts_chalk() {
+        assert_eq!(
+            done_label(),
+            "\x1b[38;5;214m\x1b[1m  Done\x1b[22m\x1b[39m",
+        );
+    }
+
+    /// Pin provider_check's wire bytes to TS chalk verbatim:
+    /// `chalk.ansi256(114).bold("[✓]") + " X"` →
+    /// `\x1b[38;5;114m\x1b[1m[✓]\x1b[22m\x1b[39m X`.
+    /// Now that we emit raw escapes (not console-rs's Style.apply_to),
+    /// the bytes are deterministic regardless of terminal detection.
+    #[test]
+    fn provider_check_byte_sequence_matches_ts_chalk() {
+        assert_eq!(
+            provider_check("X"),
+            "\x1b[38;5;114m\x1b[1m[✓]\x1b[22m\x1b[39m X",
+        );
+        // ANSI-stripped form survives.
+        assert_eq!(strip_ansi_codes(&provider_check("X")).into_owned(), "[✓] X");
     }
 
     /// Pin the bold/no-bold split between the two display_accent
