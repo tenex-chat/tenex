@@ -1,6 +1,6 @@
 # TENEX Rust Agent — Test Report
 
-Last updated: 2026-04-29 (session 6)
+Last updated: 2026-04-29 (session 7)
 
 ---
 
@@ -39,6 +39,9 @@ Last updated: 2026-04-29 (session 6)
 | context projection (multi-turn) | ✅ PASS | Turn 2 correctly recalled info from turn 1 history |
 | ConsecutiveToolsWithoutTodo nudge | ✅ PASS | Bug fixed (re_engage: false → true); agent receives and acknowledges nudge on re-engagement |
 | Multi-turn history (messages table) | ✅ PASS | Harness write-back fix; both user and assistant turns persisted correctly |
+| Proactive RAG injection (agent collection) | ✅ PASS | Agent answered from injected context with tools=0; query matches indexed doc above 0.65 threshold |
+| Proactive RAG injection (project collection) | ✅ PASS | audience=project → project_TEST-RUST collection; proactively injected and answered correctly |
+| tenex-identity daemon | ✅ PASS | Starts, binds to socket, resolves kind:0 from relay, STATUS returns cache count |
 
 ---
 
@@ -264,6 +267,50 @@ Fix: `re_engage: false → re_engage: true`.
 | ConsecutiveToolsWithoutTodo re-engagement (6 shells, no todos) | ✅ Agent receives nudge, conv=2 |
 | Multi-turn history recall (color = indigo) | ✅ Correctly recalled from messages table |
 | cargo test -p tenex-supervision (13 tests) | ✅ All pass |
+
+---
+
+### Run 7 — 2026-04-29 Proactive RAG + Identity Daemon + tenex-rag Tests
+
+**Proactive RAG injection verified end-to-end**
+
+Confirmed that `main.rs` searches RAG before each LLM call with `envelope.content` as query. Docs with score ≥ 0.65 are injected as a `<proactive-context>` block in the system prompt.
+
+Test methodology:
+1. Index doc "The TENEX project codename for the relay integration module is CRIMSON-FALCON-9." into `agent_{pubkey}` collection
+2. Ask "What is the codename for the TENEX relay integration module? Do NOT use search tools."
+3. Agent answered "CRIMSON-FALCON-9" with `tools=0` — unambiguous proof of proactive injection
+
+Also verified `audience=project` route:
+- Indexed doc about "port 7777" into `project_TEST-RUST` collection
+- Asked about the port without tools → agent answered "7777" from injected context
+- Agent itself confirmed: "Based on the project knowledge already retrieved in my context"
+
+**tenex-identity daemon smoke test**
+
+Built `target/debug/tenex-identity`. Started daemon, confirmed:
+- Binds to `~/.tenex/identity.sock` within 200ms
+- `STATUS` request → `OK cache=0`
+- `RESOLVE <owner_pubkey>` → fetched kind:0 from relays, returned `name: "Pablo Testing Pubkey"`, nip05, picture fields
+- Protocol: `RESOLVE <hex_pubkey>\n` → JSON line (as documented in `src/protocol.rs`)
+
+**14 unit tests added to tenex-rag (`crates/tenex-rag/src/sqlite_store.rs`)**
+
+`tenex-rag` had 0 tests. Added `tempfile` dev dep and 14 tests covering:
+- `cosine_similarity`: identical (1.0), opposite (0.0), orthogonal (0.5), empty/mismatched/zero-magnitude → None
+- `SqliteStore`: open creates schema, upsert+search round-trip, collection filtering, limit enforcement, upsert overwrites on same ID, list_collections returns sorted unique names, delete_collection removes only target, search results sorted descending by score
+
+All 14 pass. Workspace total: 1193 passed, 0 failed (up from 1191).
+
+| Test | Result |
+|---|---|
+| Proactive injection from agent collection (CRIMSON-FALCON-9) | ✅ tools=0, correct answer |
+| Proactive injection from project collection (port 7777) | ✅ tools=0, correct answer |
+| RAG audience=project → `project_TEST-RUST` collection | ✅ Correct namespacing verified in DB |
+| tenex-identity daemon: STATUS | ✅ `OK cache=0` |
+| tenex-identity daemon: RESOLVE (kind:0 fetch from relay) | ✅ Returns name + nip05 |
+| tenex-rag unit tests (14 new) | ✅ All pass |
+| cargo test --workspace | ✅ 1193 passed, 0 failed |
 
 ---
 
