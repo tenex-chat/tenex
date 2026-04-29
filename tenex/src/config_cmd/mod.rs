@@ -184,13 +184,42 @@ pub async fn run(args: ConfigArgs) -> Result<()> {
         match section_menu_prompt("Settings", &sections)? {
             SectionMenuResult::Back | SectionMenuResult::Cancelled => return Ok(()),
             SectionMenuResult::Selected(value) => {
-                dispatch(&base_dir, &value).await?;
+                // TS at config/index.ts:113-115 awaits the subcommand and
+                // continues the menu loop on failure. Each subcommand's own
+                // catch already emitted the red error line (via `dispatch`'s
+                // wrapper); discard the propagated `Err` here so the menu
+                // re-renders rather than booting the user out.
+                let _ = dispatch(&base_dir, &value).await;
             }
         }
     }
 }
 
 async fn dispatch(base_dir: &std::path::Path, value: &str) -> Result<()> {
+    let result = dispatch_inner(base_dir, value).await;
+    match result {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            let msg = format!("{e}");
+            // TS catch blocks at every config subcommand swallow
+            // SIGINT/force-closed errors silently — mirror that.
+            if msg.contains("SIGINT") || msg.contains("force closed") {
+                return Ok(());
+            }
+            // For subcommands that have a TS-side red catch wrapper, emit
+            // the same `❌ Failed to <verb> <noun>: <error>` line. The
+            // remaining two (`paths`, `context-management`) have NO TS
+            // wrapper — let the error propagate untouched.
+            if let Some(prefix) = failure_message_prefix(value) {
+                let red = console::Style::new().red();
+                println!("{}", red.apply_to(format!("❌ {prefix}: {e}")));
+            }
+            Err(e)
+        }
+    }
+}
+
+async fn dispatch_inner(base_dir: &std::path::Path, value: &str) -> Result<()> {
     match value {
         "providers" => run_providers_submenu(base_dir).await,
         "llm" => run_llm_submenu(base_dir),
@@ -215,6 +244,40 @@ async fn dispatch(base_dir: &std::path::Path, value: &str) -> Result<()> {
             ));
             Ok(())
         }
+    }
+}
+
+/// TS-verbatim subject for the `❌ <prefix>: <error>` red catch wrapper.
+///
+/// Each TS config subcommand has its own try/catch that emits a red
+/// `❌ Failed to <verb> <noun>: ${error}` line on failure. The exact verb
+/// + noun varies per subcommand and must match TS byte-for-byte:
+///
+/// - `llm.ts:40` is the only one that says "start LLM configuration"
+///   instead of "configure LLM" — mirror exactly.
+/// - `embed.ts:266` says "configure embedding model" (not "embed").
+/// - `system-prompt.ts:218` says "configure global system prompt"
+///   (not just "system-prompt").
+/// - `telegram.ts:432` says "configure Telegram" (capitalised T).
+/// - `paths.ts` and `context-management.ts` have NO TS catch wrapper —
+///   they return `None` here so errors propagate untouched.
+fn failure_message_prefix(value: &str) -> Option<&'static str> {
+    match value {
+        "providers" => Some("Failed to configure providers"),
+        "llm" => Some("Failed to start LLM configuration"),
+        "roles" => Some("Failed to configure roles"),
+        "embed" => Some("Failed to configure embedding model"),
+        "relays" => Some("Failed to configure relays"),
+        "identity" => Some("Failed to configure identity"),
+        "logging" => Some("Failed to configure logging"),
+        "escalation" => Some("Failed to configure escalation"),
+        "summarization" => Some("Failed to configure summarization"),
+        "intervention" => Some("Failed to configure intervention"),
+        "telemetry" => Some("Failed to configure telemetry"),
+        "system-prompt" => Some("Failed to configure global system prompt"),
+        "telegram" => Some("Failed to configure Telegram"),
+        "paths" | "context-management" => None,
+        _ => None,
     }
 }
 
@@ -661,5 +724,83 @@ mod tests {
         assert!(s.starts_with("  "), "got: {s:?}");
         // And the third character is the start of the actual label.
         assert!(s.chars().nth(2).map(|c| c == 'L').unwrap_or(false));
+    }
+
+    /// Pin the `❌ <prefix>: <error>` red catch-wrapper subjects to their
+    /// TS verbatim source. Each line below cites the `console.log
+    /// (chalk.red(...))` site in `src/commands/config/<file>.ts`.
+    #[test]
+    fn failure_prefixes_match_ts_verbatim() {
+        // providers.ts:24
+        assert_eq!(
+            failure_message_prefix("providers"),
+            Some("Failed to configure providers"),
+        );
+        // llm.ts:40 — note the unique wording "start LLM configuration".
+        assert_eq!(
+            failure_message_prefix("llm"),
+            Some("Failed to start LLM configuration"),
+        );
+        // roles.ts:251
+        assert_eq!(
+            failure_message_prefix("roles"),
+            Some("Failed to configure roles"),
+        );
+        // embed.ts:266 — note "embedding model", not "embed".
+        assert_eq!(
+            failure_message_prefix("embed"),
+            Some("Failed to configure embedding model"),
+        );
+        // relays.ts:119
+        assert_eq!(
+            failure_message_prefix("relays"),
+            Some("Failed to configure relays"),
+        );
+        // identity.ts:67
+        assert_eq!(
+            failure_message_prefix("identity"),
+            Some("Failed to configure identity"),
+        );
+        // logging.ts:47
+        assert_eq!(
+            failure_message_prefix("logging"),
+            Some("Failed to configure logging"),
+        );
+        // escalation.ts:36
+        assert_eq!(
+            failure_message_prefix("escalation"),
+            Some("Failed to configure escalation"),
+        );
+        // summarization.ts:36
+        assert_eq!(
+            failure_message_prefix("summarization"),
+            Some("Failed to configure summarization"),
+        );
+        // intervention.ts:63
+        assert_eq!(
+            failure_message_prefix("intervention"),
+            Some("Failed to configure intervention"),
+        );
+        // telemetry.ts:191
+        assert_eq!(
+            failure_message_prefix("telemetry"),
+            Some("Failed to configure telemetry"),
+        );
+        // system-prompt.ts:218 — note "global system prompt" (full phrase).
+        assert_eq!(
+            failure_message_prefix("system-prompt"),
+            Some("Failed to configure global system prompt"),
+        );
+        // telegram.ts:432 — note capital T.
+        assert_eq!(
+            failure_message_prefix("telegram"),
+            Some("Failed to configure Telegram"),
+        );
+        // TS sources for these two have NO catch wrapper — let errors
+        // propagate untouched.
+        assert_eq!(failure_message_prefix("paths"), None);
+        assert_eq!(failure_message_prefix("context-management"), None);
+        // Unknown values (typo, future addition) also return None.
+        assert_eq!(failure_message_prefix("unknown-value"), None);
     }
 }
