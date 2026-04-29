@@ -12,7 +12,7 @@ mod skills;
 mod tools;
 
 use anyhow::{Context, Result};
-use cassette::{CassetteRecorder, CassetteToolCall};
+use cassette::{CassetteRecorder, RecordingClient};
 use config::{LlmsConfig, ResolvedModel};
 use emit::{AgentMeta, EmitState};
 use hook::EmitHook;
@@ -28,7 +28,7 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc, Mutex,
 };
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH};
 use tenex_context::{
     CacheObservation, Message as CtxMessage, ModelProfile, ToolCall as CtxToolCall, ToolDef,
     TurnRecord,
@@ -1049,10 +1049,8 @@ async fn run() -> Result<()> {
     let mut current_message = user_message;
     // extra history accumulated from re-engagement turns (user + assistant pairs).
     let mut re_engage_history: Vec<RigMessage> = Vec::new();
-    let mut cassette_turn = 0usize;
 
     'agent_loop: loop {
-        cassette_turn += 1;
         let current_history: Vec<RigMessage> = {
             let mut h = initial_history.clone();
             h.extend(re_engage_history.iter().cloned());
@@ -1069,7 +1067,6 @@ async fn run() -> Result<()> {
         } else {
             current_message.clone()
         };
-        let request_debug = turn_message.clone();
 
         let turn_span = info_span!(
             "tenex.agent.turn",
@@ -1081,7 +1078,6 @@ async fn run() -> Result<()> {
             llm.model = %resolved.model,
             history.messages = initial_history.len(),
         );
-        let llm_started = Instant::now();
         let final_response = async {
             let response = match resolved.provider.as_str() {
                 "openrouter" => {
@@ -1089,7 +1085,8 @@ async fn run() -> Result<()> {
                         .api_key
                         .clone()
                         .context("No OpenRouter API key found. Set OPENROUTER_API_KEY or add it to ~/.tenex/providers.json")?;
-                    let client = openrouter::Client::new(&key)?;
+                    let client =
+                        RecordingClient::new(openrouter::Client::new(&key)?, cassette_recorder.clone());
                     run_agent!(
                         client,
                         &resolved.model,
@@ -1105,7 +1102,10 @@ async fn run() -> Result<()> {
                         .api_key
                         .clone()
                         .context("No OpenAI API key found. Set OPENAI_API_KEY or add it to ~/.tenex/providers.json")?;
-                    let client = openai::CompletionsClient::builder().api_key(&key).build()?;
+                    let client = RecordingClient::new(
+                        openai::CompletionsClient::builder().api_key(&key).build()?,
+                        cassette_recorder.clone(),
+                    );
                     run_agent!(
                         client,
                         &resolved.model,
@@ -1121,7 +1121,7 @@ async fn run() -> Result<()> {
                     if let Some(url) = &resolved.base_url {
                         builder = builder.base_url(url);
                     }
-                    let client = builder.build()?;
+                    let client = RecordingClient::new(builder.build()?, cassette_recorder.clone());
                     run_agent!(
                         client,
                         &resolved.model,
@@ -1133,7 +1133,10 @@ async fn run() -> Result<()> {
                     )
                 }
                 "mock" => {
-                    let client = mock_llm::MockClient::from_env(&agent_slug)?;
+                    let client = RecordingClient::new(
+                        mock_llm::MockClient::from_env(&agent_slug)?,
+                        cassette_recorder.clone(),
+                    );
                     run_agent!(
                         client,
                         &resolved.model,
@@ -1152,7 +1155,8 @@ async fn run() -> Result<()> {
                             resolved.provider.to_uppercase().replace('-', "_")
                         )
                     })?;
-                    let client = anthropic::Client::new(&key)?;
+                    let client =
+                        RecordingClient::new(anthropic::Client::new(&key)?, cassette_recorder.clone());
                     run_agent!(
                         client,
                         &resolved.model,
@@ -1168,29 +1172,12 @@ async fn run() -> Result<()> {
         }
         .instrument(turn_span)
         .await?;
-        let llm_duration_ms = llm_started.elapsed().as_millis() as u64;
 
         if let Some(state) = &runtime_state {
             state.release_driver();
         }
 
         let recorded_calls = recorder.take_records();
-        if let Some(recorder) = &cassette_recorder {
-            let tool_calls: Vec<CassetteToolCall> = recorded_calls
-                .iter()
-                .map(|record| CassetteToolCall {
-                    name: record.tool_name.clone(),
-                    args: record.args.clone(),
-                })
-                .collect();
-            recorder.record_turn(
-                cassette_turn,
-                llm_duration_ms,
-                &request_debug,
-                final_response.response(),
-                &tool_calls,
-            );
-        }
 
         // Persist final todos and self-applied skills back to the conversation store.
         if let Some(ref store) = conv_store {

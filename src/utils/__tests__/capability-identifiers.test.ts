@@ -14,7 +14,7 @@ describe("assignCapabilityIdentifiers", () => {
 
         expect(identifiers.get(`${"a".repeat(12)}${"0".repeat(52)}`)).toEqual({
             identifier: "make-poster",
-            shortId: "aaaaaaaaaaaa",
+            shortId: "aaaaaaaaaa",
         });
     });
 
@@ -23,8 +23,8 @@ describe("assignCapabilityIdentifiers", () => {
         const identifiers = assignCapabilityIdentifiers([{ eventId }]);
 
         expect(identifiers.get(eventId)).toEqual({
-            identifier: "bbbbbbbbbbbb",
-            shortId: "bbbbbbbbbbbb",
+            identifier: "bbbbbbbbbb",
+            shortId: "bbbbbbbbbb",
         });
     });
 
@@ -37,12 +37,12 @@ describe("assignCapabilityIdentifiers", () => {
         ]);
 
         expect(identifiers.get(eventId1)).toEqual({
-            identifier: "cccccccccccc",
-            shortId: "cccccccccccc",
+            identifier: "cccccccccc",
+            shortId: "cccccccccc",
         });
         expect(identifiers.get(eventId2)).toEqual({
-            identifier: "dddddddddddd",
-            shortId: "dddddddddddd",
+            identifier: "dddddddddd",
+            shortId: "dddddddddd",
         });
     });
 });

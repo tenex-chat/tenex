@@ -1,4 +1,5 @@
-import { createConnection } from "node:net";
+import { existsSync } from "node:fs";
+import { Socket } from "node:net";
 import { join } from "node:path";
 import { getTenexBasePath } from "@/constants";
 
@@ -40,7 +41,13 @@ export interface ResolvedIdentity {
  */
 export function resolveIdentity(pubkey: string): Promise<ResolvedIdentity | null> {
     return new Promise((resolve, reject) => {
-        const sock = createConnection({ path: socketPath() });
+        const path = socketPath();
+        if (!existsSync(path)) {
+            reject(new IdentityDaemonError(`identity daemon socket not found: ${path}`));
+            return;
+        }
+
+        const sock = new Socket();
         let buf = "";
         let settled = false;
 
@@ -114,5 +121,18 @@ export function resolveIdentity(pubkey: string): Promise<ResolvedIdentity | null
                 )
             );
         });
+
+        try {
+            sock.connect(path);
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            finish(() =>
+                reject(
+                    new IdentityDaemonError(
+                        `identity daemon connect failed: ${message}`
+                    )
+                )
+            );
+        }
     });
 }

@@ -227,8 +227,15 @@ export async function installAgentScripts(
             results.push(result);
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : String(error);
-            throw new Error(`[ScriptInstaller] Failed to install script ${scriptRef.eventId}: ${errorMessage}`, {
-                cause: error,
+            results.push({
+                eventId: scriptRef.eventId,
+                relativePath: "",
+                absolutePath: "",
+                success: false,
+                error: new Error(
+                    `[ScriptInstaller] Failed to install script ${scriptRef.eventId}: ${errorMessage}`,
+                    { cause: error }
+                ).message,
             });
         }
     }
