@@ -41,6 +41,10 @@ function buildAvatarUrl(pubkey: string): string {
     return `https://api.dicebear.com/7.x/${avatarStyle}/png?seed=${pubkey}`;
 }
 
+function shortPubkey(pubkey: unknown): string {
+    return typeof pubkey === "string" ? pubkey.substring(0, 8) : "(unknown)";
+}
+
 /**
  * Publishes a kind:0 profile event for an agent
  */
@@ -377,7 +381,7 @@ export async function publishCompiledInstructions(
     } catch (error) {
         logger.error("Failed to create kind:0 with compiled instructions", {
             error,
-            agentPubkey: signer.pubkey.substring(0, 8),
+            agentPubkey: shortPubkey((signer as { pubkey?: unknown }).pubkey),
         });
         // Don't throw - this is fire-and-forget
     }

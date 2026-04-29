@@ -15,6 +15,11 @@ import {
     type Event,
     type EventTemplate,
 } from "nostr-tools";
+import {
+    cassetteToMockScenario,
+    parseProbeLlmOptions,
+    type ProbeLlmOptions,
+} from "./tenex-runtime-probe-cassette";
 import { setupMcpProbeFixture } from "./tenex-runtime-probe-mcp";
 import {
     availableScenarios,
@@ -36,8 +41,10 @@ type Proc = {
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(scriptDir, "..");
 const launcherRelayDir = "/home/pablo/Work/tenex-launcher/relay";
-const scenarioName = (process.argv[2] ?? "delegation-basic") as ScenarioName;
-const keep = process.argv.includes("--keep");
+const cliArgs = process.argv.slice(2);
+const scenarioName = (positionalArgs(cliArgs)[0] ?? "delegation-basic") as ScenarioName;
+const keep = cliArgs.includes("--keep");
+const llm = parseProbeLlmOptions(cliArgs);
 
 if (!availableScenarios.includes(scenarioName)) {
     console.error(`Unknown scenario: ${scenarioName}`);
@@ -66,6 +73,10 @@ const agentsDir = path.join(baseDir, "agents");
 const workspaceDir = path.join(runDir, "workspace");
 const artifactPath = path.join(runDir, "events.json");
 const requestRecordPath = path.join(runDir, "mock-requests.jsonl");
+const cassetteRecordPath = llm.recordCassettePath
+    ? path.resolve(llm.recordCassettePath)
+    : path.join(runDir, "llm-cassette.jsonl");
+const llmModelName = llm.mode === "ollama" ? "probe-real" : "mock";
 
 mkdirSync(relayDir, { recursive: true });
 mkdirSync(projectDir, { recursive: true });
@@ -117,11 +128,22 @@ writeJson(path.join(baseDir, "config.json"), {
     telemetry: { enabled: false },
 });
 writeJson(path.join(baseDir, "llms.json"), {
-    configurations: { mock: { provider: "mock", model: scenarioName } },
-    default: "mock",
+    configurations:
+        llm.mode === "ollama"
+            ? { [llmModelName]: { provider: "ollama", model: llm.ollamaModel } }
+            : { mock: { provider: "mock", model: scenarioName } },
+    default: llmModelName,
 });
 writeJson(path.join(baseDir, "providers.json"), {
-    providers: { mock: { apiKeys: [{ key: "none" }] } },
+    providers:
+        llm.mode === "ollama"
+            ? {
+                  ollama: {
+                      apiKeys: [{ key: llm.ollamaBaseUrl ?? "none" }],
+                      baseUrl: llm.ollamaBaseUrl,
+                  },
+              }
+            : { mock: { apiKeys: [{ key: "none" }] } },
 });
 writeJson(path.join(relayDir, "relay.json"), {
     port: relayPort,
@@ -141,10 +163,10 @@ writeJson(path.join(agentsDir, `${pm.pubkey}.json`), {
     working_directory: workspaceDir,
     default:
         scenarioName === "mcp-tool-basic"
-            ? { model: "mock", mcp: ["probe"] }
+            ? { model: llmModelName, mcp: ["probe"] }
             : scenarioName === "fs-read-adjustment"
-            ? { model: "mock", skills: ["read-access"] }
-            : { model: "mock" },
+            ? { model: llmModelName, skills: ["read-access"] }
+            : { model: llmModelName },
 });
 writeJson(path.join(agentsDir, `${worker.pubkey}.json`), {
     name: "Probe Worker",
@@ -153,11 +175,21 @@ writeJson(path.join(agentsDir, `${worker.pubkey}.json`), {
     category: "worker",
     description: "Completes delegated probe tasks",
     instructions: "Complete delegated probe tasks with a concise result.",
-    default: { model: "mock" },
+    default: { model: llmModelName },
 });
 
 const mockScenarioPath = path.join(runDir, "mock-llm.json");
-writeJson(mockScenarioPath, mockScenario(scenarioName));
+if (llm.mode === "mock") {
+    writeJson(mockScenarioPath, mockScenario(scenarioName));
+} else if (llm.mode === "cassette") {
+    if (!llm.cassettePath) {
+        throw new Error("Cassette replay requires --cassette or TENEX_PROBE_CASSETTE");
+    }
+    writeJson(
+        mockScenarioPath,
+        cassetteToMockScenario(path.resolve(llm.cassettePath), llm.generationTimeFactor)
+    );
+}
 
 const relayCommand = resolveRelayCommand(path.join(relayDir, "relay.json"));
 const tenexBin = process.env.TENEX_BIN ?? path.join(repoRoot, "target", "debug", "tenex");
@@ -170,8 +202,15 @@ if (!existsSync(tenexBin) || !existsSync(agentBin)) {
 }
 
 console.log(`scenario: ${scenarioName}`);
+console.log(`llm    : ${describeLlm(llm)}`);
 console.log(`baseDir : ${baseDir}`);
 console.log(`relay   : ${relayUrl}`);
+if (llm.mode === "ollama" || llm.recordCassettePath) {
+    console.log(`cassette record: ${cassetteRecordPath}`);
+}
+if (llm.mode === "cassette" && llm.cassettePath) {
+    console.log(`cassette replay: ${path.resolve(llm.cassettePath)}`);
+}
 
 spawnLogged("relay", relayCommand.cmd, relayCommand.args, {
     cwd: relayCommand.cwd,
@@ -195,11 +234,7 @@ const runtimeProc = spawnLogged(
     ["runtime", projectDtag, "--base-dir", baseDir],
     {
         cwd: scenarioName === "mcp-tool-basic" ? workspaceDir : repoRoot,
-        env: {
-            ...probeEnv(),
-            TENEX_MOCK_LLM_SCENARIO: mockScenarioPath,
-            TENEX_MOCK_LLM_RECORD_PATH: requestRecordPath,
-        },
+        env: runtimeEnv(llm, mockScenarioPath, requestRecordPath, cassetteRecordPath),
     }
 );
 
@@ -246,7 +281,12 @@ for (const verdict of verdicts) {
     }
 }
 console.log(`events : ${artifactPath}`);
-console.log(`requests : ${requestRecordPath}`);
+if (llm.mode === "mock" || llm.mode === "cassette") {
+    console.log(`requests : ${requestRecordPath}`);
+}
+if (llm.mode === "ollama" || llm.recordCassettePath) {
+    console.log(`cassette : ${cassetteRecordPath}`);
+}
 
 if (!keep) {
     cleanup();
@@ -312,6 +352,64 @@ function probeEnv(): NodeJS.ProcessEnv {
         TENEX_BASE_DIR: baseDir,
         RUST_LOG: process.env.RUST_LOG ?? "info,nostr_sdk=warn,nostr_relay_pool=warn",
     };
+}
+
+function runtimeEnv(
+    options: ProbeLlmOptions,
+    mockScenarioPath: string,
+    mockRecordPath: string,
+    cassettePath: string
+): NodeJS.ProcessEnv {
+    const env = probeEnv();
+    if (options.mode === "mock" || options.mode === "cassette") {
+        env.TENEX_MOCK_LLM_SCENARIO = mockScenarioPath;
+        env.TENEX_MOCK_LLM_RECORD_PATH = mockRecordPath;
+    }
+    if (options.mode === "ollama" || options.recordCassettePath) {
+        env.TENEX_LLM_CASSETTE_RECORD_PATH = cassettePath;
+    }
+    if (options.ollamaBaseUrl) {
+        env.OLLAMA_API_BASE_URL = options.ollamaBaseUrl;
+    }
+    return env;
+}
+
+function describeLlm(options: ProbeLlmOptions): string {
+    if (options.mode === "ollama") {
+        return `ollama/${options.ollamaModel}`;
+    }
+    if (options.mode === "cassette") {
+        return `cassette factor=${options.generationTimeFactor}`;
+    }
+    return "mock";
+}
+
+function positionalArgs(args: string[]): string[] {
+    const valueFlags = new Set([
+        "--llm",
+        "--cassette",
+        "--record-cassette",
+        "--llm-generation-time-factor",
+        "--ollama-model",
+        "--ollama-base-url",
+    ]);
+    const result: string[] = [];
+    for (let index = 0; index < args.length; index += 1) {
+        const arg = args[index];
+        if (arg.startsWith("--")) {
+            if (
+                valueFlags.has(arg) &&
+                !arg.includes("=") &&
+                args[index + 1] &&
+                !args[index + 1].startsWith("--")
+            ) {
+                index += 1;
+            }
+            continue;
+        }
+        result.push(arg);
+    }
+    return result;
 }
 
 function cleanup(): void {

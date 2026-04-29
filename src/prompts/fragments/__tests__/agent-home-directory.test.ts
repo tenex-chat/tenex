@@ -249,7 +249,7 @@ describe("agent-home-directory fragment", () => {
             expect(result).not.toContain("<memorized-files>");
         });
 
-        it("should document project-specific memory when project context is present", async () => {
+        it("should keep project-specific memory out of the home-directory fragment", async () => {
             ensureAgentHomeSpy.mockImplementation(() => true);
             readdirSyncSpy.mockImplementation(() => []);
 
@@ -258,9 +258,9 @@ describe("agent-home-directory fragment", () => {
                 projectId: "acme-app",
             } as never);
 
-            expect(result).toContain("/home/abcd1234/projects/acme-app/docs");
-            expect(result).toContain("injected in the project-context section");
-            expect(result).toContain("keep them lean, and link out to non-`+` files");
+            expect(result).toContain("<home-directory>");
+            expect(result).not.toContain("/home/abcd1234/projects/acme-app/docs");
+            expect(result).not.toContain("injected in the project-context section");
         });
 
         it("should inject home-scoped +files only (project files moved to project-context)", async () => {
