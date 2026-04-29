@@ -660,11 +660,15 @@ fn render_browse<W: Write>(
             let count = creds.api_key.entries().len();
             if count > 0 {
                 let plural = if count == 1 { "key" } else { "keys" };
+                // TS provider-select-prompt.ts:67 uses chalk.gray (bright
+                // black, ANSI 90 / xterm-256 index 8), NOT chalk.dim.
+                // Match the foreground-colour approach so the badge
+                // renders the same muted-grey as TS.
                 queue!(
                     stdout,
-                    SetAttribute(Attribute::Dim),
+                    SetForegroundColor(Color::AnsiValue(8)),
                     Print(format!(" [{count} {plural}]")),
-                    SetAttribute(Attribute::Reset),
+                    ResetColor,
                 )?;
             }
         } else {
