@@ -3,6 +3,63 @@ use crate::types::{Detection, EnforcementMode, PostCompletionContext, TodoStatus
 
 pub struct PendingTodosHeuristic;
 
+fn is_explicit_todo_list_only_request(message: &str) -> bool {
+    let lower = message.to_lowercase();
+    let mentions_todos =
+        lower.contains("todo") || lower.contains("to-do") || lower.contains("task list");
+    if !mentions_todos {
+        return false;
+    }
+
+    let asks_to_set_up = [
+        "set up",
+        "setup",
+        "create",
+        "make",
+        "initialize",
+        "init",
+        "write",
+        "draft",
+        "prepare",
+    ]
+    .iter()
+    .any(|phrase| lower.contains(phrase));
+    if !asks_to_set_up {
+        return false;
+    }
+
+    let asks_to_stop_after = [
+        "and stop",
+        "then stop",
+        "stop after",
+        "nothing else",
+        "only",
+        "just",
+        "do not continue",
+        "don't continue",
+        "do not do",
+        "don't do",
+    ]
+    .iter()
+    .any(|phrase| lower.contains(phrase));
+
+    let asks_to_execute_items = [
+        "then do",
+        "and do",
+        "then complete",
+        "and complete",
+        "work through",
+        "execute",
+        "implement",
+        "build",
+        "fix",
+    ]
+    .iter()
+    .any(|phrase| lower.contains(phrase));
+
+    asks_to_stop_after && !asks_to_execute_items
+}
+
 impl PostCompletionHeuristic for PendingTodosHeuristic {
     fn name(&self) -> &'static str {
         "pending-todos"
@@ -13,6 +70,9 @@ impl PostCompletionHeuristic for PendingTodosHeuristic {
             return None;
         }
         if ctx.pending_delegation_count > 0 {
+            return None;
+        }
+        if is_explicit_todo_list_only_request(&ctx.triggering_message) {
             return None;
         }
         let active: Vec<&str> = ctx
@@ -109,5 +169,29 @@ mod tests {
     fn suppressed_when_no_todos() {
         let h = PendingTodosHeuristic;
         assert!(h.check(&ctx(vec![], 0)).is_none());
+    }
+
+    #[test]
+    fn suppressed_when_user_requested_todo_setup_and_stop() {
+        let h = PendingTodosHeuristic;
+        let todos = vec![TodoEntry {
+            id: "t1".to_string(),
+            status: TodoStatus::Pending,
+        }];
+        let mut ctx = ctx(todos, 0);
+        ctx.triggering_message = "setup a todo list with 3 items and stop".to_string();
+        assert!(h.check(&ctx).is_none());
+    }
+
+    #[test]
+    fn still_fires_when_user_requests_todo_setup_and_execution() {
+        let h = PendingTodosHeuristic;
+        let todos = vec![TodoEntry {
+            id: "t1".to_string(),
+            status: TodoStatus::Pending,
+        }];
+        let mut ctx = ctx(todos, 0);
+        ctx.triggering_message = "setup a todo list and then complete the tasks".to_string();
+        assert!(h.check(&ctx).is_some());
     }
 }
