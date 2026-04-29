@@ -2989,6 +2989,7 @@ name = "tenex-agent"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "chrono",
  "dirs-next",
  "futures",

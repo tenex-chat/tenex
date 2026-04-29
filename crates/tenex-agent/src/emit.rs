@@ -67,6 +67,7 @@ impl EmitState {
         self.pending_external_work.store(true, Ordering::Release);
     }
 
+    #[allow(dead_code)]
     pub fn has_pending_external_work(&self) -> bool {
         self.pending_external_work.load(Ordering::Acquire)
     }
