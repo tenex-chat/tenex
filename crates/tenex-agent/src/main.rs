@@ -687,7 +687,12 @@ async fn run() -> Result<()> {
 
     let rag_add_documents =
         RagAddDocumentsTool::new(rag_store.clone(), project_id.clone(), pubkey_hex.clone());
-    let rag_search = RagSearchTool::new(rag_store.clone(), project_id.clone(), pubkey_hex.clone());
+    let rag_search = RagSearchTool::new(
+        rag_store.clone(),
+        project_id.clone(),
+        pubkey_hex.clone(),
+        Arc::new(resolved.clone()),
+    );
 
     // Proactive context: search RAG before the LLM call so relevant past
     // knowledge appears in the system prompt without the agent needing to ask.

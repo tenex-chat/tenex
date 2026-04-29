@@ -1,4 +1,6 @@
-use rig::{completion::ToolDefinition, tool::Tool};
+use crate::config::ResolvedModel;
+use rig::providers::{anthropic, ollama, openai, openrouter};
+use rig::{client::CompletionClient, completion::Prompt, completion::ToolDefinition, tool::Tool};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::sync::Arc;
@@ -8,6 +10,7 @@ use tenex_rag::RagStore;
 pub struct RagSearchArgs {
     pub query: String,
     pub limit: Option<u32>,
+    pub prompt: Option<String>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -19,15 +22,93 @@ pub struct RagSearchTool {
     store: Option<Arc<RagStore>>,
     project_id: String,
     agent_pubkey: String,
+    resolved: Arc<ResolvedModel>,
 }
 
 impl RagSearchTool {
-    pub fn new(store: Option<Arc<RagStore>>, project_id: String, agent_pubkey: String) -> Self {
+    pub fn new(
+        store: Option<Arc<RagStore>>,
+        project_id: String,
+        agent_pubkey: String,
+        resolved: Arc<ResolvedModel>,
+    ) -> Self {
         Self {
             store,
             project_id,
             agent_pubkey,
+            resolved,
         }
+    }
+
+    async fn call_llm(&self, system: &str, user: String) -> anyhow::Result<String> {
+        use rig::client::Nothing;
+
+        let result = match self.resolved.provider.as_str() {
+            "openrouter" => {
+                let key = self
+                    .resolved
+                    .api_key
+                    .as_deref()
+                    .ok_or_else(|| anyhow::anyhow!("no OpenRouter API key"))?;
+                let agent = openrouter::Client::new(key)?
+                    .agent(&self.resolved.model)
+                    .preamble(system)
+                    .build();
+                agent
+                    .prompt(user)
+                    .await
+                    .map_err(|e| anyhow::anyhow!("{e:?}"))?
+            }
+            "openai" => {
+                let key = self
+                    .resolved
+                    .api_key
+                    .as_deref()
+                    .ok_or_else(|| anyhow::anyhow!("no OpenAI API key"))?;
+                let agent = openai::CompletionsClient::builder()
+                    .api_key(key)
+                    .build()?
+                    .agent(&self.resolved.model)
+                    .preamble(system)
+                    .build();
+                agent
+                    .prompt(user)
+                    .await
+                    .map_err(|e| anyhow::anyhow!("{e:?}"))?
+            }
+            "ollama" => {
+                let mut builder = ollama::Client::builder().api_key(Nothing);
+                if let Some(url) = self.resolved.base_url.as_deref() {
+                    builder = builder.base_url(url);
+                }
+                let agent = builder
+                    .build()?
+                    .agent(&self.resolved.model)
+                    .preamble(system)
+                    .build();
+                agent
+                    .prompt(user)
+                    .await
+                    .map_err(|e| anyhow::anyhow!("{e:?}"))?
+            }
+            _ => {
+                let key = self
+                    .resolved
+                    .api_key
+                    .as_deref()
+                    .ok_or_else(|| anyhow::anyhow!("no Anthropic API key"))?;
+                let agent = anthropic::Client::new(key)?
+                    .agent(&self.resolved.model)
+                    .preamble(system)
+                    .build();
+                agent
+                    .prompt(user)
+                    .await
+                    .map_err(|e| anyhow::anyhow!("{e:?}"))?
+            }
+        };
+
+        Ok(result)
     }
 }
 
@@ -42,7 +123,9 @@ impl Tool for RagSearchTool {
             name: Self::NAME.to_string(),
             description: "Search for relevant documents across all available knowledge: \
                 past conversations, project knowledge, and your personal notes. \
-                Returns the most semantically similar results."
+                Returns the most semantically similar results. Optionally provide a \
+                `prompt` to have an LLM synthesize a focused answer from the results \
+                instead of returning raw snippets."
                 .to_string(),
             parameters: json!({
                 "type": "object",
@@ -54,6 +137,10 @@ impl Tool for RagSearchTool {
                     "limit": {
                         "type": "integer",
                         "description": "Maximum number of results to return (default: 10)"
+                    },
+                    "prompt": {
+                        "type": "string",
+                        "description": "If provided, an LLM processes the search results through the lens of this prompt and returns a focused extraction instead of raw snippets. Example: 'What decisions were made about the database schema?'"
                     }
                 },
                 "required": ["query"]
@@ -105,7 +192,18 @@ impl Tool for RagSearchTool {
             })
             .collect();
 
-        serde_json::to_string_pretty(&output)
-            .map_err(|e| RagSearchError(format!("serialize results: {e}")))
+        let results_json = serde_json::to_string_pretty(&output)
+            .map_err(|e| RagSearchError(format!("serialize results: {e}")))?;
+
+        if let Some(p) = args.prompt {
+            let system = "You synthesize information from search results to concisely answer the user's question based only on the provided results.";
+            let user = format!("<results>\n{results_json}\n</results>\n\n{p}");
+            return self
+                .call_llm(system, user)
+                .await
+                .map_err(|e| RagSearchError(format!("LLM call failed: {e}")));
+        }
+
+        Ok(results_json)
     }
 }
