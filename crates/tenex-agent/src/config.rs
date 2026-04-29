@@ -136,17 +136,18 @@ fn resolve_from_string(raw: &str, llms: Option<&LlmsConfig>) -> (String, String)
         return (entry.provider.clone(), entry.model.clone());
     }
 
-    // 2. Inline "provider:model" format (TENEX style)
-    if let Some((provider, model)) = raw.split_once(':') {
-        if !provider.is_empty() && !model.is_empty() {
+    // 2. Inline "provider/model" format — checked first because "ollama/model:tag"
+    //    would otherwise be mis-split at the colon in step 3.
+    if let Some((provider, model)) = raw.split_once('/') {
+        let known_providers = ["anthropic", "openai", "openrouter", "ollama", "groq", "mistral"];
+        if known_providers.contains(&provider) {
             return (provider.to_string(), model.to_string());
         }
     }
 
-    // 3. Inline "provider/model" format
-    if let Some((provider, model)) = raw.split_once('/') {
-        let known_providers = ["anthropic", "openai", "openrouter", "ollama", "groq", "mistral"];
-        if known_providers.contains(&provider) {
+    // 3. Inline "provider:model" format (legacy TENEX style)
+    if let Some((provider, model)) = raw.split_once(':') {
+        if !provider.is_empty() && !model.is_empty() {
             return (provider.to_string(), model.to_string());
         }
     }
