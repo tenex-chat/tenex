@@ -6,7 +6,10 @@ import type { NDKEvent } from "@nostr-dev-kit/ndk";
 export interface ApplyAgentConfigUpdateResult {
     agentPubkey?: string;
     configUpdated: boolean;
+    hasReset: boolean;
+    pmUpdated: boolean;
     hasModel: boolean;
+    toolCount: number;
     skillCount: number;
     mcpCount: number;
 }
@@ -27,13 +30,39 @@ export class AgentConfigUpdateService {
             });
             return {
                 configUpdated: false,
+                hasReset: false,
+                pmUpdated: false,
                 hasModel: false,
+                toolCount: 0,
                 skillCount: 0,
                 mcpCount: 0,
             };
         }
 
         const newModel = event.tagValue("model");
+        const hasReset = event.tags.some((tag) => tag[0] === "reset");
+        if (hasReset) {
+            const configUpdated = await agentStorage.resetDefaultConfig(agentPubkey);
+            return {
+                agentPubkey,
+                configUpdated,
+                hasReset: true,
+                pmUpdated: configUpdated,
+                hasModel: false,
+                toolCount: 0,
+                skillCount: 0,
+                mcpCount: 0,
+            };
+        }
+
+        const toolTagValues = event.tags
+            .filter((tag) => tag[0] === "tool")
+            .map((tag) => tag[1]?.trim())
+            .filter((toolName): toolName is string => Boolean(toolName));
+        const blockedSkillTagValues = event.tags
+            .filter((tag) => tag[0] === "blocked-skill")
+            .map((tag) => tag[1]?.trim())
+            .filter((skillId): skillId is string => Boolean(skillId));
         const skillTagValues = event.tags
             .filter((tag) => tag[0] === "skill")
             .map((tag) => tag[1]?.trim())
@@ -48,6 +77,8 @@ export class AgentConfigUpdateService {
             ...(await this.applyGlobalUpdate({
                 agentPubkey,
                 newModel,
+                toolTagValues,
+                blockedSkillTagValues,
                 skillTagValues,
                 mcpServerSlugs,
                 event,
@@ -58,6 +89,8 @@ export class AgentConfigUpdateService {
     private async applyGlobalUpdate(params: {
         agentPubkey: string;
         newModel: string | undefined;
+        toolTagValues: string[];
+        blockedSkillTagValues: string[];
         skillTagValues: string[];
         mcpServerSlugs: string[];
         event: NDKEvent;
@@ -67,6 +100,16 @@ export class AgentConfigUpdateService {
         const hasModelTag = params.event.tags.some((tag) => tag[0] === "model");
         if (hasModelTag && params.newModel) {
             defaultUpdates.model = params.newModel;
+        }
+
+        const hasToolTags = params.event.tags.some((tag) => tag[0] === "tool");
+        if (hasToolTags) {
+            defaultUpdates.tools = params.toolTagValues;
+        }
+
+        const hasBlockedSkillTags = params.event.tags.some((tag) => tag[0] === "blocked-skill");
+        if (hasBlockedSkillTags) {
+            defaultUpdates.blockedSkills = params.blockedSkillTagValues;
         }
 
         const hasSkillTags = params.event.tags.some((tag) => tag[0] === "skill");
@@ -79,14 +122,24 @@ export class AgentConfigUpdateService {
             defaultUpdates.mcp = params.mcpServerSlugs;
         }
 
-        const configUpdated = await agentStorage.updateDefaultConfig(
+        const hasDefaultUpdates = Object.keys(defaultUpdates).length > 0;
+        const defaultUpdated = hasDefaultUpdates
+            ? await agentStorage.updateDefaultConfig(
+                params.agentPubkey,
+                defaultUpdates
+            )
+            : false;
+        const pmUpdated = await agentStorage.updateAgentIsPM(
             params.agentPubkey,
-            defaultUpdates
+            params.event.tags.some((tag) => tag[0] === "pm")
         );
 
         return {
-            configUpdated,
+            configUpdated: defaultUpdated || pmUpdated,
+            hasReset: false,
+            pmUpdated,
             hasModel: !!params.newModel,
+            toolCount: params.toolTagValues.length,
             skillCount: params.skillTagValues.length,
             mcpCount: params.mcpServerSlugs.length,
         };

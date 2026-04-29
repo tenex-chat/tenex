@@ -37,6 +37,8 @@ export interface AgentInstance {
     useCriteria?: string;
     llmConfig: string;
     tools: string[];
+    /** Global project-manager designation from stored agent config. */
+    isPM?: boolean;
     eventId?: string;
     slug: string;
     useAISDKAgent?: boolean; // Feature flag: use AI SDK Agent class instead of traditional AgentExecutor

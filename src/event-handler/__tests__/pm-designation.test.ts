@@ -94,8 +94,8 @@ describe("PM Designation via Kind 24020", () => {
         expect(updateIsPMCalls[0].pubkey).toBe(agentPubkey);
         expect(updateIsPMCalls[0].isPM).toBe(true);
 
-        // Verify agent was reloaded
-        expect(reloadAgentCalls).toContain(agentPubkey);
+        // Reload is handled asynchronously by AgentConfigWatcher after storage changes.
+        expect(reloadAgentCalls).toHaveLength(0);
     });
 
     it("should call updateAgentIsPM with false when event does not contain ['pm'] tag", async () => {

@@ -43,6 +43,7 @@ export async function createAgentInstance(
     const pubkey = signer.pubkey;
 
     const effectiveLLMConfig = storedAgent.default?.model;
+    const effectiveTools = storedAgent.default?.tools ?? [];
     const effectiveAlwaysSkills = storedAgent.default?.skills;
     const effectiveMcpAccess = storedAgent.default?.mcp;
 
@@ -51,7 +52,7 @@ export async function createAgentInstance(
     const resolvedCategory = resolveCategory(storedAgent.category) ?? resolveCategory(storedAgent.inferredCategory);
 
     // Process tools using pure functions
-    const normalizedTools = processAgentTools([], resolvedCategory);
+    const normalizedTools = processAgentTools(effectiveTools, resolvedCategory);
 
     // Build agent-specific MCP config from stored mcpServers
     const agentMcpConfig: MCPConfig | undefined = storedAgent.mcpServers
@@ -72,6 +73,7 @@ export async function createAgentInstance(
         useCriteria: storedAgent.useCriteria,
         llmConfig: effectiveLLMConfig || DEFAULT_AGENT_LLM_CONFIG,
         tools: normalizedTools,
+        isPM: storedAgent.isPM,
         eventId: storedAgent.eventId,
         slug: storedAgent.slug,
         mcpServers: storedAgent.mcpServers,

@@ -22,6 +22,10 @@ export interface TelegramAgentConfig {
 export interface AgentDefaultConfig {
     /** Default LLM model configuration string (e.g., "anthropic:claude-sonnet-4") */
     model?: string;
+    /** Configurable tool names explicitly enabled for this agent. */
+    tools?: string[];
+    /** Skill IDs disabled for this agent. */
+    blockedSkills?: string[];
     /** Skill IDs that are always active for this agent across all conversations. Local skill directory IDs are authoritative. */
     skills?: string[];
     /** Project MCP server slugs this agent can access. */
@@ -58,6 +62,9 @@ export interface StoredAgentData {
      * Fields here are the global defaults.
      */
     default?: AgentDefaultConfig;
+
+    /** Global project-manager designation from kind 24020 config snapshots. */
+    isPM?: boolean;
 
     /** Telegram transport configuration for this agent. One bot per agent. */
     telegram?: TelegramAgentConfig;

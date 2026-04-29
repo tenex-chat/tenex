@@ -123,6 +123,7 @@ export function createStoredAgent(config: {
     eventId?: string;
     mcpServers?: Record<string, MCPServerConfig>;
     defaultConfig?: AgentDefaultConfig & { telegram?: TelegramAgentConfig };
+    isPM?: boolean;
     telegram?: TelegramAgentConfig;
 }): StoredAgent {
     const legacyDefaultTelegram = sanitizeTelegramConfig(
@@ -143,6 +144,7 @@ export function createStoredAgent(config: {
         status: "active",
         mcpServers: config.mcpServers,
         default: defaultConfig,
+        isPM: config.isPM,
         telegram: sanitizeTelegramConfig(config.telegram ?? legacyDefaultTelegram),
     };
 }
@@ -961,6 +963,22 @@ export class AgentStorage {
             agent.default.model = updates.model;
         }
 
+        if (updates.tools !== undefined) {
+            if (updates.tools.length > 0) {
+                agent.default.tools = updates.tools;
+            } else {
+                agent.default.tools = undefined;
+            }
+        }
+
+        if (updates.blockedSkills !== undefined) {
+            if (updates.blockedSkills.length > 0) {
+                agent.default.blockedSkills = updates.blockedSkills;
+            } else {
+                agent.default.blockedSkills = undefined;
+            }
+        }
+
         if (updates.skills !== undefined) {
             if (updates.skills.length > 0) {
                 agent.default.skills = updates.skills;
@@ -984,6 +1002,38 @@ export class AgentStorage {
 
         await this.saveAgent(agent);
         logger.info(`Updated default config for agent ${agent.name}`, { updates });
+        return true;
+    }
+
+    async resetDefaultConfig(pubkey: string): Promise<boolean> {
+        const agent = await this.loadAgent(pubkey);
+        if (!agent) {
+            logger.warn(`Agent with pubkey ${pubkey} not found`);
+            return false;
+        }
+
+        agent.default = undefined;
+        agent.isPM = undefined;
+
+        await this.saveAgent(agent);
+        logger.info(`Reset default config for agent ${agent.name}`);
+        return true;
+    }
+
+    async updateAgentIsPM(
+        pubkey: string,
+        isPM: boolean | undefined
+    ): Promise<boolean> {
+        const agent = await this.loadAgent(pubkey);
+        if (!agent) {
+            logger.warn(`Agent with pubkey ${pubkey} not found`);
+            return false;
+        }
+
+        agent.isPM = isPM;
+
+        await this.saveAgent(agent);
+        logger.info(`Updated PM designation for agent ${agent.name}`, { isPM });
         return true;
     }
 

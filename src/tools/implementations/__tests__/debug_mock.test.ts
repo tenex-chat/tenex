@@ -34,6 +34,7 @@ describe("Debug Mock Store", () => {
             const store = new ConversationStore("/test");
             (store as any).state = {
                 messages: [{ pubkey: "user", content: "test", messageType: "text", timestamp: 1700001000 }],
+                metadata: {},
                 activeRal: {},
                 nextRalNumber: {},
                 injections: [],
@@ -56,9 +57,6 @@ describe("Debug Mock Store", () => {
 
     it("should test getLastActivityTime on mock store", () => {
         const store = ConversationStore.getOrLoad("conv1");
-        console.log("Store.state:", (store as any).state);
-        console.log("Store.state.messages:", (store as any).state?.messages);
-        console.log("getLastActivityTime:", store.getLastActivityTime());
         expect(store.getLastActivityTime()).toBe(1700001000);
     });
 
@@ -69,7 +67,6 @@ describe("Debug Mock Store", () => {
         const tool = createConversationListTool(mockContext);
         const result = await tool.execute({});
 
-        console.log("Result:", JSON.stringify(result, null, 2));
         expect(result.success).toBe(true);
         expect(result.conversations.length).toBeGreaterThan(0);
         expect(result.conversations[0].lastActive).toBeDefined();

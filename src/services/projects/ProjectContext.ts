@@ -14,8 +14,9 @@ import type { Hexpubkey, NDKProject } from "@nostr-dev-kit/ndk";
  * Resolve the Project Manager for a project.
  *
  * Priority order:
- * 1. First `p` tag pubkey from the 31933 project event
- * 2. First agent in registry (fallback for projects with no agent tags)
+ * 1. Single global `isPM` flag from agent config
+ * 2. First `p` tag pubkey from the 31933 project event
+ * 3. First agent in registry (fallback for projects with no agent tags)
  *
  * @param project - The NDKProject event
  * @param agents - Map of agent slug to AgentInstance
@@ -25,7 +26,23 @@ export function resolveProjectManager(
     project: NDKProject,
     agents: Map<string, AgentInstance>
 ): AgentInstance | undefined {
-    // Step 1: First agent from project tags
+    const configuredPMs = Array.from(agents.values()).filter((agent) => agent.isPM === true);
+    if (configuredPMs.length === 1) {
+        return configuredPMs[0];
+    }
+
+    if (configuredPMs.length > 1) {
+        logger.warn("Multiple agents have global PM designation, using first one", {
+            pmAgents: configuredPMs.map((agent) => ({
+                slug: agent.slug,
+                pubkey: agent.pubkey,
+            })),
+            selectedAgent: configuredPMs[0].slug,
+        });
+        return configuredPMs[0];
+    }
+
+    // Step 2: First agent from project tags
     const firstAgentTag = project.tags.find(
         (tag: string[]) => tag[0] === "p" && tag[1]
     );
@@ -45,7 +62,7 @@ export function resolveProjectManager(
         });
     }
 
-    // Step 2: No agent tags in project, use first from registry if any exist
+    // Step 3: No agent tags in project, use first from registry if any exist
     if (agents.size > 0) {
         const firstAgent = agents.values().next().value;
         if (firstAgent) {
