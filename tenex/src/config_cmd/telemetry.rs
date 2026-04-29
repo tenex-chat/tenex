@@ -317,7 +317,7 @@ impl std::fmt::Display for TopActionItem {
 }
 
 fn top_actions() -> Vec<TopActionItem> {
-    let dim_back = console::Style::new().dim().apply_to("Back").to_string();
+    let dim_back = crate::tui::theme::chalk_dim("Back");
     vec![
         TopActionItem {
             label: "Configure tracing and analysis".into(),

@@ -52,9 +52,7 @@ fn run_reset(base_dir: &std::path::Path) -> Result<()> {
     doc.save(base_dir)?;
     println!(
         "{}",
-        console::Style::new()
-            .green()
-            .apply_to("\n✓ Context management settings reset to defaults")
+        crate::tui::theme::chalk_green("\n✓ Context management settings reset to defaults"),
     );
     Ok(())
 }
@@ -214,9 +212,7 @@ fn run_configure(base_dir: &std::path::Path) -> Result<()> {
     doc.save(base_dir)?;
     println!(
         "{}",
-        console::Style::new()
-            .green()
-            .apply_to("\n✓ Context management settings updated")
+        crate::tui::theme::chalk_green("\n✓ Context management settings updated"),
     );
     Ok(())
 }
@@ -596,7 +592,7 @@ impl std::fmt::Display for TopActionItem {
 }
 
 fn top_actions() -> Vec<TopActionItem> {
-    let dim_back = console::Style::new().dim().apply_to("Back").to_string();
+    let dim_back = crate::tui::theme::chalk_dim("Back");
     vec![
         TopActionItem {
             label: "Configure settings".into(),

@@ -54,12 +54,11 @@ pub fn resolve_owner_signer(base_dir: &std::path::Path) -> Result<Keys> {
     //        "ownerNsec" in TENEX config, or enter it now.`,
     //   ));
     // The leading \n is INSIDE the dim wrap — mirror byte-for-byte.
-    let dim = console::Style::new().dim();
     println!(
         "{}",
-        dim.apply_to(format!(
+        crate::tui::theme::chalk_dim(&format!(
             "\nNo owner nsec configured. Set ${ENV_VAR}, populate \"ownerNsec\" in TENEX config, or enter it now.",
-        ))
+        )),
     );
 
     let prompted = match prompt_for_nsec()? {

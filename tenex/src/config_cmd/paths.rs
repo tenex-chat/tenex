@@ -86,8 +86,10 @@ pub fn run(base_dir: &std::path::Path) -> Result<()> {
     // ✓ nor the body is bold (unlike most other config submodules,
     // which use `chalk.green("✓") + chalk.bold(" ...")`). Pinned
     // here because it's a real divergence that's easy to "fix" wrong.
-    let green = console::Style::new().green();
-    println!("{}", green.apply_to("\n✓ Path settings updated"));
+    println!(
+        "{}",
+        crate::tui::theme::chalk_green("\n✓ Path settings updated"),
+    );
     Ok(())
 }
 

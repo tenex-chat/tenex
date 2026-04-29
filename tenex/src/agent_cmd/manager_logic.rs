@@ -13,9 +13,9 @@
 //! - [`pick_merge_survivor`]            — `pickMergeSurvivor` (`:209-228`)
 //! - [`find_duplicate_slug_groups`]     — `findDuplicateSlugGroups` (`:230-244`)
 //!
-//! Styling: TS uses `chalk.dim(...)`. We mirror it with `console::Style::new().dim()`,
-//! which emits the same SGR `2;` "faint" sequence so the on-wire output is
-//! pixel-identical.
+//! Styling: TS uses `chalk.dim(...)`. We mirror it via
+//! `crate::tui::theme::chalk_dim(text)` which emits the exact
+//! `\x1b[2m<text>\x1b[22m` chalk wire bytes — byte-for-byte parity.
 //!
 //! `localeCompare` against ASCII (the slug universe) collapses to byte
 //! ordering — so we use `String::cmp`. If a future slug includes non-ASCII
@@ -84,19 +84,17 @@ pub fn format_projects(projects: &[String]) -> String {
 /// menu — the shipped main view uses [`format_managed_agent_list_line`] —
 /// but exists for tests and parity. Mirrored verbatim.
 pub fn format_managed_agent_label(entry: &ManagedAgent) -> String {
-    let dim = console::Style::new().dim();
+    use crate::tui::theme::chalk_dim;
     let inactive_tag = if entry.is_inactive() {
-        dim.apply_to(" [inactive]").to_string()
+        chalk_dim(" [inactive]")
     } else {
         String::new()
     };
-    let role_line = dim.apply_to(format!("    role: {}", entry.role)).to_string();
-    let projects_line = dim
-        .apply_to(format!(
-            "    projects: {}",
-            format_projects(&entry.projects)
-        ))
-        .to_string();
+    let role_line = chalk_dim(&format!("    role: {}", entry.role));
+    let projects_line = chalk_dim(&format!(
+        "    projects: {}",
+        format_projects(&entry.projects),
+    ));
     format!(
         "{slug}{inactive}\n{role}\n{projects}",
         slug = entry.slug,
@@ -125,16 +123,17 @@ pub fn format_managed_agent_label(entry: &ManagedAgent) -> String {
 /// `<slug> [inactive]`. Both shapes coexist in TS — keep them
 /// separate here too.
 pub fn format_managed_agent_list_line(entry: &ManagedAgent) -> String {
-    let dim = console::Style::new().dim();
+    use crate::tui::theme::chalk_dim;
     let inactive_tag = if entry.is_inactive() {
-        dim.apply_to("[inactive] ").to_string()
+        chalk_dim("[inactive] ")
     } else {
         String::new()
     };
-    let middle_dot = dim.apply_to("·").to_string();
-    let projects_chunk = dim
-        .apply_to(format!("projects: {}", format_projects(&entry.projects)))
-        .to_string();
+    let middle_dot = chalk_dim("·");
+    let projects_chunk = chalk_dim(&format!(
+        "projects: {}",
+        format_projects(&entry.projects),
+    ));
     format!("{inactive_tag}{slug} {middle_dot} {projects_chunk}", slug = entry.slug)
 }
 
@@ -333,31 +332,22 @@ mod tests {
     }
 
     #[test]
-    fn format_managed_agent_list_line_emits_dim_runs_when_styling_forced() {
-        // `console` auto-detects TTY; in tests it returns plain output, which
-        // would mask whether we wrap the right segments. Force styling on a
-        // fresh Style and re-check.
-        let dim = console::Style::new().force_styling(true).dim();
+    fn format_managed_agent_list_line_emits_dim_runs_unconditionally() {
+        // `theme::chalk_dim(...)` emits raw `\x1b[2m...\x1b[22m` regardless
+        // of TTY detection (unlike `console::Style.dim().apply_to(...)`
+        // which auto-suppresses on non-TTY). Active-status row should
+        // contain 2 dim runs: `·`, `projects: P1`.
         let entry = agent("alpha", None, vec!["P1".into()]);
-        let inactive_tag = if entry.is_inactive() {
-            dim.apply_to("[inactive] ").to_string()
-        } else {
-            String::new()
-        };
-        let middle_dot = dim.apply_to("·").to_string();
-        let projects_chunk = dim
-            .apply_to(format!("projects: {}", format_projects(&entry.projects)))
-            .to_string();
-        let line = format!(
-            "{inactive_tag}{slug} {middle_dot} {projects_chunk}",
-            slug = entry.slug
-        );
-        // Two dim runs in the active branch: `·`, `projects: P1`.
+        let line = format_managed_agent_list_line(&entry);
         let dim_starts = line.matches("\x1b[2m").count();
         assert_eq!(
             dim_starts, 2,
             "expected 2 dim runs (· and projects:…) in: {line:?}"
         );
+        // And every dim open is paired with a SGR-22 close (no SGR-0).
+        let dim_closes = line.matches("\x1b[22m").count();
+        assert_eq!(dim_closes, 2);
+        assert!(!line.contains("\x1b[0m"), "must use SGR 22 close, not SGR 0");
     }
 
     #[test]

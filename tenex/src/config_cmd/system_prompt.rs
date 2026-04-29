@@ -84,8 +84,10 @@ fn run_show(base_dir: &Path) -> Result<()> {
     let enabled = doc.global_system_prompt_enabled().unwrap_or(true);
 
     if content.trim().is_empty() {
-        let gray = crate::tui::theme::chalk_gray();
-        println!("{}", gray.apply_to("No global system prompt configured."));
+        println!(
+            "{}",
+            crate::tui::theme::chalk_gray_str("No global system prompt configured."),
+        );
         return Ok(());
     }
     // TS at system-prompt.ts:95-98 uses `amberBold` and `amber` from
@@ -126,7 +128,6 @@ fn run_edit(base_dir: &Path) -> Result<()> {
     let amber_close = crate::tui::theme::FG_RESET;
     let bold_open = crate::tui::theme::BOLD_OPEN;
     let bold_close = crate::tui::theme::BOLD_CLOSE;
-    let gray = crate::tui::theme::chalk_gray();
     println!(
         "{amber_open}{bold_open}Opening editor to configure global system prompt...{bold_close}{amber_close}"
     );
@@ -135,7 +136,10 @@ fn run_edit(base_dir: &Path) -> Result<()> {
     // adds another newline after, producing one styled line + one blank
     // line. Mirror byte-for-byte by embedding the `\n` in the styled
     // string before console.log's auto-newline.
-    println!("{}", gray.apply_to(format!("(Using editor: {editor})\n")));
+    println!(
+        "{}",
+        crate::tui::theme::chalk_gray_str(&format!("(Using editor: {editor})\n")),
+    );
 
     let doc = TenexConfigDoc::load(base_dir)?;
     let existing_content = doc.global_system_prompt_content().unwrap_or_default();
@@ -166,7 +170,6 @@ fn run_edit(base_dir: &Path) -> Result<()> {
         crate::tui::display::config_success("Global system prompt cleared (no content).");
     } else {
         crate::tui::display::config_success("Global system prompt saved successfully!");
-        let gray = crate::tui::theme::chalk_gray();
         // TS `cleanedContent.length` measures UTF-16 code units, but the
         // user-visible label says "characters" — Rust .len() returns
         // bytes which over-counts every multi-byte codepoint. Use
@@ -179,10 +182,10 @@ fn run_edit(base_dir: &Path) -> Result<()> {
         // never contain non-BMP characters.)
         println!(
             "{}",
-            gray.apply_to(format!(
+            crate::tui::theme::chalk_gray_str(&format!(
                 "Content length: {} characters",
                 cleaned.chars().count()
-            ))
+            )),
         );
         // TS at system-prompt.ts:209 emits:
         //   console.log(chalk.gray("\nThis prompt will be added to all agents' system prompts."));
@@ -190,7 +193,9 @@ fn run_edit(base_dir: &Path) -> Result<()> {
         // embedding it inside the apply_to string.
         println!(
             "{}",
-            gray.apply_to("\nThis prompt will be added to all agents' system prompts.")
+            crate::tui::theme::chalk_gray_str(
+                "\nThis prompt will be added to all agents' system prompts.",
+            ),
         );
     }
     Ok(())
@@ -281,7 +286,7 @@ impl std::fmt::Display for ActionItem {
 }
 
 fn actions() -> Vec<ActionItem> {
-    let dim_back = console::Style::new().dim().apply_to("Back").to_string();
+    let dim_back = crate::tui::theme::chalk_dim("Back");
     vec![
         ActionItem {
             label: "Show current".into(),
