@@ -106,13 +106,23 @@ pub fn format_managed_agent_label(entry: &ManagedAgent) -> String {
     )
 }
 
-/// `formatManagedAgentListLine` (`AgentManager.ts:203-207`):
-/// `[inactive] <slug> · projects: <csv>` — `[inactive] ` and `· projects: …`
-/// are `chalk.dim`.
+/// `formatManagedAgentListLine` (`AgentManager.ts:208`):
+///
+///     return `${inactiveTag}${storedAgent.slug} ${chalk.dim("·")} ${chalk.dim(`projects: ${formatProjects(projects)}`)}`;
+///
+/// where `inactiveTag = chalk.dim(" [inactive]")` (leading space INSIDE
+/// the dim wrap, no trailing space). The TS template prepends the tag
+/// directly before the slug with no separator — the leading space
+/// inside the dim wrap is the only thing between the tag and the
+/// preceding line edge. So an inactive agent renders as
+/// ` [inactive]<slug> · projects: <csv>` with the slug touching `]`.
+///
+/// Byte-for-byte with TS: leading space inside the dim wrap, no
+/// trailing space, slug appended right after.
 pub fn format_managed_agent_list_line(entry: &ManagedAgent) -> String {
     let dim = console::Style::new().dim();
     let inactive_tag = if entry.is_inactive() {
-        dim.apply_to("[inactive] ").to_string()
+        dim.apply_to(" [inactive]").to_string()
     } else {
         String::new()
     };
@@ -307,10 +317,14 @@ mod tests {
 
     #[test]
     fn format_managed_agent_list_line_prepends_inactive_tag() {
+        // TS at AgentManager.ts:208 prepends the tag with NO trailing
+        // space — the leading space INSIDE the dim wrap is the only
+        // separator. Stripped output is ` [inactive]alpha · …` (slug
+        // touches `]`).
         let entry = agent("alpha", Some("inactive"), vec![]);
         let line = format_managed_agent_list_line(&entry);
         let plain = console::strip_ansi_codes(&line);
-        assert_eq!(plain, "[inactive] alpha · projects: none");
+        assert_eq!(plain, " [inactive]alpha · projects: none");
     }
 
     #[test]
