@@ -147,7 +147,10 @@ pub fn format_preview_json(previews: &[AgentPreview]) -> String {
 pub fn format_preview_text(previews: &[AgentPreview]) -> String {
     let blue = console::Style::new().blue();
     let green = console::Style::new().green();
-    let gray = console::Style::new().color256(8); // chalk's default gray
+    // TS uses chalk.gray which emits `\x1b[90m` (bright black). Use the
+    // shared theme helper that produces the byte-exact same sequence —
+    // distinct from theme::muted_gray which is `\x1b[38;5;244m`.
+    let gray = crate::tui::theme::chalk_gray();
 
     // TS at openclaw.ts:204 uses the LITERAL 'agent(s)' string —
     // no real pluralisation, the parenthetical is in the template:

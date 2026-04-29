@@ -115,6 +115,15 @@ pub fn muted_gray() -> Style {
     Style::new().color256(244)
 }
 
+/// `chalk.gray` exact match — `\x1b[90m` (bright black). The TS source
+/// uses `chalk.gray` extensively for muted prose; this byte-for-byte
+/// equivalent keeps wire output identical to TS. Distinct from
+/// [`muted_gray`] (which is `\x1b[38;5;244m`, a darker palette gray
+/// used for log lines and metadata).
+pub fn chalk_gray() -> Style {
+    Style::new().black().bright()
+}
+
 /// Dim modifier (no color, just dimmed). Background instructions, `Back`
 /// labels, separators (`──`), hints, `[ ]`, `(default)`.
 pub fn dim() -> Style {
@@ -124,4 +133,52 @@ pub fn dim() -> Style {
 /// Bold modifier (default fg). Emphasis on default-color text.
 pub fn bold() -> Style {
     Style::new().bold()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// chalk.gray in chalk uses ANSI 90 (bright black). force-styling
+    /// the output and inspecting it confirms the produced wire bytes.
+    #[test]
+    fn chalk_gray_emits_ansi_90() {
+        let styled = chalk_gray()
+            .force_styling(true)
+            .apply_to("x")
+            .to_string();
+        // Bright-black opens with \x1b[90m; close is \x1b[39m (default
+        // foreground reset).
+        assert!(styled.starts_with("\x1b[90m"), "got: {styled:?}");
+        assert!(styled.ends_with("\x1b[0m") || styled.ends_with("\x1b[39m"),
+            "got: {styled:?}");
+    }
+
+    /// muted_gray is the xterm-256 #244 palette gray — distinct from
+    /// chalk_gray's ANSI 90. Pin the divergence so the two never get
+    /// silently unified.
+    #[test]
+    fn muted_gray_emits_xterm_256_244() {
+        let styled = muted_gray()
+            .force_styling(true)
+            .apply_to("x")
+            .to_string();
+        assert!(
+            styled.starts_with("\x1b[38;5;244m"),
+            "got: {styled:?}"
+        );
+    }
+
+    #[test]
+    fn chalk_gray_and_muted_gray_emit_distinct_ansi_sequences() {
+        let cg = chalk_gray()
+            .force_styling(true)
+            .apply_to("x")
+            .to_string();
+        let mg = muted_gray()
+            .force_styling(true)
+            .apply_to("x")
+            .to_string();
+        assert_ne!(cg, mg);
+    }
 }
