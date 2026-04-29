@@ -371,8 +371,23 @@ fn render_frame<W: Write>(
                 // TS at config/index.ts:98 — `chalk.dim("  Back")` with
                 // TWO leading spaces INSIDE the dim wrap. Inquirer
                 // prepends another 2-char cursor slot, so the visible
-                // indent is 4 spaces (or `❯ ` + 2 spaces). Mirror by
-                // emitting "  Back" inside the dim wrap.
+                // indent is 4 spaces (or `❯ ` + 2 spaces).
+                //
+                // When the row is active, @inquirer/select wraps the
+                // entire `${cursor} ${item.name}` template in
+                // `theme.style.highlight` (= amber). chalk's nesting
+                // re-emits the inner amber after the cursor's
+                // `\x1b[39m` close so the colour flows through, and the
+                // inner `chalk.dim("  Back")` wrap stays intact (chalk
+                // only re-emits its OWN close, not other styles' closes).
+                // Net visual: amber `❯ ` + amber+dim `  Back`.
+                //
+                // The Rust port emits a single amber span around the
+                // whole row and an inner dim span around `  Back` —
+                // visually equivalent (amber-tinted dim), byte-shorter
+                // than TS's chalk-nested double-wrap. The chalk-nesting
+                // byte exactness is documented as out-of-scope in
+                // `docs/tui-port/QUESTIONS.md`.
                 let is_active = i == active;
                 let pfx = if is_active { cursor_active.as_str() } else { "  " };
                 if is_active {
@@ -380,7 +395,9 @@ fn render_frame<W: Write>(
                         stdout,
                         SetForegroundColor(AMBER),
                         Print(pfx),
+                        SetAttribute(Attribute::Dim),
                         Print("  Back"),
+                        SetAttribute(Attribute::NormalIntensity),
                         ResetColor,
                         Print("\r\n"),
                     )?;
@@ -642,5 +659,58 @@ mod tests {
             SectionMenuInput::CtrlC
         );
         assert_eq!(SectionMenuInput::from_key_event(ke(KeyCode::Tab)), SectionMenuInput::Other);
+    }
+
+    /// Pin: the active Back row preserves the dim styling on "  Back".
+    ///
+    /// TS at `config/index.ts:98`: the Back item's `name` is
+    /// `chalk.dim("  Back")`. When @inquirer/select renders the active
+    /// row it wraps `${cursor} ${item.name}` in
+    /// `theme.style.highlight` (= amber) — the dim wrap on the inner
+    /// "  Back" stays intact, so visually the active Back row reads as
+    /// amber-tinted dim text.
+    ///
+    /// The previous Rust impl wrapped the whole `❯   Back` in one amber
+    /// span with no inner dim, dropping the dim styling — visible
+    /// difference. This test pins the dim wrap stays in the active path.
+    #[test]
+    fn render_frame_active_back_preserves_dim_styling() {
+        let sections = sample_sections();
+        let rows = flatten(&sections);
+        let active = 6; // Back (per the surrounding navigation tests)
+        let mut buf: Vec<u8> = Vec::new();
+        render_frame(&mut buf, "Settings", &rows, active, 0).unwrap();
+        let s = String::from_utf8(buf).expect("render output must be UTF-8");
+        // Active Back row must have a dim span (`\x1b[2m`) between the
+        // amber open and close — i.e. the `  Back` text is dim AND
+        // amber-tinted.
+        assert!(
+            s.contains("\x1b[2m  Back\x1b[22m"),
+            "active Back row must keep the dim wrap on the label; got {s:?}",
+        );
+    }
+
+    /// Pin: the inactive Back row still renders dim "  Back" without
+    /// any amber span.
+    #[test]
+    fn render_frame_inactive_back_renders_dim_no_amber() {
+        let sections = sample_sections();
+        let rows = flatten(&sections);
+        // Active is the first entry (1) — Back at 6 is inactive.
+        let active = 1;
+        let mut buf: Vec<u8> = Vec::new();
+        render_frame(&mut buf, "Settings", &rows, active, 0).unwrap();
+        let s = String::from_utf8(buf).expect("render output must be UTF-8");
+        assert!(
+            s.contains("\x1b[2m  Back\x1b[22m"),
+            "inactive Back row must still wrap label in dim; got {s:?}",
+        );
+        // The inactive row's own line shouldn't start with the amber
+        // cursor span — verify no amber-wrap immediately precedes the
+        // inactive `  Back`.
+        assert!(
+            !s.contains("\x1b[38;2;255;193;7m  \x1b[2m  Back"),
+            "inactive Back row must not be amber-wrapped; got {s:?}",
+        );
     }
 }
