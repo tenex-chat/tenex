@@ -32,11 +32,12 @@ use indexmap::IndexMap;
 use super::raw_mode::RawMode;
 use crate::tui::glyphs;
 
-// Truecolor `#FFC107` from the shared theme module — single source of
-// truth for the inquirer-amber palette across all bespoke prompts.
+// Palette aliases sourced from the shared theme module — single
+// source of truth for the inquirer-amber + display-palette colours
+// used across all bespoke prompts.
 const AMBER: Color = crate::tui::theme::INQUIRER_AMBER_CROSSTERM;
-const ANSI214_ACCENT: Color = Color::AnsiValue(214);
-const ANSI240_MUTED: Color = Color::AnsiValue(240);
+const ANSI214_ACCENT: Color = crate::tui::theme::DISPLAY_ACCENT_CROSSTERM;
+const ANSI240_MUTED: Color = crate::tui::theme::DISPLAY_MUTED_CROSSTERM;
 
 /// Width of the rule rendered between role rows and the Done row.
 /// Source: `roles.ts:191`.

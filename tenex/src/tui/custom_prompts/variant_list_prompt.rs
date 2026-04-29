@@ -39,10 +39,9 @@ use indexmap::IndexMap;
 use super::raw_mode::RawMode;
 use crate::tui::glyphs;
 
-// Truecolor `#FFC107` from the shared theme module — single source of
-// truth for the inquirer-amber palette across all bespoke prompts.
+// Palette aliases sourced from the shared theme module.
 const AMBER: Color = crate::tui::theme::INQUIRER_AMBER_CROSSTERM;
-const ANSI214_ACCENT: Color = Color::AnsiValue(214);
+const ANSI214_ACCENT: Color = crate::tui::theme::DISPLAY_ACCENT_CROSSTERM;
 
 /// Width of the rule rendered between variant rows and the action rows.
 /// Source: `variant-list-prompt.ts:133` (40 `─` chars).

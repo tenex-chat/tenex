@@ -40,6 +40,25 @@ pub const INQUIRER_AMBER_FG: &str = "\x1b[38;2;255;193;7m";
 pub const INQUIRER_AMBER_CROSSTERM: crossterm::style::Color =
     crossterm::style::Color::Rgb { r: 0xFF, g: 0xC1, b: 0x07 };
 
+/// Display-palette accent — xterm-256 #214 (`#ffaf00`). Section
+/// headers, hint `→`, banner `T E N E X` letter, summary `▲`, and the
+/// bespoke-prompt 'Done' label. **Distinct from**
+/// [`INQUIRER_AMBER_CROSSTERM`] (truecolor `#FFC107`) — spec doc 12 §0
+/// pins the two oranges as deliberately different.
+pub const DISPLAY_ACCENT_CROSSTERM: crossterm::style::Color =
+    crossterm::style::Color::AnsiValue(214);
+
+/// Display-palette selected — xterm-256 #114 (`#87d787`). Used for
+/// the bold `[✓]` glyph in the provider-select browse pane.
+pub const DISPLAY_SELECTED_CROSSTERM: crossterm::style::Color =
+    crossterm::style::Color::AnsiValue(114);
+
+/// Display-palette muted — xterm-256 #240 (`#585858`). Used for the
+/// inactive role-recommendation tint in the role-menu prompt
+/// (`roles.ts:186` `chalk.ansi256(240)`).
+pub const DISPLAY_MUTED_CROSSTERM: crossterm::style::Color =
+    crossterm::style::Color::AnsiValue(240);
+
 // ---------------------------------------------------------------------------
 // Display palette (xterm-256). Banner gradient, section headers, hints.
 // `src/commands/config/display.ts:3-12`
