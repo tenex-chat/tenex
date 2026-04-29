@@ -189,7 +189,10 @@ fn project_context_renders_exact_root_as_project_base() {
         telegram_channel_bindings: &[],
     });
     assert!(out.contains("cwd: $PROJECT_BASE"), "output was: {out}");
-    assert!(!out.contains("cwd: $PROJECT_BASE/"), "should not append slash: {out}");
+    assert!(
+        !out.contains("cwd: $PROJECT_BASE/"),
+        "should not append slash: {out}"
+    );
 }
 
 #[test]
@@ -239,7 +242,10 @@ fn project_context_renders_project_id_and_conversation_id() {
         telegram_channel_bindings: &[],
     });
     assert!(out.contains("ID: my-cool-project"), "output was: {out}");
-    assert!(out.contains("Conversation ID: deadbeef"), "output was: {out}");
+    assert!(
+        out.contains("Conversation ID: deadbeef"),
+        "output was: {out}"
+    );
 }
 
 #[test]
@@ -269,9 +275,18 @@ fn project_context_renders_telegram_channel_bindings() {
         telegram_channel_bindings: &bindings,
     });
     assert!(out.contains("<channels>"), "output was: {out}");
-    assert!(out.contains(r#"type="dm" id="telegram:chat:12345""#), "output was: {out}");
-    assert!(out.contains(r#"type="topic" id="telegram:group:-100987654321:topic:42""#), "output was: {out}");
-    assert!(out.contains(r#"type="group" id="telegram:group:-100111222333""#), "output was: {out}");
+    assert!(
+        out.contains(r#"type="dm" id="telegram:chat:12345""#),
+        "output was: {out}"
+    );
+    assert!(
+        out.contains(r#"type="topic" id="telegram:group:-100987654321:topic:42""#),
+        "output was: {out}"
+    );
+    assert!(
+        out.contains(r#"type="group" id="telegram:group:-100111222333""#),
+        "output was: {out}"
+    );
     assert!(out.contains("</channels>"), "output was: {out}");
 }
 

@@ -35,9 +35,9 @@ use super::recording::{RecordingTool, ToolRecorder};
 use super::report_publish::ReportPublishTool;
 use super::schedule_task::ScheduleTaskTool;
 use super::self_delegate::SelfDelegateTool;
+use super::send_message::SendMessageTool;
 use super::shell::ShellTool;
 use super::skill_list::SkillListTool;
-use super::send_message::SendMessageTool;
 use super::skills_set::SkillsSetTool;
 use super::todo::{TodoItem, TodoWriteTool};
 
@@ -224,12 +224,19 @@ impl ToolSet {
         self.push_tool(
             &mut tools,
             &recorder,
-            Box::new(ConversationGetTool::new(self.conv_db_path.clone(), self.resolved_model.clone())),
+            Box::new(ConversationGetTool::new(
+                self.conv_db_path.clone(),
+                self.resolved_model.clone(),
+            )),
         );
         self.push_tool(
             &mut tools,
             &recorder,
-            Box::new(ConversationListTool::new(self.conv_db_path.clone(), self.base_dir.clone(), self.project_d_tag.clone())),
+            Box::new(ConversationListTool::new(
+                self.conv_db_path.clone(),
+                self.base_dir.clone(),
+                self.project_d_tag.clone(),
+            )),
         );
 
         self.push_tool(

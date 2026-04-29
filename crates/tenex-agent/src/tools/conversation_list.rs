@@ -4,9 +4,7 @@ use serde_json::json;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use tenex_conversations::{
-    model::ConversationRow,
-    paths::CONVERSATION_DB_FILENAME,
-    store::ConversationListFilter,
+    model::ConversationRow, paths::CONVERSATION_DB_FILENAME, store::ConversationListFilter,
     ConversationStore,
 };
 
@@ -109,9 +107,7 @@ fn format_conv_line(tagged: &TaggedConv, indent: &str) -> String {
         .as_deref()
         .map(|p| format!("[{p}] "))
         .unwrap_or_default();
-    format!(
-        "{indent}{project_prefix}{id_short}: {title}{activity}{preview}",
-    )
+    format!("{indent}{project_prefix}{id_short}: {title}{activity}{preview}",)
 }
 
 /// Build a tree-ordered flat list: roots by `last_activity` desc, each
@@ -232,9 +228,8 @@ impl Tool for ConversationListTool {
 
         let tagged: Vec<TaggedConv> = if search_all {
             let projects_dir = self.base_dir.join("projects");
-            let entries = std::fs::read_dir(&projects_dir).map_err(|e| {
-                ConversationListError(format!("cannot read projects dir: {e}"))
-            })?;
+            let entries = std::fs::read_dir(&projects_dir)
+                .map_err(|e| ConversationListError(format!("cannot read projects dir: {e}")))?;
 
             let mut all: Vec<TaggedConv> = Vec::new();
             for entry in entries.flatten() {

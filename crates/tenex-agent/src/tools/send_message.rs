@@ -125,16 +125,17 @@ impl Tool for SendMessageTool {
                 args.channel_id
             )))?;
 
-        validate_target(&chat_id, thread_id.as_deref())
-            .map_err(SendMessageError)?;
+        validate_target(&chat_id, thread_id.as_deref()).map_err(SendMessageError)?;
 
         let store = BindingStore::open(self.bindings_path.clone());
         let binding = store
             .get_telegram(&self.agent_pubkey, &args.channel_id)
-            .ok_or_else(|| SendMessageError(format!(
-                "Channel {} is not in your remembered transport bindings.",
-                args.channel_id
-            )))?;
+            .ok_or_else(|| {
+                SendMessageError(format!(
+                    "Channel {} is not in your remembered transport bindings.",
+                    args.channel_id
+                ))
+            })?;
 
         if binding.project_id != self.project_id {
             return Err(SendMessageError(format!(

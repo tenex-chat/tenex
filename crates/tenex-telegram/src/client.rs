@@ -124,6 +124,39 @@ impl BotClient {
         parse_response::<TelegramMessage>(&body).context("sendMessage parse")
     }
 
+    /// Send a chat action (e.g. `"typing"`). The Bot API surface returns the
+    /// indicator for ~5 seconds; callers that want it visible longer must
+    /// re-send periodically.
+    pub async fn send_chat_action(
+        &self,
+        chat_id: &str,
+        action: &str,
+        message_thread_id: Option<&str>,
+    ) -> Result<()> {
+        #[derive(Serialize)]
+        struct Payload<'a> {
+            chat_id: &'a str,
+            action: &'a str,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            message_thread_id: Option<i64>,
+        }
+        let thread_id = message_thread_id.and_then(|s| s.parse::<i64>().ok());
+        let resp = self
+            .http
+            .post(self.url("sendChatAction"))
+            .json(&Payload {
+                chat_id,
+                action,
+                message_thread_id: thread_id,
+            })
+            .send()
+            .await
+            .context("sendChatAction request")?;
+        let body = resp.text().await.context("sendChatAction body")?;
+        parse_response::<bool>(&body).context("sendChatAction parse")?;
+        Ok(())
+    }
+
     pub async fn send_voice(
         &self,
         chat_id: &str,

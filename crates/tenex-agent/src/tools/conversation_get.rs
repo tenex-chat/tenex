@@ -152,9 +152,10 @@ impl Tool for ConversationGetTool {
             .map_err(|e| ConversationGetError(format!("failed to list messages: {e}")))?;
 
         if let Some(uid) = args.until_id.as_deref() {
-            if let Some(idx) = messages.iter().position(|m| {
-                m.nostr_event_id.as_deref() == Some(uid) || m.record_id == uid
-            }) {
+            if let Some(idx) = messages
+                .iter()
+                .position(|m| m.nostr_event_id.as_deref() == Some(uid) || m.record_id == uid)
+            {
                 messages.truncate(idx);
             }
         }
