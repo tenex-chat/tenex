@@ -1,4 +1,4 @@
-use serde_json::{Map, Value, json};
+use serde_json::{json, Map, Value};
 
 pub const ROOT_KEY: &str = "rustRuntime";
 pub const DRIVER_KEY: &str = "driver";

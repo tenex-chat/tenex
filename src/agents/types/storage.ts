@@ -32,6 +32,18 @@ export interface AgentDefaultConfig {
     mcp?: string[];
 }
 
+export type AgentRuntimeConfig =
+    | { kind: "tenex" }
+    | {
+          kind: "acp";
+          backend: "claude-code" | "codex" | "roo-code" | "custom";
+          command: string;
+          args?: string[];
+          env?: Record<string, string>;
+          model?: string;
+          permissionPolicy?: "allow" | "deny";
+      };
+
 /**
  * Agent data stored in JSON files (.tenex/agents/*.json).
  */
@@ -55,6 +67,9 @@ export interface StoredAgentData {
     useCriteria?: string;
     /** Agent-specific MCP server configurations */
     mcpServers?: Record<string, MCPServerConfig>;
+
+    /** Execution runtime. Missing means native TENEX runtime. */
+    runtime?: AgentRuntimeConfig;
 
     /**
      * Default configuration block.

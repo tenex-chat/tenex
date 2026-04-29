@@ -173,11 +173,11 @@ Read `src/agents/execution/RALResolver.ts`, `src/agents/execution/AgentExecutor.
 
 Read `src/conversations/ConversationStore.ts` and `src/conversations/MessageBuilder.ts` for durable markers and transcript expansion.
 
-Read `crates/tenex-agent/src/tools/delegate.rs`, `delegate_followup.rs`, `self_delegate.rs`, `crates/tenex-protocol/src/intent.rs`, and `crates/tenex-protocol/src/nostr/encoder.rs` for the Rust intent path. The Rust tools emit delegation intents and q-tagged tool-use intents, but source review did not find the TypeScript `delegation` parent tag being added by the Rust encoder.
+Read `crates/tenex-agent/src/tools/delegate.rs`, `delegate_followup.rs`, `self_delegate.rs`, `crates/tenex-protocol/src/intent.rs`, and `crates/tenex-protocol/src/nostr/encoder.rs` for the Rust intent path. Fresh Rust delegations carry the TypeScript-style `delegation` parent tag, and Rust `delegate_followup` emits an `e` root tag to the original delegation so the followup stays in the child conversation.
 
 ## Open Questions
 
-The Rust Nostr encoder currently appears to encode fresh delegations with p-tags and optional followup `e` tags, but not the TypeScript `delegation` parent tag. Confirm intended parity before relying on Rust-authored delegation events to build the same conversation chains as TypeScript-authored events.
+Rust followup id lookup now resolves original delegation ids, 10-character prefixes, and prior followup event ids from the local conversation store. Cross-project or not-yet-indexed followups still need an explicit recipient because there is no local route to derive the delegatee from.
 
 The TypeScript runtime's pending/completed delegation state is volatile. If restart-safe delegation recovery is a product requirement, source needs a persistence and replay path beyond durable conversation markers.
 

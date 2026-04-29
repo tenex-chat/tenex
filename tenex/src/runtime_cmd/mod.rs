@@ -17,14 +17,14 @@ use nostr_sdk::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter};
-use tracing::{Instrument, info, info_span, warn};
+use tracing::{info, info_span, warn, Instrument};
 
-use control::{RuntimeControlState, serve_control_socket};
+use control::{serve_control_socket, RuntimeControlState};
 use tenex_conversations::{
     AgentContextState, ConversationStore, MessageQuery, NewMessage, Project as ConversationsProject,
 };
 use tenex_mcp::{ProjectMcpRuntime, SocketServerConfig};
-use tenex_project::{Agent, Project, models::ProjectAgent};
+use tenex_project::{models::ProjectAgent, Agent, Project};
 
 use crate::daemon::config;
 use crate::nostr_pub::{backend_signer, operations_status, project_status};
@@ -51,6 +51,7 @@ struct RuntimeShared {
     project_id: String,
     base_dir: PathBuf,
     agent_binary: PathBuf,
+    agent_acp_binary: PathBuf,
     agents: Arc<Vec<Agent>>,
     project_agents: Arc<Vec<ProjectAgent>>,
     agent_pubkeys: Arc<HashSet<String>>,
@@ -69,6 +70,22 @@ struct DispatchJob {
     agent_json: PathBuf,
     allow_driver_preempt: bool,
     completion_recipient_pubkey: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AgentRuntimeKind {
+    Tenex,
+    Acp,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+enum AgentRuntimeConfig {
+    Tenex,
+    Acp {
+        #[serde(flatten)]
+        _extra: Map<String, Value>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -371,6 +388,7 @@ pub async fn run(args: RuntimeArgs) -> Result<()> {
     }
 
     let agent_binary = find_agent_binary();
+    let agent_acp_binary = find_agent_acp_binary();
     let project_dir = std::env::current_dir().context("resolving project working directory")?;
     let mcp_runtime = ProjectMcpRuntime::load(&project_dir)
         .with_context(|| format!("loading project MCP config from {}", project_dir.display()))?;
@@ -391,6 +409,7 @@ pub async fn run(args: RuntimeArgs) -> Result<()> {
         project_id: meta.d_tag.clone(),
         base_dir: base_dir.clone(),
         agent_binary,
+        agent_acp_binary,
         agents: Arc::new(agents.clone()),
         project_agents: Arc::new(project_agents.clone()),
         agent_pubkeys: Arc::new(agent_pubkeys.clone()),
@@ -1235,8 +1254,13 @@ async fn run_agent(shared: Arc<RuntimeShared>, job: DispatchJob, key: DispatchKe
         anyhow::bail!("agent JSON not found: {}", job.agent_json.display());
     }
 
+    let runtime_kind = agent_runtime_kind(&job.agent)?;
+    let binary = match runtime_kind {
+        AgentRuntimeKind::Tenex => &shared.agent_binary,
+        AgentRuntimeKind::Acp => &shared.agent_acp_binary,
+    };
     let execution_id = uuid::Uuid::new_v4().to_string();
-    let mut command = tokio::process::Command::new(&shared.agent_binary);
+    let mut command = tokio::process::Command::new(binary);
     command
         .arg(&job.agent_json)
         .env("TENEX_PROJECT_ID", &shared.project_id)
@@ -1261,11 +1285,17 @@ async fn run_agent(shared: Arc<RuntimeShared>, job: DispatchJob, key: DispatchKe
             command.env("TRACESTATE", tracestate);
         }
     }
-    let mcp_bridge = start_mcp_bridge_for_run(&shared, &job, &execution_id, &mut command).await?;
+    let mcp_bridge = if runtime_kind == AgentRuntimeKind::Tenex {
+        start_mcp_bridge_for_run(&shared, &job, &execution_id, &mut command).await?
+    } else {
+        None
+    };
 
     let agent_result = async {
-        let mut child = command.spawn().context("failed to spawn tenex-agent")?;
-        let pid = child.id().context("tenex-agent child has no pid")?;
+        let mut child = command
+            .spawn()
+            .with_context(|| format!("failed to spawn {}", binary.display()))?;
+        let pid = child.id().context("agent child has no pid")?;
         let _run_guard = shared.control.register_agent_run(
             job.conv_id.clone(),
             job.agent.pubkey.clone(),
@@ -1359,6 +1389,18 @@ async fn run_agent(shared: Arc<RuntimeShared>, job: DispatchJob, key: DispatchKe
     agent_result
 }
 
+fn agent_runtime_kind(agent: &Agent) -> Result<AgentRuntimeKind> {
+    let Some(raw) = agent.runtime_config_json.as_deref() else {
+        return Ok(AgentRuntimeKind::Tenex);
+    };
+    let config: AgentRuntimeConfig =
+        serde_json::from_str(raw).with_context(|| format!("parsing runtime for {}", agent.slug))?;
+    Ok(match config {
+        AgentRuntimeConfig::Tenex => AgentRuntimeKind::Tenex,
+        AgentRuntimeConfig::Acp { .. } => AgentRuntimeKind::Acp,
+    })
+}
+
 async fn start_mcp_bridge_for_run(
     shared: &Arc<RuntimeShared>,
     job: &DispatchJob,
@@ -1425,9 +1467,11 @@ fn should_persist_agent_message(event: &Event, conversation_id: &str) -> bool {
     if event.kind != Kind::TextNote {
         return false;
     }
+    if event.content.trim().is_empty() {
+        return false;
+    }
 
     let mut has_conversation_ref = false;
-    let mut has_recipient = false;
 
     for tag in event.tags.iter() {
         let parts = tag.as_slice();
@@ -1442,13 +1486,12 @@ fn should_persist_agent_message(event: &Event, conversation_id: &str) -> bool {
                     has_conversation_ref = true;
                 }
             }
-            "p" => has_recipient = true,
-            "tool" | "status" | "intent" | "reasoning" | "error" => return false,
+            "tool" | "intent" | "reasoning" | "error" => return false,
             _ => {}
         }
     }
 
-    has_conversation_ref && !has_recipient
+    has_conversation_ref
 }
 
 fn conversation_id_from_event(event: &Event) -> String {
@@ -1503,16 +1546,24 @@ async fn send_operations_status(
 }
 
 fn find_agent_binary() -> PathBuf {
+    find_sibling_binary("tenex-agent")
+}
+
+fn find_agent_acp_binary() -> PathBuf {
+    find_sibling_binary("tenex-agent-acp")
+}
+
+fn find_sibling_binary(name: &str) -> PathBuf {
     // Prefer a sibling binary (same install dir as the current process).
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
-            let sibling = dir.join("tenex-agent");
+            let sibling = dir.join(name);
             if sibling.exists() {
                 return sibling;
             }
         }
     }
-    PathBuf::from("tenex-agent")
+    PathBuf::from(name)
 }
 
 // ─── Per-project runtime lockfile ──────────────────────────────────────────
@@ -1627,6 +1678,7 @@ mod tests {
             default_config_json: None,
             telegram_config_json: None,
             mcp_servers_json: None,
+            runtime_config_json: None,
         }
     }
 
@@ -1658,13 +1710,11 @@ mod tests {
         write_trace_carrier_to_runtime_state(&mut state, &carrier, "event2", "agent2");
 
         assert_eq!(trace_carrier_from_runtime_state(&state), Some(carrier));
-        assert!(
-            state
-                .get("rustRuntime")
-                .and_then(|v| v.get("consumedMessages"))
-                .and_then(|v| v.get("event1"))
-                .is_some()
-        );
+        assert!(state
+            .get("rustRuntime")
+            .and_then(|v| v.get("consumedMessages"))
+            .and_then(|v| v.get("event1"))
+            .is_some());
     }
 
     #[test]
@@ -1898,6 +1948,29 @@ mod tests {
             completion_route.child_conversation_id,
             delegation.id.to_hex()
         );
+
+        let followup = signed_event_from(
+            &parent_keys,
+            Kind::TextNote,
+            "@worker use blue if available",
+            vec![
+                tag(&["e", &delegation.id.to_hex(), "", "root"]),
+                tag(&["p", &child_pubkey]),
+            ],
+        );
+
+        assert!(register_delegation_route_if_needed(
+            &store,
+            &followup,
+            &agent_pubkeys,
+            Some(&parent_job)
+        )
+        .unwrap()
+        .is_none());
+        assert_eq!(
+            conversation_id_from_event(&followup),
+            delegation.id.to_hex()
+        );
     }
 
     #[test]
@@ -1929,7 +2002,7 @@ mod tests {
         let root = root_id();
         let event = signed_event(
             Kind::TextNote,
-            "",
+            "tool call",
             vec![tag(&["e", &root, "", "root"]), tag(&["tool", "shell"])],
         );
 
@@ -1937,17 +2010,42 @@ mod tests {
     }
 
     #[test]
-    fn rejects_delegation_events() {
+    fn persists_completion_events_with_recipients() {
         let root = root_id();
+        let recipient = Keys::generate().public_key().to_hex();
+        let event = signed_event(
+            Kind::TextNote,
+            "The worker picked blue.",
+            vec![
+                tag(&["e", &root, "", "root"]),
+                tag(&["p", recipient.as_str()]),
+                tag(&["status", "completed"]),
+            ],
+        );
+
+        assert!(should_persist_agent_message(&event, &root));
+    }
+
+    #[test]
+    fn rejects_fresh_delegation_events_without_current_root() {
+        let parent_root = root_id();
         let recipient = Keys::generate().public_key().to_hex();
         let event = signed_event(
             Kind::TextNote,
             "@worker do this",
             vec![
-                tag(&["e", &root, "", "root"]),
+                tag(&["delegation", &parent_root]),
                 tag(&["p", recipient.as_str()]),
             ],
         );
+
+        assert!(!should_persist_agent_message(&event, &parent_root));
+    }
+
+    #[test]
+    fn rejects_empty_conversation_events() {
+        let root = root_id();
+        let event = signed_event(Kind::TextNote, "   ", vec![tag(&["e", &root, "", "root"])]);
 
         assert!(!should_persist_agent_message(&event, &root));
     }

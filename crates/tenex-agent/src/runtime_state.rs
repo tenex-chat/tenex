@@ -3,10 +3,10 @@ use std::path::PathBuf;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::runtime_state_json::{
-    ACTIVE_TOOLS_KEY, CONSUMED_MESSAGES_KEY, DRIVER_KEY, ROOT_KEY, active_tools_object_mut,
-    compact_json, consumed_messages_object_mut, driver_matches, root_object_mut,
+    active_tools_object_mut, compact_json, consumed_messages_object_mut, driver_matches,
+    root_object_mut, ACTIVE_TOOLS_KEY, CONSUMED_MESSAGES_KEY, DRIVER_KEY, ROOT_KEY,
 };
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use tenex_conversations::ConversationStore;
 use tokio::time::sleep;
 

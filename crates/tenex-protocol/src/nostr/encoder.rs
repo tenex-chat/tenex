@@ -126,10 +126,10 @@ fn encode_delegation(
             let mut builder =
                 EventBuilder::new(Kind::TextNote, prefixed).custom_created_at(now_plus_one);
 
-            // Followup delegations carry an e-tag referencing the original event.
+            // Followup delegations stay in the original delegated conversation.
             // Fresh delegations start a new conversation without any e-tag.
             if let Some(MessageRef::Nostr { event_id }) = d.followup_of.as_ref() {
-                builder = builder.tag(e_reply_tag(event_id)?);
+                builder = builder.tag(e_root_tag(event_id)?);
             } else if let Some(ConversationRef::Nostr { root_event_id }) =
                 ctx.conversation_root.as_ref()
             {
@@ -396,18 +396,15 @@ mod tests {
         let tags = signed_tags(builders.into_iter().next().unwrap());
         assert!(tags.iter().any(|t| t[0] == "status" && t[1] == "completed"));
         assert!(tags.iter().any(|t| t[0] == "p"));
-        assert!(
-            tags.iter()
-                .any(|t| t[0] == "e" && t.len() >= 4 && t[3] == "root")
-        );
-        assert!(
-            tags.iter()
-                .any(|t| t[0] == "llm-prompt-tokens" && t[1] == "100")
-        );
-        assert!(
-            tags.iter()
-                .any(|t| t[0] == "llm-total-tokens" && t[1] == "150")
-        );
+        assert!(tags
+            .iter()
+            .any(|t| t[0] == "e" && t.len() >= 4 && t[3] == "root"));
+        assert!(tags
+            .iter()
+            .any(|t| t[0] == "llm-prompt-tokens" && t[1] == "100"));
+        assert!(tags
+            .iter()
+            .any(|t| t[0] == "llm-total-tokens" && t[1] == "150"));
     }
 
     #[test]
@@ -440,10 +437,9 @@ mod tests {
         let builders = NostrEncoder::encode(&Intent::ToolUse(intent), &ctx).expect("encode");
         let tags = signed_tags(builders.into_iter().next().unwrap());
         assert!(tags.iter().any(|t| t[0] == "tool" && t[1] == "delegate"));
-        assert!(
-            tags.iter()
-                .any(|t| t[0] == "tool-args" && t[1] == "{\"x\":1}")
-        );
+        assert!(tags
+            .iter()
+            .any(|t| t[0] == "tool-args" && t[1] == "{\"x\":1}"));
         assert!(tags.iter().any(|t| t[0] == "q"));
     }
 
@@ -475,15 +471,13 @@ mod tests {
         let builders = NostrEncoder::encode(&Intent::PublishArticle(intent), &ctx).expect("encode");
         assert_eq!(builders.len(), 1);
         let tags = signed_tags(builders.into_iter().next().unwrap());
-        assert!(
-            tags.iter()
-                .any(|t| t[0] == "d" && t[1] == "notes/2024-01-01")
-        );
+        assert!(tags
+            .iter()
+            .any(|t| t[0] == "d" && t[1] == "notes/2024-01-01"));
         assert!(tags.iter().any(|t| t[0] == "document" && t[1] == "notes"));
-        assert!(
-            tags.iter()
-                .any(|t| t[0] == "a" && t[1].starts_with("31933:"))
-        );
+        assert!(tags
+            .iter()
+            .any(|t| t[0] == "a" && t[1].starts_with("31933:")));
         // Must NOT carry conversation threading tags
         assert!(!tags.iter().any(|t| t[0] == "e"));
         assert!(!tags.iter().any(|t| t[0] == "p"));
@@ -521,5 +515,45 @@ mod tests {
         assert!(tags.iter().any(|t| t[0] == "p"));
         assert!(tags.iter().any(|t| t[0] == "delegation"));
         assert_eq!(event.content, "@architect: Please review");
+    }
+
+    #[test]
+    fn delegation_followup_uses_delegation_as_root() {
+        let ctx = test_ctx();
+        let recipient_keys = Keys::generate();
+        let delegation_id =
+            EventId::from_hex("1111111111111111111111111111111111111111111111111111111111111111")
+                .unwrap();
+        let intent = DelegationIntent {
+            items: vec![crate::intent::DelegationRequest {
+                recipient: PrincipalRef::Nostr {
+                    pubkey: recipient_keys.public_key(),
+                    kind: PrincipalKind::Agent,
+                    display_name: None,
+                },
+                recipient_label: "@worker".into(),
+                request: "Clarification".into(),
+                branch: None,
+                followup_of: Some(MessageRef::Nostr {
+                    event_id: delegation_id,
+                }),
+            }],
+        };
+        let builders = NostrEncoder::encode(&Intent::Delegation(intent), &ctx).expect("encode");
+        assert_eq!(builders.len(), 1);
+        let tags = signed_tags(builders.into_iter().next().unwrap());
+
+        assert!(tags.iter().any(|t| {
+            t[0] == "e"
+                && t.get(1).map(String::as_str) == Some(delegation_id.to_hex().as_str())
+                && t.get(3).map(String::as_str) == Some("root")
+        }));
+        assert!(!tags.iter().any(|t| {
+            t[0] == "e"
+                && t.get(1).map(String::as_str) == Some(delegation_id.to_hex().as_str())
+                && t.get(3).map(String::as_str) == Some("reply")
+        }));
+        assert!(!tags.iter().any(|t| t[0] == "delegation"));
+        assert!(tags.iter().any(|t| t[0] == "p"));
     }
 }

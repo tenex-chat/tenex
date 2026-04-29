@@ -38,6 +38,7 @@ pub struct Agent {
     pub default_config_json: Option<String>,
     pub telegram_config_json: Option<String>,
     pub mcp_servers_json: Option<String>,
+    pub runtime_config_json: Option<String>,
 }
 
 /// Project-scoped membership row.

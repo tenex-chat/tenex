@@ -2,7 +2,7 @@ use rig::{completion::ToolDefinition, tool::Tool};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::path::PathBuf;
-use tenex_conversations::{ConversationStore, store::ConversationListFilter};
+use tenex_conversations::{store::ConversationListFilter, ConversationStore};
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct ConversationListArgs {

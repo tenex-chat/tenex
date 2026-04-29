@@ -1,10 +1,16 @@
 import type { Event, EventTemplate, SimplePool } from "nostr-tools";
+import {
+    messageText,
+    waitForStoredMessage,
+    type ConversationMonitor,
+} from "./tenex-runtime-probe-conversations";
 
 export const availableScenarios = [
     "delegation-basic",
     "same-agent-concurrency",
     "fs-read-adjustment",
     "mcp-tool-basic",
+    "acp-worker-basic",
 ] as const;
 
 export type ScenarioName = (typeof availableScenarios)[number];
@@ -55,6 +61,7 @@ type ScenarioContext = {
     events: Event[];
     relayUrl: string;
     projectRef: string;
+    conversationDbPath: string;
     pmPubkey: string;
     workerPubkey: string;
     userSecret: Uint8Array;
@@ -74,6 +81,10 @@ type ScenarioContext = {
         timeoutMs: number,
         label: string
     ) => Promise<MockRequestRecord[]>;
+    monitorConversation: (
+        conversationId: string,
+        onEvent?: (event: Event) => void
+    ) => ConversationMonitor;
 };
 
 export function scenarioProjectDtag(name: ScenarioName): string {
@@ -85,6 +96,9 @@ export function scenarioProjectDtag(name: ScenarioName): string {
     }
     if (name === "mcp-tool-basic") {
         return "probe-mcp-tool";
+    }
+    if (name === "acp-worker-basic") {
+        return "probe-acp-worker";
     }
     return "probe-fs-read-adjustment";
 }
@@ -98,6 +112,9 @@ export function pmInstructions(name: ScenarioName): string {
     }
     if (name === "mcp-tool-basic") {
         return "Use the MCP probe tool when asked for project-scoped MCP validation.";
+    }
+    if (name === "acp-worker-basic") {
+        return "This scenario targets the ACP worker directly; remain idle unless directly mentioned.";
     }
     return "Use fs_read one file at a time. If the user corrects the requested total, follow the latest total before finishing.";
 }
@@ -213,6 +230,10 @@ export function mockScenario(name: ScenarioName): unknown {
         };
     }
 
+    if (name === "acp-worker-basic") {
+        return { responses: [], defaultContent: "ACP worker scenario uses an ACP backend." };
+    }
+
     const mockDelayMs = Number(process.env.TENEX_PROBE_MOCK_DELAY_MS ?? 750);
     return {
         defaultDelayMs: mockDelayMs,
@@ -248,6 +269,8 @@ export async function runScenario(name: ScenarioName, context: ScenarioContext):
         await runSameAgentConcurrencyProbe(context);
     } else if (name === "mcp-tool-basic") {
         await runMcpToolProbe(context);
+    } else if (name === "acp-worker-basic") {
+        await runAcpWorkerProbe(context);
     } else {
         await runFsReadAdjustmentProbe(context);
     }
@@ -283,23 +306,39 @@ async function runDelegationProbe(context: ScenarioContext): Promise<void> {
         },
         context.userSecret
     );
-    await Promise.all(context.pool.publish([context.relayUrl], userEvent));
     const timeoutMs = Number(process.env.TENEX_PROBE_WAIT_MS ?? 8_000);
-    const workerCompletion = await context.waitForObservedEvent(
+    await Promise.all(context.pool.publish([context.relayUrl], userEvent));
+    await context.waitForObservedEvent(
         context.events,
         (event) =>
             event.kind === 1 &&
-            event.pubkey === context.workerPubkey &&
-            includesColorChoice(event.content),
+            event.pubkey === context.pmPubkey &&
+            hasEventTag(event, "p", context.workerPubkey) &&
+            !hasAnyEventTag(event, "tool"),
         timeoutMs,
-        "worker random-color completion"
+        "PM delegation event"
     );
-    const workerColor = extractColorChoice(workerCompletion.content);
-    await waitForPmColorReport(
-        context,
-        workerCompletion.created_at,
-        workerColor,
-        timeoutMs
+
+    const workerCompletion = await waitForStoredMessage(
+        context.conversationDbPath,
+        userEvent.id,
+        (message) =>
+            message.authorPubkey === context.workerPubkey &&
+            includesColorChoice(messageText(message)),
+        timeoutMs,
+        "worker color completion in parent conversation store",
+        context.delay
+    );
+    const workerColor = extractColorChoice(messageText(workerCompletion));
+    await waitForStoredMessage(
+        context.conversationDbPath,
+        userEvent.id,
+        (message) =>
+            message.authorPubkey === context.pmPubkey &&
+            extractColorChoice(messageText(message)) === workerColor,
+        timeoutMs,
+        "PM color report in parent conversation store",
+        context.delay
     );
 }
 
@@ -307,34 +346,8 @@ function hasEventTag(event: Event, name: string, value: string): boolean {
     return event.tags.some((tag) => tag[0] === name && tag[1] === value);
 }
 
-async function waitForPmColorReport(
-    context: ScenarioContext,
-    sinceCreatedAt: number,
-    expectedColor: string | null,
-    timeoutMs: number
-): Promise<void> {
-    const deadline = Date.now() + timeoutMs;
-    while (Date.now() < deadline) {
-        const report = context.events.find(
-            (event) =>
-                event.kind === 1 &&
-                event.pubkey === context.pmPubkey &&
-                event.created_at >= sinceCreatedAt &&
-                !hasEventTag(event, "tool", "delegate") &&
-                extractColorChoice(event.content) !== null
-        );
-        if (report) {
-            const actualColor = extractColorChoice(report.content);
-            if (actualColor === expectedColor) {
-                return;
-            }
-            throw new Error(
-                `PM reported ${actualColor ?? "<none>"} instead of ${expectedColor ?? "<none>"}: ${report.content}`
-            );
-        }
-        await context.delay(100);
-    }
-    throw new Error(`did not observe PM random-color follow-up within ${timeoutMs}ms`);
+function hasAnyEventTag(event: Event, name: string): boolean {
+    return event.tags.some((tag) => tag[0] === name);
 }
 
 async function runSameAgentConcurrencyProbe(context: ScenarioContext): Promise<void> {
@@ -440,6 +453,32 @@ async function runMcpToolProbe(context: ScenarioContext): Promise<void> {
         "MCP tool event"
     );
     await context.delay(Number(process.env.TENEX_PROBE_WAIT_MS ?? 5_000));
+}
+
+async function runAcpWorkerProbe(context: ScenarioContext): Promise<void> {
+    const userEvent = context.sign(
+        {
+            kind: 1,
+            created_at: context.now(),
+            content: "ACP worker: reply with the exact phrase haiku acp worker completed.",
+            tags: [
+                ["a", context.projectRef],
+                ["p", context.workerPubkey],
+            ],
+        },
+        context.userSecret
+    );
+    await Promise.all(context.pool.publish([context.relayUrl], userEvent));
+    await context.waitForObservedEvent(
+        context.events,
+        (event) =>
+            event.kind === 1 &&
+            event.pubkey === context.workerPubkey &&
+            event.content.toLowerCase().includes("haiku acp worker completed") &&
+            hasTag(event, "status", "completed"),
+        Number(process.env.TENEX_PROBE_WAIT_MS ?? 20_000),
+        "ACP worker completion"
+    );
 }
 
 function isShellTool(event: Event, commandNeedle: string): boolean {

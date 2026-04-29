@@ -11,6 +11,11 @@ import {
     parseProbeLlmOptions,
     type ProbeLlmOptions,
 } from "./tenex-runtime-probe-cassette";
+import {
+    conversationDbPath,
+    monitorConversation,
+    readAllConversationTranscripts,
+} from "./tenex-runtime-probe-conversations";
 import { setupMcpProbeFixture } from "./tenex-runtime-probe-mcp";
 import {
     availableScenarios,
@@ -75,9 +80,12 @@ const baseDir = path.join(runDir, ".tenex");
 const relayDir = path.join(baseDir, "relay");
 const projectDtag = scenarioProjectDtag(scenarioName);
 const projectDir = path.join(baseDir, "projects", projectDtag);
+const convDbPath = conversationDbPath(baseDir, projectDtag);
 const agentsDir = path.join(baseDir, "agents");
 const workspaceDir = path.join(runDir, "workspace");
 const artifactPath = path.join(runDir, "events.json");
+const transcriptArtifactPath = path.join(runDir, "conversation-transcripts.json");
+const processOutputArtifactPath = path.join(runDir, "process-output.json");
 const requestRecordPath = path.join(runDir, "mock-requests.jsonl");
 const cassetteRecordPath = llm.recordCassettePath
     ? path.resolve(llm.recordCassettePath)
@@ -98,6 +106,10 @@ const mcpProbe =
               workspaceDir,
               bunPath: process.execPath,
           })
+        : undefined;
+const acpProbe =
+    scenarioName === "acp-worker-basic"
+        ? buildAcpProbeRuntime()
         : undefined;
 
 const relayPort = await freePort();
@@ -183,6 +195,7 @@ writeJson(path.join(agentsDir, `${worker.pubkey}.json`), {
     instructions:
         "Complete delegated probe tasks with a concise result. If asked to choose a random color, never call no_response; reply with exactly one lowercase color word and no punctuation.",
     default: { model: llmModelName },
+    ...(acpProbe ? { runtime: acpProbe } : {}),
 });
 
 const mockScenarioPath = path.join(runDir, "mock-llm.json");
@@ -201,8 +214,9 @@ if (llm.mode === "mock") {
 const relayCommand = resolveRelayCommand(path.join(relayDir, "relay.json"));
 const tenexBin = process.env.TENEX_BIN ?? path.join(repoRoot, "target", "debug", "tenex");
 const agentBin = path.join(path.dirname(tenexBin), "tenex-agent");
+const agentAcpBin = path.join(path.dirname(tenexBin), "tenex-agent-acp");
 
-if (!existsSync(tenexBin) || !existsSync(agentBin)) {
+if (!existsSync(tenexBin) || !existsSync(agentBin) || (scenarioName === "acp-worker-basic" && !existsSync(agentAcpBin))) {
     console.error("Missing Rust binaries. Build them first:");
     console.error("  cargo build -p tenex -p tenex-agent");
     process.exit(2);
@@ -247,32 +261,58 @@ const runtimeProc = spawnLogged(
 
 await waitForOutput(runtimeProc, "subscriptions active", 15_000);
 await Promise.all(pool.publish([relayUrl], projectEvent));
-await runScenario(scenarioName, {
-    pool,
-    events,
-    relayUrl,
-    projectRef,
-    pmPubkey: pm.pubkey,
-    workerPubkey: worker.pubkey,
-    userSecret: user.secret,
-    requestRecordPath,
-    sign,
-    now,
-    delay,
-    waitForObservedEvent,
-    waitForRequestRecord,
-});
+let scenarioError: unknown = null;
+try {
+    await runScenario(scenarioName, {
+        pool,
+        events,
+        relayUrl,
+        projectRef,
+        conversationDbPath: convDbPath,
+        pmPubkey: pm.pubkey,
+        workerPubkey: worker.pubkey,
+        userSecret: user.secret,
+        requestRecordPath,
+        sign,
+        now,
+        delay,
+        waitForObservedEvent,
+        waitForRequestRecord,
+        monitorConversation: (conversationId, onEvent) =>
+            monitorConversation(pool, relayUrl, conversationId, {
+                since: startTime,
+                onEvent,
+                delay,
+            }),
+    });
+} catch (error) {
+    scenarioError = error;
+    console.error(`scenario driver failed: ${errorMessage(error)}`);
+}
 sub.close();
 
-const storedEvents = await pool.querySync(
-    [relayUrl],
-    { kinds: [1, 24010, 24133, 31933], since: startTime },
-    { maxWait: 2_000 }
-);
-const mergedEvents = mergeEvents(events, storedEvents);
+let mergedEvents = events;
+try {
+    const storedEvents = await pool.querySync(
+        [relayUrl],
+        { kinds: [1, 24010, 24133, 24135, 31933], since: startTime },
+        { maxWait: 2_000 }
+    );
+    mergedEvents = mergeEvents(events, storedEvents);
+} catch (error) {
+    console.error(`relay artifact query failed: ${errorMessage(error)}`);
+}
 pool.close([relayUrl]);
 
 writeJson(artifactPath, mergedEvents);
+writeJson(transcriptArtifactPath, readAllConversationTranscripts(convDbPath));
+writeJson(
+    processOutputArtifactPath,
+    procs.map((proc) => ({
+        label: proc.label,
+        output: proc.output,
+    }))
+);
 
 const requestRecords = readRequestRecords(requestRecordPath);
 const mcpProbeRecords = mcpProbe ? readJsonLines(mcpProbe.logPath) : [];
@@ -280,9 +320,17 @@ const verdicts = evaluate(scenarioName, mergedEvents, requestRecords, {
     pmPubkey: pm.pubkey,
     workerPubkey: worker.pubkey,
     modelName: llmModelName,
+    conversationDbPath: convDbPath,
     mcpProbeRecords,
     workspaceDir,
 });
+if (scenarioError) {
+    verdicts.unshift({
+        name: "Scenario driver completed",
+        ok: false,
+        detail: errorMessage(scenarioError),
+    });
+}
 for (const verdict of verdicts) {
     console.log(`${verdict.ok ? "ok " : "BAD"} ${verdict.name}`);
     if (!verdict.ok) {
@@ -290,6 +338,8 @@ for (const verdict of verdicts) {
     }
 }
 console.log(`events : ${artifactPath}`);
+console.log(`conversations : ${transcriptArtifactPath}`);
+console.log(`processes : ${processOutputArtifactPath}`);
 if (llm.mode === "mock" || llm.mode === "cassette") {
     console.log(`requests : ${requestRecordPath}`);
 }
@@ -393,6 +443,43 @@ function describeLlm(options: ProbeLlmOptions): string {
     return "mock";
 }
 
+function buildAcpProbeRuntime(): Record<string, unknown> {
+    const backend = process.env.TENEX_PROBE_ACP_BACKEND ?? "fake";
+    const model = process.env.TENEX_PROBE_ACP_MODEL ?? "haiku";
+    if (backend === "claude") {
+        const command = process.env.TENEX_PROBE_ACP_COMMAND ?? "npx";
+        const args = process.env.TENEX_PROBE_ACP_ARGS
+            ? JSON.parse(process.env.TENEX_PROBE_ACP_ARGS)
+            : ["-y", "@agentclientprotocol/claude-agent-acp@latest"];
+        return {
+            kind: "acp",
+            backend: "claude-code",
+            command,
+            args,
+            model,
+            permissionPolicy: "allow",
+            env: {
+                ANTHROPIC_MODEL: model,
+                ANTHROPIC_DEFAULT_HAIKU_MODEL:
+                    process.env.ANTHROPIC_DEFAULT_HAIKU_MODEL ?? "claude-haiku-4-5-20251001",
+            },
+        };
+    }
+    return {
+        kind: "acp",
+        backend: "fake-claude-code",
+        command: process.execPath,
+        args: [path.join(scriptDir, "tenex-runtime-probe-acp.ts")],
+        model,
+        permissionPolicy: "allow",
+        env: {
+            ANTHROPIC_MODEL: model,
+            TENEX_PROBE_ACP_MODEL: model,
+            TENEX_PROBE_ACP_RESPONSE: `haiku acp worker completed with model ${model}`,
+        },
+    };
+}
+
 function positionalArgs(args: string[]): string[] {
     const valueFlags = new Set([
         "--llm",
@@ -419,6 +506,10 @@ function positionalArgs(args: string[]): string[] {
         result.push(arg);
     }
     return result;
+}
+
+function errorMessage(error: unknown): string {
+    return error instanceof Error ? error.message : String(error);
 }
 
 function cleanup(): void {

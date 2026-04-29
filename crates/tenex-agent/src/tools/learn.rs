@@ -157,7 +157,11 @@ fn strip_llm_preamble(s: &str) -> &str {
         .find("\n#")
         .or_else(|| if s.starts_with('#') { Some(0) } else { None })
     {
-        if pos == 0 { s } else { s[pos + 1..].trim() }
+        if pos == 0 {
+            s
+        } else {
+            s[pos + 1..].trim()
+        }
     } else {
         s
     }

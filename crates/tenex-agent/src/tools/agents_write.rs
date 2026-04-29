@@ -1,7 +1,7 @@
 use indexmap::IndexMap;
 use rig::{completion::ToolDefinition, tool::Tool};
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 use tenex_agent_registry::{AgentDoc, AgentStorage};
 

@@ -1,6 +1,6 @@
 use std::sync::{
-    Arc, Mutex,
     atomic::{AtomicU64, Ordering},
+    Arc, Mutex,
 };
 
 use crate::emit::EmitState;
@@ -172,7 +172,7 @@ impl<M: CompletionModel> PromptHook<M> for EmitHook {
         _internal_call_id: &str,
         args: &str,
     ) -> impl std::future::Future<Output = ToolCallHookAction> + Send {
-        let is_delegate = tool_name == "delegate";
+        let emits_delayed_tool_use = matches!(tool_name, "delegate" | "delegate_followup");
         let name = tool_name.to_string();
         let args_string = args.to_string();
 
@@ -204,7 +204,7 @@ impl<M: CompletionModel> PromptHook<M> for EmitHook {
             if let Some(state) = runtime_state {
                 state.release_driver();
             }
-            if !is_delegate {
+            if !emits_delayed_tool_use {
                 let intent = ToolUseIntent {
                     tool_name: name,
                     content: String::new(),

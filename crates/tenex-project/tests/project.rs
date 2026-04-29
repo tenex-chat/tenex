@@ -73,6 +73,7 @@ fn expected_agent() -> Agent {
         default_config_json: Some(r#"{"skills":["write-access","read-access"]}"#.into()),
         telegram_config_json: None,
         mcp_servers_json: None,
+        runtime_config_json: None,
     }
 }
 
@@ -247,6 +248,7 @@ fn agent_json_fields_round_trip() {
         .unwrap()
         .contains("botToken"));
     assert!(a.mcp_servers_json.as_deref().unwrap().contains("repomix"));
+    assert!(a.runtime_config_json.is_none());
 }
 
 #[test]

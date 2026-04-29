@@ -184,7 +184,11 @@ impl ToolSet {
             self.push_tool(&mut tools, &recorder, Box::new(d.clone()));
         }
 
-        self.push_tool(&mut tools, &recorder, Box::new(self.rag_add_documents.clone()));
+        self.push_tool(
+            &mut tools,
+            &recorder,
+            Box::new(self.rag_add_documents.clone()),
+        );
         self.push_tool(&mut tools, &recorder, Box::new(self.rag_search.clone()));
 
         self.push_tool(

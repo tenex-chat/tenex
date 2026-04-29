@@ -86,7 +86,7 @@ fn discovers_project_lists_candidate_reads_transcript() {
     assert_eq!(project_event.d_tag, d_tag);
     assert_eq!(project_event.tag_id(), format!("31933:{pubkey}:{d_tag}"));
 
-    let candidates = source::list_candidates(project, 10).unwrap();
+    let candidates = source::list_candidates(project, 10, 3_600).unwrap();
     assert_eq!(candidates.len(), 1);
     assert_eq!(candidates[0].conversation_id, conversation_id);
     assert_eq!(candidates[0].last_activity, last_activity);

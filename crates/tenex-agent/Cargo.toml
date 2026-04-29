@@ -7,6 +7,10 @@ edition = "2021"
 name = "tenex-agent"
 path = "src/main.rs"
 
+[[bin]]
+name = "tenex-agent-acp"
+path = "src/acp_main.rs"
+
 [dependencies]
 tenex-project = { path = "../tenex-project" }
 tenex-agent-registry = { path = "../tenex-agent-registry" }

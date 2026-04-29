@@ -1,5 +1,10 @@
 import type { Event } from "nostr-tools";
 import {
+    messageText,
+    readConversationTranscript,
+    type ConversationTranscript,
+} from "./tenex-runtime-probe-conversations";
+import {
     delegationUserRequest,
     delegationWorkerCompletionText,
     extractColorChoice,
@@ -14,6 +19,7 @@ type EvaluateContext = {
     pmPubkey: string;
     workerPubkey: string;
     modelName: string;
+    conversationDbPath: string;
     mcpProbeRecords?: Array<Record<string, unknown>>;
     workspaceDir?: string;
 };
@@ -34,6 +40,9 @@ export function evaluate(
     }
     if (name === "mcp-tool-basic") {
         return [...commonVerdicts, ...evaluateMcpTool(events, requestRecords, context)];
+    }
+    if (name === "acp-worker-basic") {
+        return [...commonVerdicts, ...evaluateAcpWorker(events, context)];
     }
     return [...commonVerdicts, ...evaluateFsReadAdjustment(events, requestRecords, context)];
 }
@@ -78,8 +87,41 @@ function evaluateDelegation(events: Event[], context: EvaluateContext): Verdict[
             (event.content.includes(delegationWorkerCompletionText) ||
                 includesColorChoice(event.content))
     );
-    const workerColor = workerCompletion ? extractColorChoice(workerCompletion.content) : null;
-    const pmColorReports = events.filter(
+    const parentTranscript = initialUserEvent
+        ? readConversationTranscript(context.conversationDbPath, initialUserEvent.id)
+        : emptyTranscript("<missing-parent>");
+    const delegatedTranscript = delegation
+        ? readConversationTranscript(context.conversationDbPath, delegation.id)
+        : emptyTranscript("<missing-delegation>");
+    const storedDelegationRoot = delegatedTranscript.messages.find(
+        (message) =>
+            message.authorPubkey === context.pmPubkey &&
+            message.nostrEventId === delegation?.id
+    );
+    const storedWorkerCompletion = parentTranscript.messages.find(
+        (message) =>
+            message.authorPubkey === context.workerPubkey &&
+            includesColorChoice(messageText(message))
+    );
+    const workerColor = storedWorkerCompletion
+        ? extractColorChoice(messageText(storedWorkerCompletion))
+        : workerCompletion
+        ? extractColorChoice(workerCompletion.content)
+        : null;
+    const parentPmColorReport = parentTranscript.messages.find(
+        (message) =>
+            message.authorPubkey === context.pmPubkey &&
+            extractColorChoice(messageText(message)) !== null
+    );
+    const parentPmReportedColor = parentPmColorReport
+        ? extractColorChoice(messageText(parentPmColorReport))
+        : null;
+    const delegatedPmColorReport = delegatedTranscript.messages.find(
+        (message) =>
+            message.authorPubkey === context.pmPubkey &&
+            extractColorChoice(messageText(message)) !== null
+    );
+    const relayPmColorReports = events.filter(
         (event) =>
             event.kind === 1 &&
             event.pubkey === context.pmPubkey &&
@@ -87,11 +129,10 @@ function evaluateDelegation(events: Event[], context: EvaluateContext): Verdict[
             !hasTag(event, "tool", "delegate") &&
             extractColorChoice(event.content) !== null
     );
-    const pmObservedWorker = pmColorReports[0];
-    const pmReportedColor = pmObservedWorker ? extractColorChoice(pmObservedWorker.content) : null;
+    const relayPmObservedWorker = relayPmColorReports[0];
     const pmObservedInParentConversation =
-        Boolean(initialUserEvent && pmObservedWorker) &&
-        hasMarkedTag(pmObservedWorker!, "e", initialUserEvent!.id, "root");
+        Boolean(initialUserEvent && relayPmObservedWorker) &&
+        hasMarkedTag(relayPmObservedWorker!, "e", initialUserEvent!.id, "root");
     const completedStatus = events.find(
         (event) =>
             event.kind === 1 &&
@@ -116,12 +157,27 @@ function evaluateDelegation(events: Event[], context: EvaluateContext): Verdict[
             detail: "Expected worker kind:1 containing scripted random-color completion text.",
         },
         {
-            name: "PM observed worker completion",
-            ok: Boolean(pmObservedWorker) && pmReportedColor === workerColor,
-            detail: `Expected first PM color report to repeat ${workerColor ?? "<worker color>"}; saw ${pmReportedColor ?? "<none>"}.`,
+            name: "Store recorded delegated conversation root",
+            ok: Boolean(storedDelegationRoot),
+            detail: "Expected delegated conversation transcript to start from the PM delegation event.",
         },
         {
-            name: "PM observed worker completion in parent conversation",
+            name: "Store recorded worker completion in parent conversation",
+            ok: Boolean(storedWorkerCompletion),
+            detail: "Expected parent conversation transcript to contain worker color completion.",
+        },
+        {
+            name: "Store kept PM color report in parent conversation",
+            ok: Boolean(parentPmColorReport) && parentPmReportedColor === workerColor,
+            detail: `Expected parent transcript PM report to repeat ${workerColor ?? "<worker color>"}; saw ${parentPmReportedColor ?? "<none>"}.`,
+        },
+        {
+            name: "Store has no PM color report in delegated conversation",
+            ok: !delegatedPmColorReport,
+            detail: `Expected delegated transcript to not contain PM color report; saw ${delegatedPmColorReport ? messageText(delegatedPmColorReport) : "<none>"}.`,
+        },
+        {
+            name: "Relay PM color report uses parent conversation root",
             ok: pmObservedInParentConversation,
             detail: "Expected PM follow-up to keep the original user event as the root e-tag.",
         },
@@ -335,6 +391,35 @@ function evaluateMcpTool(
     ];
 }
 
+function evaluateAcpWorker(events: Event[], context: EvaluateContext): Verdict[] {
+    const completion = events.find(
+        (event) =>
+            event.kind === 1 &&
+            event.pubkey === context.workerPubkey &&
+            event.content.toLowerCase().includes("haiku acp worker completed") &&
+            hasTag(event, "status", "completed")
+    );
+    const toolEvent = events.find(
+        (event) =>
+            event.kind === 1 &&
+            event.pubkey === context.workerPubkey &&
+            event.tags.some((tag) => tag[0] === "tool")
+    );
+
+    return [
+        {
+            name: "ACP worker emitted completed Nostr response",
+            ok: Boolean(completion),
+            detail: "Expected worker completion from tenex-agent-acp containing the ACP backend response.",
+        },
+        {
+            name: "ACP worker did not receive TENEX tool surface",
+            ok: !toolEvent,
+            detail: `Expected no TENEX tool-use events from ACP worker; saw ${toolEvent ? JSON.stringify(toolEvent.tags) : "<none>"}.`,
+        },
+    ];
+}
+
 function isShellTool(event: Event, commandNeedle: string): boolean {
     return (
         event.kind === 1 &&
@@ -362,6 +447,10 @@ function hasTag(event: Event, name: string, value?: string): boolean {
 
 function hasMarkedTag(event: Event, name: string, value: string, marker: string): boolean {
     return event.tags.some((tag) => tag[0] === name && tag[1] === value && tag[3] === marker);
+}
+
+function emptyTranscript(conversationId: string): ConversationTranscript {
+    return { conversationId, messages: [] };
 }
 
 function tagValue(event: Event, name: string): string | undefined {

@@ -18,6 +18,7 @@ pub struct AgentProjection {
     pub default_config_json: Option<String>,
     pub telegram_config_json: Option<String>,
     pub mcp_servers_json: Option<String>,
+    pub runtime_config_json: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -50,6 +51,8 @@ struct RawStoredAgent {
     telegram: Option<serde_json::Value>,
     #[serde(default, rename = "mcpServers")]
     mcp_servers: Option<serde_json::Value>,
+    #[serde(default)]
+    runtime: Option<serde_json::Value>,
 }
 
 pub fn read_agent_projection_file(path: &Path, pubkey: &str) -> anyhow::Result<AgentProjection> {
@@ -75,5 +78,6 @@ pub fn read_agent_projection_file(path: &Path, pubkey: &str) -> anyhow::Result<A
         default_config_json: raw.default.as_ref().map(|v| v.to_string()),
         telegram_config_json: raw.telegram.as_ref().map(|v| v.to_string()),
         mcp_servers_json: raw.mcp_servers.as_ref().map(|v| v.to_string()),
+        runtime_config_json: raw.runtime.as_ref().map(|v| v.to_string()),
     })
 }

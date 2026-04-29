@@ -1,0 +1,396 @@
+mod acp_process;
+#[path = "config.rs"]
+mod config;
+#[path = "home.rs"]
+mod home;
+
+use acp_process::{AcpProcess, AcpUpdates};
+use anyhow::{Context, Result};
+use config::AgentRuntimeConfig;
+use serde_json::{json, Value};
+use std::sync::Arc;
+use tenex_context::{
+    CacheObservation, Message as CtxMessage, ModelProfile, ToolCall as CtxToolCall, ToolDef,
+    TurnRecord,
+};
+use tenex_conversations::ConversationStore;
+use tenex_project::Project;
+use tenex_protocol::{
+    nostr::{read_one_from_stdin, NostrChannel},
+    sink::StdoutNdjsonSink,
+    Channel, CompletionIntent, ConversationRef, EncodingContext, LlmMetadata, MessageRef,
+    PrincipalKind, PrincipalRef, ProjectRef,
+};
+use tenex_telegram::composite::CompositeChannel;
+use tenex_telegram::delivery::TelegramContext;
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    let telemetry = tenex_telemetry::init("tenex-agent-acp");
+    let result = run().await;
+    telemetry.shutdown();
+    result
+}
+
+async fn run() -> Result<()> {
+    let args: Vec<String> = std::env::args().collect();
+    if args.len() < 2 {
+        anyhow::bail!("Usage: tenex-agent-acp <agent.json>");
+    }
+
+    let project_id = std::env::var("TENEX_PROJECT_ID")
+        .context("TENEX_PROJECT_ID environment variable is required")?;
+    let agent_config = config::AgentConfig::load(&args[1])?;
+    let acp_config = match agent_config.runtime.as_ref() {
+        Some(AgentRuntimeConfig::Acp(cfg)) => cfg.clone(),
+        Some(AgentRuntimeConfig::Tenex) => {
+            anyhow::bail!("agent runtime.kind is tenex; tenex-agent-acp requires acp")
+        }
+        None => anyhow::bail!("agent runtime config is missing; tenex-agent-acp requires acp"),
+    };
+
+    let envelope = read_one_from_stdin()
+        .await
+        .context("Failed to parse triggering event from stdin")?;
+
+    let nostr_channel = Arc::new(
+        NostrChannel::from_nsec(&agent_config.nsec, StdoutNdjsonSink::new())
+            .context("Failed to initialize Nostr channel")?,
+    );
+    let channel: Arc<dyn Channel> = if let (Some(tg_cfg), Some(tg_meta)) =
+        (&agent_config.telegram, &envelope.metadata.telegram)
+    {
+        let tg_ctx = TelegramContext {
+            chat_id: tg_meta.chat_id.clone(),
+            message_id: tg_meta.message_id.clone(),
+            thread_id: tg_meta.thread_id.clone(),
+        };
+        Arc::new(CompositeChannel::new(
+            nostr_channel,
+            tg_cfg.clone(),
+            tg_ctx,
+            tg_cfg.publish_conversation_to_telegram.unwrap_or(false),
+        ))
+    } else {
+        nostr_channel
+    };
+    let pubkey_hex = match channel.identity() {
+        PrincipalRef::Nostr { pubkey, .. } => pubkey.to_hex(),
+    };
+
+    let working_dir = agent_config
+        .working_directory
+        .as_deref()
+        .map(String::from)
+        .unwrap_or_else(|| {
+            std::env::current_dir()
+                .map(|p| p.display().to_string())
+                .unwrap_or_else(|_| ".".to_string())
+        });
+
+    let project = Project::open_default(&project_id)
+        .with_context(|| format!("Failed to open project for '{project_id}'"))?;
+    let project_meta = project
+        .metadata()
+        .context("Failed to read project metadata")?
+        .context("Project metadata is missing")?;
+    let project_agents = project.agents().context("Failed to read project agents")?;
+    let owner_pubkey_hex = project_meta
+        .owner_pubkey
+        .as_ref()
+        .context("Project metadata has no owner_pubkey")?;
+    let project_ref = ProjectRef {
+        author: nostr::PublicKey::from_hex(owner_pubkey_hex)
+            .context("Failed to parse project owner pubkey")?,
+        d_tag: project_meta.d_tag.clone(),
+    };
+
+    let envelope_conversation_id = match &envelope.root {
+        MessageRef::Nostr { event_id } => event_id.to_hex(),
+    };
+    let conversation_id = std::env::var("TENEX_CONVERSATION_ID")
+        .ok()
+        .filter(|id| nostr::EventId::from_hex(id).is_ok())
+        .unwrap_or(envelope_conversation_id);
+    let conv_store = open_conversation_store(&project_id, &conversation_id);
+
+    let base_dir = tenex_project::paths::default_base_dir();
+    let teams = tenex_project::load_teams(&base_dir, Some(&project_id));
+    let member_teams =
+        tenex_project::teams_for_agent(&teams, agent_config.slug.as_deref().unwrap_or(""));
+    let teams_fragment =
+        tenex_project::render_teams_context(&member_teams, envelope.metadata.team.as_deref());
+
+    let agent_home = home::agent_home_dir(&base_dir, &pubkey_hex);
+    home::ensure_agent_home_dir(&agent_home);
+    let injected_files = home::get_injected_files(&agent_home);
+    let file_count = home::count_home_files(&agent_home);
+    let home_dir = agent_home.display().to_string();
+    let home_info = tenex_system_prompt::HomeDirectoryInfo {
+        home_dir: &home_dir,
+        file_count: &file_count,
+        injected_files: &injected_files,
+    };
+    let system_prompt =
+        tenex_system_prompt::build_system_prompt(tenex_system_prompt::BuildSystemPromptInput {
+            identity_name: agent_config.identity_name(),
+            pubkey_hex: &pubkey_hex,
+            category_str: agent_config.category.as_deref(),
+            category: agent_config.resolved_category(),
+            instructions: agent_config.instructions.as_deref(),
+            working_dir: &working_dir,
+            project_meta: Some(&project_meta),
+            agents: &project_agents,
+            teams_fragment: &teams_fragment,
+            home: &home_info,
+            preloaded_skills_block: None,
+        });
+    let history = render_history(
+        conv_store.as_ref(),
+        &conversation_id,
+        &pubkey_hex,
+        &system_prompt,
+        &acp_config.backend,
+    );
+    let prompt = render_acp_prompt(&system_prompt, &history, &envelope.content);
+
+    eprintln!(
+        "[tenex-agent-acp] {} ({}) backend={} command={} model={}",
+        agent_config.identity_name(),
+        &pubkey_hex[..8],
+        acp_config.backend,
+        acp_config.command,
+        acp_config.model.as_deref().unwrap_or("default")
+    );
+
+    let mut acp = AcpProcess::spawn(&acp_config).await?;
+    let mut updates = AcpUpdates::default();
+    acp.request(
+        "initialize",
+        json!({
+            "protocolVersion": 1,
+            "clientCapabilities": {},
+            "clientInfo": {
+                "name": "tenex-agent-acp",
+                "title": "TENEX ACP Worker Runner",
+                "version": env!("CARGO_PKG_VERSION")
+            }
+        }),
+        &mut updates,
+    )
+    .await?;
+
+    let session_result = acp
+        .request(
+            "session/new",
+            json!({
+                "cwd": working_dir,
+                "mcpServers": []
+            }),
+            &mut updates,
+        )
+        .await?;
+    let session_id = session_result
+        .get("sessionId")
+        .and_then(Value::as_str)
+        .context("ACP session/new response missing sessionId")?
+        .to_string();
+
+    if let Some(model) = acp_config.model.as_deref() {
+        if let Some(config_id) = find_model_config_id(&session_result) {
+            if let Err(err) = acp
+                .request(
+                    "session/set_config_option",
+                    json!({
+                        "sessionId": session_id,
+                        "configId": config_id,
+                        "value": model
+                    }),
+                    &mut updates,
+                )
+                .await
+            {
+                eprintln!("[tenex-agent-acp] warn: failed to set ACP model option: {err}");
+            }
+        }
+    }
+
+    let prompt_result = acp
+        .request(
+            "session/prompt",
+            json!({
+                "sessionId": session_id,
+                "prompt": [{"type": "text", "text": prompt}]
+            }),
+            &mut updates,
+        )
+        .await?;
+    let stop_reason = prompt_result
+        .get("stopReason")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown")
+        .to_string();
+    acp.shutdown().await;
+
+    if let Some(store) = conv_store.as_ref() {
+        let turn = TurnRecord {
+            messages_visible: vec![
+                CtxMessage::User {
+                    content: envelope.content.clone(),
+                },
+                CtxMessage::Assistant {
+                    content: updates.visible_text.clone(),
+                    tool_calls: Vec::<CtxToolCall>::new(),
+                },
+            ],
+            reminders_applied: Vec::new(),
+            compaction_decisions: Vec::new(),
+            cache_observed: CacheObservation::default(),
+        };
+        if let Err(err) = tenex_context::record_turn(store, &conversation_id, &pubkey_hex, turn) {
+            eprintln!("[tenex-agent-acp] warn: failed to record ACP turn: {err}");
+        }
+    }
+
+    let completion_recipient = std::env::var("TENEX_COMPLETION_RECIPIENT_PUBKEY")
+        .ok()
+        .and_then(|pubkey| nostr::PublicKey::from_hex(&pubkey).ok())
+        .map(|pubkey| PrincipalRef::Nostr {
+            pubkey,
+            kind: PrincipalKind::Human,
+            display_name: None,
+        });
+    let conversation_root = nostr::EventId::from_hex(&conversation_id)
+        .ok()
+        .map(|root_event_id| ConversationRef::Nostr { root_event_id });
+    let ctx = EncodingContext {
+        project: project_ref,
+        conversation_root,
+        triggering_message: Some(envelope.message.clone()),
+        completion_recipient,
+        triggering_principal: envelope.principal.clone(),
+        ral: 1,
+        model: Some(format!("acp:{}:{}", acp_config.backend, stop_reason)),
+        cost_usd: None,
+        execution_time_ms: None,
+        llm_runtime_ms: None,
+        llm_runtime_total_ms: None,
+        branch: None,
+        team: envelope.metadata.team.clone(),
+    };
+    channel
+        .send(
+            tenex_protocol::Intent::Completion(CompletionIntent {
+                content: updates.visible_text,
+                usage: None,
+                metadata: Some(LlmMetadata {
+                    thread_id: Some(session_id),
+                    ..Default::default()
+                }),
+            }),
+            &ctx,
+        )
+        .await
+        .context("Failed to emit ACP completion")?;
+    Ok(())
+}
+
+fn open_conversation_store(project_id: &str, conversation_id: &str) -> Option<ConversationStore> {
+    let base_dir = tenex_conversations::paths::default_base_dir();
+    let d_tag = tenex_conversations::normalize_project_id(project_id).ok()?;
+    let db_path = tenex_conversations::paths::conversation_db_path(&base_dir, &d_tag);
+    match ConversationStore::open(&db_path) {
+        Ok(store) => {
+            if let Err(err) = store.ensure_conversation(conversation_id) {
+                eprintln!("[tenex-agent-acp] warn: failed to ensure conversation row: {err}");
+            }
+            Some(store)
+        }
+        Err(err) => {
+            eprintln!("[tenex-agent-acp] warn: conversation store unavailable: {err}");
+            None
+        }
+    }
+}
+
+fn render_history(
+    store: Option<&ConversationStore>,
+    conversation_id: &str,
+    agent_pubkey: &str,
+    system_prompt: &str,
+    backend: &str,
+) -> String {
+    let Some(store) = store else {
+        return String::new();
+    };
+    let profile = ModelProfile {
+        provider: "acp".to_string(),
+        model_id: backend.to_string(),
+        prompt_cache: false,
+        ephemeral_reminders: false,
+        image_support: false,
+        max_context_tokens: 200_000,
+    };
+    let tool_defs: Vec<ToolDef> = Vec::new();
+    match tenex_context::project(
+        store,
+        conversation_id,
+        agent_pubkey,
+        system_prompt,
+        &profile,
+        &tool_defs,
+    ) {
+        Ok(projection) => projection
+            .messages
+            .into_iter()
+            .filter_map(format_context_message)
+            .collect::<Vec<_>>()
+            .join("\n\n"),
+        Err(err) => {
+            eprintln!("[tenex-agent-acp] warn: context projection failed: {err}");
+            String::new()
+        }
+    }
+}
+
+fn format_context_message(message: CtxMessage) -> Option<String> {
+    match message {
+        CtxMessage::System { .. } => None,
+        CtxMessage::User { content } => Some(format!("User:\n{content}")),
+        CtxMessage::Assistant { content, .. } => Some(format!("Assistant:\n{content}")),
+        CtxMessage::ToolResult { content, .. } => Some(format!("Tool result:\n{content}")),
+    }
+}
+
+fn render_acp_prompt(system_prompt: &str, history: &str, current_task: &str) -> String {
+    let history_block = if history.is_empty() {
+        "No prior conversation history is available.".to_string()
+    } else {
+        history.to_string()
+    };
+    format!(
+        "<tenex-context>\n{system_prompt}\n</tenex-context>\n\n\
+         <worker-runtime>\n\
+         You are running as an external ACP worker inside TENEX. TENEX tools are not available in this session. \
+         Use only the capabilities provided by the ACP backend, then return a concise result for TENEX to publish.\n\
+         </worker-runtime>\n\n\
+         <conversation-history>\n{history_block}\n</conversation-history>\n\n\
+         <current-task>\n{current_task}\n</current-task>"
+    )
+}
+
+fn find_model_config_id(session_result: &Value) -> Option<String> {
+    session_result
+        .get("configOptions")
+        .and_then(Value::as_array)?
+        .iter()
+        .find(|option| {
+            option.get("category").and_then(Value::as_str) == Some("model")
+                || matches!(
+                    option.get("id").and_then(Value::as_str),
+                    Some("model" | "models")
+                )
+        })
+        .and_then(|option| option.get("id").and_then(Value::as_str))
+        .map(str::to_string)
+}
