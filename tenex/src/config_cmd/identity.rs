@@ -49,9 +49,8 @@ pub fn run(base_dir: &std::path::Path) -> Result<()> {
 /// byte-for-byte by embedding the indent and trailing newline inside
 /// the dim'd payload.
 fn render_listing(pubkeys: &[String]) {
-    let dim = console::Style::new().dim();
     if pubkeys.is_empty() {
-        println!("{}", dim.apply_to("  No authorized pubkeys.\n"));
+        println!("{}", crate::tui::theme::chalk_dim("  No authorized pubkeys.\n"));
     } else {
         println!("  Authorized pubkeys:");
         for pk in pubkeys {
@@ -99,8 +98,7 @@ fn remove_pubkey(
     if existing.is_empty() {
         // TS at identity.ts:50 — `chalk.dim("  Nothing to remove.")`
         // with the leading 2-space indent INSIDE the dim wrap.
-        let dim = console::Style::new().dim();
-        println!("{}", dim.apply_to("  Nothing to remove."));
+        println!("{}", crate::tui::theme::chalk_dim("  Nothing to remove."));
         return Ok(());
     }
     let chosen = match prompts::select("Remove which pubkey?", existing.clone()).prompt() {

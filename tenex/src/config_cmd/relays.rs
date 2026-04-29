@@ -64,25 +64,22 @@ pub fn run(base_dir: &std::path::Path) -> Result<()> {
 /// byte: include the same whitespace inside the dim'd payload so the
 /// wire ANSI sequence matches TS exactly.
 fn render_listing(relays: &[String], identity_relays: &[String]) {
-    let dim = console::Style::new().dim();
-    let cyan_bullet = console::Style::new().cyan().apply_to("●");
-    println!("{}", dim.apply_to("\n  Relays:"));
+    use crate::tui::theme::{chalk_cyan, chalk_dim};
+    let cyan_bullet = chalk_cyan("●");
+    println!("{}", chalk_dim("\n  Relays:"));
     if relays.is_empty() {
-        println!("{}", dim.apply_to("    No relays configured."));
+        println!("{}", chalk_dim("    No relays configured."));
     } else {
         for r in relays {
             println!("    {cyan_bullet} {r}");
         }
     }
 
-    println!(
-        "{}",
-        dim.apply_to("\n  Identity relays (for kind:0 events):"),
-    );
+    println!("{}", chalk_dim("\n  Identity relays (for kind:0 events):"));
     if identity_relays.is_empty() {
         println!(
             "{}",
-            dim.apply_to(format!("    {DEFAULT_IDENTITY_RELAY} (default)")),
+            chalk_dim(&format!("    {DEFAULT_IDENTITY_RELAY} (default)")),
         );
     } else {
         for r in identity_relays {
@@ -117,8 +114,7 @@ fn remove_relay(
     if existing.is_empty() {
         // TS at relays.ts:70 — `chalk.dim("  Nothing to remove.")`
         // with the leading 2-space indent INSIDE the dim wrap.
-        let dim = console::Style::new().dim();
-        println!("{}", dim.apply_to("  Nothing to remove."));
+        println!("{}", crate::tui::theme::chalk_dim("  Nothing to remove."));
         return Ok(());
     }
     let chosen = match prompt_select_relay("Remove which relay?", &existing) {
@@ -158,10 +154,9 @@ fn remove_identity_relay(
         // TS at relays.ts:102 — `chalk.dim(\`  No custom identity relays
         // configured (using default: ${DEFAULT_IDENTITY_RELAY}).\`)`
         // with the leading 2-space indent INSIDE the dim wrap.
-        let dim = console::Style::new().dim();
         println!(
             "{}",
-            dim.apply_to(format!(
+            crate::tui::theme::chalk_dim(&format!(
                 "  No custom identity relays configured (using default: {DEFAULT_IDENTITY_RELAY})."
             )),
         );

@@ -14,8 +14,10 @@ pub fn run(base_dir: &std::path::Path) -> Result<()> {
     let current = doc
         .escalation_agent()
         .unwrap_or_else(|| "not configured".to_owned());
-    let dim = console::Style::new().dim();
-    println!("  Current escalation agent: {}\n", dim.apply_to(&current));
+    println!(
+        "  Current escalation agent: {}\n",
+        crate::tui::theme::chalk_dim(&current),
+    );
 
     let default = doc.escalation_agent().unwrap_or_default();
     let raw = match prompts::input("Agent slug (empty to disable):")
