@@ -31,6 +31,10 @@ const HTTP_USER_AGENT = "TENEX-RAG-Ingester/1.0";
 // Type definitions for protocol handlers
 type ProtocolHandler = (uri: string, context: ToolExecutionContext) => Promise<string>;
 
+interface RAGAddDocumentsDependencies {
+    ragService?: Pick<RAGService, "addDocuments">;
+}
+
 /**
  * Schema for RAG document input
  */
@@ -528,7 +532,8 @@ async function processDocuments(
  */
 async function executeAddDocuments(
     input: z.infer<typeof ragAddDocumentsSchema>,
-    context: ToolExecutionContext
+    context: ToolExecutionContext,
+    dependencies: RAGAddDocumentsDependencies = {}
 ): Promise<ToolResponse> {
     const { collection, documents } = input;
 
@@ -539,7 +544,7 @@ async function executeAddDocuments(
     const processedDocs = await processDocuments(documents, context, baseProvenance);
 
     // Add to collection
-    const ragService = RAGService.getInstance();
+    const ragService = dependencies.ragService ?? RAGService.getInstance();
     await ragService.addDocuments(collection, processedDocs);
 
     return {
@@ -573,7 +578,10 @@ async function executeAddDocuments(
  * - URI validation provides early error detection
  * - Content validation ensures meaningful documents
  */
-export function createRAGAddDocumentsTool(context: ToolExecutionContext): AISdkTool {
+export function createRAGAddDocumentsTool(
+    context: ToolExecutionContext,
+    dependencies: RAGAddDocumentsDependencies = {}
+): AISdkTool {
     return tool({
         description:
             "Add documents to a RAG collection. Documents can be provided as text content, file paths, or URIs (file://, https://, etc.). Each document will be automatically embedded for semantic search. Enforces file size limits (100MB) and HTTP timeouts (30s).",
@@ -583,8 +591,9 @@ export function createRAGAddDocumentsTool(context: ToolExecutionContext): AISdkT
                 "rag_add_documents",
                 input as z.infer<typeof ragAddDocumentsSchema>,
                 context,
-                executeAddDocuments
+                (validatedInput, executionContext) =>
+                    executeAddDocuments(validatedInput, executionContext, dependencies)
             );
         },
     }) as AISdkTool;
-} 
+}

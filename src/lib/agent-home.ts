@@ -43,9 +43,9 @@ export function getShortPubkey(pubkey: string): string {
  * Get the home directory path for an agent.
  * This is the canonical source of truth for agent home directory paths.
  */
-export function getAgentHomeDirectory(agentPubkey: string): string {
+export function getAgentHomeDirectory(agentPubkey: string, tenexBasePath = getTenexBasePath()): string {
     const shortPubkey = getShortPubkey(agentPubkey);
-    return join(getTenexBasePath(), "home", shortPubkey);
+    return join(tenexBasePath, "home", shortPubkey);
 }
 
 

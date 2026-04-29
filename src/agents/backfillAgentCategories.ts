@@ -4,6 +4,7 @@ import { logger } from "@/utils/logger";
 
 export interface BackfillOptions {
     dryRun?: boolean;
+    categorize?: typeof categorizeAgent;
 }
 
 export interface BackfillResult {
@@ -43,7 +44,7 @@ export async function backfillAgentCategories(
         const pubkey = deriveAgentPubkeyFromNsec(agent.nsec);
         const metadata = toMetadata(agent);
 
-        const inferredCategory = await categorizeAgent(metadata);
+        const inferredCategory = await (options.categorize ?? categorizeAgent)(metadata);
         if (!inferredCategory) {
             result.failed++;
             continue;

@@ -20,7 +20,10 @@ export const TENEX_DIR = ".tenex" as const;
  * @returns The absolute path to the TENEX base directory
  */
 export function getTenexBasePath(): string {
-    return process.env.TENEX_BASE_DIR || join(homedir(), TENEX_DIR);
+    const override = process.env.TENEX_BASE_DIR?.trim();
+    return override && override !== "undefined" && override !== "null"
+        ? override
+        : join(homedir(), TENEX_DIR);
 }
 
 /**
@@ -30,5 +33,4 @@ export const CONFIG_FILE = "config.json" as const;
 export const MCP_CONFIG_FILE = "mcp.json" as const;
 export const LLMS_FILE = "llms.json" as const;
 export const PROVIDERS_FILE = "providers.json" as const;
-
 

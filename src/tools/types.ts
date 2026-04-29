@@ -113,6 +113,19 @@ export interface ExecutionEnvironment {
      * Example: "master", "feature/branch-name", "research/foo"
      */
     currentBranch: string;
+    /**
+     * Project d-tag used for TENEX metadata lookups.
+     * Some tool contexts are constructed before a full ConversationStore is
+     * available, so callers may provide this directly instead of relying on
+     * getConversation().getProjectId().
+     */
+    projectId?: string;
+    /**
+     * Optional TENEX data directory override for isolated executions and tests.
+     * Runtime code normally relies on TENEX_BASE_DIR; context-scoped execution
+     * avoids cross-test/process global mutations when resolving tool env files.
+     */
+    tenexBasePath?: string;
     triggeringEnvelope: InboundEnvelope;
     /**
      * Access to conversation state. May return undefined before full execution setup.

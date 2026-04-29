@@ -52,6 +52,8 @@ export interface ExecutionContextManagement {
     ): Promise<ContextManagementPreparedRequest>;
 }
 
+type GenerateTextFn = typeof generateText;
+
 function createSummarizationModel(options: {
     conversationId: string;
     agent: AgentInstance;
@@ -118,7 +120,8 @@ function createCompactionStore(options: {
 
 function createCompactionCallback(
     model: LanguageModel,
-    conversationId: string
+    conversationId: string,
+    generateTextImpl: GenerateTextFn = generateText
 ): NonNullable<CompactionToolStrategyOptions["onCompact"]> {
     return async ({ messages, mode, steeringMessage }) => {
         const transcript = buildSummaryTranscript(messages);
@@ -149,7 +152,7 @@ function createCompactionCallback(
         ];
 
         try {
-            const { text } = await generateText({
+            const { text } = await generateTextImpl({
                 model,
                 messages: summaryPrompt,
                 temperature: 0,
@@ -170,6 +173,7 @@ function createConversationContextManagementRuntime(options: {
     conversationStore: ConversationStore;
     conversationId: string;
     agent: AgentInstance;
+    generateTextImpl?: GenerateTextFn;
 }): {
     runtime: ContextManagementRuntime;
 } {
@@ -204,7 +208,8 @@ function createConversationContextManagementRuntime(options: {
             };
             compactionOptions.onCompact = createCompactionCallback(
                 summarizationModel,
-                options.conversationId
+                options.conversationId,
+                options.generateTextImpl
             );
         }
 
@@ -287,6 +292,7 @@ export function createExecutionContextManagement(options: {
     conversationId: string;
     agent: AgentInstance;
     conversationStore: ConversationStore;
+    generateTextImpl?: GenerateTextFn;
 }): ExecutionContextManagement | undefined {
     const settings = getContextManagementSettings();
 
@@ -316,6 +322,7 @@ export function createExecutionContextManagement(options: {
         conversationStore: options.conversationStore,
         conversationId: options.conversationId,
         agent: options.agent,
+        generateTextImpl: options.generateTextImpl,
     });
     const optionalTools = runtime.optionalTools as unknown as Record<string, AISdkTool>;
 

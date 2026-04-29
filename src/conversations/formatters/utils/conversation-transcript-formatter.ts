@@ -272,11 +272,14 @@ function resolveEntryDisplayName(
   principal: ConversationPrincipal,
   identityDisplayService: ReturnType<typeof getIdentityDisplayService>
 ): string {
+  const snapshotDisplayName = principal?.displayName?.trim() || principal?.username?.trim();
+  if (snapshotDisplayName) {
+    return snapshotDisplayName;
+  }
+
   return identityDisplayService.resolveDisplayNameSync({
     principalId: principal?.id,
     linkedPubkey: pubkey,
-    displayName: principal?.displayName,
-    username: principal?.username,
   });
 }
 

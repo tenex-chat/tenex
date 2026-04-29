@@ -59,17 +59,18 @@ function buildAgentHomeEnvBootstrap(
     return lines.join("\n");
 }
 
-export function getAgentHomeEnvPath(agentPubkey: string): string {
-    return join(getAgentHomeDirectory(agentPubkey), ".env");
+export function getAgentHomeEnvPath(agentPubkey: string, tenexBasePath?: string): string {
+    return join(getAgentHomeDirectory(agentPubkey, tenexBasePath), ".env");
 }
 
 export async function ensureAgentHomeEnvFile(
     agentPubkey: string,
     agentNsec: string,
-    relays?: string[]
+    relays?: string[],
+    tenexBasePath?: string
 ): Promise<EnsureAgentHomeEnvFileResult> {
-    const homeDir = getAgentHomeDirectory(agentPubkey);
-    const envPath = getAgentHomeEnvPath(agentPubkey);
+    const homeDir = getAgentHomeDirectory(agentPubkey, tenexBasePath);
+    const envPath = getAgentHomeEnvPath(agentPubkey, tenexBasePath);
     const normalizedNsec = normalizeNsecToBech32(agentNsec);
     const signer = new NDKPrivateKeySigner(normalizedNsec);
     const pubkey = signer.pubkey;

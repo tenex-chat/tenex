@@ -25,6 +25,8 @@ import type { NDKEvent } from "@nostr-dev-kit/ndk";
  */
 const categorizationInFlight = new Set<string>();
 
+type CategorizeAgentFn = typeof categorizeAgent;
+
 /**
  * Create an AgentInstance from stored agent data.
  * This is the hydration step from persistent data to runtime object.
@@ -138,7 +140,8 @@ export async function createAgentInstance(
  */
 export async function loadStoredAgentIntoRegistry(
     pubkey: string,
-    registry: AgentRegistry
+    registry: AgentRegistry,
+    categorize: CategorizeAgentFn = categorizeAgent
 ): Promise<AgentInstance> {
     const existingAgent = registry.getAgentByPubkey(pubkey);
     if (existingAgent) {
@@ -163,7 +166,7 @@ export async function loadStoredAgentIntoRegistry(
                 timeoutId = setTimeout(() => reject(new Error("categorization timed out after 30s")), 30_000);
             });
             const inferredCategory = await Promise.race([
-                categorizeAgent({
+                categorize({
                     name: storedAgent.name,
                     role: storedAgent.role,
                     description: storedAgent.description,

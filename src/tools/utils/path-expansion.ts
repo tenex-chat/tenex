@@ -52,9 +52,9 @@ export function expandPathWithEnvironment(rawPath: string, env: NodeJS.ProcessEn
 
 export async function resolveToolEnvironment(context: ExecutionEnvironment): Promise<NodeJS.ProcessEnv> {
     const conversation = context.getConversation?.();
-    const projectId = typeof conversation?.getProjectId === "function"
+    const projectId = context.projectId ?? (typeof conversation?.getProjectId === "function"
         ? conversation.getProjectId()
-        : null;
+        : null);
 
     return await agentEnvironmentService.resolveShellEnvironment({
         agentPubkey: context.agent.pubkey,
@@ -62,6 +62,7 @@ export async function resolveToolEnvironment(context: ExecutionEnvironment): Pro
         projectDTag: projectId,
         projectPath: context.projectBasePath || undefined,
         baseEnv: process.env,
+        tenexBasePath: context.tenexBasePath,
     });
 }
 

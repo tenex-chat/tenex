@@ -13,11 +13,13 @@ export interface ResolveShellEnvironmentParams {
     projectPath?: string | null;
     agentNsec?: string;
     baseEnv?: NodeJS.ProcessEnv;
+    tenexBasePath?: string;
 }
 
 export interface EnsureAgentHomeEnvParams {
     agentPubkey: string;
     agentNsec?: string;
+    tenexBasePath?: string;
 }
 
 export class AgentEnvironmentFileError extends Error {
@@ -37,20 +39,24 @@ export class AgentEnvironmentService {
         private readonly agentLoader: Pick<AgentStorage, "loadAgent"> = agentStorage
     ) {}
 
-    getGlobalEnvPath(): string {
-        return path.join(config.getGlobalPath(), ".env");
+    private getBasePath(tenexBasePath?: string): string {
+        return tenexBasePath ?? config.getGlobalPath();
     }
 
-    getProjectEnvPath(projectDTag: string): string {
-        return path.join(config.getConfigPath("projects"), projectDTag, ".env");
+    getGlobalEnvPath(tenexBasePath?: string): string {
+        return path.join(this.getBasePath(tenexBasePath), ".env");
+    }
+
+    getProjectEnvPath(projectDTag: string, tenexBasePath?: string): string {
+        return path.join(this.getBasePath(tenexBasePath), "projects", projectDTag, ".env");
     }
 
     getProjectRepoEnvPath(projectPath: string): string {
         return path.join(projectPath, ".env");
     }
 
-    getAgentEnvPath(agentPubkey: string): string {
-        return getAgentHomeEnvPath(agentPubkey);
+    getAgentEnvPath(agentPubkey: string, tenexBasePath?: string): string {
+        return getAgentHomeEnvPath(agentPubkey, tenexBasePath);
     }
 
     async ensureAgentHomeEnv(
@@ -66,7 +72,12 @@ export class AgentEnvironmentService {
         } catch {
             // Config not loaded yet
         }
-        return ensureAgentHomeEnvFile(params.agentPubkey, agentNsec, relays);
+        return ensureAgentHomeEnvFile(
+            params.agentPubkey,
+            agentNsec,
+            relays,
+            params.tenexBasePath
+        );
     }
 
     async resolveShellEnvironment(
@@ -84,16 +95,16 @@ export class AgentEnvironmentService {
         // Capture original HOME before any .env merges - this MUST be preserved
         const originalHome = baseEnv.HOME;
 
-        const globalEnvPath = this.getGlobalEnvPath();
+        const globalEnvPath = this.getGlobalEnvPath(params.tenexBasePath);
         const projectRepoEnvPath = params.projectPath
             ? this.getProjectRepoEnvPath(params.projectPath)
             : null;
         const projectEnvPath = params.projectDTag
-            ? this.getProjectEnvPath(params.projectDTag)
+            ? this.getProjectEnvPath(params.projectDTag, params.tenexBasePath)
             : null;
 
         await this.ensureAgentHomeEnv(params);
-        const agentEnvPath = this.getAgentEnvPath(params.agentPubkey);
+        const agentEnvPath = this.getAgentEnvPath(params.agentPubkey, params.tenexBasePath);
 
         // Merge order (lowest to highest priority):
         // global < project-repo < project-metadata < agent
@@ -125,7 +136,7 @@ export class AgentEnvironmentService {
         if (params.projectDTag) {
             mergedEnv.PROJECT_ID = params.projectDTag;
         }
-        mergedEnv.TENEX_BASE_DIR = config.getConfigPath();
+        mergedEnv.TENEX_BASE_DIR = this.getBasePath(params.tenexBasePath);
 
         return mergedEnv;
     }
