@@ -41,6 +41,7 @@ pub use intent::{
 };
 pub use refs::{ConversationRef, MessageRef, PrincipalKind, PrincipalRef, ProjectRef};
 pub use runtime_control::{
+    DispatchAcceptedFrame, DispatchEventFrame, DispatchTransportFrame, DispatchTransportRequest,
     ErrorResponse, KillRequest, KillResponse, KillTargetType, ListShellTasksRequest,
     RunShellRequest, RuntimeControlRequest, RuntimeControlResponse, ShellBackgroundResponse,
     ShellCompletedResponse, ShellTaskMode, ShellTaskSummary, ShellTasksResponse,

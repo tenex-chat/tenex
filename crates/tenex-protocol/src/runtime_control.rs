@@ -13,6 +13,44 @@ pub enum RuntimeControlRequest {
     RunShell(RunShellRequest),
     ListShellTasks(ListShellTasksRequest),
     Kill(KillRequest),
+    DispatchTransport(DispatchTransportRequest),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DispatchTransportRequest {
+    /// Signed Nostr event JSON (as produced by `Event::as_json`).
+    pub event_json: String,
+}
+
+/// Streaming frames returned on a `DispatchTransport` connection.
+///
+/// The runtime writes one JSON line per frame in order:
+///   1. exactly one `Accepted` or `Error` after the inbound is parsed,
+///   2. zero or more `Event` frames, one per Nostr event the agent emits,
+///   3. exactly one terminal frame: `Done`, `Superseded`, or `Error`.
+///
+/// `Superseded` is sent when the inbound dispatch was queued and then dropped
+/// by `DispatchCoordinator`'s newer-wins policy before the agent ran.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", content = "data", rename_all = "snake_case")]
+pub enum DispatchTransportFrame {
+    Accepted(DispatchAcceptedFrame),
+    Event(DispatchEventFrame),
+    Done,
+    Superseded,
+    Error(ErrorResponse),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DispatchAcceptedFrame {
+    pub conversation_id: String,
+    pub agent_pubkey: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DispatchEventFrame {
+    /// Signed Nostr event JSON.
+    pub event_json: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
