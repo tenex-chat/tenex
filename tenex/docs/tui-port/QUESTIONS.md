@@ -155,14 +155,21 @@ Migrated so far (each site is byte-perfect chalk now):
 - Every `chalk.{red,green,yellow,cyan,gray}` wrap that was previously
   routed through crossterm's `Color::Dark*` (256-colour) → raw
   `theme::CHALK_*_OPEN` + `theme::FG_RESET`.
+- Every active-row cursor `${cursor} ` close in the five
+  separated-cursor bespoke prompts (`role_menu_prompt`,
+  `variant_list_prompt`, `agent_select_prompt`, `llm_menu_prompt`,
+  `provider_select_prompt`) → `Print(theme::FG_RESET)`. Pinned by
+  `role_menu_prompt::tests::render_frame_active_role_cursor_has_space_outside_amber_wrap`
+  (asserts the SGR-39 close exactly, forbids SGR-0).
 
 Still using `ResetColor` and therefore emitting `\x1b[0m`:
-- The active-row cursor `${cursor} ` (every bespoke prompt's variant
-  rows / action rows / Done row). The cursor wrap is FG-only so the
-  visual is unchanged; the existing space-position regression tests
-  tolerate either closer.
 - Inner amber wraps in `section_menu_prompt`'s active Entry / Back
   rows (single-amber-span pattern around cursor + label).
+- A handful of mixed-attribute closes (e.g. amber + bold "  Done"
+  ending with `NormalIntensity, ResetColor`). These have a real
+  intensity-close before the foreground close, so SGR-0 here
+  redundantly closes nothing extra — visually identical to chalk.
+  Migration would be cosmetic.
 
 Visually identical for spans that only changed foreground (no bold,
 dim, italic, or background open at the same time — which is the case

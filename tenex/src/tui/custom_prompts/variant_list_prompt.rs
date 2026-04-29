@@ -377,7 +377,7 @@ fn render_frame<W: Write>(
                 stdout,
                 SetForegroundColor(AMBER),
                 Print(glyphs::CURSOR_THIN),
-                ResetColor,
+                Print(crate::tui::theme::FG_RESET),
                 Print(" "),
             )?;
         } else {
@@ -432,7 +432,7 @@ fn render_frame<W: Write>(
             stdout,
             SetForegroundColor(AMBER),
             Print(glyphs::CURSOR_THIN),
-            ResetColor,
+            Print(crate::tui::theme::FG_RESET),
             Print(" "),
         )?;
     } else {
@@ -458,7 +458,7 @@ fn render_frame<W: Write>(
             stdout,
             SetForegroundColor(AMBER),
             Print(glyphs::CURSOR_THIN),
-            ResetColor,
+            Print(crate::tui::theme::FG_RESET),
             Print(" "),
         )?;
     } else {

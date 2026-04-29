@@ -331,7 +331,7 @@ fn render_frame<W: Write>(
                 stdout,
                 SetForegroundColor(AMBER),
                 Print(glyphs::CURSOR_THIN),
-                ResetColor,
+                Print(crate::tui::theme::FG_RESET),
                 Print(" "),
             )?;
         } else {
@@ -400,7 +400,7 @@ fn render_frame<W: Write>(
             stdout,
             SetForegroundColor(AMBER),
             Print(glyphs::CURSOR_THIN),
-            ResetColor,
+            Print(crate::tui::theme::FG_RESET),
             Print(" "),
         )?;
     } else {
@@ -612,17 +612,20 @@ mod tests {
         let mut buf: Vec<u8> = Vec::new();
         render_frame(&mut buf, "Roles", &state, 0).unwrap();
         let s = String::from_utf8(buf).expect("render output must be UTF-8");
-        // Space outside the wrap, regardless of FG closer:
-        let space_outside_full_reset = s.contains("\x1b[38;2;255;193;7m›\x1b[0m ");
-        let space_outside_fg_reset = s.contains("\x1b[38;2;255;193;7m›\x1b[39m ");
+        // The cursor wrap now closes with SGR 39 (FG default) — chalk-perfect.
+        // Wire bytes: `\x1b[38;2;255;193;7m›\x1b[39m ` (literal space AFTER the
+        // foreground reset).
         assert!(
-            space_outside_full_reset || space_outside_fg_reset,
-            "active cursor must emit `›` + colour-closer + literal space; got {s:?}",
+            s.contains("\x1b[38;2;255;193;7m›\x1b[39m "),
+            "active cursor must emit `›` + SGR-39 close + literal space; got {s:?}",
         );
-        // Legacy space-inside-wrap forms (with either closer) must NOT appear:
+        // Forbid the legacy SGR-0 closer AND the space-inside-wrap form.
         assert!(
-            !s.contains("\x1b[38;2;255;193;7m› \x1b[0m")
-                && !s.contains("\x1b[38;2;255;193;7m› \x1b[39m"),
+            !s.contains("\x1b[38;2;255;193;7m›\x1b[0m"),
+            "cursor close must be SGR-39 (chalk-perfect), not SGR-0; got {s:?}",
+        );
+        assert!(
+            !s.contains("\x1b[38;2;255;193;7m› \x1b[39m"),
             "must not wrap the cursor's trailing space inside the amber span; got {s:?}",
         );
     }

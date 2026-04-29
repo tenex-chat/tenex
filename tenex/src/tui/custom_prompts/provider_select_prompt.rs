@@ -663,7 +663,7 @@ fn render_browse<W: Write>(
                 stdout,
                 SetForegroundColor(AMBER),
                 Print(glyphs::CURSOR_THIN),
-                ResetColor,
+                Print(crate::tui::theme::FG_RESET),
                 Print(" "),
             )?;
         } else {
@@ -732,7 +732,7 @@ fn render_browse<W: Write>(
             stdout,
             SetForegroundColor(AMBER),
             Print(glyphs::CURSOR_THIN),
-            ResetColor,
+            Print(crate::tui::theme::FG_RESET),
             Print(" "),
         )?;
     } else {
@@ -815,7 +815,7 @@ fn render_keys<W: Write>(stdout: &mut W, state: &ProviderState) -> io::Result<u1
                 stdout,
                 SetForegroundColor(AMBER),
                 Print(glyphs::CURSOR_THIN),
-                ResetColor,
+                Print(crate::tui::theme::FG_RESET),
                 Print(" "),
             )?;
         } else {
@@ -850,7 +850,7 @@ fn render_keys<W: Write>(stdout: &mut W, state: &ProviderState) -> io::Result<u1
             stdout,
             SetForegroundColor(AMBER),
             Print(glyphs::CURSOR_THIN),
-            ResetColor,
+            Print(crate::tui::theme::FG_RESET),
             Print(" "),
         )?;
     } else {
@@ -871,7 +871,7 @@ fn render_keys<W: Write>(stdout: &mut W, state: &ProviderState) -> io::Result<u1
             stdout,
             SetForegroundColor(AMBER),
             Print(glyphs::CURSOR_THIN),
-            ResetColor,
+            Print(crate::tui::theme::FG_RESET),
             Print(" "),
         )?;
     } else {
