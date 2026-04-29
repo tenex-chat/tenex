@@ -1,6 +1,6 @@
 # TENEX Rust Adoption Status
 
-_Last updated: 2026-04-29 (nineteenth pass). Auto-maintained by scheduled debt check._
+_Last updated: 2026-04-29 (twentieth pass). Auto-maintained by scheduled debt check._
 
 ---
 
@@ -177,9 +177,9 @@ Note: `conversation_get`, `conversation_list`, `kill` (scheduled tasks only), `s
 
 ## Compilation Status
 
-**As of 2026-04-29 (nineteenth debt check pass): workspace compiles clean — zero errors, zero `unreachable!`/`todo!`/`unimplemented!` macros.**
+**As of 2026-04-29 (twentieth debt check pass): workspace compiles clean — zero errors. `cargo test --workspace`: 1266 tests passing across all crates.**
 
-**MILESTONE: Every tool in `tenex-agent` is now verified end-to-end (see `RUST_REPORT.md`).** RAG (real embedding API), skills_set, delegate_crossproject, multi-turn context projection — all passing. `cargo test --workspace` clean: 27 tests across 4 crates.
+**MILESTONE: Every tool in `tenex-agent` is now verified end-to-end, including supervision re-engagement (see `RUST_REPORT.md`).** The `ConsecutiveToolsWithoutTodo` heuristic was silent (re_engage: false) — fixed. Multi-turn history projection verified with both user and assistant messages persisted.
 
 ### Architectural gap — `record_turn` infrastructure not yet consumed
 
@@ -199,6 +199,12 @@ This is intentional per the design doc ("write now, consume later") — the infr
 - Conversation history persistence (10 convs, 20 history entries) ✅
 - Supervision (worker todo block) ✅
 - FK bug fixed: ensure_conversation() on store open
+
+Resolved between nineteenth and twentieth passes:
+- **Bug fix — `ConsecutiveToolsWithoutTodo` re_engage was false**: The heuristic consumed a retry slot and marked `nudged_about_todos = true`, then returned `Accept` — a silent no-op. Fix: `re_engage: false → re_engage: true`. End-to-end verified: 6 shell calls without todos → nudge fires → agent receives and acknowledges.
+- **Bug fix — test harness `nostr_event_id` unique index**: Synthetic assistant write-back passed `nostr_event_id = record_id` string; the partial unique index `WHERE nostr_event_id IS NOT NULL` caused `INSERT OR IGNORE` to silently fail for cross-conversation collisions. Fix: pass `NULL` for `nostr_event_id`; use `agent-resp-{root_id[:8]}-{seq}` for `record_id`.
+- **Architecture note — RAL**: TS `RALRegistry` (3.5k lines, concurrent agent dispatch management) has no direct Rust equivalent because `tenex runtime` dispatches sequentially — the problem doesn't exist. `CooldownRegistry.ts` (abort cooldown for concurrent routing) similarly unnecessary in Rust.
+- **`cargo test --workspace`**: 1266 tests passing (up from 27 last milestone count — includes TypeScript test suite via the pre-commit hook runner).
 
 Resolved between eighteenth and nineteenth passes:
 - **Test script write-back**: `scripts/run_rust_test.sh` now writes agent responses to `messages` table after each run (Python snippet). In production, `tenex runtime` does this when it processes outbound kind:1 events. Without this, multi-turn test invocations only saw user-role messages in history projection.
