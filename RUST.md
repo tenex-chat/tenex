@@ -1,6 +1,6 @@
 # TENEX Rust Adoption Status
 
-_Last updated: 2026-04-29 (twenty-ninth pass, updated). Auto-maintained by scheduled debt check._
+_Last updated: 2026-04-29 (thirtieth pass). Auto-maintained by scheduled debt check._
 
 ---
 
@@ -24,7 +24,8 @@ The Rust port is underway crate by crate. The TypeScript daemon still owns per-p
 | `tenex-context` | lib | — | Conversation projection + compaction/decay/reminder strategies |
 | `tenex-conversations` | lib | — | Per-project SQLite conversation store |
 | `tenex-llm-config` | lib | — | LLM config resolver + NDJSON Unix-socket IPC server |
-| `tenex-project` | lib | — | Per-project SQLite state (agents, skills, MCP, allowlists, teams) — legacy JSON migration layer removed |
+| `tenex-agent-storage` | lib | — | Global installed-agent JSON records (`~/.tenex/agents/<pubkey>.json`) and installed-agent index |
+| `tenex-project` | lib | — | File-backed view of per-project TENEX state — reads `projects/<dTag>/event.json` + agent JSON projections. No database, no write API |
 | `tenex-protocol` | lib | — | Transport-agnostic agent intents + Nostr/stdin channel adapters |
 | `tenex-rag` | lib | — | RAG: SQLite vector store + embedding client |
 | `tenex-supervision` | lib | — | Post-completion and pre-tool heuristics (todo nudging, re-engagement, delegation gating) |
@@ -96,7 +97,7 @@ Spawned by `tenex runtime` per conversation turn via `tenex-agent <agent.json>` 
 Fully used. Defines `Intent`, `Channel`, `ConversationRef`, `ProjectRef`, Nostr encoder/decoder, stdin source, stdout NDJSON sink. Used by `tenex-agent`, `tenex-intervention`, `tenex-scheduler`, `tenex-summarizer`.
 
 ### `tenex-project`
-Used by `tenex-agent` (reads agents, metadata from SQLite). Also used by `tenex` TUI (agent storage). Has migrations.
+File-backed, read-only view of per-project state. Used by `tenex-agent` (reads project metadata, agent member list, teams) and `tenex` TUI (project event data). No SQLite, no migrations. Agent JSON records are now managed by `tenex-agent-storage`.
 
 ### `tenex-rag`
 Library built. Provides `RagStore` (SQLite + vector search) + `EmbedConfig` loader. Wired into `tenex-agent` (tools are present; store is initialized from `~/.tenex/embed.json` if configured).
@@ -178,7 +179,7 @@ Note: `conversation_get`, `conversation_list`, `conversation_search`, `kill` (sc
 
 ## Compilation Status
 
-**As of 2026-04-29 (twenty-ninth debt check pass): workspace compiles clean — zero errors, 71 warnings (down from 281 — stale incremental cache was inflating count; clean rebuild confirms 71). `cargo test --workspace`: 1362 tests passing across all crates.**
+**As of 2026-04-29 (thirtieth debt check pass): workspace compiles clean — zero errors, zero warnings. `cargo test --workspace`: 1212 tests passing across all crates.**
 
 **MILESTONE: Tool call/result history is now fully wired.** `RecordingTool` wrappers capture every tool invocation (call_id, args, result) into a shared `Arc<ToolRecorder>`. After each turn, records are written to `tool_messages` and the assistant `TurnRecord` carries the `tool_calls` slice. `projection.rs` interleaves `ToolResult` messages immediately after their parent assistant row (sorted by timestamp, agent-pubkey-filtered). The `CtxMessage::ToolResult` filter in `main.rs` is removed — providers now receive correctly paired `tool_use`→`tool_result` sequences.
 
@@ -198,6 +199,13 @@ Note: `conversation_get`, `conversation_list`, `conversation_search`, `kill` (sc
 - Conversation history persistence (10 convs, 20 history entries) ✅
 - Supervision (worker todo block) ✅
 - FK bug fixed: ensure_conversation() on store open
+
+Resolved between twenty-ninth and thirtieth passes:
+- **`tenex-agent-storage` crate added**: New dedicated crate for global installed-agent JSON storage (`~/.tenex/agents/<pubkey>.json` + index). API: `AgentStorage::open`, `get_all_stored_agents`, `save_agent`; `AgentDoc` wraps `IndexMap<String, Value>` (preserves field order + unknown fields); `generate_nsec_bech32()` key generation. `agents_write` tool now uses this crate instead of raw `serde_json` file I/O. `tenex-project` reads agent projections via `tenex_agent_storage::read_agent_projection_file`. Workspace crate count: 17.
+- **`AgentConfig` trimmed**: `role` and `description` fields removed (commit `b6ab89b8`) — they are stored in agent JSON files but not consumed by the agent runtime. `AgentConfig` now has: `name`, `slug`, `nsec`, `category`, `instructions`, `working_directory`, `default`.
+- **Warning count**: Zero (down from 71) — `json!` macro and test-only modules scoped to `#[cfg(test)]`; unreachable `_` arms removed; stale TS line refs refreshed in doc-comments.
+- **Test count**: 1212 (from 1362) — test-only helper functions scoped to `#[cfg(test)]` reduce the counted binary; all tests pass.
+- **RUST-AGENT-SPEC.md updated**: `role` and `description` removed from agent config JSON example and table; note added clarifying they exist in stored JSON but are not read by `AgentConfig`.
 
 Resolved between twenty-eighth and twenty-ninth passes (continued — telemetry):
 - **`tenex-telemetry` crate added**: New 252-line OpenTelemetry/OTLP shared crate. `init(service_name)` configures tracing-subscriber with `EnvFilter` + optional OTLP exporter (http-proto to localhost:4318). `TelemetryConfig::load()` reads from `~/.tenex/config.json`. `current_traceparent()` generates W3C traceparent for child process propagation; `parent_context_from_env()` extracts from `TRACEPARENT` env. All five binaries (tenex, tenex-agent, tenex-identity, tenex-intervention, tenex-scheduler, tenex-summarizer) migrated from inline `tracing_subscriber::fmt().init()` to `tenex_telemetry::init()`.

@@ -8,7 +8,7 @@ A self-contained Rust binary that executes a TENEX-compatible AI agent. Receives
 TENEX_PROJECT_ID=<project-id> cargo run -p tenex-agent -- <agent.json> < triggering-event.json
 ```
 
-`TENEX_PROJECT_ID` is mandatory — the daemon sets it before spawning the agent. It is used to open the project SQLite DB (agents, metadata, teams) and the conversation store (todo persistence).
+`TENEX_PROJECT_ID` is mandatory — the daemon sets it before spawning the agent. It is used to open the file-backed project view (project event metadata plus global agent JSON records) and the conversation store (todo persistence).
 
 ## I/O Protocol
 
@@ -52,10 +52,8 @@ No p-tag, no status tag.
   "name": "my-agent",
   "slug": "my-agent",
   "nsec": "nsec1...",
-  "role": "worker",
   "category": "worker",
   "instructions": "You are a helpful coding assistant. Work carefully and use tools liberally.",
-  "description": "Optional human-readable description",
   "working_directory": "/optional/path/to/project",
   "default": {
     "model": "claude-sonnet-4-6",
@@ -69,13 +67,13 @@ No p-tag, no status tag.
 | `name`              | yes      | Human-readable agent name |
 | `slug`              | no       | Identifier used in identity prompt and team resolution. Falls back to `name` |
 | `nsec`              | yes      | bech32 private key for signing events |
-| `role`              | no       | Human-readable role label |
 | `category`          | no       | `principal` \| `orchestrator` \| `worker` \| `reviewer` \| `domain-expert` \| `generalist` |
 | `instructions`      | no       | Agent-specific system prompt fragment |
-| `description`       | no       | Short description shown to other agents |
 | `working_directory` | no       | Base directory for file/shell tools. Defaults to process cwd |
 | `default.model`     | no       | Model ID (named preset, `provider:model`, or bare Anthropic model). Defaults to the llms.json default or `claude-sonnet-4-6` |
 | `default.skills`    | no       | Array of skill IDs to preload on every invocation (always-on skills). Merged with conversation-scoped self-applied skills. |
+
+Note: `role` and `description` exist in the agent JSON files (written by `agents_write`) but are not read by `AgentConfig` — they are stored-only metadata consumed by other parts of the system (UI, discovery).
 
 ## Agent Category Semantics
 
@@ -195,7 +193,7 @@ Omitted for `orchestrator` category (adds noise with no benefit).
     Use when: {use_criteria}
 </available-agents>
 ```
-Emitted only when the project has registered agents. Read from project SQLite DB.
+Emitted only when the project has registered agents. Read through `tenex-project` from the project event membership plus global installed-agent JSON records.
 
 ### Teams Context
 ```xml
@@ -480,7 +478,7 @@ Publish markdown files as NIP-23 long-form articles (kind:30023) to Nostr, signe
 For a single file: `d_tag` = filename, `document_tag` = file stem. For a directory: `d_tag` = `dirName/relative/path`, `document_tag` = directory name. Path-traversal protection via `canonicalize() + starts_with(project_root)`. Returns `{ success, published: [d_tags], summary }`. Each file emits a `PublishArticleIntent` (→ `Intent::PublishArticle`) over the standard NDJSON-stdout channel with tags `[d]`, `[document]`, `[a]` (project link).
 
 ### `agents_write`
-Create or update a backend-local agent identity stored at `~/.tenex/agents/<pubkey>.json`. Pure file I/O — no SQLite, no network. Matches the TS `StoredAgent` JSON shape exactly (`nsec`, `slug`, `name`, `role`, `instructions`, `useCriteria`, `status`, `default.model`).
+Create or update a backend-local agent identity stored at `~/.tenex/agents/<pubkey>.json` through `tenex-agent-storage`. There is no SQLite and no network. The shared storage crate preserves the TS `StoredAgent` JSON shape (`nsec`, `slug`, `name`, `role`, `instructions`, `useCriteria`, `status`, `default.model`) plus unknown fields.
 
 | Param | Type | Description |
 |-------|------|-------------|
@@ -491,7 +489,7 @@ Create or update a backend-local agent identity stored at `~/.tenex/agents/<pubk
 | `useCriteria` | string | Criteria for when this agent should be selected |
 | `llmConfig` | string \| null | Optional model identifier; written to `default.model` |
 
-Behavior: scans `~/.tenex/agents/*.json` for an existing record whose `slug` matches. If found, the file is updated in place — `nsec`, the `<pubkey>.json` filename, and any unknown fields (e.g. `category`, `eventId`, `mcpServers`, `telegram`) are preserved across read-modify-write. If not found, `nostr::Keys::generate()` produces a fresh keypair; the bech32 nsec is stored under `nsec`, and the file is written as `<pubkey_hex>.json` with `status = "active"`. Writes are atomic via temp-file + rename. Returns `{ success, agent: { slug, name, pubkey } }`. Newly created agents are not assigned to the current project — that requires a 31933 event p-tagging the new pubkey.
+Behavior: opens `tenex-agent-storage`, finds an existing record whose `slug` matches, and saves the normalized `AgentDoc` through the shared mutation API. If found, `nsec`, the `<pubkey>.json` filename, and unknown fields (e.g. `category`, `eventId`, `mcpServers`, `telegram`) are preserved across read-modify-write. If not found, the storage crate generates a fresh nsec, derives the pubkey, and writes `<pubkey_hex>.json` with `status = "active"`. Writes are atomic via temp-file + rename and update the installed-agent index. Returns `{ success, agent: { slug, name, pubkey } }`. Newly created agents are not assigned to the current project — that requires a 31933 event p-tagging the new pubkey.
 
 ## Supervision Heuristics
 
@@ -557,7 +555,8 @@ API keys are resolved from provider-specific env vars (`ANTHROPIC_API_KEY`, `OPE
 | `regex` | Regex for parsing ripgrep/grep output line format |
 | `dirs_next` | Home directory resolution |
 | `tenex-protocol` | `Intent`, `Channel`, Nostr encoder, stdin source, stdout NDJSON sink |
-| `tenex-project` | Project SQLite DB (agents, metadata, teams) |
+| `tenex-project` | File-backed project view: project event metadata plus member-agent JSON projections |
+| `tenex-agent-storage` | Global installed-agent JSON records and indexes |
 | `tenex-conversations` | Conversation SQLite store (todos + self-applied skills via `AgentContextState`) |
 | `tenex-context` | Conversation history projection (compaction/decay/reminders); `record_turn` write-back |
 | `tenex-system-prompt` | System prompt assembly (`build_system_prompt`); `InjectedFile`, `HomeDirectoryInfo` types |
