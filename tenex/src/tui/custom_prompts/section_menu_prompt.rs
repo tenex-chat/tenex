@@ -301,8 +301,20 @@ fn render_frame<W: Write>(
     clear_frame(stdout, prev_height)?;
     queue!(stdout, MoveToColumn(0))?;
 
+    // TS at config/index.ts:101-108 calls inquirer.prompt({type:"select", message, ...})
+    // which renders the message via @inquirer/core's default
+    // `theme.style.message` (`@inquirer/core/dist/lib/theme.js:14` —
+    // `styleText('bold', text)`). The TENEX inquirerTheme doesn't
+    // override `style.message`, so the message stays bold. Mirror that.
     queue!(stdout, SetForegroundColor(AMBER), Print("?"), ResetColor)?;
-    queue!(stdout, Print(format!(" {message}\r\n")))?;
+    queue!(
+        stdout,
+        Print(" "),
+        SetAttribute(Attribute::Bold),
+        Print(message),
+        SetAttribute(Attribute::Reset),
+        Print("\r\n"),
+    )?;
     let mut height: u16 = 1;
 
     let cursor_active = format!("{} ", glyphs::CURSOR_HEAVY);

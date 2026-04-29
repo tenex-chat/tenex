@@ -610,8 +610,18 @@ fn render_frame<W: Write>(
     queue!(stdout, MoveToColumn(0))?;
 
     // Header: amber `?` + message.
+    // TS at provider-select-prompt.ts:217-218 builds
+    //   const styledMessage = theme.style.message(message, "idle");
+    // → `styleText('bold', text)`. Mirror byte-for-byte: bold.
     queue!(stdout, SetForegroundColor(AMBER), Print("?"), ResetColor)?;
-    queue!(stdout, Print(format!(" {message}\r\n")))?;
+    queue!(
+        stdout,
+        Print(" "),
+        SetAttribute(Attribute::Bold),
+        Print(message),
+        SetAttribute(Attribute::Reset),
+        Print("\r\n"),
+    )?;
     let mut height: u16 = 1;
 
     height += match state.mode {

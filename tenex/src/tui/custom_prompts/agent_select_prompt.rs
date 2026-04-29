@@ -302,8 +302,18 @@ fn render_frame<W: Write>(
     clear_frame(stdout, prev_height)?;
     queue!(stdout, MoveToColumn(0))?;
 
+    // TS at AgentManager.ts:129-133 wraps message in
+    //   theme.style.message(config.message, "idle")
+    // → `styleText('bold', text)`. Mirror byte-for-byte: bold.
     queue!(stdout, SetForegroundColor(AMBER), Print("?"), ResetColor)?;
-    queue!(stdout, Print(format!(" {message}\r\n")))?;
+    queue!(
+        stdout,
+        Print(" "),
+        SetAttribute(Attribute::Bold),
+        Print(message),
+        SetAttribute(Attribute::Reset),
+        Print("\r\n"),
+    )?;
     let mut height: u16 = 1;
 
     let done_index = actions.len();

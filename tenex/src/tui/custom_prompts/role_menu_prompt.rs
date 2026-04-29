@@ -299,8 +299,18 @@ fn render_frame<W: Write>(
     clear_frame(stdout, prev_height)?;
     queue!(stdout, MoveToColumn(0))?;
 
+    // TS at onboard.ts:318 / roles.ts:177 wraps message in
+    //   theme.style.message(promptConfig.message, "idle")
+    // → `styleText('bold', text)`. Mirror byte-for-byte: bold.
     queue!(stdout, SetForegroundColor(AMBER), Print("?"), ResetColor)?;
-    queue!(stdout, Print(format!(" {message}\r\n")))?;
+    queue!(
+        stdout,
+        Print(" "),
+        SetAttribute(Attribute::Bold),
+        Print(message),
+        SetAttribute(Attribute::Reset),
+        Print("\r\n"),
+    )?;
     queue!(stdout, Print("\r\n"))?;
     let mut height: u16 = 2;
 

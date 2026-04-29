@@ -337,8 +337,18 @@ fn render_frame<W: Write>(
     queue!(stdout, MoveToColumn(0))?;
 
     // Header: amber `?` + message
+    // TS at variant-list-prompt.ts:118 wraps message in
+    //   theme.style.message(config.message, "idle")
+    // → `styleText('bold', text)`. Mirror byte-for-byte: bold.
     queue!(stdout, SetForegroundColor(AMBER), Print("?"), ResetColor)?;
-    queue!(stdout, Print(format!(" {message}\r\n")))?;
+    queue!(
+        stdout,
+        Print(" "),
+        SetAttribute(Attribute::Bold),
+        Print(message),
+        SetAttribute(Attribute::Reset),
+        Print("\r\n"),
+    )?;
     queue!(stdout, Print("\r\n"))?;
     queue!(
         stdout,
