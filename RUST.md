@@ -1,6 +1,6 @@
 # TENEX Rust Adoption Status
 
-_Last updated: 2026-04-29 (twenty-third pass). Auto-maintained by scheduled debt check._
+_Last updated: 2026-04-29 (twenty-fourth pass). Auto-maintained by scheduled debt check._
 
 ---
 
@@ -165,20 +165,19 @@ All previously listed gaps have been closed. Remaining TS-only tools not yet por
 | TS Tool | Status | Notes |
 |---------|--------|-------|
 | `conversation_search` | TS-only | Semantic search across conversations. No Rust equivalent. |
-| `send_message` | TS-only | Send arbitrary Nostr message. Not yet ported. |
+| `send_message` | TS-only | Telegram channel message delivery. Depends on TS bot-token + TransportBindingStore infrastructure — not portable. |
 | `mcp_list_resources`, `mcp_resource_read`, `mcp_subscribe`, `mcp_subscription_stop` | TS-only | MCP protocol tools. No Rust equivalent yet. |
-| `report_publish` | TS-only | Publish a formatted report event. Not yet ported. |
-| `agents_write` | TS-only | Create/update agent records. Not yet ported. |
+| `agents_write` | TS-only | Create/update agent records. Depends on TS AgentStorage/AgentProvisioningService. |
 | `rag_subscription_*` | TS-only | RAG subscription management. No Rust equivalent. |
 | `rag_collection_create`, `rag_collection_delete`, `rag_collection_list` | TS-only | RAG collection management. Not ported; Rust agents use audience-scoped collections implicitly. |
 
-Note: `conversation_get`, `conversation_list`, `kill` (scheduled tasks only), `schedule_task`, `change_model`, and `no_response` are now implemented in Rust. The Rust `kill` only cancels scheduled tasks — agent/shell kills require TS in-process state (RALRegistry, CooldownRegistry, AgentDispatchService). The Rust `change_model` accepts any model spec (`provider:model`, named preset) rather than the TS restriction to meta-model variant names.
+Note: `conversation_get`, `conversation_list`, `kill` (scheduled tasks only), `schedule_task`, `change_model`, `no_response`, and `report_publish` are now implemented in Rust. The Rust `kill` only cancels scheduled tasks — agent/shell kills require TS in-process state (RALRegistry, CooldownRegistry, AgentDispatchService). The Rust `change_model` accepts any model spec (`provider:model`, named preset) rather than the TS restriction to meta-model variant names. The Rust `report_publish` emits kind:30023 NIP-23 articles via `PublishArticleIntent` through the standard NDJSON-stdout channel; it includes path-traversal protection and directory recursion. The TS `send_message` is Telegram-specific (not generic Nostr) and depends on TS-only infrastructure.
 
 ---
 
 ## Compilation Status
 
-**As of 2026-04-29 (twenty-third debt check pass): workspace compiles clean — zero errors. `cargo test --workspace`: 1320 tests passing across all crates.**
+**As of 2026-04-29 (twenty-fourth debt check pass): workspace compiles clean — zero errors. `cargo test --workspace`: 1330 tests passing across all crates.**
 
 **MILESTONE: Every tool in `tenex-agent` is now verified end-to-end, including supervision re-engagement (see `RUST_REPORT.md`).** The `ConsecutiveToolsWithoutTodo` heuristic was silent (re_engage: false) — fixed. Multi-turn history projection verified with both user and assistant messages persisted.
 
@@ -198,6 +197,13 @@ Note: `conversation_get`, `conversation_list`, `kill` (scheduled tasks only), `s
 - Conversation history persistence (10 convs, 20 history entries) ✅
 - Supervision (worker todo block) ✅
 - FK bug fixed: ensure_conversation() on store open
+
+Resolved between twenty-third and twenty-fourth passes:
+- **`report_publish` tool ported**: Emits kind:30023 NIP-23 long-form articles (replaceable) via `PublishArticleIntent` through the standard NDJSON-stdout channel. Accepts file or directory path; directory recursion prefixes `dirName/relative/path` as `d_tag`. Path-traversal protection via `canonicalize() + starts_with()`. 4 unit tests (single file, directory prefix, traversal rejection, missing path) + 1 encoder test in `tenex-protocol`.
+- **`tenex-protocol` kind:30023**: `PublishArticleIntent`, `Intent::PublishArticle`, `LONG_FORM_ARTICLE = 30023` constant, `encode_publish_article()` encoder. Tags: `[d]`, `[document]`, `[a]` project link.
+- **Banner byte-fidelity**: `banner.rs` migrated from `theme::banner_glow` etc. to raw ANSI escape constants (`\x1b[38;5;Nm`) matching TS chalk's wire bytes; removes the function-pointer row table. Continuation of the larger `display.ts` wire-byte parity sweep (8+ files already done in this cycle).
+- **`send_message` clarified**: Not a generic Nostr tool — it delivers messages to Telegram channels and depends on TS-only `TransportBindingStore` + bot-token infrastructure. Not portable to Rust without that substrate.
+- **Test count**: 1330 (up from 1320).
 
 Resolved between twenty-second and twenty-third passes:
 - **`no_response` tool ported**: `Arc<AtomicBool>` flag set when agent calls `no_response`; main loop checks it before emitting final `ConversationIntent`. Silent completion — no Nostr event published.

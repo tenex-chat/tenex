@@ -2884,6 +2884,7 @@ dependencies = [
  "rig-core",
  "serde",
  "serde_json",
+ "tempfile",
  "tenex-context",
  "tenex-conversations",
  "tenex-llm-config",

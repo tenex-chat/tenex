@@ -1,6 +1,6 @@
 # TENEX Rust Agent — Test Report
 
-Last updated: 2026-04-29 (session 8)
+Last updated: 2026-04-29 (session 9)
 
 ---
 
@@ -46,6 +46,7 @@ Last updated: 2026-04-29 (session 8)
 | no_response tool | ✅ PASS | conv=0 tools=1 — tool fires, final conversation event suppressed; ported from TS |
 | Compaction strategy unit tests (4 new) | ✅ PASS | below-threshold, zero-max-tokens, collapses-middle, keep-tail sentinel |
 | Reminders strategy unit tests (6 new) | ✅ PASS | absent/done todos, appends to last message, counts breakdown, system-only noop, tool-result tail |
+| report_publish tool | ✅ PASS | Ports TS report_publish; emits kind:30023 NIP-23 articles via PublishArticleIntent; path-traversal protection + directory recursion; 4 unit tests + 1 encoder test |
 
 ---
 
