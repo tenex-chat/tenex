@@ -14,7 +14,6 @@
 //! pin lives in `crate::tui::theme` (single source of truth) so the same
 //! palette can't drift between modules.
 
-use console::Style;
 
 use crate::tui::theme;
 
@@ -35,21 +34,37 @@ pub use crate::tui::banner::welcome;
 /// ```
 pub fn step(number: usize, total: usize, title: &str) {
     println!();
-    let header = format!("{number}/{total}");
-    // TS at display.ts:23 uses `ACCENT.bold(...)` for header + title.
-    let accent_bold = theme::display_accent();
-    println!(
-        "  {}  {}",
-        accent_bold.apply_to(&header),
-        accent_bold.apply_to(title)
-    );
-    // TS at display.ts:24 uses `ACCENT(chalk.dim(rule))` — plain ACCENT
-    // (no .bold), then dim INSIDE. Don't compose bold on the rule.
-    let rule = "─".repeat(RULE_WIDTH);
-    let rule_style = theme::display_accent_plain().force_styling(true);
-    let dim = Style::new().dim();
-    println!("  {}", rule_style.apply_to(dim.apply_to(&rule)));
+    let (header_line, rule_line) = format_step_lines(number, total, title);
+    println!("{header_line}");
+    println!("{rule_line}");
     println!();
+}
+
+/// Returns the (`header_line`, `rule_line`) pair for a step header, with
+/// raw escape codes matching TS chalk's wire bytes.
+///
+/// TS source `display.ts:20-26`:
+/// ```ts
+/// console.log();
+/// console.log(`  ${ACCENT.bold(`${number}/${total}`)}  ${ACCENT.bold(title)}`);
+/// console.log(`  ${ACCENT(chalk.dim("─".repeat(RULE_WIDTH)))}`);
+/// console.log();
+/// ```
+/// Wire bytes (using ACCENT = chalk.ansi256(214)):
+/// - header: `  \x1b[38;5;214m\x1b[1m<n/t>\x1b[22m\x1b[39m  \x1b[38;5;214m\x1b[1m<title>\x1b[22m\x1b[39m`
+/// - rule:   `  \x1b[38;5;214m\x1b[2m─×45\x1b[22m\x1b[39m`
+fn format_step_lines(number: usize, total: usize, title: &str) -> (String, String) {
+    use crate::tui::theme::{BOLD_CLOSE, BOLD_OPEN, DIM_CLOSE, DIM_OPEN, FG_RESET};
+    const ACCENT_OPEN: &str = "\x1b[38;5;214m";
+    let header = format!("{number}/{total}");
+    let header_line = format!(
+        "  {ACCENT_OPEN}{BOLD_OPEN}{header}{BOLD_CLOSE}{FG_RESET}  {ACCENT_OPEN}{BOLD_OPEN}{title}{BOLD_CLOSE}{FG_RESET}",
+    );
+    let rule = "─".repeat(RULE_WIDTH);
+    // TS uses ACCENT(chalk.dim(rule)) — chalk.dim emits SGR 2 + SGR 22
+    // INSIDE the ACCENT (SGR 38;5;214 + SGR 39) wrap. Mirror byte order.
+    let rule_line = format!("  {ACCENT_OPEN}{DIM_OPEN}{rule}{DIM_CLOSE}{FG_RESET}");
+    (header_line, rule_line)
 }
 
 /// `display.context(text)` — `:31-35`. Splits on `\n`; each line printed as
@@ -128,9 +143,24 @@ pub fn blank() {
 /// ```
 pub fn setup_complete() {
     println!();
-    let accent = theme::display_accent();
-    println!("  {} {}", accent.apply_to("▲"), accent.apply_to("Setup complete!"));
+    println!("{}", format_setup_complete_line());
     println!();
+}
+
+/// Returns the styled "▲ Setup complete!" line.
+///
+/// TS at `display.ts:92`:
+/// ```ts
+/// console.log(`  ${ACCENT.bold("▲")} ${ACCENT.bold("Setup complete!")}`);
+/// ```
+/// Wire bytes (ACCENT = chalk.ansi256(214)):
+/// `  \x1b[38;5;214m\x1b[1m▲\x1b[22m\x1b[39m \x1b[38;5;214m\x1b[1mSetup complete!\x1b[22m\x1b[39m`.
+fn format_setup_complete_line() -> String {
+    use crate::tui::theme::{BOLD_CLOSE, BOLD_OPEN, FG_RESET};
+    const ACCENT_OPEN: &str = "\x1b[38;5;214m";
+    format!(
+        "  {ACCENT_OPEN}{BOLD_OPEN}▲{BOLD_CLOSE}{FG_RESET} {ACCENT_OPEN}{BOLD_OPEN}Setup complete!{BOLD_CLOSE}{FG_RESET}",
+    )
 }
 
 /// `display.summaryLine(label, value)` — `:99-102`.
@@ -139,12 +169,26 @@ pub fn setup_complete() {
 /// `    <INFO paddedLabel>{value}` (no space between label and value —
 /// the padEnd accounts for the spacing).
 pub fn summary_line(label: &str, value: &str) {
+    println!("{}", format_summary_line(label, value));
+}
+
+/// Returns the styled summary line.
+///
+/// TS at `display.ts:99-101`:
+/// ```ts
+/// const paddedLabel = `${label}:`.padEnd(16);
+/// console.log(`    ${INFO(paddedLabel)}${value}`);
+/// ```
+/// Wire bytes (INFO = chalk.ansi256(117)):
+/// `    \x1b[38;5;117m<padded-label>\x1b[39m<value>`.
+fn format_summary_line(label: &str, value: &str) -> String {
     let mut padded = format!("{label}:");
     while padded.chars().count() < 16 {
         padded.push(' ');
     }
-    let info = theme::display_info();
-    println!("    {}{}", info.apply_to(&padded), value);
+    use crate::tui::theme::FG_RESET;
+    const INFO_OPEN: &str = "\x1b[38;5;117m";
+    format!("    {INFO_OPEN}{padded}{FG_RESET}{value}")
 }
 
 /// `display.providerCheck(text)` — `:107-109`. Returns the styled fragment
@@ -285,6 +329,54 @@ mod tests {
             done_label(),
             "\x1b[38;5;214m\x1b[1m  Done\x1b[22m\x1b[39m",
         );
+    }
+
+    /// Pin step header line wire bytes per `display.ts:23`.
+    #[test]
+    fn step_header_line_matches_ts_chalk_byte_sequence() {
+        let (header, _) = format_step_lines(3, 7, "AI Providers");
+        assert_eq!(
+            header,
+            "  \x1b[38;5;214m\x1b[1m3/7\x1b[22m\x1b[39m  \x1b[38;5;214m\x1b[1mAI Providers\x1b[22m\x1b[39m",
+        );
+    }
+
+    /// Pin step rule line wire bytes per `display.ts:24`:
+    /// `  ${ACCENT(chalk.dim(rule))}` → ACCENT wraps chalk.dim wraps the
+    /// rule. Result: 45 dashes between SGR 38;5;214 + SGR 2 opens and
+    /// SGR 22 + SGR 39 closes.
+    #[test]
+    fn step_rule_line_matches_ts_chalk_byte_sequence() {
+        let (_, rule) = format_step_lines(1, 7, "Identity");
+        let dashes = "─".repeat(45);
+        let expected =
+            format!("  \x1b[38;5;214m\x1b[2m{dashes}\x1b[22m\x1b[39m");
+        assert_eq!(rule, expected);
+    }
+
+    /// Pin setup-complete line wire bytes per `display.ts:92`.
+    #[test]
+    fn setup_complete_line_matches_ts_chalk_byte_sequence() {
+        assert_eq!(
+            format_setup_complete_line(),
+            "  \x1b[38;5;214m\x1b[1m▲\x1b[22m\x1b[39m \x1b[38;5;214m\x1b[1mSetup complete!\x1b[22m\x1b[39m",
+        );
+    }
+
+    /// Pin summary-line wire bytes per `display.ts:99-101`.
+    #[test]
+    fn summary_line_byte_sequence_matches_ts_chalk() {
+        // "username:" is 9 chars; padEnd(16) → 7 trailing spaces.
+        let s = format_summary_line("username", "alice");
+        assert_eq!(s, "    \x1b[38;5;117musername:       \x1b[39malice");
+        assert_eq!(strip_ansi_codes(&s).into_owned(), "    username:       alice");
+    }
+
+    #[test]
+    fn step_lines_do_not_emit_sgr_0_full_reset() {
+        let (h, r) = format_step_lines(1, 1, "x");
+        assert!(!h.contains("\x1b[0m"));
+        assert!(!r.contains("\x1b[0m"));
     }
 
     /// Pin provider_check's wire bytes to TS chalk verbatim:
