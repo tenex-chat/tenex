@@ -478,7 +478,7 @@ Publish markdown files as NIP-23 long-form articles (kind:30023) to Nostr, signe
 For a single file: `d_tag` = filename, `document_tag` = file stem. For a directory: `d_tag` = `dirName/relative/path`, `document_tag` = directory name. Path-traversal protection via `canonicalize() + starts_with(project_root)`. Returns `{ success, published: [d_tags], summary }`. Each file emits a `PublishArticleIntent` (→ `Intent::PublishArticle`) over the standard NDJSON-stdout channel with tags `[d]`, `[document]`, `[a]` (project link).
 
 ### `agents_write`
-Create or update a backend-local agent identity stored at `~/.tenex/agents/<pubkey>.json` through `tenex-agent-storage`. There is no SQLite and no network. The shared storage crate preserves the TS `StoredAgent` JSON shape (`nsec`, `slug`, `name`, `role`, `instructions`, `useCriteria`, `status`, `default.model`) plus unknown fields.
+Create or update a backend-local agent identity stored at `~/.tenex/agents/<pubkey>.json` through `tenex-agent-registry`. There is no SQLite and no network. The shared registry crate preserves the TS `StoredAgent` JSON shape (`nsec`, `slug`, `name`, `role`, `instructions`, `useCriteria`, `status`, `default.model`) plus unknown fields.
 
 | Param | Type | Description |
 |-------|------|-------------|
@@ -489,7 +489,7 @@ Create or update a backend-local agent identity stored at `~/.tenex/agents/<pubk
 | `useCriteria` | string | Criteria for when this agent should be selected |
 | `llmConfig` | string \| null | Optional model identifier; written to `default.model` |
 
-Behavior: opens `tenex-agent-storage`, finds an existing record whose `slug` matches, and saves the normalized `AgentDoc` through the shared mutation API. If found, `nsec`, the `<pubkey>.json` filename, and unknown fields (e.g. `category`, `eventId`, `mcpServers`, `telegram`) are preserved across read-modify-write. If not found, the storage crate generates a fresh nsec, derives the pubkey, and writes `<pubkey_hex>.json` with `status = "active"`. Writes are atomic via temp-file + rename and update the installed-agent index. Returns `{ success, agent: { slug, name, pubkey } }`. Newly created agents are not assigned to the current project — that requires a 31933 event p-tagging the new pubkey.
+Behavior: opens `tenex-agent-registry`, finds an existing record whose `slug` matches, and saves the normalized `AgentDoc` through the shared mutation API. If found, `nsec`, the `<pubkey>.json` filename, and unknown fields (e.g. `category`, `eventId`, `mcpServers`, `telegram`) are preserved across read-modify-write. If not found, the registry crate generates a fresh nsec, derives the pubkey, and writes `<pubkey_hex>.json` with `status = "active"`. Writes are atomic via temp-file + rename and update the installed-agent index. Returns `{ success, agent: { slug, name, pubkey } }`. Newly created agents are not assigned to the current project — that requires a 31933 event p-tagging the new pubkey.
 
 ## Supervision Heuristics
 
@@ -556,7 +556,7 @@ API keys are resolved from provider-specific env vars (`ANTHROPIC_API_KEY`, `OPE
 | `dirs_next` | Home directory resolution |
 | `tenex-protocol` | `Intent`, `Channel`, Nostr encoder, stdin source, stdout NDJSON sink |
 | `tenex-project` | File-backed project view: project event metadata plus member-agent JSON projections |
-| `tenex-agent-storage` | Global installed-agent JSON records and indexes |
+| `tenex-agent-registry` | Global installed-agent registry JSON records and indexes |
 | `tenex-conversations` | Conversation SQLite store (todos + self-applied skills via `AgentContextState`) |
 | `tenex-context` | Conversation history projection (compaction/decay/reminders); `record_turn` write-back |
 | `tenex-system-prompt` | System prompt assembly (`build_system_prompt`); `InjectedFile`, `HomeDirectoryInfo` types |

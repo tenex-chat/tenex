@@ -1,6 +1,6 @@
-# tenex-agent-storage
+# tenex-agent-registry
 
-Library crate. Owns TENEX's global installed-agent storage under `<base_dir>/agents`.
+Library crate. Owns TENEX's global installed-agent registry under `<base_dir>/agents`.
 Agent records are JSON files named `<pubkey>.json`; `index.json` stores slug and event-id lookups.
 
 ## Storage layout
@@ -19,6 +19,6 @@ Agent records are JSON files named `<pubkey>.json`; `index.json` stores slug and
 
 ## Boundaries
 
-- No SQLite. Agents are global JSON files, not project database rows.
+- No SQLite. Agents are global registry JSON files, not project database rows.
 - No project event mutation. Project membership is still derived by `tenex-project` from project events.
 - Keep project consumers read-side only; mutation behavior belongs here.

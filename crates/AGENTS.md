@@ -45,7 +45,7 @@ independent restart, hot-swap. Otherwise it is a library, not a daemon.
 | Want | Make it a … |
 |---|---|
 | Typed conversation state shared across processes | Library + SQLite (`tenex-conversations`) |
-| Global installed-agent JSON shared across processes | Library + JSON files (`tenex-agent-storage`) |
+| Global installed-agent JSON shared across processes | Library + JSON files (`tenex-agent-registry`) |
 | Read-side project metadata and membership | Library + JSON files (`tenex-project`) |
 | LLM-bound or stateful work that should survive bun-runtime crashes | Daemon (`tenex-summarizer`, future `tenex-cron`, `tenex-intervention`) |
 | Pure compute reachable over a frame protocol | One-shot or long-lived binary (`tenex-agent`) |

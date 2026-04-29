@@ -2965,7 +2965,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "shell-words",
- "tenex-agent-storage",
+ "tenex-agent-registry",
  "tenex-conversations",
  "tenex-identity",
  "tenex-llm-config",
@@ -2995,7 +2995,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
- "tenex-agent-storage",
+ "tenex-agent-registry",
  "tenex-context",
  "tenex-conversations",
  "tenex-llm-config",
@@ -3015,7 +3015,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "tenex-agent-storage"
+name = "tenex-agent-registry"
 version = "0.1.0"
 dependencies = [
  "anyhow",
@@ -3116,7 +3116,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
- "tenex-agent-storage",
+ "tenex-agent-registry",
  "thiserror 2.0.18",
  "tracing",
  "tracing-subscriber",

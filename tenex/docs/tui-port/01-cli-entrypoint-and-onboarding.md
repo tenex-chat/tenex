@@ -1108,7 +1108,7 @@ Printed via `console.log(JSON.stringify(output, null, 2))`. Then `process.exit(0
 | Save LLM configs | `<globalPath>/llms.json` | `src/commands/onboard.ts:242, 379, 551` |
 | Read embedding config | `<globalPath>/embeddings.json` (`loadEmbeddingConfiguration`) | `src/commands/onboard.ts:389` |
 | Save embedding config | `<globalPath>/embeddings.json` (`saveEmbeddingConfiguration`) | `src/commands/onboard.ts:429, 490` |
-| Agent storage initialize | LMDB-style local store rooted under `<globalPath>` (via `agentStorage.initialize`) | `src/commands/onboard.ts:851` |
+| Agent registry initialize | JSON files under `<globalPath>/agents` (via `agentStorage.initialize`) | `src/commands/onboard.ts:851` |
 | Spawn child for OpenClaw import | `<argv0> <argv1> agent import openclaw --slugs <csv>` | `src/commands/onboard.ts:918` |
 | Spawn daemon | `<argv0> <entrypoint> [daemon] [--boot meta]` | `src/commands/onboard.ts:1179` |
 

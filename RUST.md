@@ -24,7 +24,7 @@ The Rust port is underway crate by crate. The TypeScript daemon still owns per-p
 | `tenex-context` | lib | — | Conversation projection + compaction/decay/reminder strategies |
 | `tenex-conversations` | lib | — | Per-project SQLite conversation store |
 | `tenex-llm-config` | lib | — | LLM config resolver + NDJSON Unix-socket IPC server |
-| `tenex-agent-registry` | lib | — | Global installed-agent JSON records (`~/.tenex/agents/<pubkey>.json`) and installed-agent index (renamed from `tenex-agent-storage`) |
+| `tenex-agent-registry` | lib | — | Global installed-agent JSON records (`~/.tenex/agents/<pubkey>.json`) and installed-agent index |
 | `tenex-project` | lib | — | File-backed view of per-project TENEX state — reads `projects/<dTag>/event.json` + agent JSON projections. No database, no write API |
 | `tenex-protocol` | lib | — | Transport-agnostic agent intents + Nostr/stdin channel adapters |
 | `tenex-rag` | lib | — | RAG: SQLite vector store + embedding client |
@@ -179,7 +179,7 @@ Spawned by `tenex runtime` per conversation turn via `tenex-agent <agent.json>` 
 Fully used. Defines `Intent`, `Channel`, `ConversationRef`, `ProjectRef`, Nostr encoder/decoder, stdin source, stdout NDJSON sink. Used by `tenex-agent`, `tenex-intervention`, `tenex-scheduler`, `tenex-summarizer`.
 
 ### `tenex-project`
-File-backed, read-only view of per-project state. Used by `tenex-agent` (reads project metadata, agent member list, teams) and `tenex` TUI (project event data). No SQLite, no migrations. Agent JSON records are now managed by `tenex-agent-storage`.
+File-backed, read-only view of per-project state. Used by `tenex-agent` (reads project metadata, agent member list, teams) and `tenex` TUI (project event data). No SQLite, no migrations. Agent JSON records are now managed by `tenex-agent-registry`.
 
 ### `tenex-rag`
 Library built. Provides `RagStore` (SQLite + vector search) + `EmbedConfig` loader. Wired into `tenex-agent` (tools are present; store is initialized from `~/.tenex/embed.json` if configured).
@@ -287,13 +287,13 @@ Resolved between thirtieth and thirty-first passes:
 - **Runtime state persistence**: `crates/tenex-agent/src/runtime_state.rs` — `RuntimeStateHandle` persists per-turn agent state to the conversation SQLite store. `tenex-conversations/src/store.rs` gains `set_runtime_state` and `update_runtime_state` (immediate write and atomic read-modify-write under `TransactionBehavior::Immediate`).
 - **Message injection tracking**: `crates/tenex-agent/src/injections.rs` — `MessageInjectionTracker` polls the conversation DB for external messages injected between turns and surfaces them as user-turn content for the next LLM invocation.
 - **Dispatch coordinator**: `tenex/src/runtime_cmd/mod.rs` gains `DispatchCoordinator` — serializes concurrent events to the same (agent, conversation) pair; queues a follow-up run if a second event arrives while one is in flight.
-- **`tenex-agent-storage` → `tenex-agent-registry`**: Crate renamed; all callers migrated to `tenex_agent_registry`.
+- **Agent registry crate renamed**: Crate is now `tenex-agent-registry`; all callers migrated to `tenex_agent_registry`.
 - **Dead code cleanup**: `cfg(test)` visibility gates on test-only store APIs (`api_keys`, `embed`, `llms`, `mcp`, `models_dev`, `project_members`, `provider_ids`, `conversation_disk_reader`); unused glyphs constants removed (`glyphs.rs`); `variant_list_prompt` I/O loop removed; `project_mutation` `trigger` field and verbose `ProjectEventPublishResult` struct removed; `PublishOutcome::as_str` removed.
 - **Warning count**: 0 (clean).
 - **Test count**: 1372 (up from 1212).
 
 Resolved between twenty-ninth and thirtieth passes:
-- **`tenex-agent-storage` crate added**: New dedicated crate for global installed-agent JSON storage (`~/.tenex/agents/<pubkey>.json` + index). API: `AgentStorage::open`, `get_all_stored_agents`, `save_agent`; `AgentDoc` wraps `IndexMap<String, Value>` (preserves field order + unknown fields); `generate_nsec_bech32()` key generation. `agents_write` tool now uses this crate instead of raw `serde_json` file I/O. `tenex-project` reads agent projections via `tenex_agent_storage::read_agent_projection_file`. Workspace crate count: 17.
+- **`tenex-agent-registry` crate added**: Dedicated crate for global installed-agent JSON storage (`~/.tenex/agents/<pubkey>.json` + index). API: `AgentStorage::open`, `get_all_stored_agents`, `save_agent`; `AgentDoc` wraps `IndexMap<String, Value>` (preserves field order + unknown fields); `generate_nsec_bech32()` key generation. `agents_write` tool uses this crate instead of raw `serde_json` file I/O. `tenex-project` reads agent projections via `tenex_agent_registry::read_agent_projection_file`.
 - **`AgentConfig` trimmed**: `role` and `description` fields removed (commit `b6ab89b8`) — they are stored in agent JSON files but not consumed by the agent runtime. `AgentConfig` now has: `name`, `slug`, `nsec`, `category`, `instructions`, `working_directory`, `default`.
 - **Warning count**: Zero (down from 71) — `json!` macro and test-only modules scoped to `#[cfg(test)]`; unreachable `_` arms removed; stale TS line refs refreshed in doc-comments.
 - **Test count**: 1212 (from 1362) — test-only helper functions scoped to `#[cfg(test)]` reduce the counted binary; all tests pass.

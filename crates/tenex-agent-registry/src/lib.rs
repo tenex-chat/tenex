@@ -1,4 +1,4 @@
-//! Global installed-agent JSON storage.
+//! Global installed-agent JSON registry.
 //!
 //! Owns `<base_dir>/agents/index.json` and `<base_dir>/agents/<pubkey>.json`.
 

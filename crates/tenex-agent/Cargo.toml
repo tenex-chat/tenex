@@ -9,7 +9,7 @@ path = "src/main.rs"
 
 [dependencies]
 tenex-project = { path = "../tenex-project" }
-tenex-agent-storage = { path = "../tenex-agent-storage" }
+tenex-agent-registry = { path = "../tenex-agent-registry" }
 tenex-conversations = { path = "../tenex-conversations" }
 tenex-context = { path = "../tenex-context" }
 tenex-protocol = { path = "../tenex-protocol", default-features = false }

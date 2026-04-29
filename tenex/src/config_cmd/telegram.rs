@@ -5,7 +5,7 @@
 //!
 //! 1. **Configure an agent Telegram bot** (`:236-307`) — operates on
 //!    per-agent `TelegramAgentConfig` records in
-//!    [`tenex_agent_storage::AgentStorage`]. The Rust port wires
+//!    [`tenex_agent_registry::AgentStorage`]. The Rust port wires
 //!    the chooseAgent → action loop with the four mutation paths
 //!    (token, apiBaseUrl, toggle DMs, reset) plus Back. The TS version
 //!    enriches its summary with runtime-binding-store data
@@ -24,7 +24,7 @@ use crate::agent_cmd::telegram_config::{mask_token, normalize_telegram_draft, to
 use crate::store::tenex_config::TenexConfigDoc;
 use crate::tui::prompts;
 use crate::types::telegram::is_telegram_identity;
-use tenex_agent_storage::{AgentStorage, TelegramAgentConfig};
+use tenex_agent_registry::{AgentStorage, TelegramAgentConfig};
 
 pub fn run(base_dir: &std::path::Path) -> Result<()> {
     loop {
@@ -445,7 +445,7 @@ fn choose_agent(base_dir: &std::path::Path) -> Result<Option<String>> {
     let mut items: Vec<AgentChoice> = Vec::with_capacity(agents.len() + 1);
     for agent in &agents {
         let nsec = agent.nsec().ok_or_else(|| anyhow!("agent missing nsec"))?;
-        let pubkey = tenex_agent_storage::derive_agent_pubkey_from_nsec(nsec)?;
+        let pubkey = tenex_agent_registry::derive_agent_pubkey_from_nsec(nsec)?;
         let projects = crate::store::project_members::list_projects_for_agent(base_dir, &pubkey)?;
         let n = projects.len();
         let plural = if n == 1 { "" } else { "s" };

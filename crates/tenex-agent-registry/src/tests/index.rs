@@ -7,7 +7,7 @@ fn unique_temp() -> std::path::PathBuf {
     static COUNTER: AtomicU64 = AtomicU64::new(0);
     let n = COUNTER.fetch_add(1, Ordering::Relaxed);
     let p = std::env::temp_dir().join(format!(
-        "tenex-agent-storage-{}-{}-{n}",
+        "tenex-agent-registry-{}-{}-{n}",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)

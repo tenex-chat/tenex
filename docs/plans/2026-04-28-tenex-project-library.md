@@ -11,10 +11,10 @@ This crate is file-backed. It does not own a SQLite database. Project metadata c
 | Crate | Concern | Storage |
 |-------|---------|---------|
 | `tenex-conversations` | Conversation transcripts, tool messages, prompt history, and context state. | SQLite |
-| `tenex-agent-storage` | Global installed-agent JSON records and indexes. | JSON files |
+| `tenex-agent-registry` | Global installed-agent registry records and indexes. | JSON files |
 | `tenex-project` | Read-side project metadata, membership, and member-agent projections. | JSON files |
 
-`tenex-project` composes the project event with read projections from `tenex-agent-storage`; it does not mutate either source.
+`tenex-project` composes the project event with read projections from `tenex-agent-registry`; it does not mutate either source.
 
 ## Source-of-truth Model
 
@@ -45,7 +45,7 @@ There is no `project.db`, no `agents` table, and no project-local agent rows.
 
 ## What It Does Not Own
 
-- Agent JSON mutation, installed-agent indexes, key generation, category migration, or Telegram config writes. Those belong to `tenex-agent-storage`.
+- Agent JSON mutation, installed-agent indexes, key generation, category migration, or Telegram config writes. Those belong to `tenex-agent-registry`.
 - Conversation state. That belongs to `tenex-conversations`.
 - Relay subscriptions, event publishing, or project event mutation.
 - Skill catalog persistence.
@@ -75,7 +75,7 @@ Agent signing is the one abstraction worth keeping. The read-side agent projecti
 `tenex-project` is read-side file access. Multi-process reads are allowed. Writes happen elsewhere:
 
 - Project event writes are project-event mutation/publishing concerns.
-- Installed-agent writes go through `tenex-agent-storage`.
+- Installed-agent writes go through `tenex-agent-registry`.
 - Conversation writes go through `tenex-conversations`.
 
 ## Success Criteria

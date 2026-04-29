@@ -176,7 +176,7 @@ fn first_tag_value(tags: &[Vec<String>], name: &str) -> Option<String> {
 }
 
 fn read_agent_file(path: &Path, pubkey: &str) -> Result<Agent> {
-    let raw = tenex_agent_storage::read_agent_projection_file(path, pubkey)
+    let raw = tenex_agent_registry::read_agent_projection_file(path, pubkey)
         .map_err(|e| Error::Other(format!("read agent file {}: {e}", path.display())))?;
     Ok(Agent {
         pubkey: raw.pubkey,

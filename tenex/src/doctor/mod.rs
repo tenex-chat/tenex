@@ -157,7 +157,7 @@ async fn run_agents(args: AgentsArgs) -> Result<()> {
 /// if result.failed > 0 { … exit 1 … }
 /// ```
 fn preview_categorize(dry_run: bool) -> Result<()> {
-    use tenex_agent_storage::AgentStorage;
+    use tenex_agent_registry::AgentStorage;
 
     let base_dir = crate::store::resolve_base_dir(None);
     let storage = AgentStorage::open(&base_dir)?;
@@ -202,7 +202,7 @@ fn preview_categorize(dry_run: bool) -> Result<()> {
 /// "Orphan" means: the agent's pubkey appears in zero persisted kind:31933
 /// project events on disk. Membership is read via
 /// [`crate::store::project_members::list_projects_for_agent`] (the canonical
-/// source — agent storage's index is only a cache). Output strings are the
+/// source — the agent registry's index is only a cache). Output strings are the
 /// TS verbatim:
 /// - "No orphaned agents found." (green)
 /// - "Found N orphaned agent(s):" (yellow)
@@ -211,7 +211,7 @@ fn preview_categorize(dry_run: bool) -> Result<()> {
 ///   "Done: N deleted" (blue)
 fn find_orphaned_agents(purge: bool) -> Result<()> {
     use crate::store::project_members::list_projects_for_agent;
-    use tenex_agent_storage::{derive_agent_pubkey_from_nsec, AgentStorage};
+    use tenex_agent_registry::{derive_agent_pubkey_from_nsec, AgentStorage};
 
     let base_dir = crate::store::resolve_base_dir(None);
     let mut storage = AgentStorage::open(&base_dir)?;

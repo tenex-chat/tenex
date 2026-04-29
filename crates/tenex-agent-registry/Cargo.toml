@@ -1,11 +1,11 @@
 [package]
-name = "tenex-agent-storage"
+name = "tenex-agent-registry"
 version = "0.1.0"
 edition = "2021"
-description = "JSON-backed global installed-agent storage for TENEX."
+description = "JSON-backed global installed-agent registry for TENEX."
 
 [lib]
-name = "tenex_agent_storage"
+name = "tenex_agent_registry"
 path = "src/lib.rs"
 
 [dependencies]

@@ -21,7 +21,7 @@ use anyhow::{anyhow, Context, Result};
 use nostr_sdk::{Client, Event, EventBuilder, Keys, Kind, Tag, TagKind};
 
 use crate::store::tenex_config::TenexConfigDoc;
-use tenex_agent_storage::{derive_agent_pubkey_from_nsec, AgentStorage};
+use tenex_agent_registry::{derive_agent_pubkey_from_nsec, AgentStorage};
 
 const KIND_INSTALLED_AGENT_LIST: u16 = 24011;
 
@@ -285,14 +285,14 @@ mod tests {
         let mut storage = AgentStorage::open(&base).unwrap();
         // Build three agents with slugs in non-canonical order.
         for slug in ["zebra", "alpha", "mango"] {
-            let nsec = tenex_agent_storage::generate_nsec_bech32().unwrap();
+            let nsec = tenex_agent_registry::generate_nsec_bech32().unwrap();
             let mut raw = IndexMap::<String, Value>::new();
             raw.insert("nsec".into(), Value::String(nsec));
             raw.insert("slug".into(), Value::String(slug.to_owned()));
             raw.insert("name".into(), Value::String(slug.to_owned()));
             raw.insert("role".into(), Value::String("thinker".to_owned()));
             raw.insert("status".into(), Value::String("active".to_owned()));
-            let doc = tenex_agent_storage::AgentDoc::from_raw(raw);
+            let doc = tenex_agent_registry::AgentDoc::from_raw(raw);
             storage.save_agent(&doc).unwrap();
         }
         let entries = collect_inventory_entries(&base).unwrap();

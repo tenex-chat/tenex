@@ -7,7 +7,7 @@
 //!
 //! - [`crate::agent_cmd::provisioning::delete_stored_agent`] — local file +
 //!   index removal + optional kind:24011 inventory publish
-//! - [`tenex_agent_storage::AgentStorage::add_agent_to_project`] —
+//! - [`tenex_agent_registry::AgentStorage::add_agent_to_project`] —
 //!   local index mutation + status flip
 //! - [`crate::nostr_pub::project_mutation::sync_many_project_memberships`]
 //!   — kind:31933 republish per affected project
@@ -42,7 +42,7 @@ use crate::tui::custom_prompts::agent_select_prompt::{
 };
 use crate::tui::display;
 use crate::tui::prompts;
-use tenex_agent_storage::AgentStorage;
+use tenex_agent_registry::AgentStorage;
 
 /// Mirror `bulkDeleteAgents` (`AgentManager.ts:456-490`).
 ///
@@ -719,7 +719,7 @@ mod tests {
     use crate::agent_cmd::manager_logic::ManagedAgent;
     use nostr_sdk::Keys;
     use std::sync::atomic::{AtomicU64, Ordering};
-    use tenex_agent_storage::generate_nsec_bech32;
+    use tenex_agent_registry::generate_nsec_bech32;
 
     fn unique_temp() -> std::path::PathBuf {
         static COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -740,7 +740,7 @@ mod tests {
         // Generate a random pubkey so Set-based dedupe across tests doesn't
         // bleed; we only use this in tests that don't read the storage.
         let nsec = generate_nsec_bech32().unwrap();
-        let pubkey = tenex_agent_storage::derive_agent_pubkey_from_nsec(&nsec).unwrap();
+        let pubkey = tenex_agent_registry::derive_agent_pubkey_from_nsec(&nsec).unwrap();
         ManagedAgent {
             slug: slug.to_owned(),
             name: format!("{slug}-name"),

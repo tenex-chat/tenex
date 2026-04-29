@@ -3,7 +3,7 @@ use rig::{completion::ToolDefinition, tool::Tool};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
-use tenex_agent_storage::{AgentDoc, AgentStorage};
+use tenex_agent_registry::{AgentDoc, AgentStorage};
 
 #[derive(Debug, thiserror::Error)]
 #[error("{0}")]
@@ -74,7 +74,7 @@ fn apply_llm_config(agent: &mut AgentDoc, llm_config: Option<String>) {
 }
 
 fn build_agent(args: &AgentsWriteArgs) -> Result<AgentDoc, AgentsWriteError> {
-    let nsec = tenex_agent_storage::generate_nsec_bech32()
+    let nsec = tenex_agent_registry::generate_nsec_bech32()
         .map_err(|e| AgentsWriteError(format!("Failed to generate nsec: {e}")))?;
     let mut raw = IndexMap::<String, Value>::new();
     raw.insert("nsec".to_string(), Value::String(nsec));
@@ -120,7 +120,7 @@ fn perform_write(
     }
 
     let mut storage =
-        AgentStorage::open(base_dir).map_err(|e| storage_error("open agent storage", e))?;
+        AgentStorage::open(base_dir).map_err(|e| storage_error("open agent registry", e))?;
     let existing = storage
         .get_all_stored_agents()
         .map_err(|e| storage_error("list agents", e))?

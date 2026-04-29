@@ -14,7 +14,7 @@ use anyhow::Result;
 use indexmap::IndexMap;
 use regex::Regex;
 
-use tenex_agent_storage::{
+use tenex_agent_registry::{
     derive_agent_pubkey_from_nsec, is_valid_category, AgentCategory, AgentDoc, AgentStorage,
     VALID_CATEGORIES,
 };
@@ -49,7 +49,7 @@ pub struct AgentMetadata {
 ///
 /// The trailing `Valid categories: <list>` line is generated from
 /// [`VALID_CATEGORIES`] joined with `", "` — keeping the source-of-truth
-/// in [`tenex_agent_storage`] so adding/removing a category
+/// in [`tenex_agent_registry`] so adding/removing a category
 /// updates the prompt automatically. Built lazily because formatting at
 /// item-init isn't available for `static`.
 pub fn system_prompt() -> String {
@@ -270,7 +270,7 @@ mod tests {
     use super::*;
     use serde_json::Value;
     use std::sync::atomic::{AtomicU64, Ordering};
-    use tenex_agent_storage::generate_nsec_bech32;
+    use tenex_agent_registry::generate_nsec_bech32;
 
     fn unique_temp() -> std::path::PathBuf {
         static COUNTER: AtomicU64 = AtomicU64::new(0);

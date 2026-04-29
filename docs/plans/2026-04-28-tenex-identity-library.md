@@ -2,7 +2,7 @@
 
 ## Purpose
 
-A Rust library that resolves `pubkey → IdentityView` (display name, picture, NIP-05, banner, etc.) from kind:0 metadata events. Cache hits return immediately; misses fetch from relays, write-through to a local cache, and return. Same shape as `tenex-conversations` and `tenex-project`: schema-as-contract SQLite, library not daemon, multi-process safe.
+A Rust library that resolves `pubkey → IdentityView` (display name, picture, NIP-05, banner, etc.) from kind:0 metadata events. Cache hits return immediately; misses fetch from relays, write-through to a local cache, and return. Same library-not-daemon shape as the other Rust state crates; when backed by SQLite, its schema is the contract and must be multi-process safe.
 
 Replaces ad-hoc per-binary identity resolution (the summarizer's first-pass fallback chain, and eventually the bun runtime's `PubkeyService` once the TS path retires).
 

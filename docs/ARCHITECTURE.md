@@ -14,6 +14,7 @@ Related architecture notes:
 - `docs/system-prompt-architecture.md` covers how TENEX builds the base system prompt.
 - `docs/CONTEXT-MANAGEMENT-AND-REMINDERS.md` covers request-time context management, reminders, and prompt-history overlays.
 - `docs/SUPERVISION.md` covers supervision heuristics, post-completion gating, retry semantics, and structured resolution paths.
+- `docs/plans/2026-04-28-architecture-map.md` covers Rust workspace crates, including the JSON-backed installed-agent registry.
 
 ---
 
