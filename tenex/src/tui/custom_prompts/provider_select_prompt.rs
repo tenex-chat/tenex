@@ -710,12 +710,16 @@ fn render_browse<W: Write>(
     )?;
     height += 1;
 
-    queue!(
+    // TS at provider-select-prompt.ts:247-252 — bold-key / dim-label
+    // help row (see `crate::tui::custom_prompts::help_row` for the
+    // chalk-equivalence rationale).
+    crate::tui::custom_prompts::help_row::render_help_row(
         stdout,
-        SetAttribute(Attribute::Dim),
-        Print("  ↑↓ navigate • space toggle • ⏎ manage keys / done"),
-        SetAttribute(Attribute::Reset),
-        Print("\r\n"),
+        &[
+            ("↑↓", "navigate"),
+            ("space", "toggle"),
+            ("⏎", "manage keys / done"),
+        ],
     )?;
     height += 1;
 
@@ -826,12 +830,15 @@ fn render_keys<W: Write>(stdout: &mut W, state: &ProviderState) -> io::Result<u1
     )?;
     height += 1;
 
-    queue!(
+    // TS at provider-select-prompt.ts:279-285 — bold-key / dim-label help row.
+    crate::tui::custom_prompts::help_row::render_help_row(
         stdout,
-        SetAttribute(Attribute::Dim),
-        Print("  ↑↓ navigate • d delete key • ⏎ select • esc back"),
-        SetAttribute(Attribute::Reset),
-        Print("\r\n"),
+        &[
+            ("↑↓", "navigate"),
+            ("d", "delete key"),
+            ("⏎", "select"),
+            ("esc", "back"),
+        ],
     )?;
     height += 1;
 

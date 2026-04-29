@@ -548,12 +548,17 @@ fn render_frame<W: Write>(
         }
     }
 
-    queue!(
+    // TS at LLMConfigEditor.ts:164-170 — bold-key / dim-label help row
+    // (see `crate::tui::custom_prompts::help_row` for the chalk-equivalence
+    // rationale).
+    crate::tui::custom_prompts::help_row::render_help_row(
         stdout,
-        SetAttribute(Attribute::Dim),
-        Print("  ↑↓ navigate • ⏎ select • t test • d delete"),
-        SetAttribute(Attribute::Reset),
-        Print("\r\n"),
+        &[
+            ("↑↓", "navigate"),
+            ("⏎", "select"),
+            ("t", "test"),
+            ("d", "delete"),
+        ],
     )?;
     height += 1;
 

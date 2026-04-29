@@ -450,13 +450,17 @@ fn render_frame<W: Write>(
     }
     height += 1;
 
-    // Help.
-    queue!(
+    // TS at variant-list-prompt.ts:148-154 — bold-key / dim-label help row
+    // (see `crate::tui::custom_prompts::help_row` for the chalk-equivalence
+    // rationale).
+    crate::tui::custom_prompts::help_row::render_help_row(
         stdout,
-        SetAttribute(Attribute::Dim),
-        Print("  ↑↓ navigate • ⏎ edit • d set default • ⌫ remove"),
-        SetAttribute(Attribute::Reset),
-        Print("\r\n"),
+        &[
+            ("↑↓", "navigate"),
+            ("⏎", "edit"),
+            ("d", "set default"),
+            ("⌫", "remove"),
+        ],
     )?;
     height += 1;
 
