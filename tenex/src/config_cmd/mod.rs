@@ -76,7 +76,11 @@ pub enum ConfigCommand {
     /// Configure which model handles what task
     Roles,
     /// Configure embedding model for RAG (global by default, --project for current project)
-    Embed,
+    Embed {
+        /// Use project-specific configuration instead of global
+        #[arg(long)]
+        project: bool,
+    },
     /// Configure agent escalation — route ask() calls through an agent first
     Escalation,
     /// Configure intervention — auto-review when you're idle
@@ -123,7 +127,7 @@ impl ConfigCommand {
             ConfigCommand::Providers => "providers",
             ConfigCommand::Llm { .. } => "llm",
             ConfigCommand::Roles => "roles",
-            ConfigCommand::Embed => "embed",
+            ConfigCommand::Embed { .. } => "embed",
             ConfigCommand::Escalation => "escalation",
             ConfigCommand::Intervention => "intervention",
             ConfigCommand::Telegram => "telegram",
@@ -148,6 +152,27 @@ pub async fn run(args: ConfigArgs) -> Result<()> {
         // the menu would. Mirror TS `system-prompt.ts:88-129`: when a
         // flag is set, skip the interactive menu and run the matching
         // action directly.
+        //
+        // `tenex config embed --project`: TS at `embed.ts:55-60` accepts
+        // `--project` to persist the embedding selection in the current
+        // project's `<project>/.tenex/` instead of the global home dir.
+        // The Rust port currently routes `tenex config embed` through
+        // `crate::onboard::embeddings::run` (the `runEmbeddingSetup` port),
+        // which is global-scope only. Project-scope persistence + the
+        // Ollama embedding adapter are pending substrates per
+        // `docs/tui-port/QUESTIONS.md`. Surface an honest hint and exit
+        // cleanly so the user sees what's blocking — never silently fall
+        // back to global scope when --project was requested.
+        if let ConfigCommand::Embed { project: true } = cmd {
+            display::hint(
+                "Project-scope embedding (`tenex config embed --project`) requires the \
+                 project-scope persistence + Ollama embedding adapter substrates — \
+                 pending port. The global-scope flow (`tenex config embed` without \
+                 --project) is wired and routes through `crate::onboard::embeddings::run`.",
+            );
+            std::process::exit(1);
+        }
+
         if let ConfigCommand::SystemPrompt { show, disable, enable } = cmd {
             // TS evaluates the flags in source order: --show, --disable,
             // --enable. Each branch returns immediately, so when more
@@ -514,6 +539,29 @@ mod tests {
         }
     }
 
+    /// Pin the `tenex config embed --project` flag's help text against
+    /// TS source (`commands/config/embed.ts:59`):
+    ///   .option("--project", "Use project-specific configuration instead of global")
+    /// The flag was originally absent in the Rust port — the description
+    /// promised it but `tenex config embed --project` errored with
+    /// "unexpected argument". Now the flag exists; project-scope
+    /// persistence is substrate-blocked but the user-facing help is
+    /// faithful.
+    #[test]
+    fn config_embed_project_flag_help_matches_ts_verbatim() {
+        use clap::CommandFactory;
+        let cmd = ConfigArgs::command();
+        let embed = cmd.find_subcommand("embed").expect("embed subcommand");
+        let project_arg = embed
+            .get_arguments()
+            .find(|a| a.get_long() == Some("project"))
+            .expect("--project flag");
+        assert_eq!(
+            project_arg.get_help().map(|s| s.to_string()).as_deref(),
+            Some("Use project-specific configuration instead of global"),
+        );
+    }
+
     #[test]
     fn config_subcommands_count_matches_ts() {
         // Spec doc 02 §2.4 / TS commands/config/index.ts:137-153 — 15
@@ -580,7 +628,7 @@ mod tests {
             (ConfigCommand::Providers, "providers"),
             (ConfigCommand::Llm { advanced: false }, "llm"),
             (ConfigCommand::Roles, "roles"),
-            (ConfigCommand::Embed, "embed"),
+            (ConfigCommand::Embed { project: false }, "embed"),
             (ConfigCommand::Escalation, "escalation"),
             (ConfigCommand::Intervention, "intervention"),
             (ConfigCommand::Telegram, "telegram"),
