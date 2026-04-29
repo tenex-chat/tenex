@@ -34,6 +34,16 @@ struct PendingBoots {
     consumed: Vec<(String, String)>,
 }
 
+struct RuntimeCtx<'a> {
+    client: &'a Client,
+    supervisor: &'a Supervisor,
+    known: &'a Mutex<HashSet<String>>,
+    boot_sub: &'a Mutex<Option<SubscriptionId>>,
+    pending_boots: &'a Mutex<PendingBoots>,
+    authors: &'a [PublicKey],
+    startup_ts: Timestamp,
+}
+
 pub async fn run(
     cfg: Config,
     supervisor: Supervisor,
@@ -99,17 +109,16 @@ pub async fn run(
         let mut notifications = task_client.notifications();
         while let Ok(notification) = notifications.recv().await {
             if let RelayPoolNotification::Event { event, .. } = notification {
-                handle_event(
-                    &task_client,
-                    &supervisor,
-                    &known,
-                    &boot_sub,
-                    &pending_boots,
-                    &authors,
+                let ctx = RuntimeCtx {
+                    client: &task_client,
+                    supervisor: &supervisor,
+                    known: &known,
+                    boot_sub: &boot_sub,
+                    pending_boots: &pending_boots,
+                    authors: &authors,
                     startup_ts,
-                    &event,
-                )
-                .await;
+                };
+                handle_event(&ctx, &event).await;
             }
         }
     });
@@ -117,46 +126,16 @@ pub async fn run(
     Ok(handle)
 }
 
-async fn handle_event(
-    client: &Client,
-    supervisor: &Supervisor,
-    known: &Mutex<HashSet<String>>,
-    boot_sub: &Mutex<Option<SubscriptionId>>,
-    pending_boots: &Mutex<PendingBoots>,
-    authors: &[PublicKey],
-    startup_ts: Timestamp,
-    event: &Event,
-) {
+async fn handle_event(ctx: &RuntimeCtx<'_>, event: &Event) {
     match event.kind.as_u16() {
-        PROJECT_KIND => {
-            handle_project(
-                client,
-                supervisor,
-                known,
-                boot_sub,
-                pending_boots,
-                authors,
-                startup_ts,
-                event,
-            )
-            .await
-        }
-        1 => handle_boot_trigger(supervisor, known, event, BootKind::TextNote).await,
-        BOOT_KIND => handle_boot_trigger(supervisor, known, event, BootKind::Explicit).await,
+        PROJECT_KIND => handle_project(ctx, event).await,
+        1 => handle_boot_trigger(ctx.supervisor, ctx.known, event, BootKind::TextNote).await,
+        BOOT_KIND => handle_boot_trigger(ctx.supervisor, ctx.known, event, BootKind::Explicit).await,
         _ => {}
     }
 }
 
-async fn handle_project(
-    client: &Client,
-    supervisor: &Supervisor,
-    known: &Mutex<HashSet<String>>,
-    boot_sub: &Mutex<Option<SubscriptionId>>,
-    pending_boots: &Mutex<PendingBoots>,
-    authors: &[PublicKey],
-    startup_ts: Timestamp,
-    event: &Event,
-) {
+async fn handle_project(ctx: &RuntimeCtx<'_>, event: &Event) {
     let Some(d_tag) = single_letter_tag(event, Alphabet::D) else {
         debug!(event_id = %event.id, "kind 31933 missing d-tag; ignoring");
         return;
@@ -164,24 +143,32 @@ async fn handle_project(
     let address = format!("{}:{}:{}", PROJECT_KIND, event.pubkey.to_hex(), d_tag);
 
     let inserted = {
-        let mut k = known.lock().await;
+        let mut k = ctx.known.lock().await;
         k.insert(address.clone())
     };
     if !inserted {
         return;
     }
 
-    let matched_prefixes = resolve_pending_boots(pending_boots, &d_tag).await;
+    let matched_prefixes = resolve_pending_boots(ctx.pending_boots, &d_tag).await;
     for prefix in matched_prefixes {
         info!(prefix, d_tag, "matched --boot prefix to discovered project");
-        supervisor.boot(d_tag.clone()).await;
+        ctx.supervisor.boot(d_tag.clone()).await;
     }
 
     let addresses: Vec<String> = {
-        let k = known.lock().await;
+        let k = ctx.known.lock().await;
         k.iter().cloned().collect()
     };
-    if let Err(e) = update_boot_subscription(client, boot_sub, authors, startup_ts, &addresses).await {
+    if let Err(e) = update_boot_subscription(
+        ctx.client,
+        ctx.boot_sub,
+        ctx.authors,
+        ctx.startup_ts,
+        &addresses,
+    )
+    .await
+    {
         warn!(error = %e, "failed to update boot trigger subscription");
     }
 }

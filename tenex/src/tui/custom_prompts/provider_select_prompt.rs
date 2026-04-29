@@ -494,7 +494,7 @@ pub fn compose_keys_lines(state: &ProviderState) -> Vec<String> {
 /// can hand back a borrow of `pid` directly without allocation. The
 /// known-name branches are `&'static str` literals which coerce to `&'a`
 /// for any `'a` since `'static` outlives every lifetime.
-pub fn provider_display_name<'a>(pid: &'a str) -> &'a str {
+pub fn provider_display_name(pid: &str) -> &str {
     match pid {
         "openrouter" => "OpenRouter (300+ models)",
         "anthropic" => "Anthropic (Claude)",

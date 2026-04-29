@@ -729,7 +729,7 @@ mod tests {
 
     #[test]
     fn remove_filters_chosen_entry() {
-        let current = vec![
+        let current = [
             "telegram:user:1".to_owned(),
             "telegram:user:2".to_owned(),
             "telegram:user:3".to_owned(),

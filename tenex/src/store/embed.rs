@@ -159,7 +159,7 @@ mod tests {
         doc.set_provider("openai");
         doc.set_model("x");
         doc.set_base_url(Some("https://api.example"));
-        let s = String::from_utf8(serialize(doc.raw()).unwrap()).unwrap();
+        let s = String::from_utf8(serialize(&doc.raw).unwrap()).unwrap();
         assert!(s.contains("\"baseUrl\""));
         assert!(s.contains("https://api.example"));
     }
@@ -169,7 +169,7 @@ mod tests {
         let mut doc = parse(br#"{"provider":"openai","model":"x","baseUrl":"https://a"}"#);
         doc.set_base_url(None);
         assert!(doc.base_url().is_none());
-        let s = String::from_utf8(serialize(doc.raw()).unwrap()).unwrap();
+        let s = String::from_utf8(serialize(&doc.raw).unwrap()).unwrap();
         assert!(!s.contains("baseUrl"));
     }
 
@@ -212,13 +212,5 @@ mod tests {
         assert_eq!(reloaded.model(), Some("text-embedding-3-small"));
         assert!(reloaded.base_url().is_none());
         std::fs::remove_dir_all(&tmp).ok();
-    }
-}
-
-// Allow tests to access raw() without exposing it on the public API.
-#[cfg(test)]
-impl EmbedDoc {
-    fn raw(&self) -> &IndexMap<String, Value> {
-        &self.raw
     }
 }

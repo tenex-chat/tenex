@@ -356,7 +356,7 @@ mod tests {
     #[test]
     fn find_state_dir_returns_none_when_no_match() {
         let a = unique_temp();
-        let result = find_openclaw_state_dir(&[a.clone()]);
+        let result = find_openclaw_state_dir(std::slice::from_ref(&a));
         assert_eq!(result, None);
         std::fs::remove_dir_all(&a).ok();
     }

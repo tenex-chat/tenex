@@ -428,14 +428,14 @@ mod tests {
     #[test]
     fn route_done_returns_false() {
         let base = fresh_temp();
-        assert_eq!(route(&base, "done").unwrap(), false);
+        assert!(!route(&base, "done").unwrap());
         std::fs::remove_dir_all(&base).ok();
     }
 
     #[test]
     fn route_unknown_value_continues() {
         let base = fresh_temp();
-        assert_eq!(route(&base, "garbage").unwrap(), true);
+        assert!(route(&base, "garbage").unwrap());
         std::fs::remove_dir_all(&base).ok();
     }
 

@@ -837,8 +837,13 @@ mod tests {
         let base = unique_temp();
         let keys = Keys::generate();
         let a = agent("alpha", vec![]);
-        let result =
-            bulk_merge_agents(&base, &keys, &[a.clone()], &[a.pubkey.clone()]).await;
+        let result = bulk_merge_agents(
+            &base,
+            &keys,
+            std::slice::from_ref(&a),
+            std::slice::from_ref(&a.pubkey),
+        )
+        .await;
         assert!(result.is_ok());
         std::fs::remove_dir_all(&base).ok();
     }
@@ -853,7 +858,7 @@ mod tests {
             &base,
             &keys,
             &[a.clone(), b],
-            &[a.pubkey.clone()],
+            std::slice::from_ref(&a.pubkey),
         )
         .await;
         assert!(result.is_ok());

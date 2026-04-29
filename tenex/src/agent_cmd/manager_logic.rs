@@ -7,8 +7,8 @@
 //! - [`compare_agents`]                 — `compareAgents` (`:178-186`)
 //! - [`format_projects`]                — `formatProjects` (`:188-190`)
 //! - [`format_managed_agent_label`]     — `formatManagedAgentLabel` (`:192-201`)
-//!                                        (multi-line variant, currently unused
-//!                                        by the live menu but exists for tests)
+//!   (multi-line variant, currently unused by the live menu but exists for
+//!   tests)
 //! - [`format_managed_agent_list_line`] — `formatManagedAgentListLine` (`:203-207`)
 //! - [`pick_merge_survivor`]            — `pickMergeSurvivor` (`:209-228`)
 //! - [`find_duplicate_slug_groups`]     — `findDuplicateSlugGroups` (`:230-244`)
@@ -337,7 +337,7 @@ mod tests {
         // of TTY detection (unlike `console::Style.dim().apply_to(...)`
         // which auto-suppresses on non-TTY). Active-status row should
         // contain 2 dim runs: `·`, `projects: P1`.
-        let entry = agent("alpha", None, vec!["P1".into()]);
+        let entry = agent("alpha", None, vec!["P1"]);
         let line = format_managed_agent_list_line(&entry);
         let dim_starts = line.matches("\x1b[2m").count();
         assert_eq!(
@@ -352,7 +352,7 @@ mod tests {
 
     #[test]
     fn format_managed_agent_label_is_three_lines() {
-        let entry = agent("alpha", None, vec!["P1".into()]);
+        let entry = agent("alpha", None, vec!["P1"]);
         let label = format_managed_agent_label(&entry);
         let lines: Vec<&str> = label.split('\n').collect();
         assert_eq!(lines.len(), 3);

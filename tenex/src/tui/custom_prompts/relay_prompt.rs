@@ -50,8 +50,10 @@ pub struct RelayPromptConfig<'a> {
     pub items: Vec<RelayItem>,
     pub input_prefix: &'a str,
     pub input_placeholder: &'a str,
-    pub validate: Option<Box<dyn Fn(&str) -> Result<(), String>>>,
+    pub validate: Option<RelayValidator>,
 }
+
+type RelayValidator = Box<dyn Fn(&str) -> Result<(), String>>;
 
 impl<'a> RelayPromptConfig<'a> {
     /// Construct with TS defaults: prefix `wss://`, placeholder
@@ -157,11 +159,12 @@ impl RelayState {
             KeyCode::Backspace => {
                 self.input_value.pop();
             }
-            KeyCode::Char(ch) => {
-                if !key.modifiers.contains(KeyModifiers::CONTROL) && (ch as u32) >= 32 {
-                    self.input_value.push(ch);
-                }
+            KeyCode::Char(ch)
+                if !key.modifiers.contains(KeyModifiers::CONTROL) && (ch as u32) >= 32 =>
+            {
+                self.input_value.push(ch);
             }
+            KeyCode::Char(_) => {}
             _ => {}
         }
         KeyOutcome::Continue

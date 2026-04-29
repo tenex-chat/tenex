@@ -54,8 +54,9 @@ pub struct AgentDoc {
 
 impl AgentDoc {
     /// Read `<base>/agents/<pubkey>.json` and apply load-time normalization
-    /// + migration. If the file was migrated, the canonicalized bytes are
-    /// written back (matching `loadAgent` at `AgentStorage.ts:459-481`).
+    ///
+    /// If the file was migrated, the canonicalized bytes are written back
+    /// (matching `loadAgent` at `AgentStorage.ts:459-481`).
     /// Returns `None` if the file does not exist.
     pub fn load(base_dir: &std::path::Path, pubkey: &str) -> Result<Option<Self>> {
         let path = agent_file_path(base_dir, pubkey);
@@ -875,12 +876,10 @@ impl AgentStorage {
         let new_event_id = agent.event_id().map(str::to_owned);
         if let Some(existing) = &existing {
             if let Some(old_eid) = existing.event_id() {
-                if Some(old_eid) != new_event_id.as_deref() {
-                    if self.index.by_event_id.get(old_eid).map(String::as_str)
-                        == Some(&pubkey)
-                    {
-                        self.index.by_event_id.shift_remove(old_eid);
-                    }
+                if Some(old_eid) != new_event_id.as_deref()
+                    && self.index.by_event_id.get(old_eid).map(String::as_str) == Some(&pubkey)
+                {
+                    self.index.by_event_id.shift_remove(old_eid);
                 }
             }
         }

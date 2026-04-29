@@ -361,8 +361,8 @@ mod tests {
         assert_eq!(DEFAULT_RETENTION_DAYS, 14);
         assert_eq!(DEFAULT_LARGE_MESSAGE_THRESHOLD_TOKENS, 2000);
         assert_eq!(DEFAULT_MAX_PREVIEW_CHARS, 256);
-        assert_eq!(DEFAULT_STORE_MESSAGE_PREVIEWS, true);
-        assert_eq!(DEFAULT_STORE_FULL_MESSAGE_TEXT, true);
+        let defaults = (DEFAULT_STORE_MESSAGE_PREVIEWS, DEFAULT_STORE_FULL_MESSAGE_TEXT);
+        assert_eq!(defaults, (true, true));
     }
 
     #[test]

@@ -413,11 +413,10 @@ fn conversation_id_from_event(event: &Event) -> String {
         let marker = parts.get(3).map(|s| s.as_str());
         match marker {
             Some("root") => return event_id.clone(),
-            None | Some("") => {
-                if first_unmarked.is_none() {
-                    first_unmarked = Some(event_id.clone());
-                }
+            None | Some("") if first_unmarked.is_none() => {
+                first_unmarked = Some(event_id.clone());
             }
+            None | Some("") => {}
             _ => {}
         }
     }

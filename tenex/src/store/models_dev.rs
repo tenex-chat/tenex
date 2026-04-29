@@ -563,7 +563,7 @@ mod tests {
         for (provider, model_id, data) in entries {
             let entry = out
                 .entry((*provider).to_owned())
-                .or_insert_with(ProviderModels::default);
+                .or_default();
             entry.models.insert((*model_id).to_owned(), data.clone());
         }
         out
