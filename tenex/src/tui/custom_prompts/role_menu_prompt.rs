@@ -315,15 +315,24 @@ fn render_frame<W: Write>(
     let mut height: u16 = 2;
 
     let label_width = ROLES.iter().map(|r| r.label().len()).max().unwrap_or(0);
-    let cursor_active = format!("{} ", glyphs::CURSOR_THIN);
 
     for (i, role) in ROLES.iter().enumerate() {
         let is_active = i == state.active;
-        let pfx = if is_active { cursor_active.as_str() } else { "  " };
+        // TS at `roles.ts:182`: `pfx = isActive ? \`${cursor} \` : "  "`
+        // where `cursor = chalk.hex("#FFC107")("›")`. The trailing space is
+        // OUTSIDE the chalk wrap, so the active wire bytes are
+        // `\x1b[38;2;255;193;7m›\x1b[39m ` — print the cursor inside the
+        // amber span, the space as a literal after `ResetColor`.
         if is_active {
-            queue!(stdout, SetForegroundColor(AMBER), Print(pfx), ResetColor)?;
+            queue!(
+                stdout,
+                SetForegroundColor(AMBER),
+                Print(glyphs::CURSOR_THIN),
+                ResetColor,
+                Print(" "),
+            )?;
         } else {
-            queue!(stdout, Print(pfx))?;
+            queue!(stdout, Print("  "))?;
         }
         let padded_label = format!("{:width$}", role.label(), width = label_width);
         // Bold label, then dim assignment.
@@ -381,12 +390,18 @@ fn render_frame<W: Write>(
     height += 1;
 
     // Done row (always available — no minimum-count restriction here).
+    // Same `${cursor} ` byte-fidelity rule as the role rows above.
     let done_active = state.active == ROLES.len();
-    let pfx = if done_active { cursor_active.as_str() } else { "  " };
     if done_active {
-        queue!(stdout, SetForegroundColor(AMBER), Print(pfx), ResetColor)?;
+        queue!(
+            stdout,
+            SetForegroundColor(AMBER),
+            Print(glyphs::CURSOR_THIN),
+            ResetColor,
+            Print(" "),
+        )?;
     } else {
-        queue!(stdout, Print(pfx))?;
+        queue!(stdout, Print("  "))?;
     }
     queue!(
         stdout,
@@ -568,6 +583,68 @@ mod tests {
         let lines = compose_lines(&state, "Roles");
         let supervision_row = lines.iter().find(|l| l.contains("Supervision")).unwrap();
         assert!(supervision_row.starts_with(glyphs::CURSOR_THIN), "got: {supervision_row}");
+    }
+
+    /// Pin: the active-row cursor's trailing space must land OUTSIDE the
+    /// amber colour span.
+    ///
+    /// TS at `roles.ts:174,182`:
+    ///   const cursor = chalk.hex("#FFC107")("›");
+    ///   const pfx = isActive ? `${cursor} ` : "  ";
+    /// → wire bytes `\x1b[38;2;255;193;7m›\x1b[39m ` (space AFTER the
+    /// foreground reset). The previous Rust impl wrapped the entire
+    /// `"› "` string in a single colour span, putting the space inside.
+    ///
+    /// Note: crossterm's `ResetColor` currently emits `\x1b[0m` (full SGR
+    /// reset) where TS chalk emits `\x1b[39m` (foreground-default). That's
+    /// a separate systemic divergence tracked in
+    /// `docs/tui-port/QUESTIONS.md` ("crossterm ResetColor emits SGR 0").
+    /// This test asserts only the space-position fix — it tolerates either
+    /// reset code, and explicitly forbids the legacy "space-inside-wrap"
+    /// form regardless of which closer crossterm picks.
+    #[test]
+    fn render_frame_active_role_cursor_has_space_outside_amber_wrap() {
+        let mut state = RoleMenuState::new(assignments_all("x"));
+        state.active = 0; // first role row
+        let mut buf: Vec<u8> = Vec::new();
+        render_frame(&mut buf, "Roles", &state, 0).unwrap();
+        let s = String::from_utf8(buf).expect("render output must be UTF-8");
+        // Space outside the wrap, regardless of FG closer:
+        let space_outside_full_reset = s.contains("\x1b[38;2;255;193;7m›\x1b[0m ");
+        let space_outside_fg_reset = s.contains("\x1b[38;2;255;193;7m›\x1b[39m ");
+        assert!(
+            space_outside_full_reset || space_outside_fg_reset,
+            "active cursor must emit `›` + colour-closer + literal space; got {s:?}",
+        );
+        // Legacy space-inside-wrap forms (with either closer) must NOT appear:
+        assert!(
+            !s.contains("\x1b[38;2;255;193;7m› \x1b[0m")
+                && !s.contains("\x1b[38;2;255;193;7m› \x1b[39m"),
+            "must not wrap the cursor's trailing space inside the amber span; got {s:?}",
+        );
+    }
+
+    /// Pin the same `${cursor} ` byte rule for the active Done row.
+    #[test]
+    fn render_frame_active_done_cursor_has_space_outside_amber_wrap() {
+        let mut state = RoleMenuState::new(assignments_all("x"));
+        state.active = ROLES.len(); // Done row
+        let mut buf: Vec<u8> = Vec::new();
+        render_frame(&mut buf, "Roles", &state, 0).unwrap();
+        let s = String::from_utf8(buf).expect("render output must be UTF-8");
+        // Cursor wrap → colour close → literal space → ansi256-#214 + bold
+        // for "  Done". Tolerates either FG closer per the systemic
+        // crossterm-vs-chalk divergence noted above.
+        let with_full_reset = s.contains(
+            "\x1b[38;2;255;193;7m›\x1b[0m \x1b[38;5;214m\x1b[1m  Done",
+        );
+        let with_fg_reset = s.contains(
+            "\x1b[38;2;255;193;7m›\x1b[39m \x1b[38;5;214m\x1b[1m  Done",
+        );
+        assert!(
+            with_full_reset || with_fg_reset,
+            "Done row must emit cursor + close + literal space + ansi256(214)+bold for the label; got {s:?}",
+        );
     }
 
     #[test]

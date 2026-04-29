@@ -131,6 +131,43 @@ agent project-membership editor at `AgentManager.ts:418`. Visual
 divergence is one column of horizontal padding per row — not a
 correctness bug.
 
+### `crossterm::ResetColor` emits SGR 0 where chalk emits SGR 39
+
+TS `chalk.hex(...)(text)` and `chalk.<color>(text)` close their spans
+with `\x1b[39m` (foreground-default). `crossterm::style::ResetColor`
+emits `\x1b[0m` (full SGR reset — clears foreground, background, AND
+every attribute span open at the same time).
+
+Where `display.rs` and the helpers in `theme.rs` exist, every site
+that needs byte-perfect chalk wrapping is already routed through
+the raw-string `chalk_*(text)` helpers (which emit
+`<open>...\x1b[39m`). The bespoke crossterm prompts in
+`tui/custom_prompts/` (`role_menu_prompt`, `provider_select_prompt`,
+`section_menu_prompt`, `variant_list_prompt`, `relay_prompt`,
+`agent_select_prompt`) all `queue!(stdout, ResetColor)` — at runtime
+they emit `\x1b[0m` where TS chalk would emit `\x1b[39m`.
+
+Visually identical for spans that only changed foreground (no bold,
+dim, italic, or background open at the same time — which is the case
+for every `${cursor} ` prefix and every dim-/bold-only label). When a
+foreground-and-attribute span is open, the SGR 0 closer also
+implicitly closes the attribute, so the matching `NormalIntensity` /
+attribute-close that follows is a no-op rather than a real close —
+still visually identical because there's nothing left to reset.
+
+Cleanly fixing this would require either:
+- replacing every `ResetColor` in `tui/custom_prompts/` with
+  `Print(theme::FG_RESET)` (where `FG_RESET = "\x1b[39m"`), AND
+- fixing the attribute-close ordering so the `NormalIntensity`
+  /`Reset(Italic)` happens *before* the foreground close (to match
+  chalk's nested-style closer order).
+
+That's a bespoke-prompt-wide sweep with high diff churn for zero
+visual change. Tracked here so the byte-fidelity tests in each
+custom prompt assert space-position and order-of-attributes
+correctly without conflating the two issues; see e.g.
+`role_menu_prompt::tests::render_frame_active_role_cursor_has_space_outside_amber_wrap`.
+
 ## Substrate-blocked surfaces (acknowledged, not stubs)
 
 ### `tenex doctor migrate` — only reports, doesn't migrate
