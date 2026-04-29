@@ -201,7 +201,7 @@ describe("nostr-entity-parser", () => {
             isInitializedSpy = spyOn(prefixKVStore, "isInitialized").mockReturnValue(true);
 
             expect(resolvePrefixToId("invalid")).toBe(null);
-            expect(resolvePrefixToId("82341f")).toBe(null); // too short (6 chars, needs 18)
+            expect(resolvePrefixToId("82341f")).toBe(null); // too short for event id lookup
             expect(resolvePrefixToId("")).toBe(null);
             expect(resolvePrefixToId(undefined)).toBe(null);
         });

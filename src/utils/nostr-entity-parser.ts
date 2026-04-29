@@ -169,7 +169,7 @@ export function isHexPrefix(input: string | undefined): boolean {
  *
  * IMPORTANT: This function is TYPE-AGNOSTIC - it returns any matching ID without
  * validating whether it's an event ID or pubkey. For resolving specifically to
- * agent pubkeys, use `resolveAgentSlug` from the AgentResolution service.
+ * agent pubkeys, use `resolveAgentId` from the AgentResolution service.
  *
  * @param prefix - A STORAGE_PREFIX_LENGTH-character hex string prefix (10 chars)
  * @returns The full 64-character ID, or null if not found or invalid input
@@ -179,7 +179,7 @@ export function resolvePrefixToId(prefix: string | undefined): string | null {
 
     const cleaned = prefix.trim().toLowerCase();
 
-    // Must be exactly STORAGE_PREFIX_LENGTH hex characters (18)
+    // Must be exactly STORAGE_PREFIX_LENGTH hex characters
     if (!new RegExp("^[0-9a-f]{" + STORAGE_PREFIX_LENGTH + "}$").test(cleaned)) {
         return null;
     }
@@ -226,7 +226,7 @@ export function resolveToFullEventId(input: string | undefined): FullEventId | n
         return normalized;
     }
 
-    // 2. Check for STORAGE_PREFIX_LENGTH hex prefix (18 chars)
+    // 2. Check for STORAGE_PREFIX_LENGTH hex prefix
     if (isShortEventId(normalized)) {
         const resolved = resolvePrefixToId(normalized);
         if (resolved && isFullEventId(resolved)) {
