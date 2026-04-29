@@ -1,6 +1,6 @@
 # TENEX Rust Adoption Status
 
-_Last updated: 2026-04-29 (twenty-fourth pass). Auto-maintained by scheduled debt check._
+_Last updated: 2026-04-29 (twenty-fifth pass). Auto-maintained by scheduled debt check._
 
 ---
 
@@ -178,7 +178,7 @@ Note: `conversation_get`, `conversation_list`, `kill` (scheduled tasks only), `s
 
 ## Compilation Status
 
-**As of 2026-04-29 (twenty-fourth debt check pass): workspace compiles clean — zero errors. `cargo test --workspace`: 1330 tests passing across all crates.**
+**As of 2026-04-29 (twenty-fifth debt check pass): workspace compiles clean — zero errors, 281 warnings. `cargo test --workspace`: 1325 tests passing across all crates.**
 
 **MILESTONE: Every tool in `tenex-agent` is now verified end-to-end, including supervision re-engagement (see `RUST_REPORT.md`).** The `ConsecutiveToolsWithoutTodo` heuristic was silent (re_engage: false) — fixed. Multi-turn history projection verified with both user and assistant messages persisted.
 
@@ -198,6 +198,12 @@ Note: `conversation_get`, `conversation_list`, `kill` (scheduled tasks only), `s
 - Conversation history persistence (10 convs, 20 history entries) ✅
 - Supervision (worker todo block) ✅
 - FK bug fixed: ensure_conversation() on store open
+
+Resolved between twenty-fourth and twenty-fifth passes:
+- **Dead display.rs helpers removed**: `provider_check`, `provider_uncheck`, `done_label` functions and their 6 tests deleted. Bespoke crossterm prompts render `[✓]`/`[ ]` and "Done" inline with raw ANSI constants; these helpers had no production callers. Stale module-doc reference also updated.
+- **llm_editor chalk_dim simplification**: `compose_display_name` and `action_items` in `tenex/src/tui/prompts/llm_editor.rs` now use `chalk_dim()` helper instead of manual `DIM_OPEN`/`DIM_CLOSE` concatenation.
+- **Warning count**: 285 → 281 (4 removed by dead code deletion).
+- **Test count**: 1330 → 1325 (6 orphaned tests removed, 1 new pin test added in prior session commit for prompts/mod.rs).
 
 Resolved between twenty-third and twenty-fourth passes:
 - **`report_publish` tool ported**: Emits kind:30023 NIP-23 long-form articles (replaceable) via `PublishArticleIntent` through the standard NDJSON-stdout channel. Accepts file or directory path; directory recursion prefixes `dirName/relative/path` as `d_tag`. Path-traversal protection via `canonicalize() + starts_with()`. 4 unit tests (single file, directory prefix, traversal rejection, missing path) + 1 encoder test in `tenex-protocol`.
