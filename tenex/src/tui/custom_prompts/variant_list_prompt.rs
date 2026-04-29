@@ -360,15 +360,25 @@ fn render_frame<W: Write>(
     let mut height: u16 = 3;
 
     let names: Vec<String> = state.variants.keys().cloned().collect();
-    let cursor_active = format!("{} ", glyphs::CURSOR_THIN);
 
     for (i, name) in names.iter().enumerate() {
         let is_active = i == state.active;
-        let pfx = if is_active { cursor_active.as_str() } else { "  " };
+        // TS at `variant-list-prompt.ts:115,126`: `cursor = chalk.hex("#FFC107")("›")`,
+        // `pfx = isActive ? \`${cursor} \` : "  "`. The trailing space is
+        // OUTSIDE the chalk wrap — print the cursor inside the amber span,
+        // the literal space after `ResetColor`. (See `role_menu_prompt`
+        // for the same fix and `docs/tui-port/QUESTIONS.md` for the
+        // crossterm-vs-chalk reset-code divergence note.)
         if is_active {
-            queue!(stdout, SetForegroundColor(AMBER), Print(pfx), ResetColor)?;
+            queue!(
+                stdout,
+                SetForegroundColor(AMBER),
+                Print(glyphs::CURSOR_THIN),
+                ResetColor,
+                Print(" "),
+            )?;
         } else {
-            queue!(stdout, Print(pfx))?;
+            queue!(stdout, Print("  "))?;
         }
         let model = state
             .variants
@@ -406,18 +416,19 @@ fn render_frame<W: Write>(
     )?;
     height += 1;
 
-    // Add row.
+    // Add row. Same `${cursor} ` byte-fidelity rule as the variant rows.
     let add_index = names.len();
     let done_index = names.len() + 1;
-    let pfx = if state.active == add_index {
-        cursor_active.as_str()
-    } else {
-        "  "
-    };
     if state.active == add_index {
-        queue!(stdout, SetForegroundColor(AMBER), Print(pfx), ResetColor)?;
+        queue!(
+            stdout,
+            SetForegroundColor(AMBER),
+            Print(glyphs::CURSOR_THIN),
+            ResetColor,
+            Print(" "),
+        )?;
     } else {
-        queue!(stdout, Print(pfx))?;
+        queue!(stdout, Print("  "))?;
     }
     queue!(
         stdout,
@@ -428,16 +439,17 @@ fn render_frame<W: Write>(
     )?;
     height += 1;
 
-    // Done row.
-    let pfx = if state.active == done_index {
-        cursor_active.as_str()
-    } else {
-        "  "
-    };
+    // Done row. Same `${cursor} ` byte-fidelity rule.
     if state.active == done_index {
-        queue!(stdout, SetForegroundColor(AMBER), Print(pfx), ResetColor)?;
+        queue!(
+            stdout,
+            SetForegroundColor(AMBER),
+            Print(glyphs::CURSOR_THIN),
+            ResetColor,
+            Print(" "),
+        )?;
     } else {
-        queue!(stdout, Print(pfx))?;
+        queue!(stdout, Print("  "))?;
     }
     if names.len() < 2 {
         queue!(
@@ -718,6 +730,63 @@ mod tests {
         let lines = compose_lines(&state, "Edit variants");
         let rule = lines.iter().find(|l| l.contains('─')).unwrap();
         assert_eq!(rule.matches('─').count(), RULE_WIDTH);
+    }
+
+    /// Pin: the active-row cursor's trailing space lands OUTSIDE the
+    /// amber colour span. TS at `variant-list-prompt.ts:115,126`:
+    ///   const cursor = chalk.hex("#FFC107")("›");
+    ///   const pfx = i === active ? `${cursor} ` : "  ";
+    /// Wire bytes: `\x1b[38;2;255;193;7m›\x1b[<reset>m ` (literal space
+    /// AFTER the foreground reset). See `role_menu_prompt`'s identical
+    /// test and `docs/tui-port/QUESTIONS.md` for the systemic
+    /// crossterm-vs-chalk reset-code divergence.
+    #[test]
+    fn render_frame_active_variant_cursor_has_space_outside_amber_wrap() {
+        let mut state = state_with(three_variants(), "fast");
+        state.active = 0; // first variant row
+        let mut buf: Vec<u8> = Vec::new();
+        render_frame(&mut buf, "Edit variants", &state, 0).unwrap();
+        let s = String::from_utf8(buf).expect("render output must be UTF-8");
+        let space_outside_full_reset = s.contains("\x1b[38;2;255;193;7m›\x1b[0m ");
+        let space_outside_fg_reset = s.contains("\x1b[38;2;255;193;7m›\x1b[39m ");
+        assert!(
+            space_outside_full_reset || space_outside_fg_reset,
+            "active variant cursor must emit `›` + colour-closer + literal space; got {s:?}",
+        );
+        assert!(
+            !s.contains("\x1b[38;2;255;193;7m› \x1b[0m")
+                && !s.contains("\x1b[38;2;255;193;7m› \x1b[39m"),
+            "must not wrap the cursor's trailing space inside the amber span; got {s:?}",
+        );
+    }
+
+    /// Pin same `${cursor} ` rule for the active Add-variant row.
+    /// Asserts only the cursor-prefix byte sequence, not the
+    /// "Add variant" colour (crossterm's `Color::DarkCyan` emits
+    /// `\x1b[38;5;6m` while TS chalk.cyan emits `\x1b[36m` — a separate
+    /// systemic divergence not yet swept).
+    #[test]
+    fn render_frame_active_add_variant_cursor_has_space_outside_amber_wrap() {
+        let mut state = state_with(three_variants(), "fast");
+        // 3 variants → indices 0..2; Add row at index 3.
+        state.active = 3;
+        let mut buf: Vec<u8> = Vec::new();
+        render_frame(&mut buf, "Edit variants", &state, 0).unwrap();
+        let s = String::from_utf8(buf).expect("render output must be UTF-8");
+        // Find the second occurrence of the active cursor (the first is
+        // the `?` prefix amber wrap from the message header). The
+        // post-rule active prefix is the Add row.
+        let needle_full_reset = "\x1b[38;2;255;193;7m›\x1b[0m ";
+        let needle_fg_reset = "\x1b[38;2;255;193;7m›\x1b[39m ";
+        assert!(
+            s.contains(needle_full_reset) || s.contains(needle_fg_reset),
+            "Add row must emit cursor + close + literal space; got {s:?}",
+        );
+        assert!(
+            !s.contains("\x1b[38;2;255;193;7m› \x1b[0m")
+                && !s.contains("\x1b[38;2;255;193;7m› \x1b[39m"),
+            "must not wrap the cursor's trailing space inside the amber span; got {s:?}",
+        );
     }
 
     // ---- VariantInput::from_key_event ----------------------------------
