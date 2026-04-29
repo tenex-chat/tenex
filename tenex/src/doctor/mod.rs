@@ -108,7 +108,22 @@ pub async fn run(args: DoctorArgs) -> Result<()> {
 async fn run_agents(args: AgentsArgs) -> Result<()> {
     match args.command {
         AgentsCommand::Orphans { purge } => find_orphaned_agents(purge),
-        AgentsCommand::Categorize { dry_run } => preview_categorize(dry_run),
+        AgentsCommand::Categorize { dry_run } => {
+            // Mirror the catch wrapper at `commands/doctor.ts:36-40`:
+            //   const message = error instanceof Error ? error.message : String(error);
+            //   console.error(chalk.red(`Failed to categorize agents: ${message}`));
+            //   process.exit(1);
+            // (No SIGINT/force-closed filter — TS doesn't filter for this
+            // subcommand because there's no inquirer prompt in the path.)
+            match preview_categorize(dry_run) {
+                Ok(()) => Ok(()),
+                Err(e) => {
+                    let red = console::Style::new().red();
+                    eprintln!("{}", red.apply_to(format!("Failed to categorize agents: {e}")));
+                    Err(e)
+                }
+            }
+        }
     }
 }
 

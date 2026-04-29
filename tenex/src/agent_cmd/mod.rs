@@ -122,13 +122,32 @@ async fn run_delete(pubkey: &str) -> Result<()> {
 }
 
 async fn run_import(import: ImportArgs) -> Result<()> {
-    match import.command {
+    let result = match import.command {
         ImportCommand::Openclaw {
             dry_run,
             json,
             no_sync,
             slugs,
         } => run_openclaw_import(dry_run, json, no_sync, slugs).await,
+    };
+    // Mirror the catch wrapper at `agent/import/openclaw.ts:237-244`:
+    //   const errorMessage = error instanceof Error ? error.message : String(error);
+    //   if (errorMessage?.includes("SIGINT") || errorMessage?.includes("force closed")) return;
+    //   console.error(chalk.red(`Import failed: ${errorMessage}`));
+    //   process.exitCode = 1;
+    // SIGINT/force-closed paths from inquire are caught at call sites
+    // and converted into clean returns; only real failures reach here.
+    match result {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            let msg = format!("{e}");
+            if msg.contains("SIGINT") || msg.contains("force closed") {
+                return Ok(());
+            }
+            let red = console::Style::new().red();
+            eprintln!("{}", red.apply_to(format!("Import failed: {e}")));
+            Err(e)
+        }
     }
 }
 
