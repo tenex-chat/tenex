@@ -487,7 +487,14 @@ pub fn compose_keys_lines(state: &ProviderState) -> Vec<String> {
 
 /// Display-name lookup. Source: `getProviderDisplayName` at
 /// `src/llm/utils/ProviderConfigUI.ts:14-24`.
-pub fn provider_display_name(pid: &str) -> &'static str {
+///
+/// TS fallback is `names[provider] || provider` — when no friendly name is
+/// known, the provider ID itself renders. The Rust port returns
+/// `&'a str` (parameterised over the input lifetime) so the fallback path
+/// can hand back a borrow of `pid` directly without allocation. The
+/// known-name branches are `&'static str` literals which coerce to `&'a`
+/// for any `'a` since `'static` outlives every lifetime.
+pub fn provider_display_name<'a>(pid: &'a str) -> &'a str {
     match pid {
         "openrouter" => "OpenRouter (300+ models)",
         "anthropic" => "Anthropic (Claude)",
@@ -495,17 +502,8 @@ pub fn provider_display_name(pid: &str) -> &'static str {
         "ollama" => "Ollama (Local models)",
         "codex" => "Codex",
         "claude-code" => "Claude Code (Agents)",
-        _ => provider_unknown_name(pid),
+        _ => pid,
     }
-}
-
-fn provider_unknown_name(_pid: &str) -> &'static str {
-    // The TS fallback is `names[provider] || provider` — we cannot return
-    // an arbitrary borrowed string here without lifetimes leaking through
-    // public API, so unknown providers render as a placeholder. Screens
-    // call sites are aware of this constraint and only feed in IDs from
-    // `provider-ids.ts`.
-    "provider"
 }
 
 /// Format the key-count suffix shown beside an enabled provider's name.
@@ -1507,5 +1505,30 @@ mod tests {
                 && !s.contains("\x1b[38;2;255;193;7m› \x1b[39m"),
             "must not wrap the cursor's trailing space inside the amber span; got {s:?}",
         );
+    }
+
+    /// Pin: `provider_display_name` returns the friendly name for known
+    /// IDs and falls back to the raw input for unknown IDs — matching
+    /// TS `getProviderDisplayName`'s `names[provider] || provider` at
+    /// `src/llm/utils/ProviderConfigUI.ts:23`. The previous Rust impl
+    /// returned a literal `"provider"` placeholder for unknown IDs,
+    /// losing the actual identifier in any rendered listing.
+    #[test]
+    fn provider_display_name_known_ids_match_ts_friendly_names() {
+        assert_eq!(provider_display_name("openrouter"), "OpenRouter (300+ models)");
+        assert_eq!(provider_display_name("anthropic"), "Anthropic (Claude)");
+        assert_eq!(provider_display_name("openai"), "OpenAI (GPT)");
+        assert_eq!(provider_display_name("ollama"), "Ollama (Local models)");
+        assert_eq!(provider_display_name("codex"), "Codex");
+        assert_eq!(provider_display_name("claude-code"), "Claude Code (Agents)");
+    }
+
+    #[test]
+    fn provider_display_name_unknown_id_falls_back_to_pid_verbatim() {
+        // TS `names[provider] || provider` — unknown providers render
+        // their raw identifier, not the literal placeholder `"provider"`.
+        assert_eq!(provider_display_name("foobar"), "foobar");
+        assert_eq!(provider_display_name("custom-provider"), "custom-provider");
+        assert_eq!(provider_display_name(""), "");
     }
 }
