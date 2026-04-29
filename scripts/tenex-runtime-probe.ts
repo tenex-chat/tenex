@@ -451,6 +451,17 @@ function buildAcpProbeRuntime(): Record<string, unknown> {
         const args = process.env.TENEX_PROBE_ACP_ARGS
             ? JSON.parse(process.env.TENEX_PROBE_ACP_ARGS)
             : ["-y", "@agentclientprotocol/claude-agent-acp@latest"];
+        const env: Record<string, string> = {
+            ANTHROPIC_MODEL: model,
+            ANTHROPIC_DEFAULT_HAIKU_MODEL:
+                process.env.ANTHROPIC_DEFAULT_HAIKU_MODEL ?? "claude-haiku-4-5-20251001",
+        };
+        for (const key of ["ANTHROPIC_API_KEY", "HOME", "XDG_CONFIG_HOME"]) {
+            const value = process.env[key];
+            if (value) {
+                env[key] = value;
+            }
+        }
         return {
             kind: "acp",
             backend: "claude-code",
@@ -458,11 +469,7 @@ function buildAcpProbeRuntime(): Record<string, unknown> {
             args,
             model,
             permissionPolicy: "allow",
-            env: {
-                ANTHROPIC_MODEL: model,
-                ANTHROPIC_DEFAULT_HAIKU_MODEL:
-                    process.env.ANTHROPIC_DEFAULT_HAIKU_MODEL ?? "claude-haiku-4-5-20251001",
-            },
+            env,
         };
     }
     return {

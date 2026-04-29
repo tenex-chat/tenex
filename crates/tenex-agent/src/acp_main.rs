@@ -1,12 +1,11 @@
+mod acp_config;
 mod acp_process;
-#[path = "config.rs"]
-mod config;
 #[path = "home.rs"]
 mod home;
 
+use acp_config::{AcpAgentConfig, AgentRuntimeConfig};
 use acp_process::{AcpProcess, AcpUpdates};
 use anyhow::{Context, Result};
-use config::AgentRuntimeConfig;
 use serde_json::{json, Value};
 use std::sync::Arc;
 use tenex_context::{
@@ -40,7 +39,7 @@ async fn run() -> Result<()> {
 
     let project_id = std::env::var("TENEX_PROJECT_ID")
         .context("TENEX_PROJECT_ID environment variable is required")?;
-    let agent_config = config::AgentConfig::load(&args[1])?;
+    let agent_config = AcpAgentConfig::load(&args[1])?;
     let acp_config = match agent_config.runtime.as_ref() {
         Some(AgentRuntimeConfig::Acp(cfg)) => cfg.clone(),
         Some(AgentRuntimeConfig::Tenex) => {

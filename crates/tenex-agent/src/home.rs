@@ -21,6 +21,7 @@ pub fn ensure_agent_home_dir(home_dir: &Path) -> bool {
 
 /// Write the agent `.env` file if it does not already exist.
 /// Returns `Ok(true)` if created, `Ok(false)` if already present.
+#[allow(dead_code)]
 pub fn write_agent_env_file(
     home_dir: &Path,
     nsec: &str,
@@ -63,6 +64,7 @@ pub fn write_agent_env_file(
 
 /// Parse a simple `KEY=VALUE` dotenv file, skipping comments and blank lines.
 /// Does not handle quoting, multiline values, or variable substitution.
+#[allow(dead_code)]
 pub fn parse_dotenv(path: &Path) -> Vec<(String, String)> {
     let Ok(content) = fs::read_to_string(path) else {
         return Vec::new();

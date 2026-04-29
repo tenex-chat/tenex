@@ -4,7 +4,7 @@ use std::process::Stdio;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter, Lines};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 
-use crate::config::{AcpPermissionPolicy, AcpRuntimeConfig};
+use crate::acp_config::{AcpPermissionPolicy, AcpRuntimeConfig};
 
 #[derive(Default)]
 pub(crate) struct AcpUpdates {

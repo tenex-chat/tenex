@@ -23,35 +23,6 @@ pub struct AgentConfig {
     pub working_directory: Option<String>,
     pub default: Option<AgentDefault>,
     pub telegram: Option<TelegramAgentConfig>,
-    pub runtime: Option<AgentRuntimeConfig>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(tag = "kind", rename_all = "kebab-case")]
-pub enum AgentRuntimeConfig {
-    Tenex,
-    Acp(AcpRuntimeConfig),
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct AcpRuntimeConfig {
-    pub backend: String,
-    pub command: String,
-    #[serde(default)]
-    pub args: Vec<String>,
-    #[serde(default)]
-    pub env: std::collections::HashMap<String, String>,
-    pub model: Option<String>,
-    #[serde(default, rename = "permissionPolicy")]
-    pub permission_policy: AcpPermissionPolicy,
-}
-
-#[derive(Debug, Clone, Copy, Deserialize, Default)]
-#[serde(rename_all = "kebab-case")]
-pub enum AcpPermissionPolicy {
-    #[default]
-    Allow,
-    Deny,
 }
 
 impl AgentConfig {
