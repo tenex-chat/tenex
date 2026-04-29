@@ -88,6 +88,28 @@ add a separate `config_cmd/embed.rs` that ports `embed.ts` and switch
 the `tenex config embed` dispatch to it; keep
 `onboard::embeddings::run` for the Step 6 path.
 
+### `inquire` wraps help_message in `[...]` brackets
+
+TS @inquirer/select / @inquirer/checkbox emit the auto-helpLine as
+plain text starting at column 0:
+- select:   `↑↓ navigate • ⏎ select`
+- checkbox: `↑↓ navigate • space select • ⏎ submit`
+
+Inquire 0.7's `render_help_message` (`ui/backend.rs:302-310`)
+hard-codes `[` + content + `]` brackets around the help string, all
+styled with `render_config.help_message`. There's no
+`with_help_brackets(false)` toggle and no `Token::Bracket` to suppress
+in the test backend either. Output:
+- TS:     `↑↓ navigate • ⏎ select`
+- Rust:   `[↑↓ navigate • ⏎ select]`
+
+We override the help text content to match TS exactly via
+`with_help_message("↑↓ navigate • ⏎ select")` (and the checkbox
+equivalent), so the WORDS match — but the bracket wrapping persists.
+Affects every stock select / multi_select call site. Suppressing
+brackets requires patching the inquire crate; visual divergence is
+one bracket-pair per prompt, not a correctness bug.
+
 ### `inquire` multi-select inserts an extra space between cursor and checkbox
 
 TS `@inquirer/checkbox/dist/index.js:178` renders each row as

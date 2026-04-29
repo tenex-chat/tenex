@@ -51,8 +51,20 @@ pub fn password<'a>(message: &'a str) -> Password<'a> {
 }
 
 /// Build a [`Select`] (single-pick list) prompt with the TENEX theme.
+///
+/// TS @inquirer/select auto-emits the helpLine
+///   `↑↓ navigate • ⏎ select`
+/// (`@inquirer/select/dist/index.js:148-151`). Inquire's stock
+/// `DEFAULT_HELP_MESSAGE` is
+///   `↑↓ to move, enter to select, type to filter`
+/// — different wording, plus an extra "type to filter" hint TS doesn't
+/// have. Override to TS's shorter form. Inquire still wraps the help
+/// message in `[...]` brackets (inquire-specific render quirk without
+/// a clean override path); divergence acknowledged in QUESTIONS.md.
 pub fn select<'a, T: std::fmt::Display>(message: &'a str, options: Vec<T>) -> Select<'a, T> {
-    Select::new(message, options).with_render_config(theme())
+    Select::new(message, options)
+        .with_render_config(theme())
+        .with_help_message("↑↓ navigate • ⏎ select")
 }
 
 /// Build a [`Confirm`] (y/n) prompt with the TENEX theme.
@@ -66,11 +78,25 @@ pub fn confirm<'a>(message: &'a str) -> Confirm<'a> {
 /// `src/commands/agent/AgentManager.ts:417-424`). Caller chains
 /// `.with_default(&indices)` to pre-check items and
 /// `.with_page_size(n)` for visible-window control.
+///
+/// TS @inquirer/checkbox auto-emits the helpLine
+///   `↑↓ navigate • space select • ⏎ submit`
+/// (`@inquirer/checkbox/dist/index.js:188-196`). Inquire's stock
+/// `DEFAULT_HELP_MESSAGE` is
+///   `↑↓ to move, space to select one, → to all, ← to none, type to filter`
+/// — different wording, different keybindings (inquire has →/← for
+/// all/none which TS doesn't). Override the help message text to TS's
+/// shorter form for visual fidelity. Inquire still wraps it in `[...]`
+/// brackets — that bracket wrapping is an inquire-specific render quirk
+/// without a clean override path; visible divergence is acknowledged in
+/// docs/tui-port/QUESTIONS.md.
 pub fn multi_select<'a, T: std::fmt::Display>(
     message: &'a str,
     options: Vec<T>,
 ) -> MultiSelect<'a, T> {
-    MultiSelect::new(message, options).with_render_config(theme())
+    MultiSelect::new(message, options)
+        .with_render_config(theme())
+        .with_help_message("↑↓ navigate • space select • ⏎ submit")
 }
 
 /// Adapt a `Fn(&str) -> Result<(), &'static str>` (the shape of
