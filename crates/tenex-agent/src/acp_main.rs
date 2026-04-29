@@ -156,6 +156,16 @@ async fn run() -> Result<()> {
         file_count: &file_count,
         injected_files: &injected_files,
     };
+    let telegram_channel_bindings: Vec<tenex_system_prompt::TelegramChannelBinding> = {
+        let bindings_path = base_dir.join("data").join("transport-bindings.json");
+        let store = tenex_telegram::binding::BindingStore::open(bindings_path);
+        store
+            .list_telegram_for_agent_project(&pubkey_hex, &project_meta.d_tag)
+            .into_iter()
+            .filter_map(|r| tenex_system_prompt::TelegramChannelBinding::parse(&r.channel_id))
+            .collect()
+    };
+
     let system_prompt =
         tenex_system_prompt::build_system_prompt(tenex_system_prompt::BuildSystemPromptInput {
             identity_name: agent_config.identity_name(),
@@ -164,12 +174,16 @@ async fn run() -> Result<()> {
             category: agent_config.resolved_category(),
             instructions: agent_config.instructions.as_deref(),
             working_dir: &working_dir,
+            project_base_path: Some(&working_dir),
             project_meta: Some(&project_meta),
+            project_id: Some(&project_meta.d_tag),
+            conversation_id: Some(&conversation_id),
             root_agents_md: root_agents_md.as_deref(),
             agents: &project_agents,
             teams_fragment: &teams_fragment,
             home: &home_info,
             preloaded_skills_block: None,
+            telegram_channel_bindings: &telegram_channel_bindings,
         });
     let history = render_history(
         conv_store.as_ref(),

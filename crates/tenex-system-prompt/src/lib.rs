@@ -17,6 +17,71 @@ pub struct HomeDirectoryInfo<'a> {
     pub injected_files: &'a [InjectedFile],
 }
 
+/// Minimal Telegram channel binding descriptor — enough for the `<channels>` system
+/// prompt block. Defined here so `tenex-system-prompt` does not need to depend on
+/// `tenex-telegram`.
+pub struct TelegramChannelBinding {
+    /// Canonical channel ID, e.g. `telegram:chat:12345` or
+    /// `telegram:group:-100987654321:topic:42`.
+    pub channel_id: String,
+    /// Chat-level ID (the numeric portion after `telegram:chat:` or
+    /// `telegram:group:`). Negative values indicate groups/supergroups; positive
+    /// values indicate private DMs.
+    pub chat_id: String,
+    /// Thread ID (forum topic), present only for `telegram:group:…:topic:…` keys.
+    pub thread_id: Option<String>,
+}
+
+impl TelegramChannelBinding {
+    /// Parse a canonical channel ID string into a `TelegramChannelBinding`.
+    /// Returns `None` if the format is unrecognised.
+    ///
+    /// Supported formats (from `tenex-telegram::session::SessionStore::channel_key`):
+    /// - `telegram:chat:<chat_id>`
+    /// - `telegram:group:<chat_id>:topic:<thread_id>`
+    pub fn parse(channel_id: &str) -> Option<Self> {
+        if let Some(rest) = channel_id.strip_prefix("telegram:group:") {
+            // telegram:group:<chat_id>:topic:<thread_id>
+            if let Some((chat_part, topic_part)) = rest.split_once(":topic:") {
+                return Some(Self {
+                    channel_id: channel_id.to_string(),
+                    chat_id: chat_part.to_string(),
+                    thread_id: Some(topic_part.to_string()),
+                });
+            }
+            // telegram:group:<chat_id> (no topic suffix — treat as group)
+            return Some(Self {
+                channel_id: channel_id.to_string(),
+                chat_id: rest.to_string(),
+                thread_id: None,
+            });
+        }
+        if let Some(rest) = channel_id.strip_prefix("telegram:chat:") {
+            return Some(Self {
+                channel_id: channel_id.to_string(),
+                chat_id: rest.to_string(),
+                thread_id: None,
+            });
+        }
+        None
+    }
+
+    /// Classify the channel as `"dm"`, `"topic"`, or `"group"`.
+    ///
+    /// DM: private chat where the chat_id is positive (does not start with `-`).
+    /// Topic: group + thread_id present.
+    /// Group: group chat without a thread_id.
+    pub fn channel_type(&self) -> &'static str {
+        if !self.chat_id.starts_with('-') {
+            "dm"
+        } else if self.thread_id.is_some() {
+            "topic"
+        } else {
+            "group"
+        }
+    }
+}
+
 pub struct BuildSystemPromptInput<'a> {
     pub identity_name: &'a str,
     pub pubkey_hex: &'a str,
@@ -24,12 +89,21 @@ pub struct BuildSystemPromptInput<'a> {
     pub category: Option<AgentCategory>,
     pub instructions: Option<&'a str>,
     pub working_dir: &'a str,
+    /// Absolute path to the project's root directory (used to render
+    /// `$PROJECT_BASE`-relative paths in the workspace block).
+    pub project_base_path: Option<&'a str>,
     pub project_meta: Option<&'a tenex_project::ProjectMetadata>,
+    /// Project d-tag (short identifier used in Nostr NIP-33 coordinates).
+    pub project_id: Option<&'a str>,
+    /// Hex conversation ID (root event ID) for the current conversation.
+    pub conversation_id: Option<&'a str>,
     pub root_agents_md: Option<&'a str>,
     pub agents: &'a [tenex_project::Agent],
     pub teams_fragment: &'a str,
     pub home: &'a HomeDirectoryInfo<'a>,
     pub preloaded_skills_block: Option<&'a str>,
+    /// Telegram channel bindings for this agent in the current project.
+    pub telegram_channel_bindings: &'a [TelegramChannelBinding],
 }
 
 fn render_home_directory(info: &HomeDirectoryInfo) -> String {
@@ -122,12 +196,16 @@ pub fn build_system_prompt(input: BuildSystemPromptInput<'_>) -> String {
         category,
         instructions,
         working_dir,
+        project_base_path,
         project_meta,
+        project_id,
+        conversation_id,
         root_agents_md,
         agents,
         teams_fragment,
         home,
         preloaded_skills_block,
+        telegram_channel_bindings,
     } = input;
     let mut parts: Vec<String> = Vec::new();
 
@@ -185,28 +263,85 @@ Your nsec and other secrets are in $AGENT_HOME/.env (auto-loaded in shell sessio
         );
     }
 
-    // Fragment 08: Workspace + project context
-    let mut project_lines = vec![format!("    cwd: {working_dir}")];
-    if let Some(meta) = project_meta {
-        if let Some(title) = &meta.title {
-            project_lines.push(format!("    project: {title}"));
+    // Fragment 08: Project context
+    {
+        // Helper: render a path as $PROJECT_BASE-relative when possible.
+        let relativize = |p: &str| -> String {
+            if let Some(base) = project_base_path {
+                if p == base {
+                    return "$PROJECT_BASE".to_string();
+                }
+                // Strip the base prefix only when the path is a strict child.
+                let base_with_sep = format!("{base}/");
+                if let Some(rel) = p.strip_prefix(base_with_sep.as_str()) {
+                    return format!("$PROJECT_BASE/{rel}");
+                }
+            }
+            p.to_string()
+        };
+
+        let mut ctx_parts: Vec<String> = Vec::new();
+        ctx_parts.push("<project-context>".to_string());
+
+        // Header: title, project ID, owner, conversation ID
+        if let Some(meta) = project_meta {
+            if let Some(title) = &meta.title {
+                ctx_parts.push(format!("  Title: \"{title}\""));
+            }
         }
-        if let Some(owner) = &meta.owner_pubkey {
-            project_lines.push(format!("    owner: {}", &owner[..8.min(owner.len())]));
+        if let Some(id) = project_id {
+            ctx_parts.push(format!("  ID: {id}"));
         }
+        if let Some(meta) = project_meta {
+            if let Some(owner) = &meta.owner_pubkey {
+                ctx_parts.push(format!(
+                    "  Owner pubkey: \"{}\"",
+                    &owner[..8.min(owner.len())]
+                ));
+            }
+        }
+        if let Some(conv_id) = conversation_id {
+            ctx_parts.push(format!(
+                "  Conversation ID: {}",
+                &conv_id[..8.min(conv_id.len())]
+            ));
+        }
+
+        // <workspace> block
+        ctx_parts.push(String::new());
+        ctx_parts.push("  <workspace>".to_string());
+        if project_base_path.is_some() {
+            ctx_parts.push("    root: $PROJECT_BASE".to_string());
+        }
+        ctx_parts.push(format!("    cwd: {}", relativize(working_dir)));
+        ctx_parts.push("  </workspace>".to_string());
+
+        // <channels> block — Telegram bindings for send_message
+        if !telegram_channel_bindings.is_empty() {
+            ctx_parts.push(String::new());
+            ctx_parts.push("  <channels>".to_string());
+            ctx_parts.push("    These are alternative communication channels available to you via the send_message tool.".to_string());
+            for binding in telegram_channel_bindings {
+                let ch_type = binding.channel_type();
+                ctx_parts.push(format!(
+                    "    <telegram type=\"{ch_type}\" id=\"{}\" />",
+                    binding.channel_id
+                ));
+            }
+            ctx_parts.push("  </channels>".to_string());
+        }
+
+        // <agents.md> block
+        if let Some(content) = root_agents_md {
+            ctx_parts.push(String::new());
+            ctx_parts.push("  <agents.md>".to_string());
+            ctx_parts.push(content.trim().to_string());
+            ctx_parts.push("  </agents.md>".to_string());
+        }
+
+        ctx_parts.push("</project-context>".to_string());
+        parts.push(ctx_parts.join("\n"));
     }
-    let mut project_ctx = format!(
-        "<project-context>\n  <workspace>\n{}\n  </workspace>",
-        project_lines.join("\n")
-    );
-    if let Some(content) = root_agents_md {
-        project_ctx.push_str(&format!(
-            "\n\n  <agents.md>\n{}\n  </agents.md>",
-            content.trim()
-        ));
-    }
-    project_ctx.push_str("\n</project-context>");
-    parts.push(project_ctx);
 
     // Available agents fragment
     if !agents.is_empty() {

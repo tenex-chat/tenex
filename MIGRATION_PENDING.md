@@ -59,7 +59,10 @@ Organized by functional area. Items marked ✅ are already at parity; items mark
 - [ ] **Effective Instructions (Lesson Synthesis)** — `PromptCompilerService` merges base instructions with lessons; Rust intentionally uses a different approach (`+INDEX.md` file), but LLM-synthesized multi-lesson synthesis is absent
 
 ### 2.3 Incomplete Fragments
-- [ ] **Fragment 08 — Project Context**: Rust omits team-related channel bindings, worktree metadata, other project references, and Telegram channel bindings that TypeScript includes
+- ✅ **Fragment 08 — Project Context**: Now renders project ID, owner pubkey, conversation ID, `$PROJECT_BASE`-relative workspace paths, and Telegram channel bindings (`<channels>` block) from `BindingStore`. Remaining gaps that cannot be implemented with current data:
+  - ❌ **Worktree metadata** — no Rust git-worktree utility exists; `tenex-project` carries no worktree data
+  - ❌ **Team-related channel bindings** — teams (`Team` struct) have no channel fields in the current data model
+  - ❌ **Other project cross-references** — `ProjectMetadata` has no such field; not populated by the ingestion pipeline
 
 ---
 

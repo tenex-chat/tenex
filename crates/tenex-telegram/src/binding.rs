@@ -96,6 +96,22 @@ impl BindingStore {
         Ok(removed)
     }
 
+    /// Return all Telegram bindings for the given agent pubkey and project ID.
+    pub fn list_telegram_for_agent_project(
+        &self,
+        agent_pubkey: &str,
+        project_id: &str,
+    ) -> Vec<&TransportBindingRecord> {
+        self.bindings
+            .values()
+            .filter(|r| {
+                r.transport == TELEGRAM_TRANSPORT
+                    && r.agent_pubkey == agent_pubkey
+                    && r.project_id == project_id
+            })
+            .collect()
+    }
+
     fn save(&self) -> Result<()> {
         if let Some(parent) = self.path.parent() {
             std::fs::create_dir_all(parent)?;
@@ -145,6 +161,31 @@ mod tests {
         let binding = reloaded.get_telegram("agent1", "telegram:chat:1").unwrap();
         assert_eq!(binding.project_id, "project1");
         assert_eq!(binding.transport, "telegram");
+    }
+
+    #[test]
+    fn list_telegram_for_agent_project_filters_correctly() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("transport-bindings.json");
+        let mut store = BindingStore::open(path);
+
+        store
+            .remember_telegram("agent1", "telegram:chat:1", "project1")
+            .unwrap();
+        store
+            .remember_telegram("agent1", "telegram:chat:2", "project1")
+            .unwrap();
+        store
+            .remember_telegram("agent1", "telegram:chat:3", "project2")
+            .unwrap();
+        store
+            .remember_telegram("agent2", "telegram:chat:1", "project1")
+            .unwrap();
+
+        let bindings = store.list_telegram_for_agent_project("agent1", "project1");
+        let mut channel_ids: Vec<&str> = bindings.iter().map(|b| b.channel_id.as_str()).collect();
+        channel_ids.sort();
+        assert_eq!(channel_ids, vec!["telegram:chat:1", "telegram:chat:2"]);
     }
 
     #[test]

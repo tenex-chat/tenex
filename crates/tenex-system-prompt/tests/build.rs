@@ -1,6 +1,8 @@
 //! Smoke tests for `tenex_system_prompt::build_system_prompt`.
 
-use tenex_system_prompt::{build_system_prompt, BuildSystemPromptInput, HomeDirectoryInfo};
+use tenex_system_prompt::{
+    build_system_prompt, BuildSystemPromptInput, HomeDirectoryInfo, TelegramChannelBinding,
+};
 
 fn minimal_home() -> HomeDirectoryInfo<'static> {
     HomeDirectoryInfo {
@@ -10,23 +12,31 @@ fn minimal_home() -> HomeDirectoryInfo<'static> {
     }
 }
 
-#[test]
-fn contains_identity_fragment() {
-    let home = minimal_home();
-    let out = build_system_prompt(BuildSystemPromptInput {
+fn minimal_input<'a>(home: &'a HomeDirectoryInfo<'a>) -> BuildSystemPromptInput<'a> {
+    BuildSystemPromptInput {
         identity_name: "scout",
         pubkey_hex: "abcdef0123456789",
         category_str: None,
         category: None,
         instructions: None,
         working_dir: "/home/u/proj",
+        project_base_path: None,
         project_meta: None,
+        project_id: None,
+        conversation_id: None,
         root_agents_md: None,
         agents: &[],
         teams_fragment: "",
-        home: &home,
+        home,
         preloaded_skills_block: None,
-    });
+        telegram_channel_bindings: &[],
+    }
+}
+
+#[test]
+fn contains_identity_fragment() {
+    let home = minimal_home();
+    let out = build_system_prompt(minimal_input(&home));
     assert!(out.contains("<agent-identity>"));
     assert!(out.contains("Your name: scout (abcdef01)"));
     assert!(out.contains("</agent-identity>"));
@@ -35,20 +45,7 @@ fn contains_identity_fragment() {
 #[test]
 fn contains_todo_guidance() {
     let home = minimal_home();
-    let out = build_system_prompt(BuildSystemPromptInput {
-        identity_name: "scout",
-        pubkey_hex: "abcdef0123456789",
-        category_str: None,
-        category: None,
-        instructions: None,
-        working_dir: "/home/u/proj",
-        project_meta: None,
-        root_agents_md: None,
-        agents: &[],
-        teams_fragment: "",
-        home: &home,
-        preloaded_skills_block: None,
-    });
+    let out = build_system_prompt(minimal_input(&home));
     assert!(out.contains("todo_write()"));
 }
 
@@ -63,12 +60,16 @@ fn identical_inputs_produce_byte_identical_output() {
         category: None,
         instructions: Some("hold steady"),
         working_dir: "/x",
+        project_base_path: None,
         project_meta: None,
+        project_id: None,
+        conversation_id: None,
         root_agents_md: None,
         agents: &[],
         teams_fragment: "",
         home: &home_a,
         preloaded_skills_block: None,
+        telegram_channel_bindings: &[],
     });
     let b = build_system_prompt(BuildSystemPromptInput {
         identity_name: "stable",
@@ -77,12 +78,16 @@ fn identical_inputs_produce_byte_identical_output() {
         category: None,
         instructions: Some("hold steady"),
         working_dir: "/x",
+        project_base_path: None,
         project_meta: None,
+        project_id: None,
+        conversation_id: None,
         root_agents_md: None,
         agents: &[],
         teams_fragment: "",
         home: &home_b,
         preloaded_skills_block: None,
+        telegram_channel_bindings: &[],
     });
     assert_eq!(a, b);
 }
@@ -98,12 +103,16 @@ fn orchestrator_category_skips_env_vars() {
         category: Some(AgentCategory::Orchestrator),
         instructions: None,
         working_dir: "/home/u/proj",
+        project_base_path: None,
         project_meta: None,
+        project_id: None,
+        conversation_id: None,
         root_agents_md: None,
         agents: &[],
         teams_fragment: "",
         home: &home,
         preloaded_skills_block: None,
+        telegram_channel_bindings: &[],
     });
     assert!(!out.contains("<environment-variables>"));
     assert!(out.contains("Orchestrator Guidance"));
@@ -119,12 +128,186 @@ fn includes_root_agents_md_when_supplied() {
         category: None,
         instructions: None,
         working_dir: "/home/u/proj/.worktrees/feature",
+        project_base_path: None,
         project_meta: None,
+        project_id: None,
+        conversation_id: None,
         root_agents_md: Some("\n# Project Rules\nUse repo conventions.\n"),
         agents: &[],
         teams_fragment: "",
         home: &home,
         preloaded_skills_block: None,
+        telegram_channel_bindings: &[],
     });
     assert!(out.contains("  <agents.md>\n# Project Rules\nUse repo conventions.\n  </agents.md>"));
+}
+
+#[test]
+fn project_context_renders_project_base_relative_cwd() {
+    let home = minimal_home();
+    let out = build_system_prompt(BuildSystemPromptInput {
+        identity_name: "scout",
+        pubkey_hex: "abcdef0123456789",
+        category_str: None,
+        category: None,
+        instructions: None,
+        working_dir: "/home/u/proj/src",
+        project_base_path: Some("/home/u/proj"),
+        project_meta: None,
+        project_id: None,
+        conversation_id: None,
+        root_agents_md: None,
+        agents: &[],
+        teams_fragment: "",
+        home: &home,
+        preloaded_skills_block: None,
+        telegram_channel_bindings: &[],
+    });
+    assert!(out.contains("cwd: $PROJECT_BASE/src"), "output was: {out}");
+    assert!(out.contains("root: $PROJECT_BASE"));
+}
+
+#[test]
+fn project_context_renders_exact_root_as_project_base() {
+    let home = minimal_home();
+    let out = build_system_prompt(BuildSystemPromptInput {
+        identity_name: "scout",
+        pubkey_hex: "abcdef0123456789",
+        category_str: None,
+        category: None,
+        instructions: None,
+        working_dir: "/home/u/proj",
+        project_base_path: Some("/home/u/proj"),
+        project_meta: None,
+        project_id: None,
+        conversation_id: None,
+        root_agents_md: None,
+        agents: &[],
+        teams_fragment: "",
+        home: &home,
+        preloaded_skills_block: None,
+        telegram_channel_bindings: &[],
+    });
+    assert!(out.contains("cwd: $PROJECT_BASE"), "output was: {out}");
+    assert!(!out.contains("cwd: $PROJECT_BASE/"), "should not append slash: {out}");
+}
+
+#[test]
+fn project_context_does_not_rewrite_sibling_path() {
+    let home = minimal_home();
+    let out = build_system_prompt(BuildSystemPromptInput {
+        identity_name: "scout",
+        pubkey_hex: "abcdef0123456789",
+        category_str: None,
+        category: None,
+        instructions: None,
+        working_dir: "/home/u/other-proj",
+        project_base_path: Some("/home/u/proj"),
+        project_meta: None,
+        project_id: None,
+        conversation_id: None,
+        root_agents_md: None,
+        agents: &[],
+        teams_fragment: "",
+        home: &home,
+        preloaded_skills_block: None,
+        telegram_channel_bindings: &[],
+    });
+    assert!(out.contains("cwd: /home/u/other-proj"), "output was: {out}");
+    assert!(!out.contains("cwd: $PROJECT_BASE"));
+}
+
+#[test]
+fn project_context_renders_project_id_and_conversation_id() {
+    let home = minimal_home();
+    let out = build_system_prompt(BuildSystemPromptInput {
+        identity_name: "scout",
+        pubkey_hex: "abcdef0123456789",
+        category_str: None,
+        category: None,
+        instructions: None,
+        working_dir: "/home/u/proj",
+        project_base_path: None,
+        project_meta: None,
+        project_id: Some("my-cool-project"),
+        conversation_id: Some("deadbeef01234567"),
+        root_agents_md: None,
+        agents: &[],
+        teams_fragment: "",
+        home: &home,
+        preloaded_skills_block: None,
+        telegram_channel_bindings: &[],
+    });
+    assert!(out.contains("ID: my-cool-project"), "output was: {out}");
+    assert!(out.contains("Conversation ID: deadbeef"), "output was: {out}");
+}
+
+#[test]
+fn project_context_renders_telegram_channel_bindings() {
+    let home = minimal_home();
+    let bindings = vec![
+        TelegramChannelBinding::parse("telegram:chat:12345").unwrap(),
+        TelegramChannelBinding::parse("telegram:group:-100987654321:topic:42").unwrap(),
+        TelegramChannelBinding::parse("telegram:group:-100111222333").unwrap(),
+    ];
+    let out = build_system_prompt(BuildSystemPromptInput {
+        identity_name: "scout",
+        pubkey_hex: "abcdef0123456789",
+        category_str: None,
+        category: None,
+        instructions: None,
+        working_dir: "/home/u/proj",
+        project_base_path: None,
+        project_meta: None,
+        project_id: None,
+        conversation_id: None,
+        root_agents_md: None,
+        agents: &[],
+        teams_fragment: "",
+        home: &home,
+        preloaded_skills_block: None,
+        telegram_channel_bindings: &bindings,
+    });
+    assert!(out.contains("<channels>"), "output was: {out}");
+    assert!(out.contains(r#"type="dm" id="telegram:chat:12345""#), "output was: {out}");
+    assert!(out.contains(r#"type="topic" id="telegram:group:-100987654321:topic:42""#), "output was: {out}");
+    assert!(out.contains(r#"type="group" id="telegram:group:-100111222333""#), "output was: {out}");
+    assert!(out.contains("</channels>"), "output was: {out}");
+}
+
+#[test]
+fn no_channels_block_when_no_bindings() {
+    let home = minimal_home();
+    let out = build_system_prompt(minimal_input(&home));
+    assert!(!out.contains("<channels>"), "output was: {out}");
+}
+
+#[test]
+fn telegram_channel_binding_parse_dm() {
+    let b = TelegramChannelBinding::parse("telegram:chat:12345").unwrap();
+    assert_eq!(b.chat_id, "12345");
+    assert_eq!(b.thread_id, None);
+    assert_eq!(b.channel_type(), "dm");
+}
+
+#[test]
+fn telegram_channel_binding_parse_group() {
+    let b = TelegramChannelBinding::parse("telegram:group:-100111222333").unwrap();
+    assert_eq!(b.chat_id, "-100111222333");
+    assert_eq!(b.thread_id, None);
+    assert_eq!(b.channel_type(), "group");
+}
+
+#[test]
+fn telegram_channel_binding_parse_topic() {
+    let b = TelegramChannelBinding::parse("telegram:group:-100987654321:topic:42").unwrap();
+    assert_eq!(b.chat_id, "-100987654321");
+    assert_eq!(b.thread_id, Some("42".to_string()));
+    assert_eq!(b.channel_type(), "topic");
+}
+
+#[test]
+fn telegram_channel_binding_parse_unknown_returns_none() {
+    assert!(TelegramChannelBinding::parse("unknown:format:here").is_none());
+    assert!(TelegramChannelBinding::parse("").is_none());
 }
