@@ -323,15 +323,13 @@ fn run_llm_submenu(base_dir: &std::path::Path) -> Result<()> {
         //   console.log(chalk.red("❌ No providers configured."));
         //   console.log(amber("→") + chalk.bold(" Run tenex config providers first"));
         // where `amber` is INQUIRER-amber truecolor (chalk.hex("#FFC107")),
-        // NOT bold and NOT the display palette's xterm-256 #214. Emit
-        // the raw truecolor escape and route the chalk.red through the
-        // theme helper for byte-perfect SGR-39 close.
-        let amber_open = crate::tui::theme::INQUIRER_AMBER_FG;
-        let amber_close = crate::tui::theme::FG_RESET;
-        eprintln!("{}", crate::tui::theme::chalk_red("❌ No providers configured."));
+        // NOT bold and NOT the display palette's xterm-256 #214.
+        use crate::tui::theme::{chalk_bold, chalk_red, inquirer_amber};
+        eprintln!("{}", chalk_red("❌ No providers configured."));
         eprintln!(
-            "{amber_open}→{amber_close}{}",
-            crate::tui::theme::chalk_bold(" Run tenex config providers first"),
+            "{}{}",
+            inquirer_amber("→"),
+            chalk_bold(" Run tenex config providers first"),
         );
         std::process::exit(1);
     }
