@@ -180,7 +180,7 @@ The Rust `tenex` runtime (`tenex/src/runtime_cmd/`) already implements core orch
 - 🚫 Won't port — already implemented as `tenex/src/runtime_cmd/agent_config_update.rs` with partial-update semantics (model, tool, skill, blocked-skill, mcp tags; full reset via `reset` tag)
 
 ### 8.4 Escalation (ask tool target)
-- [ ] `EscalationService` — resolves the escalation agent slug from `config.escalation.agent`, auto-adds to current project if not already a member, notifies `ProjectContext`. Not found in Rust.
+- ✅ `EscalationService` — `crates/tenex-agent/src/escalation.rs` resolves the escalation agent slug from `config.escalation.agent` (project agents first, then global index fallback). `AskTool` routes through the escalation agent via `DelegationIntent` when a pubkey is resolved; falls back to owner ask on resolution failure.
 
 ---
 
