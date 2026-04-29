@@ -224,6 +224,19 @@ fn format_claude_setup_token_hint() -> String {
     )
 }
 
+/// TS at `provider-setup.ts:105` emits:
+///
+/// ```ts
+/// message: `${displayName} label ${chalk.dim("(optional)")}:`
+/// ```
+///
+/// The parenthesised hint is the only dim-wrapped portion; everything
+/// else is plain. Mirror byte-for-byte: `<displayName> label \x1b[2m(optional)\x1b[22m:`.
+fn format_label_prompt(display_name: &str) -> String {
+    use crate::tui::theme::{DIM_CLOSE, DIM_OPEN};
+    format!("{display_name} label {DIM_OPEN}(optional){DIM_CLOSE}:")
+}
+
 /// Open the appropriate input prompt for `provider_id`. Returns
 /// `Some(serialized)` if the user entered a value (key + optional label
 /// joined by a single space, per `serializeApiKeyEntry`), or `None` if the
@@ -265,7 +278,11 @@ pub fn ask_for_key(
 
     let Some(value) = value else { return Ok(None) };
 
-    let label_msg = format!("{display_name} label (optional):");
+    // TS at provider-setup.ts:105 emits:
+    //   message: `${displayName} label ${chalk.dim("(optional)")}:`
+    // — the parenthesised hint is dim while the rest of the prompt is
+    // plain. Mirror byte-for-byte by embedding the dim escapes.
+    let label_msg = format_label_prompt(display_name);
     let label_raw = prompts::input(&label_msg)
         .prompt()
         .map_err(|e| anyhow!("{display_name} label prompt: {e}"))?;
@@ -473,5 +490,21 @@ mod tests {
             plain,
             "  Run claude setup-token in another terminal, then paste the key (sk-ant-...) here.",
         );
+    }
+
+    /// Pin the per-provider label prompt against TS chalk output of
+    /// `provider-setup.ts:105`. The dim wrap is on `(optional)` only.
+    #[test]
+    fn label_prompt_dim_wraps_only_the_optional_hint() {
+        let s = format_label_prompt("Anthropic");
+        assert_eq!(s, "Anthropic label \x1b[2m(optional)\x1b[22m:");
+    }
+
+    #[test]
+    fn label_prompt_ansi_stripped_text_is_verbatim_ts() {
+        use console::strip_ansi_codes;
+        let s = format_label_prompt("OpenRouter");
+        let plain = strip_ansi_codes(&s).into_owned();
+        assert_eq!(plain, "OpenRouter label (optional):");
     }
 }
