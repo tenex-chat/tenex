@@ -58,7 +58,21 @@ pub fn theme() -> RenderConfig<'static> {
             ErrorMessageRenderConfig::default_colored()
                 .with_prefix(Styled::new(">").with_fg(Color::DarkRed))
                 .with_message(StyleSheet::new().with_fg(Color::DarkRed)),
-        );
+        )
+        // TS @inquirer/core's default `theme.style.help`
+        // (`@inquirer/core/dist/lib/theme.js:17`) is
+        //   (text) => styleText('dim', text)
+        // — SGR 2 (faint), no foreground colour. Inquire 0.7's
+        // `Attributes` enum only supports BOLD + ITALIC (`ui/api/style.rs:25-31`)
+        // — there's no way to emit the `\x1b[2m` faint attribute through
+        // its public API without forking. The closest visual
+        // approximation is `Color::DarkGrey` (`\x1b[90m` — chalk.gray's
+        // exact escape), which renders a similar "muted helper text"
+        // look on every terminal that handles ANSI 256-colour bright
+        // black. Inquire's own default `default_colored()` paints the
+        // help line `LightCyan` (a bright highlight); overriding to
+        // DarkGrey is the best byte-fidelity we can achieve here.
+        .with_help_message(StyleSheet::new().with_fg(Color::DarkGrey));
     // TS @inquirer/core's default `theme.style.message` is
     // `styleText('bold', text)` (`@inquirer/core/dist/lib/theme.js:14`)
     // and the TENEX inquirerTheme doesn't override it — so prompt
@@ -149,5 +163,19 @@ mod tests {
         assert_eq!(cfg.error_message.prefix.content, ">");
         assert_eq!(cfg.error_message.prefix.style.fg, Some(Color::DarkRed));
         assert_eq!(cfg.error_message.message.fg, Some(Color::DarkRed));
+    }
+
+    /// Pin the help-message style to DarkGrey. TS @inquirer/core's
+    /// `theme.style.help` uses chalk.dim (SGR 2); inquire 0.7 can't emit
+    /// SGR 2, so DarkGrey (`\x1b[90m`) is the closest byte-level
+    /// approximation — inquire's default of LightCyan is visibly off.
+    #[test]
+    fn theme_uses_dark_grey_for_help_message_approximating_chalk_dim() {
+        let cfg = theme();
+        assert_eq!(
+            cfg.help_message.fg,
+            Some(Color::DarkGrey),
+            "help_message must use DarkGrey to approximate chalk.dim",
+        );
     }
 }
