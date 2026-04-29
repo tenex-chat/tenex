@@ -353,13 +353,24 @@ pub fn build_menu_sections() -> Vec<MenuSection> {
 }
 
 /// Pad `label` to 16 visible characters, then append `"— "` and the
-/// description. Source: `src/commands/config/index.ts:89-91`.
+/// description.
+///
+/// Source: `src/commands/config/index.ts:89-91` —
+/// ```ts
+/// const label = entry.label.padEnd(16);
+/// choices.push({ name: `  ${label}— ${entry.description}`, value: idx });
+/// ```
+///
+/// Note the TWO leading spaces inside the choice name. Inquirer's
+/// select prompt prepends its own `  ` (or `❯ `) cursor slot, so the
+/// visible indent is 4 spaces (or `❯ ` + 2 spaces = 3 chars). Mirror
+/// this here so the rendered indent matches TS byte-for-byte.
 fn format_label(label: &str, description: &str) -> String {
     let mut padded = label.to_owned();
     while padded.chars().count() < 16 {
         padded.push(' ');
     }
-    format!("{padded}— {description}")
+    format!("  {padded}— {description}")
 }
 
 #[cfg(test)]
@@ -589,16 +600,18 @@ mod tests {
 
     #[test]
     fn menu_labels_pad_to_at_least_16_chars_before_em_dash() {
+        // TS prepends 2 leading spaces inside the choice name
+        // (config/index.ts:89). Plus 16-char-padded label. Total 18
+        // chars before "— ".
         let s = build_menu_sections();
         for sec in &s {
             for entry in &sec.entries {
                 let pre = entry.label.split("— ").next().unwrap();
-                // The label part (before "— ") should be exactly 16 chars
-                // (some labels are longer than 16 — those don't pad).
                 let pre_len = pre.chars().count();
                 let label_only = entry.label.split_whitespace().next().unwrap();
                 if label_only.len() <= 16 {
-                    assert_eq!(pre_len, 16, "for label: {pre:?}");
+                    // 2 leading spaces + 16-char padded label = 18.
+                    assert_eq!(pre_len, 18, "for label: {pre:?}");
                 }
             }
         }
@@ -619,14 +632,29 @@ mod tests {
     #[test]
     fn format_label_pads_short_labels_to_sixteen_chars() {
         let s = format_label("LLMs", "Model configurations");
-        // "LLMs" + 12 spaces = 16 chars before "— ".
-        assert!(s.starts_with("LLMs            — "));
+        // 2 leading spaces (per TS template) + "LLMs" + 12 padding spaces
+        // = 18 chars before "— ".
+        assert!(s.starts_with("  LLMs            — "));
     }
 
     #[test]
     fn format_label_does_not_truncate_long_labels() {
         let s = format_label("Intervention", "x");
-        // "Intervention" is 12 chars → padded to 16. "Summarization" is 13.
-        assert!(s.starts_with("Intervention    — "));
+        // "Intervention" is 12 chars → padded to 16, with 2 leading
+        // spaces prepended per TS template.
+        assert!(s.starts_with("  Intervention    — "));
+    }
+
+    #[test]
+    fn format_label_prepends_two_leading_spaces_per_ts_template() {
+        // TS at config/index.ts:89-91 wraps the padded label in a
+        // template with TWO leading spaces inside the choice name:
+        //   `  ${label}— ${entry.description}`
+        // Pin those leading spaces — they're what makes the visible
+        // indent 4 (when inquirer adds its own 2-char cursor slot).
+        let s = format_label("LLMs", "Model configurations");
+        assert!(s.starts_with("  "), "got: {s:?}");
+        // And the third character is the start of the actual label.
+        assert!(s.chars().nth(2).map(|c| c == 'L').unwrap_or(false));
     }
 }

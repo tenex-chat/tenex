@@ -312,6 +312,11 @@ fn render_frame<W: Write>(
                 }
             }
             Row::Back => {
+                // TS at config/index.ts:98 — `chalk.dim("  Back")` with
+                // TWO leading spaces INSIDE the dim wrap. Inquirer
+                // prepends another 2-char cursor slot, so the visible
+                // indent is 4 spaces (or `❯ ` + 2 spaces). Mirror by
+                // emitting "  Back" inside the dim wrap.
                 let is_active = i == active;
                 let pfx = if is_active { cursor_active.as_str() } else { "  " };
                 if is_active {
@@ -319,7 +324,7 @@ fn render_frame<W: Write>(
                         stdout,
                         SetForegroundColor(AMBER),
                         Print(pfx),
-                        Print("Back"),
+                        Print("  Back"),
                         ResetColor,
                         Print("\r\n"),
                     )?;
@@ -328,7 +333,7 @@ fn render_frame<W: Write>(
                         stdout,
                         Print(pfx),
                         SetAttribute(Attribute::Dim),
-                        Print("Back"),
+                        Print("  Back"),
                         SetAttribute(Attribute::Reset),
                         Print("\r\n"),
                     )?;
