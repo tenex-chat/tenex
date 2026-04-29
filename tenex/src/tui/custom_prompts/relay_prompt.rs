@@ -338,7 +338,7 @@ fn render_frame<W: Write>(
         if !desc.is_empty() {
             queue!(
                 stdout,
-                SetForegroundColor(Color::AnsiValue(8)),
+                SetForegroundColor(crate::tui::theme::CHALK_GRAY_CROSSTERM),
                 Print(desc),
                 ResetColor,
             )?;

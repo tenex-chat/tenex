@@ -659,11 +659,11 @@ fn render_browse<W: Write>(
                 let plural = if count == 1 { "key" } else { "keys" };
                 // TS provider-select-prompt.ts:67 uses chalk.gray (bright
                 // black, ANSI 90 / xterm-256 index 8), NOT chalk.dim.
-                // Match the foreground-colour approach so the badge
-                // renders the same muted-grey as TS.
+                // Use the shared theme constant so the badge renders
+                // the same muted-grey as TS without an inline literal.
                 queue!(
                     stdout,
-                    SetForegroundColor(Color::AnsiValue(8)),
+                    SetForegroundColor(crate::tui::theme::CHALK_GRAY_CROSSTERM),
                     Print(format!(" [{count} {plural}]")),
                     ResetColor,
                 )?;

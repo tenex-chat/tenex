@@ -227,8 +227,9 @@ const COL_TITLE: usize = 22;
 const COL_SCHEDULE: usize = 22;
 const COL_TYPE: usize = 5;
 
-const ACCENT: Color = Color::AnsiValue(214);
-const MUTED: Color = Color::AnsiValue(240);
+// Palette aliases sourced from the shared theme module.
+const ACCENT: Color = crate::tui::theme::DISPLAY_ACCENT_CROSSTERM;
+const MUTED: Color = crate::tui::theme::DISPLAY_MUTED_CROSSTERM;
 
 // ─── Main TUI loop ───────────────────────────────────────────────────────────
 
