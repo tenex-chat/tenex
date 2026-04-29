@@ -77,6 +77,7 @@ Spawned by `tenex runtime` per conversation turn via `tenex-agent <agent.json>` 
 - **Conversation tools**: `conversation_get` (retrieve message transcript by ID from SQLite store), `conversation_list` (list conversations with date range filter)
 - **Scheduling tools**: `schedule_task` (write one-off or recurring tasks to `schedules.json` via `tenex-scheduler` storage API), `kill` (cancel a scheduled task by ID; agent/shell kills require TS runtime in-process state)
 - **Model override**: `change_model` (persist `meta_model_variant` to `AgentContextState`; resolved on next invocation — accepts named preset, `provider:model`, or `provider/model`)
+- **Silent completion**: `no_response` (sets `Arc<AtomicBool>` flag; main loop skips final `ConversationIntent` emission — no Nostr event published)
 - Provider dispatch: Anthropic, OpenAI, OpenRouter, Ollama (via `rig-core`)
 - LLM config resolution from `~/.tenex/llms.json` + `~/.tenex/providers.json`
 - Teams support: loads `teams.json`, renders `<teams-context>` fragment, routes delegation by team name
@@ -164,7 +165,6 @@ All previously listed gaps have been closed. Remaining TS-only tools not yet por
 | TS Tool | Status | Notes |
 |---------|--------|-------|
 | `conversation_search` | TS-only | Semantic search across conversations. No Rust equivalent. |
-| `no_response` | ✅ Ported | Suppresses final ConversationIntent via `Arc<AtomicBool>` checked in main loop. |
 | `send_message` | TS-only | Send arbitrary Nostr message. Not yet ported. |
 | `mcp_list_resources`, `mcp_resource_read`, `mcp_subscribe`, `mcp_subscription_stop` | TS-only | MCP protocol tools. No Rust equivalent yet. |
 | `report_publish` | TS-only | Publish a formatted report event. Not yet ported. |
@@ -172,7 +172,7 @@ All previously listed gaps have been closed. Remaining TS-only tools not yet por
 | `rag_subscription_*` | TS-only | RAG subscription management. No Rust equivalent. |
 | `rag_collection_create`, `rag_collection_delete`, `rag_collection_list` | TS-only | RAG collection management. Not ported; Rust agents use audience-scoped collections implicitly. |
 
-Note: `conversation_get`, `conversation_list`, `kill` (scheduled tasks only), `schedule_task`, and `change_model` are now implemented in Rust. The Rust `kill` only cancels scheduled tasks — agent/shell kills require TS in-process state (RALRegistry, CooldownRegistry, AgentDispatchService). The Rust `change_model` accepts any model spec (`provider:model`, named preset) rather than the TS restriction to meta-model variant names.
+Note: `conversation_get`, `conversation_list`, `kill` (scheduled tasks only), `schedule_task`, `change_model`, and `no_response` are now implemented in Rust. The Rust `kill` only cancels scheduled tasks — agent/shell kills require TS in-process state (RALRegistry, CooldownRegistry, AgentDispatchService). The Rust `change_model` accepts any model spec (`provider:model`, named preset) rather than the TS restriction to meta-model variant names.
 
 ---
 

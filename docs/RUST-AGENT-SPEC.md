@@ -463,6 +463,13 @@ Add or remove skills for the current conversation. Newly-added skill content is 
 
 Returns JSON: `{ success, message, activeSkills, skillContent }`. Rejects if the same ID appears in both `add` and `remove`, or if any `add` ID is not resolvable from `skill_list`.
 
+### `no_response`
+Request a silent completion for the current turn. Use only when the user's message explicitly asks for no reply (note-to-self, counting-aloud, or similar cases where an acknowledgement would be unwanted).
+
+No parameters.
+
+Sets an `Arc<AtomicBool>` flag in the main loop. After the inner rig loop ends, `main.rs` checks this flag before emitting the final `ConversationIntent` — if set, no event is published and the turn ends silently. Note: the TS implementation (in `no_response.ts`) uses a similar early-exit pattern; the Rust version is behaviorally equivalent.
+
 ## Supervision Heuristics
 
 `tenex-supervision` is wired into the hook layer. It runs two kinds of checks:
@@ -536,5 +543,4 @@ API keys are resolved from provider-specific env vars (`ANTHROPIC_API_KEY`, `OPE
 ## Future Work (not yet implemented)
 
 - **ToolResult in history**: Projection filters out `ToolResult` messages because assistant records currently have empty `tool_calls`. Once `record_turn` captures tool calls inline, paired tool-call/result sequences can flow to providers.
-- **`no_response` tool**: Suppress the completion event when the agent decides no reply is needed.
 - **TS-only tools**: `conversation_search`, `send_message`, MCP tools (`mcp_list_resources`, `mcp_resource_read`, `mcp_subscribe`, `mcp_subscription_stop`), `report_publish`, `agents_write`, RAG subscription tools (`rag_subscription_create/delete/get/list`), RAG collection management tools (`rag_collection_create/delete/list`).
