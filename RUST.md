@@ -201,7 +201,7 @@ Note: `conversation_get`, `conversation_list`, `kill` (scheduled tasks only), `s
 Resolved between twenty-third and twenty-fourth passes:
 - **`report_publish` tool ported**: Emits kind:30023 NIP-23 long-form articles (replaceable) via `PublishArticleIntent` through the standard NDJSON-stdout channel. Accepts file or directory path; directory recursion prefixes `dirName/relative/path` as `d_tag`. Path-traversal protection via `canonicalize() + starts_with()`. 4 unit tests (single file, directory prefix, traversal rejection, missing path) + 1 encoder test in `tenex-protocol`.
 - **`tenex-protocol` kind:30023**: `PublishArticleIntent`, `Intent::PublishArticle`, `LONG_FORM_ARTICLE = 30023` constant, `encode_publish_article()` encoder. Tags: `[d]`, `[document]`, `[a]` project link.
-- **Banner byte-fidelity**: `banner.rs` migrated from `theme::banner_glow` etc. to raw ANSI escape constants (`\x1b[38;5;Nm`) matching TS chalk's wire bytes; removes the function-pointer row table. Continuation of the larger `display.ts` wire-byte parity sweep (8+ files already done in this cycle).
+- **Banner byte-fidelity**: `banner.rs` migrated from `theme::banner_glow` etc. to raw ANSI escape constants (`\x1b[38;5;Nm`) matching TS chalk's wire bytes; removes the function-pointer row table. Dead helpers `banner_glow`, `banner_bright`, `banner_mid`, `banner_dark` deleted from theme.rs. Continuation of the larger `display.ts` wire-byte parity sweep (8+ files done in this cycle).
 - **`send_message` clarified**: Not a generic Nostr tool — it delivers messages to Telegram channels and depends on TS-only `TransportBindingStore` + bot-token infrastructure. Not portable to Rust without that substrate.
 - **Test count**: 1330 (up from 1320).
 
