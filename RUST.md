@@ -34,6 +34,88 @@ The Rust port is underway crate by crate. The TypeScript daemon still owns per-p
 
 ---
 
+## Runtime Architecture
+
+```mermaid
+graph TD
+    subgraph DAEMON["tenex daemon — host supervisor"]
+        D["tenex\nCLI · supervisor · cron TUI · per-project runtime"]
+        LLCSRV["tenex-llm-config IPC\nin-process tokio task"]
+        HB["24011 inventory heartbeat\nin-process 30 s loop"]
+    end
+
+    D -->|"supervises · auto-restart"| WL["tenex-whitelist\nPubkey trust gate\nwatches pubkeys.txt · whitelist.sock"]
+    D -->|"supervises · auto-restart"| ID["tenex-identity\nkind:0 profile cache\nidentity.sock · SQLite TTL store"]
+    D -->|"supervises · auto-restart"| SU["tenex-summarizer\nkind:513 conversation\nmetadata daemon"]
+    D -->|"supervises · auto-restart"| SC["tenex-scheduler\nFires scheduled kind:1\nNostr events · schedules.json"]
+    D -->|"supervises · auto-restart"| IV["tenex-intervention\nMonitors kind:24133\nrequests review on user silence"]
+
+    D -->|"one per project d-tag"| RT["tenex runtime  inside tenex binary\nper-project Nostr event loop\n24010 heartbeat · DispatchCoordinator"]
+
+    RT -->|"one per conversation turn\nstdin = raw Nostr event JSON\nenv: TRACEPARENT · TENEX_BASE_DIR"| AG["tenex-agent\nper-turn LLM conversation\nstreaming · tool suite · re-engagement loop\nruntime-state persistence · injection tracking"]
+
+    AG -.->|"NDJSON intents on stdout\nConversationIntent · DelegationIntent · …"| RT
+    RT -->|sign + publish| NR(["Nostr Relay"])
+    D <-->|"subscribe to project events"| NR
+    IV <-->|"subscribe to kind:24133"| NR
+
+    WL -.->|"whitelist.sock"| TS(["TypeScript runtime\nbun src/boot.ts\noptional via --ts flag"])
+    ID -.->|"identity.sock"| TS
+    LLCSRV -.->|"llm-config.sock"| TS
+```
+
+---
+
+## Crate Dependency Graph
+
+Arrows mean **"depends on"** (uses the library at compile-time).
+
+```mermaid
+graph LR
+    subgraph BINS["Binaries / entry-points"]
+        T["tenex\nCLI + daemon + TUI"]
+        TA["tenex-agent"]
+        TID["tenex-identity"]
+        TSC["tenex-scheduler"]
+        TSU["tenex-summarizer"]
+        TIV["tenex-intervention"]
+        TWL["tenex-whitelist"]
+    end
+
+    subgraph DOM["Domain libraries"]
+        CTX["tenex-context\nconversation projection\ncompaction · decay · reminders"]
+        RAG["tenex-rag\nSQLite vector store\nembedding client"]
+        PRJ["tenex-project\nfile-backed project state\nread-only · no SQLite"]
+        SYS["tenex-system-prompt\npure prompt assembly\nidentity + project + skills"]
+    end
+
+    subgraph FOUND["Foundation libraries  no internal tenex deps"]
+        REG["tenex-agent-registry\nJSON agent records\n~/.tenex/agents/ + index"]
+        CON["tenex-conversations\nSQLite conversation store\ntool_messages · runtime_state"]
+        LLM["tenex-llm-config\nconfig resolver\nNDJSON Unix-socket IPC server"]
+        PRO["tenex-protocol\ntransport-agnostic intents\nNostr + stdio channel adapters"]
+        SUP["tenex-supervision\npost-turn heuristics\ntodo nudge · re-engagement · delegation gate"]
+        TEL["tenex-telemetry\nOTel / OTLP bootstrap\nW3C traceparent propagation"]
+        MCP["tenex-mcp\nMCP protocol types"]
+    end
+
+    T --> REG & CON & LLM & PRJ & TEL & TWL & TID
+    TA --> REG & CTX & CON & LLM & MCP & PRJ & PRO & RAG & TSC & SUP & SYS & TEL
+    TID --> TEL
+    TSC --> TEL
+    TSU --> TEL
+    TIV --> PRJ & PRO & TEL
+
+    CTX --> CON
+    RAG --> LLM
+    PRJ --> REG
+    SYS --> PRJ & SUP
+```
+
+> `tenex-agent` uses `tenex-scheduler` as a library (the `schedule_task` / `kill` tools call its storage module directly). `tenex` uses `tenex-whitelist` as a library (embeds the PubkeyGate for inline pubkey validation) and links `tenex-identity` for the supervised-process binary path resolution.
+
+---
+
 ## What Is Wired Up and Working
 
 ### `tenex daemon` — Host Supervisor
