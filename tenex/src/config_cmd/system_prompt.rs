@@ -84,7 +84,7 @@ fn run_show(base_dir: &Path) -> Result<()> {
     let enabled = doc.global_system_prompt_enabled().unwrap_or(true);
 
     if content.trim().is_empty() {
-        let gray = console::Style::new().color256(244);
+        let gray = crate::tui::theme::chalk_gray();
         println!("{}", gray.apply_to("No global system prompt configured."));
         return Ok(());
     }
@@ -116,7 +116,7 @@ fn run_set_enabled(base_dir: &Path, enabled: bool) -> Result<()> {
 fn run_edit(base_dir: &Path) -> Result<()> {
     let editor = preferred_editor();
     let amber_bold = console::Style::new().color256(214).bold();
-    let gray = console::Style::new().color256(244);
+    let gray = crate::tui::theme::chalk_gray();
     println!(
         "{}",
         amber_bold.apply_to("Opening editor to configure global system prompt...")
@@ -157,7 +157,7 @@ fn run_edit(base_dir: &Path) -> Result<()> {
         print_success_line("Global system prompt cleared (no content).");
     } else {
         print_success_line("Global system prompt saved successfully!");
-        let gray = console::Style::new().color256(244);
+        let gray = crate::tui::theme::chalk_gray();
         // TS `cleanedContent.length` measures UTF-16 code units, but the
         // user-visible label says "characters" — Rust .len() returns
         // bytes which over-counts every multi-byte codepoint. Use

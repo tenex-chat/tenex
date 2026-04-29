@@ -203,7 +203,7 @@ pub fn format_preview_text(previews: &[AgentPreview]) -> String {
 /// styling: red for line 1, gray for line 2.
 pub fn format_no_installation_detected() -> String {
     let red = console::Style::new().red();
-    let gray = console::Style::new().color256(8);
+    let gray = crate::tui::theme::chalk_gray();
     let mut out = format!("{}\n", red.apply_to("No OpenClaw installation detected."));
     out.push_str(&format!(
         "{}\n",

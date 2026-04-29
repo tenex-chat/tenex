@@ -210,7 +210,7 @@ fn find_orphaned_agents(purge: bool) -> Result<()> {
 
     let green = console::Style::new().green();
     let yellow = console::Style::new().yellow();
-    let gray = console::Style::new().color256(8); // chalk's default gray
+    let gray = crate::tui::theme::chalk_gray();
     let blue = console::Style::new().blue();
 
     if orphans.is_empty() {
@@ -340,7 +340,7 @@ fn preview_conversations_status() -> Result<()> {
     };
 
     let blue = console::Style::new().blue();
-    let gray = console::Style::new().color256(8);
+    let gray = crate::tui::theme::chalk_gray();
     let bold = console::Style::new().bold();
 
     println!("{}", blue.apply_to("Checking conversation indexing status...\n"));
@@ -392,7 +392,7 @@ fn reindex_conversations(confirm: bool) -> Result<()> {
     use crate::tui::prompts;
 
     let yellow = console::Style::new().yellow();
-    let gray = console::Style::new().color256(8);
+    let gray = crate::tui::theme::chalk_gray();
 
     if !confirm {
         println!(

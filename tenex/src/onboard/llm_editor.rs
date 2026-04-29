@@ -197,9 +197,9 @@ fn display_providers(providers: &crate::store::providers::ProvidersDoc) {
     let configured = providers.configured_provider_ids();
     if configured.is_empty() {
         // TS uses `chalk.gray("  None configured")` — leading 2-space
-        // indent inside the gray wrap. Mirror with the muted-gray
-        // style and the same indent.
-        let gray = console::Style::new().color256(244);
+        // indent inside the gray wrap. Use the chalk-gray helper so
+        // the bright-black ANSI sequence matches TS's output.
+        let gray = crate::tui::theme::chalk_gray();
         println!("{}", gray.apply_to("  None configured"));
     } else {
         for pid in &configured {
