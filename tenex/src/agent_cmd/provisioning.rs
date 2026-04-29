@@ -62,12 +62,11 @@ pub async fn delete_stored_agent(
         if let Err(e) = publish_installed_agents_inventory(base_dir).await {
             // TS path: `logger.warn(...)`. Surface to stderr so CLI users see
             // the failure; tests / library callers can capture if needed.
-            let yellow = console::Style::new().yellow();
             eprintln!(
                 "{}",
-                yellow.apply_to(format!(
+                crate::tui::theme::chalk_yellow(&format!(
                     "Warning: failed to publish installed-agent inventory: {e}"
-                ))
+                )),
             );
         }
     }

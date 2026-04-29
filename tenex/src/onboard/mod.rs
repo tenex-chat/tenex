@@ -97,8 +97,7 @@ pub async fn run(args: OnboardArgs) -> Result<()> {
             if msg.contains("SIGINT") || msg.contains("force closed") {
                 std::process::exit(0);
             }
-            let red = console::Style::new().red();
-            eprintln!("{}", red.apply_to(format!("Setup failed: {e}")));
+            eprintln!("{}", crate::tui::theme::chalk_red(&format!("Setup failed: {e}")));
             std::process::exit(1);
         }
     }

@@ -141,16 +141,10 @@ pub fn format_preview_json(previews: &[AgentPreview]) -> String {
 ///     Instructions: <first-120-chars>...
 /// ```
 ///
-/// `chalk` colours apply via `console::Style` so the wire SGR sequences
-/// match TS chalk's output (`green` for slug, `gray` for the rest,
-/// `blue` for the leading "Would import…" line).
+/// Wire bytes match TS chalk byte-for-byte via `theme::chalk_*`
+/// helpers (per-attribute SGR closes, no SGR-0 full-reset).
 pub fn format_preview_text(previews: &[AgentPreview]) -> String {
-    let blue = console::Style::new().blue();
-    let green = console::Style::new().green();
-    // TS uses chalk.gray which emits `\x1b[90m` (bright black). Use the
-    // shared theme helper that produces the byte-exact same sequence —
-    // distinct from theme::muted_gray which is `\x1b[38;5;244m`.
-    let gray = crate::tui::theme::chalk_gray();
+    use crate::tui::theme::{chalk_blue, chalk_gray_str, chalk_green};
 
     // TS at openclaw.ts:204 uses the LITERAL 'agent(s)' string —
     // no real pluralisation, the parenthetical is in the template:
@@ -158,33 +152,30 @@ pub fn format_preview_text(previews: &[AgentPreview]) -> String {
     // Match that verbatim; do NOT introduce singular/plural variants.
     let mut out = format!(
         "{}\n",
-        blue.apply_to(format!(
-            "Would import {} agent(s):\n",
-            previews.len()
-        ))
+        chalk_blue(&format!("Would import {} agent(s):\n", previews.len())),
     );
     for p in previews {
         out.push_str(&format!(
             "{}{}\n",
-            green.apply_to(format!("  {}", p.slug)),
-            gray.apply_to(format!(" ({})", p.name))
+            chalk_green(&format!("  {}", p.slug)),
+            chalk_gray_str(&format!(" ({})", p.name)),
         ));
         out.push_str(&format!(
             "{}\n",
-            gray.apply_to(format!("    Role:         {}", p.role))
+            chalk_gray_str(&format!("    Role:         {}", p.role)),
         ));
         out.push_str(&format!(
             "{}\n",
-            gray.apply_to(format!("    Model:        {}", p.model))
+            chalk_gray_str(&format!("    Model:        {}", p.model)),
         ));
         out.push_str(&format!(
             "{}\n",
-            gray.apply_to(format!("    Description:  {}", p.description))
+            chalk_gray_str(&format!("    Description:  {}", p.description)),
         ));
         let truncated: String = p.instructions.chars().take(120).collect();
         out.push_str(&format!(
             "{}\n",
-            gray.apply_to(format!("    Instructions: {truncated}..."))
+            chalk_gray_str(&format!("    Instructions: {truncated}...")),
         ));
     }
     out
@@ -202,14 +193,13 @@ pub fn format_preview_text(previews: &[AgentPreview]) -> String {
 /// TS-equivalent destination (`process.stderr` via `eprintln!`). `chalk`
 /// styling: red for line 1, gray for line 2.
 pub fn format_no_installation_detected() -> String {
-    let red = console::Style::new().red();
-    let gray = crate::tui::theme::chalk_gray();
-    let mut out = format!("{}\n", red.apply_to("No OpenClaw installation detected."));
+    use crate::tui::theme::{chalk_gray_str, chalk_red};
+    let mut out = format!("{}\n", chalk_red("No OpenClaw installation detected."));
     out.push_str(&format!(
         "{}\n",
-        gray.apply_to(
-            "Checked: $OPENCLAW_STATE_DIR, ~/.openclaw, ~/.clawdbot, ~/.moldbot, ~/.moltbot"
-        )
+        chalk_gray_str(
+            "Checked: $OPENCLAW_STATE_DIR, ~/.openclaw, ~/.clawdbot, ~/.moldbot, ~/.moltbot",
+        ),
     ));
     out
 }
