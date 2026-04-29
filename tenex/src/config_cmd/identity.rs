@@ -87,7 +87,7 @@ fn add_pubkey(
     updated.push(trimmed);
     doc.set_whitelisted_pubkeys(updated);
     doc.save(base_dir)?;
-    print_success_line("Pubkey added.");
+    crate::tui::display::config_success("Pubkey added.");
     Ok(())
 }
 
@@ -112,14 +112,8 @@ fn remove_pubkey(
     let updated: Vec<String> = existing.into_iter().filter(|pk| pk != &chosen).collect();
     doc.set_whitelisted_pubkeys(updated);
     doc.save(base_dir)?;
-    print_success_line("Pubkey removed.");
+    crate::tui::display::config_success("Pubkey removed.");
     Ok(())
-}
-
-fn print_success_line(text: &str) {
-    let check = console::Style::new().green().apply_to("✓");
-    let bold_text = console::Style::new().bold().apply_to(format!(" {text}"));
-    println!("{check}{bold_text}");
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

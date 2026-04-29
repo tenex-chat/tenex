@@ -37,7 +37,7 @@ pub fn run(base_dir: &std::path::Path) -> Result<()> {
 
     doc.set_summarization_inactivity_timeout_seconds(parsed);
     doc.save(base_dir)?;
-    print_success_line("Summarization config saved.");
+    crate::tui::display::config_success("Summarization config saved.");
     Ok(())
 }
 
@@ -50,11 +50,6 @@ pub fn validate_integer(input: &str) -> Result<(), &'static str> {
     }
 }
 
-fn print_success_line(text: &str) {
-    let check = console::Style::new().green().apply_to("✓");
-    let bold_text = console::Style::new().bold().apply_to(format!(" {text}"));
-    println!("{check}{bold_text}");
-}
 
 #[cfg(test)]
 mod tests {

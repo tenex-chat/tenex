@@ -75,7 +75,7 @@ fn run_global_allowlist(base_dir: &std::path::Path) -> Result<()> {
         let merged = merge_back(&doc, &tg);
         doc.set_whitelisted_identities(merged);
         doc.save(base_dir)?;
-        print_success_line("Global Telegram DM allowlist saved.");
+        crate::tui::display::config_success("Global Telegram DM allowlist saved.");
     }
 }
 
@@ -173,11 +173,6 @@ pub fn validate_telegram_principal(input: &str) -> Result<(), &'static str> {
     }
 }
 
-fn print_success_line(text: &str) {
-    let check = console::Style::new().green().apply_to("✓");
-    let bold = console::Style::new().bold().apply_to(format!(" {text}"));
-    println!("{check}{bold}");
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TopAction {
@@ -558,12 +553,11 @@ fn prompt_for_api_base_url(current: Option<&str>) -> Result<Option<Option<String
     }
 }
 
-/// Reuse the existing per-line printer (`print_success_line(text)` at
-/// the top of this module) so the agent flow's `✓ Telegram transport
-/// updated.` line goes through the same green-check + bold-text path
-/// as the global allowlist's `✓ Global Telegram DM allowlist saved.`
+/// Route through `display::config_success` so the agent flow's
+/// `✓ Telegram transport updated.` line uses the same green-check +
+/// bold-text wire bytes as every other config-submenu success banner.
 fn print_agent_transport_updated() {
-    print_success_line("Telegram transport updated.");
+    crate::tui::display::config_success("Telegram transport updated.");
 }
 
 // Suppress the unused warning until the new types are referenced from

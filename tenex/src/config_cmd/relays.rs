@@ -105,7 +105,7 @@ fn add_relay(
     updated.push(trimmed);
     doc.set_relays(updated);
     doc.save(base_dir)?;
-    print_success_line("Relay added.");
+    crate::tui::display::config_success("Relay added.");
     Ok(())
 }
 
@@ -128,7 +128,7 @@ fn remove_relay(
     let updated: Vec<String> = existing.into_iter().filter(|r| r != &chosen).collect();
     doc.set_relays(updated);
     doc.save(base_dir)?;
-    print_success_line("Relay removed.");
+    crate::tui::display::config_success("Relay removed.");
     Ok(())
 }
 
@@ -145,7 +145,7 @@ fn add_identity_relay(
     updated.push(trimmed);
     doc.set_identity_relays(updated);
     doc.save(base_dir)?;
-    print_success_line("Identity relay added.");
+    crate::tui::display::config_success("Identity relay added.");
     Ok(())
 }
 
@@ -174,7 +174,7 @@ fn remove_identity_relay(
     let updated: Vec<String> = existing.into_iter().filter(|r| r != &chosen).collect();
     doc.set_identity_relays(updated);
     doc.save(base_dir)?;
-    print_success_line("Identity relay removed.");
+    crate::tui::display::config_success("Identity relay removed.");
     Ok(())
 }
 
@@ -201,11 +201,6 @@ fn prompt_select_relay(message: &str, options: &[String]) -> Option<String> {
 /// Render `<green>✓</green><bold> <text></bold>` matching the TS template
 /// `chalk.green("✓") + chalk.bold(" <text>")` (`:67, :81, :99, :113`).
 /// The ✓ is plain green (not bold) — only the body is bold.
-fn print_success_line(text: &str) {
-    let check = console::Style::new().green().apply_to("✓");
-    let bold_text = console::Style::new().bold().apply_to(format!(" {text}"));
-    println!("{check}{bold_text}");
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ActionValue {

@@ -117,7 +117,7 @@ fn run_reset_analysis(base_dir: &std::path::Path) -> Result<()> {
     let mut doc = TenexConfigDoc::load(base_dir)?;
     doc.clear_telemetry_analysis();
     doc.save(base_dir)?;
-    print_success_line("Analysis telemetry reset to defaults.");
+    crate::tui::display::config_success("Analysis telemetry reset to defaults.");
     Ok(())
 }
 
@@ -292,15 +292,10 @@ fn run_configure(base_dir: &std::path::Path, resolved: &ResolvedAnalysis) -> Res
     doc.set_telemetry_endpoint(&endpoint);
     doc.set_telemetry_analysis(analysis_fields);
     doc.save(base_dir)?;
-    print_success_line("Telemetry config saved.");
+    crate::tui::display::config_success("Telemetry config saved.");
     Ok(())
 }
 
-fn print_success_line(text: &str) {
-    let check = console::Style::new().green().apply_to("✓");
-    let bold = console::Style::new().bold().apply_to(format!(" {text}"));
-    println!("{check}{bold}");
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TopAction {

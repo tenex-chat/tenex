@@ -113,7 +113,7 @@ fn run_set_enabled(base_dir: &Path, enabled: bool) -> Result<()> {
     doc.set_global_system_prompt_enabled(enabled);
     doc.save(base_dir)?;
     let label = if enabled { "enabled" } else { "disabled" };
-    print_success_line(&format!("Global system prompt {label}."));
+    crate::tui::display::config_success(&format!("Global system prompt {label}."));
     Ok(())
 }
 
@@ -163,9 +163,9 @@ fn run_edit(base_dir: &Path) -> Result<()> {
     doc.save(base_dir)?;
 
     if cleaned.is_empty() {
-        print_success_line("Global system prompt cleared (no content).");
+        crate::tui::display::config_success("Global system prompt cleared (no content).");
     } else {
-        print_success_line("Global system prompt saved successfully!");
+        crate::tui::display::config_success("Global system prompt saved successfully!");
         let gray = crate::tui::theme::chalk_gray();
         // TS `cleanedContent.length` measures UTF-16 code units, but the
         // user-visible label says "characters" — Rust .len() returns
@@ -258,11 +258,6 @@ fn make_temp_path() -> Result<PathBuf> {
     Ok(std::env::temp_dir().join(format!("tenex-global-prompt-{now}.md")))
 }
 
-fn print_success_line(text: &str) {
-    let check = console::Style::new().green().apply_to("✓");
-    let bold = console::Style::new().bold().apply_to(format!(" {text}"));
-    println!("{check}{bold}");
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Action {

@@ -81,15 +81,10 @@ pub fn run(base_dir: &std::path::Path) -> Result<()> {
     }
 
     doc.save(base_dir)?;
-    print_success_line("Intervention config saved.");
+    crate::tui::display::config_success("Intervention config saved.");
     Ok(())
 }
 
-fn print_success_line(text: &str) {
-    let check = console::Style::new().green().apply_to("✓");
-    let bold_text = console::Style::new().bold().apply_to(format!(" {text}"));
-    println!("{check}{bold_text}");
-}
 
 #[cfg(test)]
 mod tests {

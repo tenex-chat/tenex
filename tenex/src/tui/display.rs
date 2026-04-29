@@ -13,10 +13,6 @@
 //! Test coverage uses ANSI-stripped comparisons for ergonomics; the colour
 //! pin lives in `crate::tui::theme` (single source of truth) so the same
 //! palette can't drift between modules.
-
-
-use crate::tui::theme;
-
 const RULE_WIDTH: usize = 45;
 
 /// `display.welcome()` — already implemented at [`crate::tui::banner::welcome`].
@@ -105,6 +101,30 @@ fn format_success_line(text: &str) -> String {
     // Basic ANSI green = `\x1b[32m`. chalk.green's exact open code.
     const GREEN_OPEN: &str = "\x1b[32m";
     format!("  {GREEN_OPEN}{BOLD_OPEN}✓{BOLD_CLOSE}{FG_RESET} {text}")
+}
+
+/// Print a config-submenu "✓ {text}" success line.
+///
+/// **Distinct from** [`success`] — that helper matches `display.success`
+/// (2-space indent + bold-green ✓). This helper matches the inline
+/// success banner pattern used throughout `src/commands/config/*.ts`
+/// (e.g. `escalation.ts:32`, `providers.ts:18`):
+///
+/// ```ts
+/// console.log(chalk.green("✓") + chalk.bold(` ${text}`));
+/// ```
+///
+/// — green ✓ (NOT bold), no leading indent, then bold space + text.
+/// Wire bytes: `\x1b[32m✓\x1b[39m\x1b[1m {text}\x1b[22m`.
+pub fn config_success(text: &str) {
+    println!("{}", format_config_success_line(text));
+}
+
+/// Returns the styled config-submenu success line — extracted for tests.
+fn format_config_success_line(text: &str) -> String {
+    use crate::tui::theme::{BOLD_CLOSE, BOLD_OPEN, FG_RESET};
+    const GREEN_OPEN: &str = "\x1b[32m";
+    format!("{GREEN_OPEN}✓{FG_RESET}{BOLD_OPEN} {text}{BOLD_CLOSE}")
 }
 
 /// `display.hint(text)` — `:47-49`. `  <ACCENT →> <ACCENT text>`.
@@ -379,6 +399,30 @@ mod tests {
         assert!(!r.contains("\x1b[0m"));
     }
 
+    /// Pin config_success wire bytes per the inline `chalk.green("✓") +
+    /// chalk.bold(" <text>")` template used at e.g. `escalation.ts:32`,
+    /// `providers.ts:18`, `telemetry.ts:185`.
+    #[test]
+    fn config_success_line_matches_ts_chalk_byte_sequence() {
+        let s = format_config_success_line("Saved.");
+        assert_eq!(s, "\x1b[32m✓\x1b[39m\x1b[1m Saved.\x1b[22m");
+    }
+
+    #[test]
+    fn config_success_line_does_not_emit_sgr_0_full_reset() {
+        let s = format_config_success_line("x");
+        assert!(!s.contains("\x1b[0m"), "got: {s:?}");
+    }
+
+    /// The config-submenu success line has NO leading indent — distinct
+    /// from `display.success` which prefixes "  ". Pin the column-0 start.
+    #[test]
+    fn config_success_line_has_no_leading_indent() {
+        let s = format_config_success_line("X");
+        let plain = strip_ansi_codes(&s).into_owned();
+        assert_eq!(plain, "✓ X");
+    }
+
     /// Pin provider_check's wire bytes to TS chalk verbatim:
     /// `chalk.ansi256(114).bold("[✓]") + " X"` →
     /// `\x1b[38;5;114m\x1b[1m[✓]\x1b[22m\x1b[39m X`.
@@ -401,6 +445,7 @@ mod tests {
     /// different ANSI sequences.
     #[test]
     fn display_accent_helpers_differ_on_bold_attribute() {
+        use crate::tui::theme;
         let bold_form = theme::display_accent()
             .force_styling(true)
             .apply_to("x")

@@ -34,14 +34,8 @@ pub fn run(base_dir: &std::path::Path) -> Result<()> {
         doc.set_escalation_agent(Some(trimmed));
     }
     doc.save(base_dir)?;
-    print_success_line("Escalation config saved.");
+    crate::tui::display::config_success("Escalation config saved.");
     Ok(())
-}
-
-fn print_success_line(text: &str) {
-    let check = console::Style::new().green().apply_to("✓");
-    let bold_text = console::Style::new().bold().apply_to(format!(" {text}"));
-    println!("{check}{bold_text}");
 }
 
 #[cfg(test)]
