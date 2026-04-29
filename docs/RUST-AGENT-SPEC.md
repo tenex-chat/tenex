@@ -473,34 +473,41 @@ Returns JSON: `{ success, message, activeSkills, skillContent }`. Rejects if the
 - `PendingTodosHeuristic` — detects completions with unresolved pending todos.
 - `ConsecutiveToolsWithoutTodoHeuristic` — detects agents making many tool calls without a todo list.
 
-When a pre-tool heuristic fires, `ToolCallHookAction::skip(reason)` is returned and the tool call is cancelled with the reason injected as a system reminder. Post-completion detections are tracked but re-engagement is currently surfaced through the hook return value.
+When a pre-tool heuristic fires, `ToolCallHookAction::skip(reason)` is returned and the tool call is cancelled with the reason injected as a system reminder. When a post-completion heuristic fires, `Supervisor::check_post_completion` returns `PostCompletionOutcome::ReEngage { message }` — the outer `'agent_loop` in `main.rs` injects the message as a new user turn and re-runs the agent with extended history. The loop is guarded by `MAX_RETRIES = 3` in `tenex-supervision`; after that threshold it returns `Accept` unconditionally.
 
 ## Iterative Loop
 
-Uses `rig-core`'s `Agent::stream_chat()` with projected history and an `EmitHook`. The stream is consumed to completion; only the final `FinalResponse` item (containing the response text and aggregated token usage) is retained.
+Uses `rig-core`'s `Agent::stream_chat()` with projected history and an `EmitHook`. There are two loops:
 
+**Outer loop (`'agent_loop`)** — post-completion supervision re-engagement:
 1. Build system prompt from fragments via `tenex_system_prompt::build_system_prompt()` (identity → home dir → system reminders → instructions → preloaded skills → env vars → project context → agents → teams → todo guidance → category-specific → proactive RAG context).
 2. Inject todo reminder into the user message if persisted todos exist.
-3. Call `tenex_context::project()` to load prior turns from the conversation store into a `Projection`. Filter to User + Assistant messages (System excluded — handled by preamble; ToolResult excluded until projection captures tool_calls inline to avoid provider 400s).
-4. Call `agent.stream_chat(user_message, history).with_hook(hook)` and drain the stream.
-5. `rig` sends messages to the provider, receives tool calls, executes them, feeds results back — looping until the provider returns a final text response.
-6. **Before each tool call**: `EmitHook::on_tool_call` runs pre-tool supervision checks. If blocked, returns `skip(reason)`. Otherwise emits a `ToolUseIntent` event (except `delegate`, which emits its own).
-7. **After each LLM turn**: `EmitHook::on_completion_response` emits a `ConversationIntent` event with the turn text and token usage.
-8. Save todos and self-applied skills atomically to the conversation store via `save_context_state`.
-9. Call `tenex_context::record_turn()` to persist the user message + assistant response to the conversation store for future history projection.
-10. Sign and emit the final `CompletionIntent` event with token usage from `FinalResponse`.
+3. Combine projected history with any `re_engage_history` accumulated from prior outer iterations.
+4. Call `agent.stream_chat(current_message, history).with_hook(hook)` and drain the stream (inner loop).
+5. After the inner loop completes, call `Supervisor::check_post_completion` with the current todo state.
+   - `Accept` → break the outer loop normally.
+   - `ReEngage { message }` → append the current user+assistant exchange to `re_engage_history`, set `current_message = message`, and repeat from step 4. Guards: `MAX_RETRIES = 3` in `tenex-supervision`.
+6. Save todos and self-applied skills atomically via `save_context_state`.
+7. Call `tenex_context::record_turn()` to persist the user message + assistant response.
+8. Sign and emit the final `CompletionIntent` event with token usage from `FinalResponse`.
 
-The loop terminates when the provider returns a text response without tool calls. `rig` enforces `default_max_turns(25)`.
+**Inner loop (inside `rig`)** — tool call iteration:
+- `rig` sends messages to the provider, receives tool calls, executes them, feeds results back — looping until the provider returns a final text response.
+- `rig` enforces `default_max_turns(25)`.
+- **Before each tool call**: `EmitHook::on_tool_call` runs pre-tool supervision checks. If blocked, returns `skip(reason)`. Otherwise emits a `ToolUseIntent` event (except `delegate`, which emits its own).
+- **After each LLM turn**: `EmitHook::on_completion_response` emits a `ConversationIntent` event with the turn text and token usage.
 
 ## Model Resolution
 
-Resolution order:
+Resolution order (applied after reading any `meta_model_variant` override from `AgentContextState`):
 
-1. Check `default.model` against named presets in `~/.tenex/llms.json`.
-2. Parse `provider:model` or `provider/model` inline format.
-3. Fall back to raw model string with `anthropic` as provider.
+1. If raw model is absent, `"default"`, or `""` — use the `default` key from `~/.tenex/llms.json`, falling back to `anthropic/claude-sonnet-4-6`.
+2. Look up raw model in the named `configurations` map in `~/.tenex/llms.json`.
+3. Parse `provider/model` inline format (slash). Recognized providers: `anthropic`, `openai`, `openrouter`, `ollama`, `groq`, `mistral`. **Checked before colon format** to correctly handle Ollama IDs like `ollama/mistral:latest`.
+4. Parse `provider:model` inline format (colon, legacy TENEX style).
+5. Fall back: treat the whole string as a model name with `anthropic` as provider.
 
-API keys are resolved from environment (`ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, etc.) then from `~/.tenex/providers.json`. Supported providers: `anthropic`, `openai`, `openrouter`, `ollama`.
+API keys are resolved from provider-specific env vars (`ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, etc.) then from `~/.tenex/providers.json`. Ollama uses `OLLAMA_API_BASE_URL` or the `baseUrl`/`apiKey` field in `providers.json` as the base URL (no API key).
 
 ## Dependencies
 
