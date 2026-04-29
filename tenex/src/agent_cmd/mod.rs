@@ -109,15 +109,19 @@ async fn run_delete(pubkey: &str) -> Result<()> {
     .await?;
 
     if !deleted {
-        let red = console::Style::new().red();
-        eprintln!("{}", red.apply_to(format!("Error: agent {pubkey} not found")));
+        eprintln!(
+            "{}",
+            crate::tui::theme::chalk_red(&format!("Error: agent {pubkey} not found")),
+        );
         // Mirror TS `process.exit(1)` (`commands/agent/index.ts:79-80`)
         // which exits silently — no anyhow wrapper line on stderr.
         std::process::exit(1);
     }
 
-    let green = console::Style::new().green();
-    println!("{}", green.apply_to(format!("✓ Deleted agent {pubkey}")));
+    println!(
+        "{}",
+        crate::tui::theme::chalk_green(&format!("✓ Deleted agent {pubkey}")),
+    );
     Ok(())
 }
 
@@ -144,8 +148,10 @@ async fn run_import(import: ImportArgs) -> Result<()> {
             if msg.contains("SIGINT") || msg.contains("force closed") {
                 return Ok(());
             }
-            let red = console::Style::new().red();
-            eprintln!("{}", red.apply_to(format!("Import failed: {e}")));
+            eprintln!(
+                "{}",
+                crate::tui::theme::chalk_red(&format!("Import failed: {e}")),
+            );
             Err(e)
         }
     }
@@ -199,8 +205,10 @@ async fn run_openclaw_import(
         if json {
             println!("[]");
         } else {
-            let yellow = console::Style::new().yellow();
-            println!("{}", yellow.apply_to("No matching OpenClaw agents found."));
+            println!(
+                "{}",
+                crate::tui::theme::chalk_yellow("No matching OpenClaw agents found."),
+            );
         }
         return Ok(());
     }
@@ -216,14 +224,19 @@ async fn run_openclaw_import(
     // (`Found OpenClaw installation at: <stateDir>` is the same line TS
     // prints at `openclaw.ts:217-219` once it commits to the import path).
     let _ = (dry_run, no_sync);
-    let blue = console::Style::new().blue();
     println!(
         "{}",
-        blue.apply_to(format!("Found OpenClaw installation at: {}", state_dir.display()))
+        crate::tui::theme::chalk_blue(&format!(
+            "Found OpenClaw installation at: {}",
+            state_dir.display()
+        )),
     );
     println!(
         "{}",
-        blue.apply_to(format!("Found {} agent(s) to import.", filtered.len()))
+        crate::tui::theme::chalk_blue(&format!(
+            "Found {} agent(s) to import.",
+            filtered.len()
+        )),
     );
     crate::tui::display::hint(
         "Identity distillation requires the LLM service (spec doc 10 §5.1, \
