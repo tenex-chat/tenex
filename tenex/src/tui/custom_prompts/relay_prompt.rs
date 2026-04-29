@@ -192,6 +192,30 @@ impl RelayState {
         items: &[RelayItem],
         cfg: &RelayPromptConfig<'_>,
     ) -> Vec<String> {
+        self.compose_line_segments(items, cfg)
+            .into_iter()
+            .map(|(label, desc)| {
+                if desc.is_empty() {
+                    label
+                } else {
+                    format!("{label}{desc}")
+                }
+            })
+            .collect()
+    }
+
+    /// Compose the rendered lines as `(label, description_with_2_space_pad)`
+    /// tuples. The renderer applies amber to `label` when active, and
+    /// always applies chalk.gray to `description` (TS at
+    /// `commands/onboard.ts:104,109` wraps each description in
+    /// `chalk.gray` regardless of active state — only the label is
+    /// highlighted when active). `description` is empty when there's
+    /// no inline preview to render.
+    pub fn compose_line_segments(
+        &self,
+        items: &[RelayItem],
+        cfg: &RelayPromptConfig<'_>,
+    ) -> Vec<(String, String)> {
         let mut out = Vec::with_capacity(items.len());
         for (i, item) in items.iter().enumerate() {
             let cursor = if i == self.active {
@@ -201,19 +225,23 @@ impl RelayState {
             };
             match item {
                 RelayItem::Choice { name, description, .. } => {
-                    let mut line = format!("{cursor} {name}");
-                    if !description.is_empty() {
-                        line.push_str(&format!("  {description}"));
-                    }
-                    out.push(line);
+                    let label = format!("{cursor} {name}");
+                    let desc = if description.is_empty() {
+                        String::new()
+                    } else {
+                        format!("  {description}")
+                    };
+                    out.push((label, desc));
                 }
                 RelayItem::Input => {
-                    let mut line = format!("{cursor} {}", cfg.input_placeholder);
-                    if i == self.active {
+                    let label = format!("{cursor} {}", cfg.input_placeholder);
+                    let desc = if i == self.active {
                         let typed = format!("{}{}", cfg.input_prefix, self.input_value);
-                        line.push_str(&format!("  {typed}"));
-                    }
-                    out.push(line);
+                        format!("  {typed}")
+                    } else {
+                        String::new()
+                    };
+                    out.push((label, desc));
                 }
             }
         }
@@ -287,16 +315,29 @@ fn render_frame<W: Write>(
     style_amber(stdout, "?")?;
     queue!(stdout, Print(format!(" {}\r\n", cfg.message)))?;
 
-    let lines = state.compose_lines(&cfg.items, cfg);
+    // TS at commands/onboard.ts:104,109 wraps each description in
+    // chalk.gray ALWAYS — whether the row is active or not. The active
+    // row highlights only the label (theme.style.highlight) and then
+    // appends the gray-styled description verbatim. Mirror that:
+    // amber the label when active, chalk.gray the description always.
+    let segments = state.compose_line_segments(&cfg.items, cfg);
     let mut height: u16 = 1; // header
-    for (i, line) in lines.iter().enumerate() {
+    for (i, (label, desc)) in segments.iter().enumerate() {
         let is_active = i == state.active;
         if is_active {
             queue!(stdout, SetForegroundColor(Color::Rgb { r: 0xFF, g: 0xC1, b: 0x07 }))?;
-            queue!(stdout, Print(line))?;
+            queue!(stdout, Print(label))?;
             queue!(stdout, ResetColor)?;
         } else {
-            queue!(stdout, Print(line))?;
+            queue!(stdout, Print(label))?;
+        }
+        if !desc.is_empty() {
+            queue!(
+                stdout,
+                SetForegroundColor(Color::AnsiValue(8)),
+                Print(desc),
+                ResetColor,
+            )?;
         }
         queue!(stdout, Print("\r\n"))?;
         height += 1;
@@ -568,6 +609,49 @@ mod tests {
         assert!(lines[1].contains("Type a relay URL"));
         assert!(lines[1].contains("wss://x.io"));
         assert!(lines[1].starts_with(glyphs::CURSOR_HEAVY));
+    }
+
+    /// Pin the (label, description) split that the renderer needs to
+    /// apply different colours per segment. TS at onboard.ts:104,109
+    /// ALWAYS wraps the description in chalk.gray; only the label is
+    /// highlighted when active. The renderer relies on this split.
+    #[test]
+    fn compose_line_segments_splits_label_from_description() {
+        let items = sample_items();
+        let cfg = RelayPromptConfig::new("Relay", items.clone());
+        let state = RelayState::new();
+        let segments = state.compose_line_segments(&items, &cfg);
+        assert_eq!(segments.len(), 2);
+
+        // First item is the choice "TENEX Community Relay" with
+        // description "wss://tenex.chat". Active by default (state.active=0).
+        let (label, desc) = &segments[0];
+        assert!(label.contains("TENEX Community Relay"));
+        assert_eq!(desc, "  wss://tenex.chat");
+
+        // Second item is the input prompt; not active so no
+        // typed-url preview, description is empty.
+        let (label, desc) = &segments[1];
+        assert!(label.contains("Type a relay URL"));
+        assert_eq!(desc, "");
+    }
+
+    #[test]
+    fn compose_line_segments_active_input_emits_typed_url_in_description() {
+        let items = sample_items();
+        let cfg = RelayPromptConfig::new("Relay", items.clone());
+        let mut state = RelayState::new();
+        state.handle_key(ev(KeyCode::Down), &items, &cfg);
+        for ch in "x.io".chars() {
+            state.handle_key(ev(KeyCode::Char(ch)), &items, &cfg);
+        }
+        let segments = state.compose_line_segments(&items, &cfg);
+        let (label, desc) = &segments[1];
+        assert!(label.contains("Type a relay URL"));
+        // The typed URL preview lives in the description segment so
+        // the renderer paints it chalk.gray, not amber. Even when
+        // active (only the label gets highlighted).
+        assert_eq!(desc, "  wss://x.io");
     }
 
     #[test]
