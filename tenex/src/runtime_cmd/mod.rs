@@ -21,7 +21,7 @@ use tracing::{info, info_span, warn, Instrument};
 
 use control::{serve_control_socket, RuntimeControlState};
 use tenex_conversations::{
-    AgentContextState, ConversationStore, NewMessage, Project as ConversationsProject,
+    AgentContextState, ConversationStore, MessageQuery, NewMessage, Project as ConversationsProject,
 };
 use tenex_mcp::{ProjectMcpRuntime, SocketServerConfig};
 use tenex_project::{models::ProjectAgent, Agent, Project};
@@ -68,6 +68,19 @@ struct DispatchJob {
     conv_id: String,
     agent_json: PathBuf,
     allow_driver_preempt: bool,
+    completion_recipient_pubkey: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DelegationRoute {
+    parent_agent_pubkey: String,
+    parent_conversation_id: String,
+    parent_completion_recipient_pubkey: String,
+    child_agent_pubkey: String,
+    child_conversation_id: String,
+    delegation_event_id: String,
+    created_at: i64,
 }
 
 struct ActiveMcpBridge {
@@ -414,10 +427,17 @@ pub async fn run(args: RuntimeArgs) -> Result<()> {
                         }
                         let short = &event.id.to_hex()[..8];
                         info!(event_id = short, "received event");
-                        match select_agent(&event, &agents, &project_agents) {
-                            Ok(agent) => {
-                                info!(event_id = short, agent = %agent.slug, "dispatching");
-                                let conv_id = conversation_id_from_event(&event);
+                                if let Err(e) = register_delegation_route_if_needed(
+                                    &shared.store,
+                                    &event,
+                                    shared.agent_pubkeys.as_ref(),
+                                    None,
+                                ) {
+                                    warn!(event_id = short, error = %e, "failed to register delegation route");
+                                }
+                                match select_dispatch_target(&shared, &event) {
+                            Ok((agent, conv_id, completion_recipient_pubkey)) => {
+                                info!(event_id = short, agent = %agent.slug, conversation_id = %conv_id, "dispatching");
                                 if is_agent_blocked(&shared.store, &conv_id, &agent.pubkey) {
                                     warn!(
                                         event_id = short,
@@ -436,6 +456,7 @@ pub async fn run(args: RuntimeArgs) -> Result<()> {
                                     conv_id,
                                     agent_json,
                                     allow_driver_preempt: false,
+                                    completion_recipient_pubkey,
                                 };
                                 if let Err(e) = accept_dispatch(shared.clone(), job).await {
                                     warn!(event_id = short, agent = %agent.slug, error = %e, "dispatch failed");
@@ -566,7 +587,38 @@ fn spawn_dispatch_job(shared: Arc<RuntimeShared>, job: DispatchJob) {
     });
 }
 
-async fn dispatch_project_agent_target(shared: Arc<RuntimeShared>, event: &Event) -> Result<()> {
+fn select_dispatch_target(
+    shared: &RuntimeShared,
+    event: &Event,
+) -> Result<(Agent, String, Option<String>)> {
+    if let Some(route) = delegation_route_for_completion(&shared.store, event)? {
+        if let Some(agent) = shared
+            .agents
+            .iter()
+            .find(|agent| agent.pubkey == route.parent_agent_pubkey)
+        {
+            return Ok((
+                agent.clone(),
+                route.parent_conversation_id,
+                Some(route.parent_completion_recipient_pubkey),
+            ));
+        }
+        warn!(
+            parent_agent = %route.parent_agent_pubkey,
+            child_conversation = %route.child_conversation_id,
+            "delegation completion parent agent is not in this runtime"
+        );
+    }
+
+    let agent = select_agent(event, &shared.agents, &shared.project_agents)?.clone();
+    Ok((agent, conversation_id_from_event(event), None))
+}
+
+async fn dispatch_project_agent_target(
+    shared: Arc<RuntimeShared>,
+    event: &Event,
+    parent_job: Option<&DispatchJob>,
+) -> Result<()> {
     if !targets_project_agent(event, shared.agent_pubkeys.as_ref()) {
         return Ok(());
     }
@@ -574,8 +626,14 @@ async fn dispatch_project_agent_target(shared: Arc<RuntimeShared>, event: &Event
         return Ok(());
     }
 
-    let agent = select_agent(event, &shared.agents, &shared.project_agents)?.clone();
-    let conv_id = conversation_id_from_event(event);
+    register_delegation_route_if_needed(
+        &shared.store,
+        event,
+        shared.agent_pubkeys.as_ref(),
+        parent_job,
+    )?;
+
+    let (agent, conv_id, completion_recipient_pubkey) = select_dispatch_target(&shared, event)?;
     let agent_json = shared
         .base_dir
         .join("agents")
@@ -588,6 +646,7 @@ async fn dispatch_project_agent_target(shared: Arc<RuntimeShared>, event: &Event
             conv_id,
             agent_json,
             allow_driver_preempt: false,
+            completion_recipient_pubkey,
         },
     )
     .await
@@ -808,6 +867,186 @@ fn e_tag_event_ids(event: &Event) -> Vec<String> {
         .collect()
 }
 
+fn register_delegation_route_if_needed(
+    store: &Arc<Mutex<ConversationStore>>,
+    event: &Event,
+    agent_pubkeys: &HashSet<String>,
+    parent_job: Option<&DispatchJob>,
+) -> Result<Option<DelegationRoute>> {
+    let Some(child_agent_pubkey) = fresh_delegation_target(event, agent_pubkeys) else {
+        return Ok(None);
+    };
+
+    let parent_agent_pubkey = parent_job
+        .map(|job| job.agent.pubkey.clone())
+        .unwrap_or_else(|| event.pubkey.to_hex());
+    let parent_conversation_id = parent_job
+        .map(|job| job.conv_id.clone())
+        .or_else(|| delegation_parent_conversation_id(event));
+    let Some(parent_conversation_id) = parent_conversation_id else {
+        return Ok(None);
+    };
+    let parent_completion_recipient_pubkey = parent_job
+        .and_then(|job| job.completion_recipient_pubkey.clone())
+        .or_else(|| parent_job.map(|job| job.event.pubkey.to_hex()))
+        .or_else(|| first_conversation_author(store, &parent_conversation_id).ok().flatten())
+        .unwrap_or_else(|| parent_agent_pubkey.clone());
+
+    let child_conversation_id = event.id.to_hex();
+    let route = DelegationRoute {
+        parent_agent_pubkey,
+        parent_conversation_id,
+        parent_completion_recipient_pubkey,
+        child_agent_pubkey,
+        child_conversation_id: child_conversation_id.clone(),
+        delegation_event_id: child_conversation_id.clone(),
+        created_at: now_ms(),
+    };
+
+    {
+        let mut store = store.lock().unwrap();
+        store.update_runtime_state(&child_conversation_id, |state| {
+            write_delegation_route(state, &route);
+        })?;
+    }
+
+    info!(
+        parent_agent = %route.parent_agent_pubkey,
+        parent_conversation = %route.parent_conversation_id,
+        child_agent = %route.child_agent_pubkey,
+        child_conversation = %route.child_conversation_id,
+        "registered delegation route"
+    );
+
+    Ok(Some(route))
+}
+
+fn fresh_delegation_target(event: &Event, agent_pubkeys: &HashSet<String>) -> Option<String> {
+    if event.kind != Kind::TextNote {
+        return None;
+    }
+    if !agent_pubkeys.contains(&event.pubkey.to_hex()) {
+        return None;
+    }
+    if has_any_tag(event, "e")
+        || has_any_tag(event, "tool")
+        || has_any_tag(event, "status")
+        || has_any_tag(event, "intent")
+        || has_any_tag(event, "reasoning")
+        || has_any_tag(event, "error")
+    {
+        return None;
+    }
+    p_tag_pubkeys(event)
+        .into_iter()
+        .find(|pubkey| agent_pubkeys.contains(pubkey))
+}
+
+fn delegation_route_for_completion(
+    store: &Arc<Mutex<ConversationStore>>,
+    event: &Event,
+) -> Result<Option<DelegationRoute>> {
+    if !is_completion_event(event) {
+        return Ok(None);
+    }
+
+    let child_conversation_id = conversation_id_from_event(event);
+    let Some(route) = read_delegation_route(store, &child_conversation_id)? else {
+        return Ok(None);
+    };
+    if route.child_conversation_id != child_conversation_id {
+        return Ok(None);
+    }
+    if event.pubkey.to_hex() != route.child_agent_pubkey {
+        return Ok(None);
+    }
+    if !p_tag_pubkeys(event).contains(&route.parent_agent_pubkey) {
+        return Ok(None);
+    }
+
+    Ok(Some(route))
+}
+
+fn read_delegation_route(
+    store: &Arc<Mutex<ConversationStore>>,
+    child_conversation_id: &str,
+) -> Result<Option<DelegationRoute>> {
+    let store = store.lock().unwrap();
+    let Some(conversation) = store.get_conversation(child_conversation_id)? else {
+        return Ok(None);
+    };
+    Ok(delegation_route_from_runtime_state(
+        &conversation.runtime_state,
+    ))
+}
+
+fn delegation_route_from_runtime_state(state: &Value) -> Option<DelegationRoute> {
+    serde_json::from_value(
+        state
+            .get("rustRuntime")?
+            .get("delegation")?
+            .clone(),
+    )
+    .ok()
+}
+
+fn write_delegation_route(state: &mut Value, route: &DelegationRoute) {
+    let state = ensure_json_object(state);
+    let rust_runtime = ensure_child_object(state, "rustRuntime");
+    rust_runtime.insert(
+        "delegation".to_string(),
+        serde_json::to_value(route).unwrap_or_else(|_| Value::Object(Map::new())),
+    );
+}
+
+fn first_conversation_author(
+    store: &Arc<Mutex<ConversationStore>>,
+    conversation_id: &str,
+) -> Result<Option<String>> {
+    let store = store.lock().unwrap();
+    Ok(store
+        .list_messages(
+            conversation_id,
+            MessageQuery {
+                limit: Some(1),
+                ..Default::default()
+            },
+        )?
+        .into_iter()
+        .next()
+        .map(|message| message.author_pubkey))
+}
+
+fn delegation_parent_conversation_id(event: &Event) -> Option<String> {
+    event.tags.iter().find_map(|tag| {
+        let parts = tag.as_slice();
+        if parts.first().is_some_and(|head| head == "delegation") {
+            parts.get(1).cloned()
+        } else {
+            None
+        }
+    })
+}
+
+fn is_completion_event(event: &Event) -> bool {
+    event.kind == Kind::TextNote && has_tag(event, "status", "completed")
+}
+
+fn has_tag(event: &Event, tag_name: &str, tag_value: &str) -> bool {
+    event.tags.iter().any(|tag| {
+        let parts = tag.as_slice();
+        parts.first().is_some_and(|head| head == tag_name)
+            && parts.get(1).is_some_and(|value| value == tag_value)
+    })
+}
+
+fn has_any_tag(event: &Event, tag_name: &str) -> bool {
+    event
+        .tags
+        .iter()
+        .any(|tag| tag.as_slice().first().is_some_and(|head| head == tag_name))
+}
+
 fn is_agent_blocked(
     store: &Arc<Mutex<ConversationStore>>,
     conversation_id: &str,
@@ -1011,6 +1250,10 @@ async fn run_agent(shared: Arc<RuntimeShared>, job: DispatchJob, key: DispatchKe
         .stderr(Stdio::inherit())
         .process_group(0)
         .kill_on_drop(false);
+    command.env("TENEX_CONVERSATION_ID", &job.conv_id);
+    if let Some(recipient) = job.completion_recipient_pubkey.as_deref() {
+        command.env("TENEX_COMPLETION_RECIPIENT_PUBKEY", recipient);
+    }
     if job.allow_driver_preempt {
         command.env("TENEX_RUNTIME_DRIVER_PREEMPT", "1");
     }
@@ -1053,7 +1296,7 @@ async fn run_agent(shared: Arc<RuntimeShared>, job: DispatchJob, key: DispatchKe
             match Event::from_json(&line) {
                 Ok(ev) => {
                     handle_agent_runtime_signal(shared.clone(), &key, &ev).await;
-                    if let Err(e) = dispatch_project_agent_target(shared.clone(), &ev).await {
+                    if let Err(e) = dispatch_project_agent_target(shared.clone(), &ev, Some(&job)).await {
                         warn!(error = %e, "failed to dispatch agent-targeted event");
                     }
 
@@ -1347,12 +1590,16 @@ fn now_ms() -> i64 {
 mod tests {
     use super::*;
 
-    fn signed_event(kind: Kind, content: &str, tags: Vec<Tag>) -> Event {
-        let keys = Keys::generate();
+    fn signed_event_from(keys: &Keys, kind: Kind, content: &str, tags: Vec<Tag>) -> Event {
         EventBuilder::new(kind, content)
             .tags(tags)
-            .sign_with_keys(&keys)
+            .sign_with_keys(keys)
             .unwrap()
+    }
+
+    fn signed_event(kind: Kind, content: &str, tags: Vec<Tag>) -> Event {
+        let keys = Keys::generate();
+        signed_event_from(&keys, kind, content, tags)
     }
 
     fn root_id() -> String {
@@ -1390,6 +1637,7 @@ mod tests {
             conv_id: conv_id.to_string(),
             agent_json: PathBuf::from("agent.json"),
             allow_driver_preempt: false,
+            completion_recipient_pubkey: None,
         }
     }
 
@@ -1569,6 +1817,83 @@ mod tests {
         let agent_pubkeys = HashSet::from([worker]);
 
         assert!(!targets_project_agent(&event, &agent_pubkeys));
+    }
+
+    #[test]
+    fn delegation_route_maps_child_completion_back_to_parent_context() {
+        let store = Arc::new(Mutex::new(ConversationStore::open_in_memory().unwrap()));
+        let user_keys = Keys::generate();
+        let parent_keys = Keys::generate();
+        let child_keys = Keys::generate();
+        let parent_pubkey = parent_keys.public_key().to_hex();
+        let child_pubkey = child_keys.public_key().to_hex();
+        let parent_conversation_id = signed_event_from(
+            &user_keys,
+            Kind::TextNote,
+            "root task",
+            Vec::new(),
+        )
+        .id
+        .to_hex();
+        let parent_trigger = signed_event_from(
+            &user_keys,
+            Kind::TextNote,
+            "delegate this",
+            vec![tag(&["e", &parent_conversation_id, "", "root"])],
+        );
+        let parent_job = DispatchJob {
+            event: parent_trigger.clone(),
+            agent: agent(&parent_pubkey),
+            conv_id: parent_conversation_id.clone(),
+            agent_json: PathBuf::from("agent.json"),
+            allow_driver_preempt: false,
+            completion_recipient_pubkey: None,
+        };
+        let delegation = signed_event_from(
+            &parent_keys,
+            Kind::TextNote,
+            "@worker choose a color",
+            vec![
+                tag(&["p", &child_pubkey]),
+                tag(&["delegation", &parent_conversation_id]),
+            ],
+        );
+        let agent_pubkeys = HashSet::from([parent_pubkey.clone(), child_pubkey.clone()]);
+
+        let route = register_delegation_route_if_needed(
+            &store,
+            &delegation,
+            &agent_pubkeys,
+            Some(&parent_job),
+        )
+        .unwrap()
+        .expect("route registered");
+
+        assert_eq!(route.parent_agent_pubkey, parent_pubkey);
+        assert_eq!(route.parent_conversation_id, parent_conversation_id);
+        assert_eq!(
+            route.parent_completion_recipient_pubkey,
+            parent_trigger.pubkey.to_hex()
+        );
+        assert_eq!(route.child_agent_pubkey, child_pubkey);
+        assert_eq!(route.child_conversation_id, delegation.id.to_hex());
+
+        let completion = signed_event_from(
+            &child_keys,
+            Kind::TextNote,
+            "Worker picked blue.",
+            vec![
+                tag(&["e", &delegation.id.to_hex(), "", "root"]),
+                tag(&["p", &route.parent_agent_pubkey]),
+                tag(&["status", "completed"]),
+            ],
+        );
+        let completion_route = delegation_route_for_completion(&store, &completion)
+            .unwrap()
+            .expect("completion route");
+
+        assert_eq!(completion_route.parent_conversation_id, parent_conversation_id);
+        assert_eq!(completion_route.child_conversation_id, delegation.id.to_hex());
     }
 
     #[test]
