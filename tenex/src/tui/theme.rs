@@ -10,8 +10,16 @@
 //!
 //! See `docs/tui-port/12-visual-styling.md` for the full justification.
 //!
-//! Each constant exposes a `Style` from `console` ready to wrap a string.
-//! Avoid raw `\x1b[…]` sequences in feature code — go through these constants.
+//! Public surface:
+//! - `chalk_*(text) -> String` helpers — byte-perfect TS chalk wraps
+//!   for red / green / yellow / blue / cyan / dim / bold / gray.
+//! - Raw escape constants (`INQUIRER_AMBER_FG`, `BOLD_OPEN/CLOSE`,
+//!   `DIM_OPEN/CLOSE`, `CHALK_GRAY_OPEN/CLOSE`, `FG_RESET`,
+//!   `CHALK_RED_OPEN`, etc.) for callers composing styled fragments
+//!   manually.
+//! - `*_CROSSTERM` colour constants for the bespoke crossterm prompts.
+//! - `display_accent()` Style — the only `console::Style` survivor,
+//!   used by cron_cmd which is Rust-only (no TS counterpart).
 
 use console::Style;
 
@@ -78,24 +86,10 @@ pub fn display_accent() -> Style {
     Style::new().color256(214).bold()
 }
 
-/// `chalk.gray` visual match. TS chalk emits `\x1b[90m` (bright black).
-/// console::Style's `.black().bright()` translates that to
-/// `\x1b[38;5;8m` (xterm-256 palette index 8) — different bytes but
-/// the same on-screen colour in any reasonable terminal (palette index
-/// 8 is bright black). Use [`crate::tui::theme::CHALK_GRAY_OPEN`] +
-/// [`CHALK_GRAY_CLOSE`] (or the [`chalk_gray_str`] helper) for the
-/// byte-exact ANSI-90 form when emitting raw escapes by hand.
-///
-/// Retained primarily for the canary test that documents this
-/// xterm-256-vs-ANSI-90 wire-byte divergence.
-pub fn chalk_gray() -> Style {
-    Style::new().black().bright()
-}
-
-/// Raw `\x1b[90m` — chalk.gray's exact open code. Use this when you
-/// need byte-for-byte match with TS output (e.g. golden-file tests
-/// against TS recordings); the [`chalk_gray`] helper produces an
-/// xterm-256 form that's visually identical but byte-different.
+/// Raw `\x1b[90m` — chalk.gray's exact open code. Pair with
+/// [`CHALK_GRAY_CLOSE`], or use the [`chalk_gray_str`] helper for the
+/// formatted-string variant (`\x1b[90m<text>\x1b[39m` byte-for-byte
+/// matching TS chalk.gray).
 pub const CHALK_GRAY_OPEN: &str = "\x1b[90m";
 
 /// Raw chalk.gray close code — `\x1b[39m` (default foreground reset).
@@ -186,13 +180,9 @@ pub fn chalk_bold(text: &str) -> String {
     format!("{BOLD_OPEN}{text}{BOLD_CLOSE}")
 }
 
-/// Wrap `text` in chalk.gray wire bytes: `\x1b[90m<text>\x1b[39m`.
-///
-/// **Distinct from** the [`chalk_gray`] [`Style`] helper — that one
-/// emits `\x1b[38;5;8m` (xterm-256 form) via console-rs's `.bright()`
-/// modifier, which is visually identical but byte-different from
-/// chalk's basic `\x1b[90m`. Use this `String`-returning helper for
-/// byte-perfect TS chalk match.
+/// Wrap `text` in chalk.gray wire bytes: `\x1b[90m<text>\x1b[39m`
+/// (basic ANSI 90, not the xterm-256 #8 form `console::Style`'s
+/// `.black().bright()` would emit).
 pub fn chalk_gray_str(text: &str) -> String {
     format!("{CHALK_GRAY_OPEN}{text}{CHALK_GRAY_CLOSE}")
 }
@@ -200,22 +190,6 @@ pub fn chalk_gray_str(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// console::Style.black().bright() actually emits xterm-256 index 8
-    /// (`\x1b[38;5;8m`), NOT raw ANSI 90 — visually identical bright
-    /// black, byte-different from chalk's wire form. Pin both forms so
-    /// callers know which to reach for.
-    #[test]
-    fn chalk_gray_emits_xterm_256_index_8_visual_match() {
-        let styled = chalk_gray()
-            .force_styling(true)
-            .apply_to("x")
-            .to_string();
-        assert!(
-            styled.starts_with("\x1b[38;5;8m"),
-            "got: {styled:?}"
-        );
-    }
 
     #[test]
     fn chalk_gray_open_close_match_chalk_wire_bytes() {
