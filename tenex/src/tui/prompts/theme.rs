@@ -81,7 +81,16 @@ pub fn theme() -> RenderConfig<'static> {
         // need to dim it. Same SGR-2 caveat as `style.help` above —
         // approximate with DarkGrey. Inquire's default is empty
         // (plain text), which makes default values blend in too much.
-        .with_default_value(StyleSheet::new().with_fg(Color::DarkGrey));
+        .with_default_value(StyleSheet::new().with_fg(Color::DarkGrey))
+        // TS @inquirer/checkbox (`@inquirer/checkbox/dist/index.js:5-9`)
+        // overrides the icons to:
+        //   checked   = styleText('green', figures.circleFilled)  → green ◉
+        //   unchecked = figures.circle                            → plain ◯
+        // (`@inquirer/figures/dist/index.js:224-225`). Inquire's stock
+        // checkbox is `[x]`/`[ ]` — visually distinct. Override to the
+        // unicode-circle glyphs TS uses, with green on the checked one.
+        .with_selected_checkbox(Styled::new("◉").with_fg(Color::DarkGreen))
+        .with_unselected_checkbox(Styled::new("◯"));
     // TS @inquirer/core's default `theme.style.message` is
     // `styleText('bold', text)` (`@inquirer/core/dist/lib/theme.js:14`)
     // and the TENEX inquirerTheme doesn't override it — so prompt
@@ -202,5 +211,21 @@ mod tests {
             Some(Color::DarkGrey),
             "default_value must use DarkGrey to approximate chalk.dim",
         );
+    }
+
+    /// Pin the checkbox glyphs to TS @inquirer/checkbox's defaults
+    /// (`@inquirer/checkbox/dist/index.js:5-9` →
+    /// `@inquirer/figures/dist/index.js:224-225`):
+    ///   checked = green `◉` (FISHEYE U+25C9)
+    ///   unchecked = plain `◯` (LARGE CIRCLE U+25EF)
+    /// Inquire's stock `[x]`/`[ ]` glyphs are visibly off.
+    #[test]
+    fn theme_uses_unicode_circle_glyphs_for_checkboxes() {
+        let cfg = theme();
+        assert_eq!(cfg.selected_checkbox.content, "◉");
+        assert_eq!(cfg.selected_checkbox.style.fg, Some(Color::DarkGreen));
+        assert_eq!(cfg.unselected_checkbox.content, "◯");
+        // The unchecked glyph is plain (no fg styling) per TS.
+        assert_eq!(cfg.unselected_checkbox.style.fg, None);
     }
 }
