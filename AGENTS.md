@@ -1,12 +1,23 @@
 # TENEX
 
-Multi-agent AI coordination system built on Nostr. Bun CLI application.
+Multi-agent AI coordination system built on Nostr. Rust workspace.
 
 ## Key References
 
 - **`CLAUDE.md`** — coding standards, layer architecture, naming conventions, import rules, anti-patterns
 - **`MODULE_INVENTORY.md`** — canonical map of all modules; consult before writing code
 - **`README.md`** — project overview and setup
+- **`MIGRATION_PENDING.md`** — feature parity gaps between the old TypeScript runtime and the Rust stack
+
+## TypeScript Reference
+
+The TypeScript runtime has been removed. If you need to look up how a feature worked in TypeScript, a read-only reference worktree is available at:
+
+```
+/home/pablo/Work/tenex-typescript-ref
+```
+
+This is a detached-HEAD checkout of commit `35738290` (2026-04-27, "Allow concurrent RALs via lock-handoff for mid-tool dispatches") — the last stable state before cleanup. Do not modify it.
 
 ## File Size
 
@@ -37,12 +48,3 @@ Agents may only add documents with an **audience scope** (`self` or `project`) �
 
 ### Lessons: LLM-Maintained `+INDEX.md`, Not RAG
 The `learn` tool does **not** store lessons in a RAG collection. Instead, it asks an LLM to incorporate the new lesson into `+INDEX.md` in the agent's home directory, organized by category. The `+INDEX.md` file is automatically injected into the agent's system prompt (all `+` prefix files in the agent home are). This diverges intentionally from the TypeScript runtime.
-
-## Commands
-
-```bash
-bun test                   # Run all tests
-bun run typecheck          # TypeScript strict check
-bun run lint               # ESLint
-bun run lint:architecture  # Layer violation check
-```

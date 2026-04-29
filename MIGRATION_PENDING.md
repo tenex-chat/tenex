@@ -3,6 +3,8 @@
 Feature parity gaps between the TypeScript runtime and the Rust agent/daemon stack.
 Organized by functional area. Items marked ✅ are already at parity; items marked ❌ are missing or incomplete in Rust.
 
+> **TypeScript reference**: the TypeScript runtime source has been removed from this repo. For looking up how something worked in TypeScript, use the read-only reference worktree at `/home/pablo/Work/tenex-typescript-ref` (commit `35738290`, 2026-04-27).
+
 ---
 
 ## 1. Agent Tools
