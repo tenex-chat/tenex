@@ -12,7 +12,6 @@ pub(crate) struct ConfigUpdateOutcome {
     pub ignored_reason: Option<&'static str>,
     pub has_reset: bool,
     pub has_model: bool,
-    pub tool_count: usize,
     pub skill_count: usize,
     pub mcp_count: usize,
 }
@@ -25,7 +24,6 @@ impl ConfigUpdateOutcome {
             ignored_reason: Some(reason),
             has_reset: false,
             has_model: false,
-            tool_count: 0,
             skill_count: 0,
             mcp_count: 0,
         }
@@ -67,14 +65,12 @@ pub(crate) fn apply_event(
             ignored_reason: None,
             has_reset: true,
             has_model: false,
-            tool_count: 0,
             skill_count: 0,
             mcp_count: 0,
         });
     }
 
     let has_model_tag = has_tag(event, "model");
-    let tool_tag_values = tag_values(event, "tool");
     let blocked_skill_tag_values = tag_values(event, "blocked-skill");
     let skill_tag_values = tag_values(event, "skill");
     let mcp_server_slugs = tag_values(event, "mcp");
@@ -86,7 +82,6 @@ pub(crate) fn apply_event(
 
     let updates = AgentDefaultConfigUpdate {
         model: new_model.clone(),
-        tools: has_tag(event, "tool").then_some(tool_tag_values.clone()),
         blocked_skills: has_tag(event, "blocked-skill").then_some(blocked_skill_tag_values),
         skills: has_tag(event, "skill").then_some(skill_tag_values.clone()),
         mcp: has_tag(event, "mcp").then_some(mcp_server_slugs.clone()),
@@ -105,7 +100,6 @@ pub(crate) fn apply_event(
         ignored_reason: None,
         has_reset: false,
         has_model: new_model.is_some(),
-        tool_count: tool_tag_values.len(),
         skill_count: skill_tag_values.len(),
         mcp_count: mcp_server_slugs.len(),
     })
@@ -225,7 +219,6 @@ mod tests {
             tag(&["a", "31933:owner:project"]),
             tag(&["p", &pubkey]),
             tag(&["model", "gpt-5.4 mini"]),
-            tag(&["tool"]),
             tag(&["skill", "read-access"]),
             tag(&["skill", "shell"]),
             tag(&["skill", "write-access"]),
@@ -237,7 +230,6 @@ mod tests {
 
         assert!(outcome.config_updated);
         assert!(outcome.has_model);
-        assert_eq!(outcome.tool_count, 0);
         assert_eq!(outcome.skill_count, 3);
         assert_eq!(outcome.mcp_count, 0);
         let loaded = AgentDoc::load(&base, &pubkey).unwrap().unwrap();
@@ -246,7 +238,6 @@ mod tests {
             default.get("model").and_then(Value::as_str),
             Some("gpt-5.4 mini")
         );
-        assert!(default.get("tools").is_none());
         assert!(default.get("mcp").is_none());
         assert_eq!(
             default

@@ -13,7 +13,6 @@ mod rebuild;
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct AgentDefaultConfigUpdate {
     pub model: Option<String>,
-    pub tools: Option<Vec<String>>,
     pub blocked_skills: Option<Vec<String>>,
     pub skills: Option<Vec<String>>,
     pub mcp: Option<Vec<String>>,
@@ -22,7 +21,6 @@ pub struct AgentDefaultConfigUpdate {
 impl AgentDefaultConfigUpdate {
     pub fn is_empty(&self) -> bool {
         self.model.is_none()
-            && self.tools.is_none()
             && self.blocked_skills.is_none()
             && self.skills.is_none()
             && self.mcp.is_none()

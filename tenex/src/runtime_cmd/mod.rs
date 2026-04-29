@@ -916,7 +916,6 @@ async fn handle_agent_config_update(
         updated = outcome.config_updated,
         reset = outcome.has_reset,
         has_model = outcome.has_model,
-        tool_count = outcome.tool_count,
         skill_count = outcome.skill_count,
         mcp_count = outcome.mcp_count,
         "processed agent config update"

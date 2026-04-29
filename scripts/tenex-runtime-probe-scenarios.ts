@@ -559,7 +559,6 @@ async function runAgentConfigUpdateProbe(context: ScenarioContext): Promise<void
                 ["client", "tenex-runtime-probe"],
                 ["p", context.workerPubkey],
                 ["model", agentConfigUpdateModelName],
-                ["tool"],
                 ...agentConfigUpdateSkills.map((skill) => ["skill", skill]),
                 ["mcp"],
             ],
@@ -593,7 +592,7 @@ async function runAgentConfigUpdateProbe(context: ScenarioContext): Promise<void
 
     const workerAgentPath = path.join(context.agentsDir, `${context.workerPubkey}.json`);
     const workerAgent = JSON.parse(readFileSync(workerAgentPath, "utf8")) as {
-        default?: { model?: string; skills?: string[]; tools?: string[]; mcp?: string[] };
+        default?: { model?: string; skills?: string[]; mcp?: string[] };
     };
     if (workerAgent.default?.model !== agentConfigUpdateModelName) {
         throw new Error(`worker default model was ${workerAgent.default?.model ?? "<missing>"}`);
@@ -602,9 +601,6 @@ async function runAgentConfigUpdateProbe(context: ScenarioContext): Promise<void
         if (!workerAgent.default?.skills?.includes(skill)) {
             throw new Error(`worker default skills missing ${skill}`);
         }
-    }
-    if (workerAgent.default?.tools !== undefined) {
-        throw new Error("worker default tools should have been cleared by empty tool tag");
     }
     if (workerAgent.default?.mcp !== undefined) {
         throw new Error("worker default mcp should have been cleared by empty mcp tag");

@@ -28,7 +28,6 @@ impl AgentStorage {
         if let Some(model) = &updates.model {
             default.insert("model".into(), Value::String(model.clone()));
         }
-        apply_array_update(&mut default, "tools", updates.tools.as_ref());
         apply_array_update(
             &mut default,
             "blockedSkills",

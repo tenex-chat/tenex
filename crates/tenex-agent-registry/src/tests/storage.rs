@@ -107,7 +107,6 @@ fn update_default_config_writes_snapshots_and_clears_empty_fields() {
             &pubkey,
             &AgentDefaultConfigUpdate {
                 model: Some("gpt-5.4 mini".into()),
-                tools: Some(Vec::new()),
                 blocked_skills: None,
                 skills: Some(vec![
                     "read-access".into(),
@@ -126,7 +125,6 @@ fn update_default_config_writes_snapshots_and_clears_empty_fields() {
         default.get("model").and_then(Value::as_str),
         Some("gpt-5.4 mini")
     );
-    assert!(default.get("tools").is_none());
     assert_eq!(
         default
             .get("skills")
