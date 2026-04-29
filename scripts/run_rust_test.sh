@@ -199,5 +199,61 @@ fi
 # Print the root ID so callers can reuse it for history replay tests
 echo "[ROOT_ID] $ROOT_ID" >&2
 
+# Write the agent's final response back to the messages table.
+# In production the TypeScript daemon ingests the agent's outbound kind:1 Nostr
+# event and writes it as role='assistant' in messages. Without this step,
+# project() would only see user messages on re-invocation, omitting prior
+# assistant turns from the history projection.
+if [[ $EXIT_CODE -eq 0 && -n "$LAST_CONV" ]]; then
+python3 - <<PYEOF
+import sqlite3, json, time
+
+db = sqlite3.connect("$CONV_DB")
+root_id = "$ROOT_ID"
+agent_pubkey = "79c8c7e3d3946e286e345263abc2d96d8847e4e25f0b60bc63b233e3d9b10a57"
+now_ms = int(time.time() * 1000)
+
+# Collect all final (non-tool) conversation responses from the NDJSON output,
+# in emission order. This handles supervision re-engagement turns correctly —
+# each turn's response is a separate kind:1 event.
+responses = []
+try:
+    with open("$TMPFILE") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                d = json.loads(line)
+                if d.get("kind") == 1 and not any(
+                    t[0] == "tool" for t in d.get("tags", [])
+                ):
+                    content = d.get("content", "").strip()
+                    if content:
+                        responses.append(content)
+            except Exception:
+                pass
+except Exception:
+    pass
+
+for content in responses:
+    seq = db.execute(
+        "SELECT COALESCE(MAX(sequence)+1, 0) FROM messages WHERE conversation_id=?",
+        (root_id,),
+    ).fetchone()[0]
+    record_id = f"agent-resp-{seq}"
+    db.execute(
+        """INSERT OR IGNORE INTO messages
+               (conversation_id, record_id, nostr_event_id, sequence,
+                author_pubkey, message_type, role, content, created_at)
+           VALUES (?, ?, ?, ?, ?, 'text', 'assistant', ?, ?)""",
+        (root_id, record_id, record_id, seq, agent_pubkey, content, now_ms),
+    )
+
+db.commit()
+db.close()
+PYEOF
+fi
+
 cat "$TMPFILE"
 exit $EXIT_CODE
