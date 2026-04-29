@@ -115,14 +115,28 @@ pub fn muted_gray() -> Style {
     Style::new().color256(244)
 }
 
-/// `chalk.gray` exact match — `\x1b[90m` (bright black). The TS source
-/// uses `chalk.gray` extensively for muted prose; this byte-for-byte
-/// equivalent keeps wire output identical to TS. Distinct from
-/// [`muted_gray`] (which is `\x1b[38;5;244m`, a darker palette gray
-/// used for log lines and metadata).
+/// `chalk.gray` visual match. TS chalk emits `\x1b[90m` (bright black).
+/// console::Style's `.black().bright()` translates that to
+/// `\x1b[38;5;8m` (xterm-256 palette index 8) — different bytes but
+/// the same on-screen colour in any reasonable terminal (palette index
+/// 8 is bright black). Use [`crate::tui::theme::CHALK_GRAY_OPEN`] +
+/// [`CHALK_GRAY_CLOSE`] for the byte-exact ANSI-90 form when emitting
+/// raw escapes by hand.
+///
+/// Distinct from [`muted_gray`] (`\x1b[38;5;244m`), the darker palette
+/// gray used for log lines and metadata.
 pub fn chalk_gray() -> Style {
     Style::new().black().bright()
 }
+
+/// Raw `\x1b[90m` — chalk.gray's exact open code. Use this when you
+/// need byte-for-byte match with TS output (e.g. golden-file tests
+/// against TS recordings); the [`chalk_gray`] helper produces an
+/// xterm-256 form that's visually identical but byte-different.
+pub const CHALK_GRAY_OPEN: &str = "\x1b[90m";
+
+/// Raw chalk.gray close code — `\x1b[39m` (default foreground).
+pub const CHALK_GRAY_CLOSE: &str = "\x1b[39m";
 
 /// Dim modifier (no color, just dimmed). Background instructions, `Back`
 /// labels, separators (`──`), hints, `[ ]`, `(default)`.
@@ -139,19 +153,28 @@ pub fn bold() -> Style {
 mod tests {
     use super::*;
 
-    /// chalk.gray in chalk uses ANSI 90 (bright black). force-styling
-    /// the output and inspecting it confirms the produced wire bytes.
+    /// console::Style.black().bright() actually emits xterm-256 index 8
+    /// (`\x1b[38;5;8m`), NOT raw ANSI 90 — visually identical bright
+    /// black, byte-different from chalk's wire form. Pin both forms so
+    /// callers know which to reach for.
     #[test]
-    fn chalk_gray_emits_ansi_90() {
+    fn chalk_gray_emits_xterm_256_index_8_visual_match() {
         let styled = chalk_gray()
             .force_styling(true)
             .apply_to("x")
             .to_string();
-        // Bright-black opens with \x1b[90m; close is \x1b[39m (default
-        // foreground reset).
-        assert!(styled.starts_with("\x1b[90m"), "got: {styled:?}");
-        assert!(styled.ends_with("\x1b[0m") || styled.ends_with("\x1b[39m"),
-            "got: {styled:?}");
+        assert!(
+            styled.starts_with("\x1b[38;5;8m"),
+            "got: {styled:?}"
+        );
+    }
+
+    #[test]
+    fn chalk_gray_open_close_match_chalk_wire_bytes() {
+        // For golden-file byte parity with TS, use CHALK_GRAY_OPEN and
+        // CHALK_GRAY_CLOSE directly. chalk emits `\x1b[90m...\x1b[39m`.
+        assert_eq!(CHALK_GRAY_OPEN, "\x1b[90m");
+        assert_eq!(CHALK_GRAY_CLOSE, "\x1b[39m");
     }
 
     /// muted_gray is the xterm-256 #244 palette gray — distinct from
