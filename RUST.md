@@ -1,6 +1,6 @@
 # TENEX Rust Adoption Status
 
-_Last updated: 2026-04-29 (thirty-first pass). Auto-maintained by scheduled debt check._
+_Last updated: 2026-04-29 (thirty-second pass). Auto-maintained by scheduled debt check._
 
 ---
 
@@ -31,6 +31,8 @@ The Rust port is underway crate by crate. The TypeScript daemon still owns per-p
 | `tenex-supervision` | lib | — | Post-completion and pre-tool heuristics (todo nudging, re-engagement, delegation gating) |
 | `tenex-system-prompt` | lib | — | Pure system-prompt assembly from identity + project + skills |
 | `tenex-telemetry` | lib | — | Shared OpenTelemetry/OTLP bootstrap, W3C traceparent propagation, tracing-subscriber init |
+| `tenex-mcp` | lib | — | Project-scoped MCP runtime bridge — loads `mcp.json`, binds socket, proxies tool calls, exposes ToolManifest |
+| `tenex-telegram` | bin+lib | `tenex-telegram` | Telegram transport daemon + delivery library; supervised by `tenex daemon` |
 
 ---
 
@@ -49,6 +51,7 @@ graph TD
     D -->|"supervises · auto-restart"| SU["tenex-summarizer\nkind:513 conversation\nmetadata daemon"]
     D -->|"supervises · auto-restart"| SC["tenex-scheduler\nFires scheduled kind:1\nNostr events · schedules.json"]
     D -->|"supervises · auto-restart"| IV["tenex-intervention\nMonitors kind:24133\nrequests review on user silence"]
+    D -->|"supervises · auto-restart"| TG["tenex-telegram\nTelegram transport daemon\nBot API polling + delivery"]
 
     D -->|"one per project d-tag"| RT["tenex runtime  inside tenex binary\nper-project Nostr event loop\n24010 heartbeat · DispatchCoordinator"]
 
@@ -80,6 +83,7 @@ graph LR
         TSU["tenex-summarizer"]
         TIV["tenex-intervention"]
         TWL["tenex-whitelist"]
+        TTG["tenex-telegram\nTelegram transport"]
     end
 
     subgraph DOM["Domain libraries"]
@@ -96,11 +100,12 @@ graph LR
         PRO["tenex-protocol\ntransport-agnostic intents\nNostr + stdio channel adapters"]
         SUP["tenex-supervision\npost-turn heuristics\ntodo nudge · re-engagement · delegation gate"]
         TEL["tenex-telemetry\nOTel / OTLP bootstrap\nW3C traceparent propagation"]
-        MCP["tenex-mcp\nMCP protocol types"]
+        MCP["tenex-mcp\nMCP runtime bridge\nsocket server + ToolManifest"]
     end
 
     T --> REG & CON & LLM & PRJ & TEL & TWL & TID
     TA --> REG & CTX & CON & LLM & MCP & PRJ & PRO & RAG & TSC & SUP & SYS & TEL
+    TTG --> REG & PRJ & PRO & TEL
     TID --> TEL
     TSC --> TEL
     TSU --> TEL
@@ -251,7 +256,7 @@ All previously listed gaps have been closed. Remaining TS-only tools not yet por
 | TS Tool | Status | Notes |
 |---------|--------|-------|
 | `send_message` | TS-only | Telegram channel message delivery. Depends on TS bot-token + TransportBindingStore infrastructure — not portable. |
-| `mcp_list_resources`, `mcp_resource_read`, `mcp_subscribe`, `mcp_subscription_stop` | TS-only | MCP protocol tools. No Rust equivalent yet. |
+| `mcp_list_resources`, `mcp_resource_read`, `mcp_subscribe`, `mcp_subscription_stop` | TS-only | MCP resource/subscription tools. `McpProxyTool` in Rust handles general MCP tool calls via the bridge socket; resource/subscription methods are not yet wired through it. |
 | `rag_subscription_*` | TS-only | RAG subscription management. No Rust equivalent. |
 | `rag_collection_create`, `rag_collection_delete`, `rag_collection_list` | TS-only | RAG collection management. Not ported; Rust agents use audience-scoped collections implicitly. |
 
@@ -261,7 +266,7 @@ Note: `conversation_get`, `conversation_list`, `conversation_search`, `kill` (sc
 
 ## Compilation Status
 
-**As of 2026-04-29 (thirtieth debt check pass): workspace compiles clean — zero errors, zero warnings. `cargo test --workspace`: 1212 tests passing across all crates.**
+**As of 2026-04-29 (thirty-second debt check pass): workspace compiles clean — zero errors, zero warnings. `cargo test --workspace`: 1371 tests passing across all crates.**
 
 **MILESTONE: Tool call/result history is now fully wired.** `RecordingTool` wrappers capture every tool invocation (call_id, args, result) into a shared `Arc<ToolRecorder>`. After each turn, records are written to `tool_messages` and the assistant `TurnRecord` carries the `tool_calls` slice. `projection.rs` interleaves `ToolResult` messages immediately after their parent assistant row (sorted by timestamp, agent-pubkey-filtered). The `CtxMessage::ToolResult` filter in `main.rs` is removed — providers now receive correctly paired `tool_use`→`tool_result` sequences.
 
@@ -281,6 +286,19 @@ Note: `conversation_get`, `conversation_list`, `conversation_search`, `kill` (sc
 - Conversation history persistence (10 convs, 20 history entries) ✅
 - Supervision (worker todo block) ✅
 - FK bug fixed: ensure_conversation() on store open
+
+Resolved between thirty-first and thirty-second passes:
+- **`tenex-mcp` crate added**: Project-scoped MCP runtime bridge — loads `mcp.json`, binds a Unix socket per project, proxies tool calls, exposes `ToolManifest` for agent discovery. Replaces `tenex/src/store/mcp.rs`. `McpProxyTool` in `tenex-agent` routes MCP calls through this bridge.
+- **`tenex-telegram` crate added**: Telegram transport daemon (bin + lib) supervised by `tenex daemon`. Handles Bot API polling and message delivery. Complements the existing TS Telegram infrastructure.
+- **Runtime control socket** (`runtime-control.sock`): `RuntimeControlState` serves a per-project Unix socket. Agents send JSON requests to run shell commands (`RunShell`), list active shell tasks (`ListShellTasks`), or kill processes (`Kill`). Protocol types in `tenex-protocol::runtime_control`. Previously agents could only communicate via NDJSON stdout.
+- **Parallel shell-intervention dispatch**: `DispatchCoordinator.dispatch_inbound` gains `allow_parallel_when_busy` flag — events from whitelisted pubkeys bypass the queue when the target agent has active shell tasks (`has_shell_tasks` predicate on `RuntimeControlState`). Enables real-time intervention in long-running shell work.
+- **Cassette recorder** (`cassette.rs`): records each real LLM turn (provider, model, request debug, tool calls, duration) to NDJSON at `TENEX_LLM_CASSETTE_RECORD_PATH` — complements mock_llm recording for probe observability.
+- **`isPM` flag**: PM designation now stored in agent config (priority 1 in `resolveProjectManager`) ahead of p-tag pubkey. `AgentStorage.resetDefaultConfig` clears both `default` and `isPM`.
+- **`AgentStorage.updateAgent`**: handles `tools` and `blockedSkills` array updates the same way as `skills` — empty array → `undefined`, non-empty → stored value.
+- **Runtime probe harness** (`scripts/tenex-runtime-probe*.ts`): four-file harness that runs real `tenex` binaries with mock LLM responses, publishes signed Nostr events, and evaluates the published timeline against expected verdicts. Covers MCP proxy path via `tenex-runtime-probe-mcp.ts`.
+- **TS quality sweep**: explicit return types on arrow functions, `Error { cause }` chaining, non-null assertion removal, `mcpAccess` → `mcp` field rename throughout, `TelegramChatFullInfo` converted from interface extension to type alias, architecture linter `normalizeImport` fixed.
+- **Warning count**: 0.
+- **Test count**: 1371 (up from 1212).
 
 Resolved between thirtieth and thirty-first passes:
 - **`mock_llm.rs` fixed**: `EmptyListError` is a unit struct — no `drain()` method. `response_to_choice` already guards with `items.is_empty()`, so `OneOrMany::many(items).unwrap()` is correct. Compilation restored for `tenex-agent` test harness.
