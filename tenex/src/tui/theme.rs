@@ -20,13 +20,6 @@ use console::Style;
 // `src/utils/cli-theme.ts:3-13`
 // ---------------------------------------------------------------------------
 
-/// Truecolor amber `#FFC107`. Inquirer prompt cursor (`❯`), prefix (`?`),
-/// highlight, answer echo. NEVER use for banner/section headers.
-pub fn inquirer_amber() -> Style {
-    Style::new().color256(214) // approximated for non-truecolor terminals; the
-                                // emit path below uses true 24-bit RGB
-}
-
 /// Inquirer-prompt amber as a 24-bit RGB ANSI escape sequence — `console`'s
 /// `Style` does not expose RGB directly, so call sites that must hit pixel-
 /// exact `#FFC107` should use this and the matching reset.
@@ -85,68 +78,16 @@ pub fn display_accent() -> Style {
     Style::new().color256(214).bold()
 }
 
-/// Info / sky blue — xterm-256 #117 (`#87d7ff`).
-/// Summary line label; team-agent bullet `●`.
-pub fn display_info() -> Style {
-    Style::new().color256(117)
-}
-
-/// Selection green — xterm-256 #114 (`#87d787`).
-/// Provider check `[✓]`.
-pub fn display_selected() -> Style {
-    Style::new().color256(114)
-}
-
-/// Muted dark gray — xterm-256 #240 (`#585858`).
-/// Inactive role hint, secondary metadata.
-pub fn display_muted() -> Style {
-    Style::new().color256(240)
-}
-
-// ---------------------------------------------------------------------------
-// 16-color basics (semantic).
-// ---------------------------------------------------------------------------
-
-/// Error red. `❌`, `✗`, fatal log line.
-pub fn error_red() -> Style {
-    Style::new().red()
-}
-
-/// Success green. `✓`, success log line, `[FREE]` tag, `[x]` checkbox.
-pub fn success_green() -> Style {
-    Style::new().green()
-}
-
-/// Warning yellow. `⚠`, warn log line, tool-call line `🔧`, spinner.
-pub fn warning_yellow() -> Style {
-    Style::new().yellow()
-}
-
-/// Info blue. Doctor progress.
-pub fn info_blue() -> Style {
-    Style::new().blue()
-}
-
-/// Action / accent cyan. Action items, "Add variant", relay bullet `●`.
-pub fn action_cyan() -> Style {
-    Style::new().cyan()
-}
-
-/// Muted gray. Debug log line, secondary metadata, hints.
-pub fn muted_gray() -> Style {
-    Style::new().color256(244)
-}
-
 /// `chalk.gray` visual match. TS chalk emits `\x1b[90m` (bright black).
 /// console::Style's `.black().bright()` translates that to
 /// `\x1b[38;5;8m` (xterm-256 palette index 8) — different bytes but
 /// the same on-screen colour in any reasonable terminal (palette index
 /// 8 is bright black). Use [`crate::tui::theme::CHALK_GRAY_OPEN`] +
-/// [`CHALK_GRAY_CLOSE`] for the byte-exact ANSI-90 form when emitting
-/// raw escapes by hand.
+/// [`CHALK_GRAY_CLOSE`] (or the [`chalk_gray_str`] helper) for the
+/// byte-exact ANSI-90 form when emitting raw escapes by hand.
 ///
-/// Distinct from [`muted_gray`] (`\x1b[38;5;244m`), the darker palette
-/// gray used for log lines and metadata.
+/// Retained primarily for the canary test that documents this
+/// xterm-256-vs-ANSI-90 wire-byte divergence.
 pub fn chalk_gray() -> Style {
     Style::new().black().bright()
 }
@@ -256,17 +197,6 @@ pub fn chalk_gray_str(text: &str) -> String {
     format!("{CHALK_GRAY_OPEN}{text}{CHALK_GRAY_CLOSE}")
 }
 
-/// Dim modifier (no color, just dimmed). Background instructions, `Back`
-/// labels, separators (`──`), hints, `[ ]`, `(default)`.
-pub fn dim() -> Style {
-    Style::new().dim()
-}
-
-/// Bold modifier (default fg). Emphasis on default-color text.
-pub fn bold() -> Style {
-    Style::new().bold()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -295,33 +225,6 @@ mod tests {
         assert_eq!(CHALK_GRAY_CLOSE, "\x1b[39m");
     }
 
-    /// muted_gray is the xterm-256 #244 palette gray — distinct from
-    /// chalk_gray's ANSI 90. Pin the divergence so the two never get
-    /// silently unified.
-    #[test]
-    fn muted_gray_emits_xterm_256_244() {
-        let styled = muted_gray()
-            .force_styling(true)
-            .apply_to("x")
-            .to_string();
-        assert!(
-            styled.starts_with("\x1b[38;5;244m"),
-            "got: {styled:?}"
-        );
-    }
-
-    #[test]
-    fn chalk_gray_and_muted_gray_emit_distinct_ansi_sequences() {
-        let cg = chalk_gray()
-            .force_styling(true)
-            .apply_to("x")
-            .to_string();
-        let mg = muted_gray()
-            .force_styling(true)
-            .apply_to("x")
-            .to_string();
-        assert_ne!(cg, mg);
-    }
 
     /// Pin the basic-ANSI color helpers' wire bytes — must match chalk
     /// exactly (open SGR 31/32/33/34/36, close SGR 39) so config / agent
