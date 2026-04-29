@@ -194,6 +194,42 @@ export class PrefixKVStore {
     }
 
     /**
+     * Look up a full ID by a unique prefix up to the stored key length.
+     * Returns null when the prefix is invalid, absent, or ambiguous.
+     */
+    lookupUniquePrefix(prefix: string): string | null {
+        if (!this.db) {
+            throw new Error("[PrefixKVStore] Not initialized. Call initialize() first.");
+        }
+
+        const cleaned = prefix.trim().toLowerCase();
+        if (!cleaned || cleaned.length > STORAGE_PREFIX_LENGTH || !/^[0-9a-f]+$/.test(cleaned)) {
+            return null;
+        }
+
+        if (cleaned.length === STORAGE_PREFIX_LENGTH) {
+            return this.lookup(cleaned);
+        }
+
+        const matches = new Set<string>();
+        for (const { key, value } of this.db.getRange({
+            start: cleaned,
+            end: `${cleaned}\uffff`,
+            limit: 2,
+        })) {
+            if (!String(key).startsWith(cleaned)) {
+                continue;
+            }
+            matches.add(value);
+            if (matches.size > 1) {
+                return null;
+            }
+        }
+
+        return matches.values().next().value ?? null;
+    }
+
+    /**
      * Check if a prefix exists in the store.
      */
     has(prefix: string): boolean {
