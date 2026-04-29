@@ -27,13 +27,13 @@ Canonical spec: `docs/RUST-AGENT-SPEC.md`. Fleet context: `docs/plans/2026-04-28
 - **Completion only when work is actually done.** The final stdout line is a signed completion unless the turn started pending external work; pending-work text is emitted as a non-notifying conversation frame.
 - **Root event ID derivation** (`src/nostr.rs`): first `["e", id, _, "root"]` tag → else first `["e", id, ...]` tag → else the triggering event's own ID.
 - **Project context via `tenex-project`.** Agent definitions, model resolution, and project metadata come from `tenex-project::Project`. Do not parse agent JSON files directly.
-- **Tools in `src/tools/`.** `shell`, `fs_read`, `fs_write`, `fs_edit`, `fs_glob`, `fs_grep`, `todo_write`, `delegate`, and MCP proxy tools. Add new static tools as separate files in that directory; register them in `main.rs` via the `run_agent!` macro.
+- **Tools in `src/tools/`.** Static tools live as separate files in this directory and are registered in `main.rs` via the `run_agent!` macro. Core tools include shell, filesystem and home-filesystem tools, todo, delegation and follow-up delegation, ask/no-response, conversation lookup, RAG, skills, learning, reports, scheduling, project listing, model changes, agent config writes, and MCP proxy tools.
 - **No relay connections.** This binary never opens a relay. Signing and publishing happen only to stdout.
 
 ## How to approach changes
 
 1. `cargo build -p tenex-agent && cargo test -p tenex-agent`.
-2. System prompt fragments live in `crates/tenex-system-prompt`. Runner-owned prompt inputs such as root `AGENTS.md` loading live in `src/project_instructions.rs`.
+2. System prompt fragments live in `crates/tenex-system-prompt`. Runner-owned prompt inputs such as root `AGENTS.md` loading live in `src/project_instructions.rs`; stdio-only home environment setup lives in `src/stdio_home.rs`.
 3. Nostr event construction and signing: `src/nostr.rs`. Keep the hook (`NostrHook`) and signer (`AgentSigner`) in sync.
 4. Model/provider resolution: `src/config.rs`. Reads `~/.tenex/llms.json` and `~/.tenex/providers.json`.
 5. Any change to the stdout frame format must be coordinated with the bun `AgentExecutor` and the runtime orchestrator spec.
@@ -42,7 +42,5 @@ Canonical spec: `docs/RUST-AGENT-SPEC.md`. Fleet context: `docs/plans/2026-04-28
 
 - No streaming intermediate events (roadmap; not in v1).
 - No conversation history passed to the LLM (roadmap).
-- No `no_response` or `ask` tools (roadmap).
 - No token budgeting or compaction (roadmap).
 - No relay client.
-- No lessons.

@@ -16,6 +16,7 @@ mod runtime_control;
 mod runtime_state;
 mod runtime_state_json;
 mod skills;
+mod stdio_home;
 mod tools;
 
 use agent_loop_hook::AgentLoopHook;
@@ -480,12 +481,12 @@ async fn run() -> Result<()> {
     // Set up agent home directory.
     let agent_home = home::agent_home_dir(&base_dir, &pubkey_hex);
     home::ensure_agent_home_dir(&agent_home);
-    if let Err(e) = home::write_agent_env_file(&agent_home, &agent_config.nsec, &pubkey_hex) {
+    if let Err(e) = stdio_home::write_agent_env_file(&agent_home, &agent_config.nsec, &pubkey_hex) {
         eprintln!("[tenex-agent] Failed to write agent .env file: {e}");
     }
 
     // Build env vars for shell commands: parse agent .env + inject computed vars.
-    let mut shell_env: Vec<(String, String)> = home::parse_dotenv(&agent_home.join(".env"))
+    let mut shell_env: Vec<(String, String)> = stdio_home::parse_dotenv(&agent_home.join(".env"))
         .into_iter()
         .filter(|(k, _)| k != "HOME") // never override the real HOME
         .collect();
@@ -592,11 +593,7 @@ async fn run() -> Result<()> {
             );
             let svc = tenex_telegram::chat_context::TelegramChatContextService::new(bot_client);
             let ctx = svc
-                .get_context(
-                    &tg_meta.chat_id,
-                    tg_meta.thread_id.as_deref(),
-                    &[],
-                )
+                .get_context(&tg_meta.chat_id, tg_meta.thread_id.as_deref(), &[])
                 .await;
             let formatted = tenex_telegram::chat_context::TelegramChatContextForPrompt::from(ctx);
             Some(tenex_system_prompt::TelegramChatContextForPrompt {
@@ -826,8 +823,7 @@ async fn run() -> Result<()> {
     );
 
     let agent_slug = agent_config.identity_name().to_string();
-    let escalation_pubkey =
-        escalation::resolve_escalation_pubkey(&base_dir, &project_agents);
+    let escalation_pubkey = escalation::resolve_escalation_pubkey(&base_dir, &project_agents);
     let suppress_response = Arc::new(AtomicBool::new(false));
     let tool_set = ToolSet {
         emit_state: emit_state.clone(),

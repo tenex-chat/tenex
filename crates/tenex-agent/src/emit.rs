@@ -69,7 +69,10 @@ impl EmitState {
         self.pending_external_work.store(true, Ordering::Release);
     }
 
-    #[allow(dead_code)]
+    #[allow(
+        dead_code,
+        reason = "used by the stdio binary; the ACP binary compiles shared delegation tool types without this call site"
+    )]
     pub fn has_pending_external_work(&self) -> bool {
         self.pending_external_work.load(Ordering::Acquire)
     }

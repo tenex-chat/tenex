@@ -204,7 +204,13 @@ fn build_escalation_prompt(args: &AskArgs) -> String {
     );
 
     for (i, q) in args.questions.iter().enumerate() {
-        prompt.push_str(&format!("\n{}. [{}] {}\n   {}\n", i + 1, q.question_type, q.title, q.prompt));
+        prompt.push_str(&format!(
+            "\n{}. [{}] {}\n   {}\n",
+            i + 1,
+            q.question_type,
+            q.title,
+            q.prompt
+        ));
         if !q.options.is_empty() {
             prompt.push_str(&format!("   Options: {}\n", q.options.join(", ")));
         }

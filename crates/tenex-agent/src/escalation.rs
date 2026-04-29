@@ -31,9 +31,7 @@ pub fn resolve_escalation_pubkey(base_dir: &Path, project_agents: &[Agent]) -> O
 
     // Slow path: look up in the global agent index.
     let index = AgentIndexDoc::load(base_dir).ok()?;
-    index
-        .lookup_pubkey_by_slug(&slug)
-        .map(str::to_owned)
+    index.lookup_pubkey_by_slug(&slug).map(str::to_owned)
 }
 
 /// Read `escalation.agent` from `<base_dir>/config.json`.
