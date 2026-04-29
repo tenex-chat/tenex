@@ -128,6 +128,52 @@ impl ConversationStore {
         Ok(rows)
     }
 
+    /// Search conversations by keyword against title, summary, and last_user_message.
+    /// When `full_text` is true, also searches all message content.
+    pub fn search_conversations(
+        &self,
+        query: &str,
+        full_text: bool,
+        limit: i64,
+    ) -> Result<Vec<ConversationRow>> {
+        if full_text {
+            let mut stmt = self.conn.prepare(
+                "SELECT DISTINCT c.id, c.title, c.summary, c.last_user_message, c.status_label,
+                        c.status_current_activity, c.owner_pubkey, c.created_at, c.last_activity,
+                        c.metadata_json, c.runtime_state_json, c.updated_at
+                   FROM conversations c
+                   LEFT JOIN messages m ON m.conversation_id = c.id
+                  WHERE c.title LIKE '%' || ?1 || '%'
+                     OR c.summary LIKE '%' || ?1 || '%'
+                     OR c.last_user_message LIKE '%' || ?1 || '%'
+                     OR m.content LIKE '%' || ?1 || '%'
+                     OR m.human_readable LIKE '%' || ?1 || '%'
+                  ORDER BY COALESCE(c.last_activity, 0) DESC
+                  LIMIT ?2",
+            )?;
+            let rows = stmt
+                .query_map(params![query, limit], row_to_conversation)?
+                .collect::<std::result::Result<Vec<_>, _>>()?;
+            Ok(rows)
+        } else {
+            let mut stmt = self.conn.prepare(
+                "SELECT id, title, summary, last_user_message, status_label,
+                        status_current_activity, owner_pubkey, created_at, last_activity,
+                        metadata_json, runtime_state_json, updated_at
+                   FROM conversations
+                  WHERE title LIKE '%' || ?1 || '%'
+                     OR summary LIKE '%' || ?1 || '%'
+                     OR last_user_message LIKE '%' || ?1 || '%'
+                  ORDER BY COALESCE(last_activity, 0) DESC
+                  LIMIT ?2",
+            )?;
+            let rows = stmt
+                .query_map(params![query, limit], row_to_conversation)?
+                .collect::<std::result::Result<Vec<_>, _>>()?;
+            Ok(rows)
+        }
+    }
+
     pub fn list_recent(&self, filter: ConversationListFilter) -> Result<Vec<ConversationRow>> {
         let limit = filter.limit.unwrap_or(i64::MAX);
         let from_time = filter.from_time;
