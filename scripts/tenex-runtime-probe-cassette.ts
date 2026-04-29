@@ -177,7 +177,7 @@ function requiredNumber(value: number | undefined, field: string, file: string):
     if (!Number.isFinite(value)) {
         throw new Error(`Cassette record in ${file} is missing ${field}`);
     }
-    return value;
+    return value as number;
 }
 
 function flagValue(args: string[], name: string): string | undefined {
