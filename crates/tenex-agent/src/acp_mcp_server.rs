@@ -13,7 +13,7 @@ use tokio::net::UnixStream;
 
 use crate::acp_config::AcpAgentConfig;
 use crate::acp_mcp::{agent_allows_delegation, AcpMcpContext, MCP_PROTOCOL_VERSION, SERVER_NAME};
-use crate::emit::EmitState;
+use crate::emit::{EmitState, EmitStateArgs};
 use crate::tools::delegate::DelegateTool;
 use crate::tools::delegate_crossproject::DelegateCrossProjectTool;
 use crate::tools::delegate_followup::DelegateFollowupTool;
@@ -69,16 +69,16 @@ fn build_tools(context: &AcpMcpContext) -> Result<Vec<Box<dyn ToolDyn>>> {
         )
         .context("initializing ACP MCP Nostr channel")?,
     );
-    let state = Arc::new(EmitState::new(
+    let state = Arc::new(EmitState::new(EmitStateArgs {
         channel,
-        context.project.clone(),
-        context.triggering_principal.clone(),
-        context.triggering_message.clone(),
-        context.conversation_root.clone(),
-        context.completion_recipient.clone(),
-        context.model.clone(),
-        context.team.clone(),
-    ));
+        project: context.project.clone(),
+        triggering_principal: context.triggering_principal.clone(),
+        triggering_message: context.triggering_message.clone(),
+        conversation_root: context.conversation_root.clone(),
+        completion_recipient: context.completion_recipient.clone(),
+        model: context.model.clone(),
+        team: context.team.clone(),
+    }));
 
     let project = tenex_project::Project::open(&context.project_id, &context.base_dir)
         .with_context(|| format!("opening project '{}'", context.project_id))?;

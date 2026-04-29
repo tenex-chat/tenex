@@ -213,7 +213,7 @@ fn write_private_json(path: &Path, value: &impl Serialize) -> Result<()> {
             .with_context(|| format!("writing {}", path.display()))?;
         file.write_all(&bytes)?;
         file.write_all(b"\n")?;
-        return Ok(());
+        Ok(())
     }
 
     #[cfg(not(unix))]

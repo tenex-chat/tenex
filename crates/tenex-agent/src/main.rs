@@ -23,7 +23,7 @@ use anyhow::{Context, Result};
 use cassette::CassetteRecorder;
 use cassette_client::RecordingClient;
 use config::{LlmsConfig, ResolvedModel};
-use emit::EmitState;
+use emit::{EmitState, EmitStateArgs};
 use hook::EmitHook;
 use injections::MessageInjectionTracker;
 use progress_monitor::RIG_AGENT_TURN_FUSE;
@@ -660,16 +660,16 @@ async fn run() -> Result<()> {
             display_name: None,
         });
 
-    let emit_state = Arc::new(EmitState::new(
-        channel.clone(),
-        project_ref,
-        envelope.principal.clone(),
-        Some(envelope.message.clone()),
+    let emit_state = Arc::new(EmitState::new(EmitStateArgs {
+        channel: channel.clone(),
+        project: project_ref,
+        triggering_principal: envelope.principal.clone(),
+        triggering_message: Some(envelope.message.clone()),
         conversation_root,
         completion_recipient,
-        model_string.clone(),
-        envelope.metadata.team.clone(),
-    ));
+        model: model_string.clone(),
+        team: envelope.metadata.team.clone(),
+    }));
 
     // Parse category as supervision type (used by both hook and delegation check).
     let sup_category: Option<tenex_supervision::types::AgentCategory> = agent_config

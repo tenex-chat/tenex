@@ -82,14 +82,14 @@ impl Tool for FindSkillsTool {
                 }
 
                 // Check name (second priority)
-                if let Some(ref name) = skill.frontmatter.as_ref().and_then(|fm| fm.name.as_ref()) {
+                if let Some(name) = skill.frontmatter.as_ref().and_then(|fm| fm.name.as_ref()) {
                     if matches_query(name, query) {
                         score += 5.0;
                     }
                 }
 
                 // Check description
-                if let Some(ref desc) = skill
+                if let Some(desc) = skill
                     .frontmatter
                     .as_ref()
                     .and_then(|fm| fm.description.as_ref())

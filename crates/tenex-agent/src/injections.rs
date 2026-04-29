@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use tenex_conversations::{ConversationStore, MessageQuery, MessageRecord};
 
@@ -24,7 +24,7 @@ impl MessageInjectionTracker {
     ) -> Self {
         let last_sequence = initial_sequence(&db_path, &conversation_id, &trigger_event_id);
         if let Some(state) = &runtime_state {
-            state.mark_messages_consumed(&[trigger_event_id.clone()]);
+            state.mark_messages_consumed(std::slice::from_ref(&trigger_event_id));
         }
         Self {
             db_path,
@@ -114,7 +114,7 @@ impl MessageInjectionTracker {
     }
 }
 
-fn initial_sequence(db_path: &PathBuf, conversation_id: &str, trigger_event_id: &str) -> i64 {
+fn initial_sequence(db_path: &Path, conversation_id: &str, trigger_event_id: &str) -> i64 {
     let Ok(store) = ConversationStore::open(db_path) else {
         return -1;
     };

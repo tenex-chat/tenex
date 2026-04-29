@@ -38,26 +38,28 @@ pub struct EmitState {
     pending_external_work: Arc<AtomicBool>,
 }
 
+pub struct EmitStateArgs {
+    pub channel: Arc<dyn Channel>,
+    pub project: ProjectRef,
+    pub triggering_principal: PrincipalRef,
+    pub triggering_message: Option<MessageRef>,
+    pub conversation_root: Option<ConversationRef>,
+    pub completion_recipient: Option<PrincipalRef>,
+    pub model: String,
+    pub team: Option<String>,
+}
+
 impl EmitState {
-    pub fn new(
-        channel: Arc<dyn Channel>,
-        project: ProjectRef,
-        triggering_principal: PrincipalRef,
-        triggering_message: Option<MessageRef>,
-        conversation_root: Option<ConversationRef>,
-        completion_recipient: Option<PrincipalRef>,
-        model: String,
-        team: Option<String>,
-    ) -> Self {
+    pub fn new(args: EmitStateArgs) -> Self {
         Self {
-            channel,
-            project,
-            triggering_principal,
-            triggering_message,
-            conversation_root,
-            completion_recipient,
-            model,
-            team,
+            channel: args.channel,
+            project: args.project,
+            triggering_principal: args.triggering_principal,
+            triggering_message: args.triggering_message,
+            conversation_root: args.conversation_root,
+            completion_recipient: args.completion_recipient,
+            model: args.model,
+            team: args.team,
             meta: Arc::new(Mutex::new(AgentMeta::new())),
             pending_external_work: Arc::new(AtomicBool::new(false)),
         }

@@ -2,7 +2,7 @@ use rig::{completion::ToolDefinition, tool::Tool};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tenex_conversations::{
     model::ConversationRow, paths::CONVERSATION_DB_FILENAME, store::ConversationListFilter,
     ConversationStore,
@@ -54,7 +54,7 @@ fn parent_conversation_id(row: &ConversationRow) -> Option<String> {
 }
 
 fn query_store(
-    db_path: &PathBuf,
+    db_path: &Path,
     project_label: Option<String>,
     filter: &ConversationListFilter,
 ) -> Vec<TaggedConv> {

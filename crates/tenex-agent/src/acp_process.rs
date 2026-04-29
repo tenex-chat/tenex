@@ -19,26 +19,17 @@ pub(crate) struct AcpUpdates {
 
 impl AcpUpdates {
     fn apply(&mut self, message: &Value) -> Option<AcpUpdate> {
-        let update = match message
+        let update = message
             .get("params")
-            .and_then(|params| params.get("update"))
-        {
-            Some(update) => update,
-            None => return None,
-        };
-        let Some(kind) = update.get("sessionUpdate").and_then(Value::as_str) else {
-            return None;
-        };
+            .and_then(|params| params.get("update"))?;
+        let kind = update.get("sessionUpdate").and_then(Value::as_str)?;
         if kind != "agent_message_chunk" {
             return None;
         }
-        let Some(text) = update
+        let text = update
             .get("content")
             .and_then(|content| content.get("text"))
-            .and_then(Value::as_str)
-        else {
-            return None;
-        };
+            .and_then(Value::as_str)?;
         self.visible_text.push_str(text);
         Some(AcpUpdate::AgentMessageChunk {
             text: text.to_string(),
