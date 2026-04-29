@@ -127,8 +127,6 @@ impl fmt::Display for PubkeyError {
 impl std::error::Error for PubkeyError {}
 
 fn nip19_variant_name(nip: &Nip19) -> &'static str {
-    // Wildcard fallback covers feature-gated variants (e.g. encrypted-secret)
-    // we don't surface elsewhere.
     match nip {
         Nip19::Pubkey(_) => "npub",
         Nip19::Profile(_) => "nprofile",
@@ -136,7 +134,6 @@ fn nip19_variant_name(nip: &Nip19) -> &'static str {
         Nip19::Event(_) => "nevent",
         Nip19::Coordinate(_) => "naddr",
         Nip19::Secret(_) => "nsec",
-        _ => "nip19",
     }
 }
 
