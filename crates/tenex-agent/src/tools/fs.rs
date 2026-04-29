@@ -351,7 +351,7 @@ impl Tool for FsGlobTool {
     async fn definition(&self, _prompt: String) -> ToolDefinition {
         ToolDefinition {
             name: Self::NAME.to_string(),
-            description: "Fast glob-based file search. Returns matching file paths relative to the working directory in sorted order.".to_string(),
+            description: "Fast glob-based search. Returns matching file and directory paths relative to the working directory in sorted order. Directories are suffixed with '/'.".to_string(),
             parameters: json!({
                 "type": "object",
                 "properties": {
@@ -381,8 +381,13 @@ impl Tool for FsGlobTool {
         {
             match entry {
                 Ok(path) => {
-                    if path.is_file() && !has_excluded_segment(&path) {
-                        all_paths.push(make_relative(&path, &self.working_dir));
+                    if !has_excluded_segment(&path) {
+                        let rel = make_relative(&path, &self.working_dir);
+                        if path.is_dir() {
+                            all_paths.push(format!("{rel}/"));
+                        } else {
+                            all_paths.push(rel);
+                        }
                     }
                 }
                 Err(e) => eprintln!("fs_glob: {e}"),
@@ -403,7 +408,7 @@ impl Tool for FsGlobTool {
             .collect();
 
         if paginated.is_empty() {
-            return Ok(format!("No files found matching pattern: {}", args.pattern));
+            return Ok(format!("No matches found for pattern: {}", args.pattern));
         }
 
         let body = paginated.join("\n");
@@ -950,9 +955,9 @@ impl Tool for HomeFsGlobTool {
         ToolDefinition {
             name: Self::NAME.to_string(),
             description: format!(
-                "Fast glob-based file search within your agent home directory ({}). \
-                 Returns matching file paths relative to your home directory. \
-                 Patterns are relative to your home directory.",
+                "Fast glob-based search within your agent home directory ({}). \
+                 Returns matching file and directory paths relative to your home directory. \
+                 Directories are suffixed with '/'. Patterns are relative to your home directory.",
                 self.home_dir
             ),
             parameters: json!({
@@ -991,8 +996,13 @@ impl Tool for HomeFsGlobTool {
         {
             match entry {
                 Ok(path) => {
-                    if path.is_file() && !has_excluded_segment(&path) {
-                        all_paths.push(make_relative(&path, &self.home_dir));
+                    if !has_excluded_segment(&path) {
+                        let rel = make_relative(&path, &self.home_dir);
+                        if path.is_dir() {
+                            all_paths.push(format!("{rel}/"));
+                        } else {
+                            all_paths.push(rel);
+                        }
                     }
                 }
                 Err(e) => eprintln!("home_fs_glob: {e}"),
@@ -1013,7 +1023,7 @@ impl Tool for HomeFsGlobTool {
             .collect();
 
         if paginated.is_empty() {
-            return Ok(format!("No files found matching pattern: {}", args.pattern));
+            return Ok(format!("No matches found for pattern: {}", args.pattern));
         }
 
         let body = paginated.join("\n");
