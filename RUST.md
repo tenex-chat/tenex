@@ -202,7 +202,12 @@ This is intentional per the design doc ("write now, consume later") — the infr
 - FK bug fixed: ensure_conversation() on store open
 
 Resolved between twentieth and twenty-first passes:
-- **TS-only table gap**: `rag_collection_create`, `rag_collection_delete`, and `rag_collection_list` exist in TS but were absent from the "not yet ported" table. Added. Line 74 wording corrected from "removed" to "not ported to Rust" — the TS files still exist.
+- **`tenex-rag` SQLite store tests**: 14 unit tests covering `cosine_similarity` (identical/opposite/orthogonal/mismatched/empty/zero-magnitude) and `SqliteStore` (schema, upsert+search, collection filter, limit, upsert-overwrite, list_collections, delete_collection, score ordering). Added `tempfile` + `tokio` dev-deps.
+- **Proactive RAG injection verified end-to-end**: docs indexed above 0.65 threshold injected as `<proactive-context>` block before LLM call; agent answered codename query without any tool calls (unambiguous).
+- **tenex-identity daemon smoke tested**: socket bind, `STATUS → OK cache=0`, `RESOLVE <pubkey>` fetches live kind:0 from relay.
+- **Bold prompt message labels**: All 6 custom TUI prompts now wrap the `?` message in `SetAttribute(Bold)/Reset` matching `@inquirer/core`'s `theme.style.message` default.
+- **Unreachable `_` arm removed** from `nip19_variant_name` in `types/pubkey.rs` — `Nip19` has exactly 6 variants, all explicitly covered; wildcard was dead code.
+- **TS-only table gap**: `rag_collection_create`, `rag_collection_delete`, and `rag_collection_list` exist in TS but were absent from the "not yet ported" table. Added.
 
 Resolved between nineteenth and twentieth passes:
 - **Bug fix — `ConsecutiveToolsWithoutTodo` re_engage was false**: The heuristic consumed a retry slot and marked `nudged_about_todos = true`, then returned `Accept` — a silent no-op. Fix: `re_engage: false → re_engage: true`. End-to-end verified: 6 shell calls without todos → nudge fires → agent receives and acknowledges.
