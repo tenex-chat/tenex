@@ -38,8 +38,11 @@ pub const INQUIRER_AMBER_FG: &str = "\x1b[38;2;255;193;7m";
 /// LLM menu, agent-select, variant-list, relay) use this for their
 /// active-row cursor and amber-highlight foreground. Defined in one
 /// place here so the truecolor value lives at a single source of truth.
-pub const INQUIRER_AMBER_CROSSTERM: crossterm::style::Color =
-    crossterm::style::Color::Rgb { r: 0xFF, g: 0xC1, b: 0x07 };
+pub const INQUIRER_AMBER_CROSSTERM: crossterm::style::Color = crossterm::style::Color::Rgb {
+    r: 0xFF,
+    g: 0xC1,
+    b: 0x07,
+};
 
 /// Display-palette accent — xterm-256 #214 (`#ffaf00`). Section
 /// headers, hint `→`, banner `T E N E X` letter, summary `▲`, and the
@@ -203,7 +206,6 @@ mod tests {
         assert_eq!(CHALK_GRAY_OPEN, "\x1b[90m");
         assert_eq!(CHALK_GRAY_CLOSE, "\x1b[39m");
     }
-
 
     /// Pin the basic-ANSI color helpers' wire bytes — must match chalk
     /// exactly (open SGR 31/32/33/34/36, close SGR 39) so config / agent

@@ -97,7 +97,10 @@ pub async fn run(args: OnboardArgs) -> Result<()> {
             if msg.contains("SIGINT") || msg.contains("force closed") {
                 std::process::exit(0);
             }
-            eprintln!("{}", crate::tui::theme::chalk_red(&format!("Setup failed: {e}")));
+            eprintln!(
+                "{}",
+                crate::tui::theme::chalk_red(&format!("Setup failed: {e}"))
+            );
             std::process::exit(1);
         }
     }
@@ -157,11 +160,8 @@ async fn run_inner(args: OnboardArgs) -> Result<()> {
     let starting_providers = ProvidersDoc::load(&base_dir)
         .with_context(|| format!("loading providers.json from {}", base_dir.display()))?;
     let env = capture_provider_env();
-    let detection = auto_detect::auto_detect_providers(
-        starting_providers,
-        &env,
-        &auto_detect::SystemProbes,
-    );
+    let detection =
+        auto_detect::auto_detect_providers(starting_providers, &env, &auto_detect::SystemProbes);
 
     if !json_mode {
         for source in &detection.detected_sources {
@@ -171,15 +171,12 @@ async fn run_inner(args: OnboardArgs) -> Result<()> {
             display::blank();
         }
         display::step(3, 7, "AI Providers");
-        display::context(
-            "Connect the AI services your agents will use. You need at least one.",
-        );
+        display::context("Connect the AI services your agents will use. You need at least one.");
         display::blank();
     }
 
     let hints = detection.provider_hints();
-    let claude_hint_present =
-        hints.contains_key(crate::onboard::providers::PROVIDER_IDS[1]); // "anthropic"
+    let claude_hint_present = hints.contains_key(crate::onboard::providers::PROVIDER_IDS[1]); // "anthropic"
     let setup_result = providers::run(detection.doc, hints)?;
 
     let providers_doc = match setup_result {
@@ -348,9 +345,7 @@ fn emit_text_summary(
     relays: &[String],
 ) {
     display::blank();
-    display::hint(
-        "Onboarding incomplete — Step 7 (Project & Agents) is pending port.",
-    );
+    display::hint("Onboarding incomplete — Step 7 (Project & Agents) is pending port.");
     display::blank();
     display::summary_line("Identity", npub);
     if let Some(nsec) = generated_nsec {
@@ -447,9 +442,7 @@ fn emit_json_summary(
     }
     output.insert(
         "remaining".into(),
-        serde_json::Value::Array(vec![serde_json::Value::String(
-            "project-agents".into(),
-        )]),
+        serde_json::Value::Array(vec![serde_json::Value::String("project-agents".into())]),
     );
     println!(
         "{}",

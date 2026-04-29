@@ -20,8 +20,7 @@ pub fn e_root_tag(root_id: &EventId) -> Result<Tag, EncodeError> {
 }
 
 pub fn e_reply_tag(event_id: &EventId) -> Result<Tag, EncodeError> {
-    Tag::parse(["e", &event_id.to_hex(), "", "reply"])
-        .map_err(|e| EncodeError::Tag(e.to_string()))
+    Tag::parse(["e", &event_id.to_hex(), "", "reply"]).map_err(|e| EncodeError::Tag(e.to_string()))
 }
 
 pub fn p_tag(principal: &PrincipalRef) -> Result<Tag, EncodeError> {
@@ -108,8 +107,8 @@ pub fn forward_branch_team(
             .tag(Tag::parse(["branch", branch]).map_err(|e| EncodeError::Tag(e.to_string()))?);
     }
     if let Some(team) = ctx.team.as_deref() {
-        builder = builder
-            .tag(Tag::parse(["team", team]).map_err(|e| EncodeError::Tag(e.to_string()))?);
+        builder =
+            builder.tag(Tag::parse(["team", team]).map_err(|e| EncodeError::Tag(e.to_string()))?);
     }
     Ok(builder)
 }
@@ -131,12 +130,12 @@ pub fn add_llm_usage_tags(
                 .map_err(|e| EncodeError::Tag(e.to_string()))?,
         );
     }
-    let total = usage.total_tokens.or_else(|| {
-        match (usage.input_tokens, usage.output_tokens) {
+    let total = usage
+        .total_tokens
+        .or_else(|| match (usage.input_tokens, usage.output_tokens) {
             (Some(i), Some(o)) => Some(i + o),
             _ => None,
-        }
-    });
+        });
     if let Some(n) = total {
         builder = builder.tag(
             Tag::parse(["llm-total-tokens", &n.to_string()])

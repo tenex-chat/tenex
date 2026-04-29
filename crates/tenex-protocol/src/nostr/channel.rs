@@ -38,7 +38,11 @@ impl<S: EventSink> NostrChannel<S> {
             kind: PrincipalKind::Agent,
             display_name: None,
         };
-        Self { keys, sink: Arc::new(sink), identity }
+        Self {
+            keys,
+            sink: Arc::new(sink),
+            identity,
+        }
     }
 
     pub fn pubkey(&self) -> nostr::PublicKey {
@@ -61,8 +65,8 @@ impl<S: EventSink + 'static> Channel for NostrChannel<S> {
         intent: Intent,
         ctx: &EncodingContext,
     ) -> Result<Vec<MessageRef>, ChannelError> {
-        let builders = NostrEncoder::encode(&intent, ctx)
-            .map_err(|e| ChannelError::Encode(e.to_string()))?;
+        let builders =
+            NostrEncoder::encode(&intent, ctx).map_err(|e| ChannelError::Encode(e.to_string()))?;
 
         let mut refs = Vec::with_capacity(builders.len());
         for builder in builders {

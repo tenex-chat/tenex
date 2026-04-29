@@ -13,8 +13,8 @@ pub fn list_project_dtags() -> Result<Vec<String>> {
     }
 
     let mut dtags = Vec::new();
-    for entry in fs::read_dir(&projects_dir)
-        .with_context(|| format!("read {}", projects_dir.display()))?
+    for entry in
+        fs::read_dir(&projects_dir).with_context(|| format!("read {}", projects_dir.display()))?
     {
         let entry = entry?;
         if !entry.file_type()?.is_dir() {
@@ -43,8 +43,7 @@ pub fn load_tasks(d_tag: &str) -> Result<SchedulesFile> {
 pub fn save_tasks(d_tag: &str, file: &SchedulesFile) -> Result<()> {
     let path = paths::project_schedules_file(d_tag);
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("create {}", parent.display()))?;
+        fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
     }
     let tmp = path.with_extension("json.tmp");
     let json = serde_json::to_string_pretty(file).context("serialize schedules")?;

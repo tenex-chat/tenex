@@ -50,7 +50,6 @@ pub fn validate_integer(input: &str) -> Result<(), &'static str> {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;

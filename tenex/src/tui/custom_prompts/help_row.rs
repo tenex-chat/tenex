@@ -90,10 +90,7 @@ mod tests {
         let plain = strip_ansi_codes(&s).into_owned();
         // Note: rendered row terminates with `\r\n` (CRLF) — keep the
         // `\r\n` in the assertion so trailing whitespace doesn't drift.
-        assert_eq!(
-            plain,
-            "  ↑↓ navigate • ⏎ select • t test • d delete\r\n"
-        );
+        assert_eq!(plain, "  ↑↓ navigate • ⏎ select • t test • d delete\r\n");
     }
 
     #[test]

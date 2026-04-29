@@ -118,7 +118,10 @@ mod tests {
     #[test]
     fn validation_with_named_field_renders_in_clause() {
         let e = validation("must be a number", Some("limit"));
-        assert_eq!(format_tool_error(&e), "Validation error in limit: must be a number");
+        assert_eq!(
+            format_tool_error(&e),
+            "Validation error in limit: must be a number"
+        );
     }
 
     #[test]
@@ -145,10 +148,7 @@ mod tests {
         // TS `error.field ? … : …` evaluates `""` as falsy, so this
         // takes the no-field branch.
         let e = validation("must be present", Some(""));
-        assert_eq!(
-            format_tool_error(&e),
-            "Validation error: must be present"
-        );
+        assert_eq!(format_tool_error(&e), "Validation error: must be present");
     }
 
     #[test]

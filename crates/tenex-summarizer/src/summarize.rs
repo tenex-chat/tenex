@@ -56,10 +56,7 @@ pub async fn summarize(llm: &LlmSelection, transcript: &str) -> Result<Summary> 
                 .map_err(|e| anyhow!("anthropic extraction failed: {e}"))
         }
         "openrouter" => {
-            let key = llm
-                .api_key
-                .clone()
-                .context("missing OPENROUTER_API_KEY")?;
+            let key = llm.api_key.clone().context("missing OPENROUTER_API_KEY")?;
             let client = openrouter::Client::new(&key)?;
             let extractor = client
                 .extractor::<Summary>(&llm.model)

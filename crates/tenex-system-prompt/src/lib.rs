@@ -55,7 +55,11 @@ fn render_home_directory(info: &HomeDirectoryInfo) -> String {
         parts.push(String::new());
         parts.push("<memorized-files>".to_string());
         for file in info.injected_files {
-            let truncated_attr = if file.truncated { " truncated=\"true\"" } else { "" };
+            let truncated_attr = if file.truncated {
+                " truncated=\"true\""
+            } else {
+                ""
+            };
             parts.push(format!(
                 "  <file name=\"{}\"{}>{}</file>",
                 file.filename, truncated_attr, file.content
@@ -263,12 +267,18 @@ Creating a todo list helps you stay organized, shows your progress to observers,
         parts.push(DOMAIN_EXPERT_GUIDANCE.to_string());
     }
 
-    if !matches!(category, Some(AgentCategory::DomainExpert) | Some(AgentCategory::Worker)) {
+    if !matches!(
+        category,
+        Some(AgentCategory::DomainExpert) | Some(AgentCategory::Worker)
+    ) {
         parts.push(DELEGATION_TIPS.to_string());
         parts.push(TODO_BEFORE_DELEGATION.to_string());
     }
 
-    if !matches!(category, Some(AgentCategory::DomainExpert) | Some(AgentCategory::Worker)) {
+    if !matches!(
+        category,
+        Some(AgentCategory::DomainExpert) | Some(AgentCategory::Worker)
+    ) {
         parts.push(AGENT_DIRECTED_MONITORING.to_string());
     }
 
@@ -277,5 +287,9 @@ Creating a todo list helps you stay organized, shows your progress to observers,
 
 fn read_agents_md(working_dir: &str) -> Option<String> {
     let content = std::fs::read_to_string(Path::new(working_dir).join("AGENTS.md")).ok()?;
-    if content.len() > 2000 { None } else { Some(content) }
+    if content.len() > 2000 {
+        None
+    } else {
+        Some(content)
+    }
 }

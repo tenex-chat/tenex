@@ -33,10 +33,7 @@ fn shorten_event_identifier(value: &str) -> String {
         }
         return hex;
     }
-    let prefix: String = value
-        .chars()
-        .take(SHORT_EVENT_ID_LENGTH)
-        .collect();
+    let prefix: String = value.chars().take(SHORT_EVENT_ID_LENGTH).collect();
     prefix.to_lowercase()
 }
 
@@ -46,9 +43,7 @@ pub fn shorten_conversation_id(conversation_id: &str) -> String {
 }
 
 /// Mirror `shortenOptionalConversationId` (`:53-57`).
-pub fn shorten_optional_conversation_id(
-    conversation_id: Option<&str>,
-) -> Option<String> {
+pub fn shorten_optional_conversation_id(conversation_id: Option<&str>) -> Option<String> {
     conversation_id
         .filter(|s| !s.is_empty())
         .map(shorten_conversation_id)
@@ -133,10 +128,7 @@ mod tests {
 
     #[test]
     fn shorten_pubkey_takes_first_6_chars_lowercase() {
-        assert_eq!(
-            shorten_pubkey("ABCDEF1234567890ABCDEF1234567890"),
-            "abcdef"
-        );
+        assert_eq!(shorten_pubkey("ABCDEF1234567890ABCDEF1234567890"), "abcdef");
     }
 
     #[test]

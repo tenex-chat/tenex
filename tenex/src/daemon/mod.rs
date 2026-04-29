@@ -87,8 +87,7 @@ pub async fn run(args: DaemonArgs) -> Result<()> {
 
     let boot_argv = if let Some(cmd) = args.ts {
         info!(boot_command = %cmd, "boot command resolved (--ts)");
-        let argv = shell_words::split(&cmd)
-            .with_context(|| format!("parsing --ts: {cmd}"))?;
+        let argv = shell_words::split(&cmd).with_context(|| format!("parsing --ts: {cmd}"))?;
         if argv.is_empty() {
             return Err(anyhow::anyhow!("--ts is empty"));
         }
@@ -128,8 +127,7 @@ pub async fn run(args: DaemonArgs) -> Result<()> {
     {
         let base_dir_clone = base_dir.clone();
         tokio::spawn(async move {
-            let mut interval =
-                tokio::time::interval(std::time::Duration::from_secs(30));
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(30));
             loop {
                 interval.tick().await;
                 if let Err(e) =

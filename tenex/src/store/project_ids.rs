@@ -21,13 +21,23 @@ use anyhow::{anyhow, Result};
 /// `kind:pubkey:identifier` shape. Pubkey must be 64 lowercase hex.
 fn is_project_address_shape(value: &str) -> bool {
     let mut parts = value.splitn(3, ':');
-    let Some(kind) = parts.next() else { return false };
-    let Some(pubkey) = parts.next() else { return false };
-    let Some(rest) = parts.next() else { return false };
+    let Some(kind) = parts.next() else {
+        return false;
+    };
+    let Some(pubkey) = parts.next() else {
+        return false;
+    };
+    let Some(rest) = parts.next() else {
+        return false;
+    };
     if kind != "31933" {
         return false;
     }
-    if pubkey.len() != 64 || !pubkey.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase()) {
+    if pubkey.len() != 64
+        || !pubkey
+            .bytes()
+            .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
+    {
         return false;
     }
     !rest.is_empty()
@@ -151,13 +161,17 @@ mod tests {
     #[test]
     fn is_address_rejects_short_pubkey() {
         // 63 chars instead of 64.
-        assert!(!is_project_address("31933:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcde:dtag"));
+        assert!(!is_project_address(
+            "31933:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcde:dtag"
+        ));
     }
 
     #[test]
     fn is_address_rejects_uppercase_hex_in_pubkey() {
         // The TS regex is `[0-9a-f]` — case-sensitive lowercase.
-        assert!(!is_project_address("31933:ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789:dtag"));
+        assert!(!is_project_address(
+            "31933:ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789:dtag"
+        ));
     }
 
     #[test]
@@ -203,7 +217,10 @@ mod tests {
 
     #[test]
     fn create_d_tag_returns_input_unchanged_for_normal_value() {
-        assert_eq!(create_project_d_tag("TENEX-ff3ssq").unwrap(), "TENEX-ff3ssq");
+        assert_eq!(
+            create_project_d_tag("TENEX-ff3ssq").unwrap(),
+            "TENEX-ff3ssq"
+        );
     }
 
     #[test]
@@ -233,7 +250,9 @@ mod tests {
 
     #[test]
     fn create_address_invalid_errors_with_verbatim_message() {
-        let e = create_project_address("not-an-address").unwrap_err().to_string();
+        let e = create_project_address("not-an-address")
+            .unwrap_err()
+            .to_string();
         assert!(e.starts_with(
             "Invalid ProjectAddress: expected \"31933:<64-char-hex-pubkey>:<d-tag>\", got "
         ));
@@ -246,10 +265,7 @@ mod tests {
     fn extract_d_tag_simple_case() {
         let pk = good_pubkey();
         let addr = format!("31933:{pk}:TENEX-ff3ssq");
-        assert_eq!(
-            extract_d_tag_from_address(&addr).unwrap(),
-            "TENEX-ff3ssq"
-        );
+        assert_eq!(extract_d_tag_from_address(&addr).unwrap(), "TENEX-ff3ssq");
     }
 
     #[test]
@@ -269,15 +285,14 @@ mod tests {
         let e = extract_d_tag_from_address("31933:noproblem")
             .unwrap_err()
             .to_string();
-        assert_eq!(
-            e,
-            "Cannot extract d-tag from address: \"31933:noproblem\""
-        );
+        assert_eq!(e, "Cannot extract d-tag from address: \"31933:noproblem\"");
     }
 
     #[test]
     fn extract_d_tag_errors_when_no_colons() {
-        let e = extract_d_tag_from_address("just-a-dtag").unwrap_err().to_string();
+        let e = extract_d_tag_from_address("just-a-dtag")
+            .unwrap_err()
+            .to_string();
         assert!(e.contains("Cannot extract d-tag from address"));
     }
 

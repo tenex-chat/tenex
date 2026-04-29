@@ -87,7 +87,10 @@ impl<M: CompletionModel> PromptHook<M> for EmitHook {
         };
         let channel = self.state.channel.clone();
         async move {
-            let intent = StreamTextDeltaIntent { delta, sequence: seq };
+            let intent = StreamTextDeltaIntent {
+                delta,
+                sequence: seq,
+            };
             if let Err(e) = channel.send(Intent::StreamTextDelta(intent), &ctx).await {
                 eprintln!("[tenex-agent] warn: stream delta emit failed: {e}");
             }
@@ -113,7 +116,11 @@ impl<M: CompletionModel> PromptHook<M> for EmitHook {
         // The final pending is emitted by main.rs with usage from FinalResponse.
         let prev_pending = std::mem::replace(
             &mut *self.pending.lock().unwrap(),
-            if content.is_empty() { None } else { Some((content, ral)) },
+            if content.is_empty() {
+                None
+            } else {
+                Some((content, ral))
+            },
         );
 
         let state = self.state.clone();

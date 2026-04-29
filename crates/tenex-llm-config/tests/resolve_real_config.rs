@@ -18,7 +18,11 @@ fn base_dir() -> Option<PathBuf> {
     }
     let home = std::env::var("HOME").ok()?;
     let p = PathBuf::from(home).join(".tenex");
-    if p.exists() { Some(p) } else { None }
+    if p.exists() {
+        Some(p)
+    } else {
+        None
+    }
 }
 
 #[test]
@@ -28,11 +32,20 @@ fn loads_llms_and_providers() {
     let llms = load_llms(&dir).expect("load llms.json");
     let providers = load_providers(&dir).expect("load providers.json");
 
-    println!("configs   : {:?}", llms.configurations.keys().collect::<Vec<_>>());
+    println!(
+        "configs   : {:?}",
+        llms.configurations.keys().collect::<Vec<_>>()
+    );
     println!("roles     : {:?}", llms.roles);
-    println!("providers : {:?}", providers.providers.keys().collect::<Vec<_>>());
+    println!(
+        "providers : {:?}",
+        providers.providers.keys().collect::<Vec<_>>()
+    );
 
-    assert!(!llms.configurations.is_empty(), "expected at least one config");
+    assert!(
+        !llms.configurations.is_empty(),
+        "expected at least one config"
+    );
 }
 
 #[test]
@@ -51,17 +64,29 @@ fn resolves_standard_config() {
     assert_eq!(resp["provider"], "anthropic");
     assert_eq!(resp["model"], "claude-opus-4-6");
 
-    let keys = resp["apiKeys"].as_array().expect("apiKeys should be an array");
+    let keys = resp["apiKeys"]
+        .as_array()
+        .expect("apiKeys should be an array");
     assert!(!keys.is_empty(), "anthropic apiKeys should be non-empty");
 
     // The trailing alias " pfer@me.com" must be split off; key must not contain a space.
     let first = &keys[0];
-    let key_str = first["key"].as_str().expect("apiKeys[0].key should be a string");
-    assert!(!key_str.contains(' '), "key must not contain the alias: {key_str:?}");
-    assert!(key_str.starts_with("sk-"), "key should start with sk-: {key_str:?}");
+    let key_str = first["key"]
+        .as_str()
+        .expect("apiKeys[0].key should be a string");
+    assert!(
+        !key_str.contains(' '),
+        "key must not contain the alias: {key_str:?}"
+    );
+    assert!(
+        key_str.starts_with("sk-"),
+        "key should start with sk-: {key_str:?}"
+    );
 
     // Alias must be present and match the email from providers.json.
-    let alias = first["alias"].as_str().expect("apiKeys[0].alias should be present");
+    let alias = first["alias"]
+        .as_str()
+        .expect("apiKeys[0].alias should be present");
     assert!(alias.contains('@'), "alias should be an email: {alias:?}");
 }
 
@@ -74,7 +99,10 @@ fn resolves_extras_passthrough() {
 
     // "codex/gpt-5.4" has effort="xhigh" — must appear in extras
     let resp = resolve_config("codex/gpt-5.4", &llms, &providers, &kh);
-    println!("codex/gpt-5.4: {}", serde_json::to_string_pretty(&resp).unwrap());
+    println!(
+        "codex/gpt-5.4: {}",
+        serde_json::to_string_pretty(&resp).unwrap()
+    );
 
     assert_eq!(resp["ok"], true);
     assert_eq!(resp["effort"], "xhigh", "effort extra must be preserved");
@@ -110,7 +138,11 @@ fn resolves_role_summarization() {
         return;
     };
     let resp = resolve_config(&name, &llms, &providers, &kh);
-    println!("summarization ({}): {}", name, serde_json::to_string_pretty(&resp).unwrap());
+    println!(
+        "summarization ({}): {}",
+        name,
+        serde_json::to_string_pretty(&resp).unwrap()
+    );
     assert_eq!(resp["ok"], true);
 }
 
@@ -137,7 +169,10 @@ fn key_health_cooldown_excludes_key() {
     kh.mark_failed("anthropic", 0);
 
     let resp = resolve_config("opus", &llms, &providers, &kh);
-    println!("opus after key[0] failure: {}", serde_json::to_string_pretty(&resp).unwrap());
+    println!(
+        "opus after key[0] failure: {}",
+        serde_json::to_string_pretty(&resp).unwrap()
+    );
 
     assert_eq!(resp["ok"], false);
     assert!(
@@ -156,7 +191,10 @@ fn agent_provider_no_keys_is_ok() {
 
     // "claude-code/sonnet" uses the claude-code agent provider which has no real API key.
     let resp = resolve_config("claude-code/sonnet", &llms, &providers, &kh);
-    println!("claude-code/sonnet: {}", serde_json::to_string_pretty(&resp).unwrap());
+    println!(
+        "claude-code/sonnet: {}",
+        serde_json::to_string_pretty(&resp).unwrap()
+    );
 
     assert_eq!(resp["ok"], true);
     assert_eq!(resp["kind"], "standard");

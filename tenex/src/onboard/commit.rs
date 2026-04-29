@@ -203,8 +203,7 @@ mod tests {
         assert!(projects.exists(), "projects dir was not created");
         assert!(!committed.tenex_private_key.is_empty());
 
-        let written =
-            std::fs::read_to_string(base.join("config.json")).unwrap();
+        let written = std::fs::read_to_string(base.join("config.json")).unwrap();
         // Carried-over fields preserved.
         assert!(written.contains("\"version\": 7"));
         assert!(written.contains("\"logFile\": \"/tmp/x\""));
@@ -223,8 +222,11 @@ mod tests {
         let known_key = "aa".repeat(32); // 64 hex chars
         std::fs::write(
             base.join("config.json"),
-            format!(r#"{{"tenexPrivateKey":"{known_key}","projectsBase":"{}"}}"#,
-                base.join("p").to_string_lossy()).as_bytes(),
+            format!(
+                r#"{{"tenexPrivateKey":"{known_key}","projectsBase":"{}"}}"#,
+                base.join("p").to_string_lossy()
+            )
+            .as_bytes(),
         )
         .unwrap();
 
@@ -247,7 +249,11 @@ mod tests {
         let base = fresh_temp();
         std::fs::write(
             base.join("config.json"),
-            format!(r#"{{"projectsBase":"{}"}}"#, base.join("p").to_string_lossy()).as_bytes(),
+            format!(
+                r#"{{"projectsBase":"{}"}}"#,
+                base.join("p").to_string_lossy()
+            )
+            .as_bytes(),
         )
         .unwrap();
 

@@ -376,7 +376,10 @@ mod tests {
         let m = LOCAL_TRANSFORMER_MODELS;
         assert_eq!(m.len(), 4);
         assert_eq!(m[0].value, "Xenova/all-MiniLM-L6-v2");
-        assert_eq!(m[0].name, "all-MiniLM-L6-v2 (default, fast, good for general use)");
+        assert_eq!(
+            m[0].name,
+            "all-MiniLM-L6-v2 (default, fast, good for general use)"
+        );
         assert_eq!(m[1].value, "Xenova/all-mpnet-base-v2");
         assert_eq!(m[1].name, "all-mpnet-base-v2 (larger, better quality)");
         assert_eq!(m[2].value, "Xenova/paraphrase-multilingual-MiniLM-L12-v2");
@@ -408,7 +411,9 @@ mod tests {
         // embed.ts: 'paraphrase-multilingual-MiniLM-L12-v2 (multilingual support)'
         // onboard.ts: 'paraphrase-multilingual-MiniLM-L12-v2 (multilingual)'
         // The 'support' suffix is unique to embed.ts.
-        assert!(LOCAL_TRANSFORMER_MODELS[2].name.contains("(multilingual support)"));
+        assert!(LOCAL_TRANSFORMER_MODELS[2]
+            .name
+            .contains("(multilingual support)"));
     }
 
     // ── LOCAL_DEFAULT_MODEL ─────────────────────────────────────────────
@@ -518,7 +523,10 @@ mod tests {
             "❌ No providers configured. Run `tenex config providers` before configuring embeddings."
         );
         assert_eq!(SELECT_PROVIDER_MESSAGE, "Select embedding provider:");
-        assert_eq!(SELECT_OLLAMA_MODEL_MESSAGE, "Select Ollama embedding model:");
+        assert_eq!(
+            SELECT_OLLAMA_MODEL_MESSAGE,
+            "Select Ollama embedding model:"
+        );
         assert_eq!(SELECT_LOCAL_MODEL_MESSAGE, "Select local embedding model:");
         assert_eq!(ENTER_OLLAMA_MODEL_MESSAGE, "Enter Ollama model name:");
         assert_eq!(ENTER_MODEL_ID_MESSAGE, "Enter model ID:");

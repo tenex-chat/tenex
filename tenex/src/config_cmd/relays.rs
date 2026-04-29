@@ -33,12 +33,7 @@ pub fn run(base_dir: &std::path::Path) -> Result<()> {
 
     render_listing(&relays, &identity_relays);
 
-    let action = match prompts::select(
-        "What do you want to do?",
-        actions(),
-    )
-    .prompt()
-    {
+    let action = match prompts::select("What do you want to do?", actions()).prompt() {
         Ok(a) => a,
         Err(inquire::InquireError::OperationCanceled)
         | Err(inquire::InquireError::OperationInterrupted) => return Ok(()),
@@ -49,9 +44,7 @@ pub fn run(base_dir: &std::path::Path) -> Result<()> {
         ActionValue::Add => add_relay(base_dir, &mut doc, relays)?,
         ActionValue::Remove => remove_relay(base_dir, &mut doc, relays)?,
         ActionValue::AddIdentity => add_identity_relay(base_dir, &mut doc, identity_relays)?,
-        ActionValue::RemoveIdentity => {
-            remove_identity_relay(base_dir, &mut doc, identity_relays)?
-        }
+        ActionValue::RemoveIdentity => remove_identity_relay(base_dir, &mut doc, identity_relays)?,
         ActionValue::Back => {}
     }
     Ok(())
@@ -177,10 +170,7 @@ fn prompt_relay_url(message: &str) -> Option<String> {
     let validator = prompts::adapt_static_str_validator(|input: &str| {
         crate::types::relay::validate_config_screen(input).map(|_| ())
     });
-    match prompts::input(message)
-        .with_validator(validator)
-        .prompt()
-    {
+    match prompts::input(message).with_validator(validator).prompt() {
         Ok(raw) => Some(raw.trim().to_owned()),
         Err(_) => None,
     }
@@ -213,14 +203,26 @@ impl std::fmt::Display for ActionItem {
 
 fn actions() -> Vec<ActionItem> {
     vec![
-        ActionItem { label: "Add a relay", value: ActionValue::Add },
-        ActionItem { label: "Remove a relay", value: ActionValue::Remove },
-        ActionItem { label: "Add an identity relay", value: ActionValue::AddIdentity },
+        ActionItem {
+            label: "Add a relay",
+            value: ActionValue::Add,
+        },
+        ActionItem {
+            label: "Remove a relay",
+            value: ActionValue::Remove,
+        },
+        ActionItem {
+            label: "Add an identity relay",
+            value: ActionValue::AddIdentity,
+        },
         ActionItem {
             label: "Remove an identity relay",
             value: ActionValue::RemoveIdentity,
         },
-        ActionItem { label: "Back", value: ActionValue::Back },
+        ActionItem {
+            label: "Back",
+            value: ActionValue::Back,
+        },
     ]
 }
 
@@ -266,10 +268,7 @@ mod tests {
     /// would close with SGR 0 instead.
     #[test]
     fn cyan_bullet_byte_sequence_matches_ts_chalk() {
-        assert_eq!(
-            crate::tui::theme::chalk_cyan("●"),
-            "\x1b[36m●\x1b[39m",
-        );
+        assert_eq!(crate::tui::theme::chalk_cyan("●"), "\x1b[36m●\x1b[39m",);
     }
 
     #[test]

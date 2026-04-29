@@ -27,12 +27,7 @@ pub const DEFAULT_DISCOVERY_SOURCES: &[&str] = &["conversations", "lessons", "ra
 pub const DEFAULT_DECAY_EXCLUDE_TOOL_NAMES: &[&str] = &["delegate", "delegate_followup"];
 
 pub fn run(base_dir: &std::path::Path) -> Result<()> {
-    let action = match prompts::select(
-        "Context Management Settings",
-        top_actions(),
-    )
-    .prompt()
-    {
+    let action = match prompts::select("Context Management Settings", top_actions()).prompt() {
         Ok(a) => a,
         Err(inquire::InquireError::OperationCanceled)
         | Err(inquire::InquireError::OperationInterrupted) => return Ok(()),
@@ -77,10 +72,7 @@ fn run_configure(base_dir: &std::path::Path) -> Result<()> {
     let sources_v = prompts::adapt_static_str_validator(validate_discovery_sources);
 
     // Managed-context section.
-    let enabled = ask_confirm(
-        "Enable ai-sdk-context-management strategies:",
-        cm.enabled,
-    )?;
+    let enabled = ask_confirm("Enable ai-sdk-context-management strategies:", cm.enabled)?;
     let token_budget = ask_int(
         "Token budget for managed context:",
         cm.token_budget,
@@ -120,16 +112,12 @@ fn run_configure(base_dir: &std::path::Path) -> Result<()> {
     let decay_exclude = parse_csv(&decay_exclude_raw);
 
     // Strategies section.
-    let s_reminders =
-        ask_confirm("Enable RemindersStrategy:", cm.strategies_reminders)?;
+    let s_reminders = ask_confirm("Enable RemindersStrategy:", cm.strategies_reminders)?;
     let s_decay = ask_confirm(
         "Enable ToolResultDecayStrategy:",
         cm.strategies_tool_result_decay,
     )?;
-    let s_compaction = ask_confirm(
-        "Enable CompactionToolStrategy:",
-        cm.strategies_compaction,
-    )?;
+    let s_compaction = ask_confirm("Enable CompactionToolStrategy:", cm.strategies_compaction)?;
     let s_ctx_util = ask_confirm(
         "Enable reminders context-utilization source:",
         cm.strategies_context_utilization_reminder,
@@ -147,21 +135,9 @@ fn run_configure(base_dir: &std::path::Path) -> Result<()> {
         cd.timeout_ms,
         pos,
     )?;
-    let cd_queries = ask_int(
-        "Maximum discovery search queries:",
-        cd.max_queries,
-        queries,
-    )?;
-    let cd_hints = ask_int(
-        "Maximum context hints to inject:",
-        cd.max_hints,
-        hints,
-    )?;
-    let cd_min_score = ask_float(
-        "Minimum relevance score (0-1):",
-        cd.min_score,
-        score,
-    )?;
+    let cd_queries = ask_int("Maximum discovery search queries:", cd.max_queries, queries)?;
+    let cd_hints = ask_int("Maximum context hints to inject:", cd.max_hints, hints)?;
+    let cd_min_score = ask_float("Minimum relevance score (0-1):", cd.min_score, score)?;
     let cd_sources_raw = ask_string_validated(
         "Discovery sources (comma-separated: conversations, lessons, rag):",
         &cd.sources.join(", "),
@@ -262,8 +238,12 @@ fn read_cm_defaults(doc: &TenexConfigDoc) -> CmDefaults {
             .and_then(serde_json::Value::as_u64)
             .unwrap_or(fallback)
     };
-    let decay_block = block.and_then(|b| b.get("toolResultDecay")).and_then(serde_json::Value::as_object);
-    let strat_block = block.and_then(|b| b.get("strategies")).and_then(serde_json::Value::as_object);
+    let decay_block = block
+        .and_then(|b| b.get("toolResultDecay"))
+        .and_then(serde_json::Value::as_object);
+    let strat_block = block
+        .and_then(|b| b.get("strategies"))
+        .and_then(serde_json::Value::as_object);
     let decay_u64 = |key: &str, fallback: u64| -> u64 {
         decay_block
             .and_then(|b| b.get(key))
@@ -321,10 +301,7 @@ fn read_cm_defaults(doc: &TenexConfigDoc) -> CmDefaults {
         strategies_reminders: strat_bool("reminders", true),
         strategies_tool_result_decay: strat_bool("toolResultDecay", true),
         strategies_compaction: strat_bool("compaction", true),
-        strategies_context_utilization_reminder: strat_bool(
-            "contextUtilizationReminder",
-            true,
-        ),
+        strategies_context_utilization_reminder: strat_bool("contextUtilizationReminder", true),
         strategies_context_window_status: strat_bool("contextWindowStatus", true),
         // The unused `bool_or` is reserved for future fields that use the
         // `?? false` pattern (rather than `!== false`); calls above use
@@ -409,9 +386,7 @@ fn ask_confirm(message: &str, default: bool) -> Result<bool> {
     match prompts::confirm(message).with_default(default).prompt() {
         Ok(b) => Ok(b),
         Err(inquire::InquireError::OperationCanceled)
-        | Err(inquire::InquireError::OperationInterrupted) => {
-            Err(anyhow!("cancelled"))
-        }
+        | Err(inquire::InquireError::OperationInterrupted) => Err(anyhow!("cancelled")),
         Err(e) => Err(anyhow!("{message}: {e}")),
     }
 }
@@ -455,11 +430,7 @@ fn ask_string(message: &str, default: &str) -> Result<String> {
         .map_err(|e| anyhow!("{message}: {e}"))
 }
 
-fn ask_string_validated<F>(
-    message: &str,
-    default: &str,
-    validator: F,
-) -> Result<String>
+fn ask_string_validated<F>(message: &str, default: &str, validator: F) -> Result<String>
 where
     F: Fn(&str) -> Result<inquire::validator::Validation, inquire::CustomUserError>
         + Clone
@@ -485,10 +456,7 @@ fn ask_select_trigger(default: &str) -> Result<String> {
             value: "every-turn".into(),
         },
     ];
-    let starting = choices
-        .iter()
-        .position(|c| c.value == default)
-        .unwrap_or(0);
+    let starting = choices.iter().position(|c| c.value == default).unwrap_or(0);
     let chosen = prompts::select("Run context discovery:", choices)
         .with_starting_cursor(starting)
         .prompt()
@@ -828,10 +796,16 @@ mod tests {
         let r = TenexConfigDoc::load(&base).unwrap();
         let block = r.context_discovery_block().unwrap();
         // Prompted fields applied.
-        assert_eq!(block.get("trigger").and_then(Value::as_str), Some("every-turn"));
+        assert_eq!(
+            block.get("trigger").and_then(Value::as_str),
+            Some("every-turn")
+        );
         assert_eq!(block.get("timeoutMs").and_then(Value::as_u64), Some(500));
         // Unprompted fields preserved.
-        assert_eq!(block.get("injectWhenEmpty").and_then(Value::as_bool), Some(true));
+        assert_eq!(
+            block.get("injectWhenEmpty").and_then(Value::as_bool),
+            Some(true)
+        );
         assert_eq!(
             block.get("manifestTtlMs").and_then(Value::as_u64),
             Some(60000)

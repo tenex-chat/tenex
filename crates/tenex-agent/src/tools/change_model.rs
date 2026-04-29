@@ -22,7 +22,11 @@ pub struct ChangeModelTool {
 
 impl ChangeModelTool {
     pub fn new(db_path: PathBuf, conversation_id: String, agent_pubkey: String) -> Self {
-        Self { db_path, conversation_id, agent_pubkey }
+        Self {
+            db_path,
+            conversation_id,
+            agent_pubkey,
+        }
     }
 }
 
@@ -65,14 +69,24 @@ impl Tool for ChangeModelTool {
         let updated = AgentContextState {
             conversation_id: self.conversation_id.clone(),
             agent_pubkey: self.agent_pubkey.clone(),
-            next_prompt_sequence: existing.as_ref().map(|s| s.next_prompt_sequence).unwrap_or(0),
+            next_prompt_sequence: existing
+                .as_ref()
+                .map(|s| s.next_prompt_sequence)
+                .unwrap_or(0),
             cache_anchored: existing.as_ref().map(|s| s.cache_anchored).unwrap_or(false),
-            seen_message_ids: existing.as_ref().map(|s| s.seen_message_ids.clone()).unwrap_or_default(),
+            seen_message_ids: existing
+                .as_ref()
+                .map(|s| s.seen_message_ids.clone())
+                .unwrap_or_default(),
             compaction_state: existing.as_ref().and_then(|s| s.compaction_state.clone()),
             reminder_state: existing.as_ref().and_then(|s| s.reminder_state.clone()),
-            reminder_delta_state: existing.as_ref().and_then(|s| s.reminder_delta_state.clone()),
+            reminder_delta_state: existing
+                .as_ref()
+                .and_then(|s| s.reminder_delta_state.clone()),
             todos: existing.as_ref().and_then(|s| s.todos.clone()),
-            self_applied_skills: existing.as_ref().and_then(|s| s.self_applied_skills.clone()),
+            self_applied_skills: existing
+                .as_ref()
+                .and_then(|s| s.self_applied_skills.clone()),
             meta_model_variant: Some(args.model.clone()),
             is_blocked: existing.as_ref().map(|s| s.is_blocked).unwrap_or(false),
             todo_nudged: existing.as_ref().map(|s| s.todo_nudged).unwrap_or(false),

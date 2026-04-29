@@ -36,14 +36,18 @@ pub const SHELL_TASK_ID_LENGTH: usize = 7;
 /// `^[0-9a-f]{64}$` — case-sensitive lowercase.
 pub fn is_full_event_id(id: &str) -> bool {
     id.len() == FULL_EVENT_ID_LENGTH
-        && id.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        && id
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 
 /// Mirror `isShortEventId` (`event-ids.ts:107-109`):
 /// `^[0-9a-f]{10}$` — case-sensitive lowercase.
 pub fn is_short_event_id(id: &str) -> bool {
     id.len() == SHORT_EVENT_ID_LENGTH
-        && id.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        && id
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 
 /// Mirror `isShellTaskId` (`event-ids.ts:114-116`):
@@ -310,7 +314,8 @@ mod tests {
     fn detect_lowercases_input_before_matching() {
         // Uppercase input gets lowercased by detect; `0xABC...` 64-char
         // becomes the same 64-char lowercase → Full.
-        let upper: String = "ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789".to_string();
+        let upper: String =
+            "ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789".to_string();
         assert_eq!(detect_id_type(&upper), Some(IdType::Full));
     }
 

@@ -21,14 +21,7 @@
 
 /// `effort` — Codex reasoning-effort level.
 /// Source: `types.ts:276` + zod `:352`.
-pub const EFFORTS: &[&str] = &[
-    "none",
-    "minimal",
-    "low",
-    "medium",
-    "high",
-    "xhigh",
-];
+pub const EFFORTS: &[&str] = &["none", "minimal", "low", "medium", "high", "xhigh"];
 
 pub fn is_valid_effort(s: &str) -> bool {
     EFFORTS.contains(&s)
@@ -36,12 +29,7 @@ pub fn is_valid_effort(s: &str) -> bool {
 
 /// `summary` — Codex reasoning-summary detail.
 /// Source: `types.ts:278` + zod (the schema).
-pub const SUMMARIES: &[&str] = &[
-    "auto",
-    "concise",
-    "detailed",
-    "none",
-];
+pub const SUMMARIES: &[&str] = &["auto", "concise", "detailed", "none"];
 
 pub fn is_valid_summary(s: &str) -> bool {
     SUMMARIES.contains(&s)
@@ -49,11 +37,7 @@ pub fn is_valid_summary(s: &str) -> bool {
 
 /// `personality` — Codex system personality.
 /// Source: `types.ts:280` + zod `:354`.
-pub const PERSONALITIES: &[&str] = &[
-    "none",
-    "friendly",
-    "pragmatic",
-];
+pub const PERSONALITIES: &[&str] = &["none", "friendly", "pragmatic"];
 
 pub fn is_valid_personality(s: &str) -> bool {
     PERSONALITIES.contains(&s)
@@ -61,12 +45,7 @@ pub fn is_valid_personality(s: &str) -> bool {
 
 /// `approvalPolicy` — Codex execution approval policy.
 /// Source: `types.ts:282`.
-pub const APPROVAL_POLICIES: &[&str] = &[
-    "untrusted",
-    "on-failure",
-    "on-request",
-    "never",
-];
+pub const APPROVAL_POLICIES: &[&str] = &["untrusted", "on-failure", "on-request", "never"];
 
 pub fn is_valid_approval_policy(s: &str) -> bool {
     APPROVAL_POLICIES.contains(&s)
@@ -74,11 +53,7 @@ pub fn is_valid_approval_policy(s: &str) -> bool {
 
 /// `sandboxPolicy` — Codex sandbox policy.
 /// Source: `types.ts:284`.
-pub const SANDBOX_POLICIES: &[&str] = &[
-    "read-only",
-    "workspace-write",
-    "danger-full-access",
-];
+pub const SANDBOX_POLICIES: &[&str] = &["read-only", "workspace-write", "danger-full-access"];
 
 pub fn is_valid_sandbox_policy(s: &str) -> bool {
     SANDBOX_POLICIES.contains(&s)

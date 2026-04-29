@@ -24,7 +24,11 @@ pub struct RagAddDocumentsTool {
 
 impl RagAddDocumentsTool {
     pub fn new(store: Option<Arc<RagStore>>, project_id: String, agent_pubkey: String) -> Self {
-        Self { store, project_id, agent_pubkey }
+        Self {
+            store,
+            project_id,
+            agent_pubkey,
+        }
     }
 }
 
@@ -90,6 +94,9 @@ impl Tool for RagAddDocumentsTool {
             .await
             .map_err(|e| RagAddDocumentsError(format!("failed to store document: {e}")))?;
 
-        Ok(format!("Stored as '{}' in {} collection.", id, args.audience))
+        Ok(format!(
+            "Stored as '{}' in {} collection.",
+            id, args.audience
+        ))
     }
 }

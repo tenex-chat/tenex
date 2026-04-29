@@ -32,13 +32,11 @@ pub struct Lockfile {
 impl Lockfile {
     pub fn acquire(base_dir: &std::path::Path) -> Result<Self> {
         let dir = base_dir.join("daemon");
-        fs::create_dir_all(&dir)
-            .with_context(|| format!("creating {}", dir.display()))?;
+        fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
         let path = dir.join(LOCKFILE_NAME);
 
         if path.exists() {
-            let bytes = fs::read(&path)
-                .with_context(|| format!("reading {}", path.display()))?;
+            let bytes = fs::read(&path).with_context(|| format!("reading {}", path.display()))?;
             match serde_json::from_slice::<LockInfo>(&bytes) {
                 Ok(info) if process_alive(info.pid) => {
                     return Err(anyhow!(
@@ -48,10 +46,7 @@ impl Lockfile {
                     ));
                 }
                 Ok(info) => {
-                    warn!(
-                        stale_pid = info.pid,
-                        "removing stale lockfile",
-                    );
+                    warn!(stale_pid = info.pid, "removing stale lockfile",);
                 }
                 Err(_) => {
                     warn!(path = %path.display(), "removing unparseable lockfile");
@@ -66,8 +61,7 @@ impl Lockfile {
             started_at: now_millis(),
         };
         let body = serde_json::to_vec_pretty(&info)?;
-        fs::write(&path, body)
-            .with_context(|| format!("writing {}", path.display()))?;
+        fs::write(&path, body).with_context(|| format!("writing {}", path.display()))?;
 
         Ok(Self { path })
     }

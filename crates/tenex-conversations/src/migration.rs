@@ -104,7 +104,10 @@ pub fn migrate_from_legacy(project_id: &str, base_dir: &Path) -> Result<Migratio
     // without a corresponding JSON transcript on disk). Their header data
     // is preserved; messages will be empty until reingested.
     for (conversation_id, header) in &catalog_headers {
-        if migrated_conversation_ids.iter().any(|id| id == conversation_id) {
+        if migrated_conversation_ids
+            .iter()
+            .any(|id| id == conversation_id)
+        {
             continue;
         }
         let row = ConversationRow {
@@ -129,19 +132,15 @@ pub fn migrate_from_legacy(project_id: &str, base_dir: &Path) -> Result<Migratio
     // Tool messages.
     let tool_dir = legacy_tool_messages_dir(base_dir);
     let known_conversation_ids = collect_known_conversation_ids(&store)?;
-    let tool_stats = migrate_tool_messages(&mut store, &tool_dir, &known_conversation_ids, &mut report)?;
+    let tool_stats =
+        migrate_tool_messages(&mut store, &tool_dir, &known_conversation_ids, &mut report)?;
     report.tool_messages_migrated += tool_stats.migrated;
     report.flat_tool_messages_skipped += tool_stats.skipped_flat;
 
     // Archive legacy files. Old catalog DB and the JSON transcripts dir
     // are project-local; the tool-messages dir is global, so we only
     // archive the per-conversation subdirs we actually consumed.
-    archive_legacy_files(
-        base_dir,
-        &d_tag,
-        &migrated_conversation_ids,
-        &mut report,
-    )?;
+    archive_legacy_files(base_dir, &d_tag, &migrated_conversation_ids, &mut report)?;
 
     Ok(report)
 }
@@ -164,9 +163,9 @@ fn migrate_conversation_json(
 
     let runtime_state = build_runtime_state(&parsed);
     let messages = parsed.messages.unwrap_or_default();
-    let metadata = parsed.metadata.unwrap_or(serde_json::Value::Object(
-        serde_json::Map::new(),
-    ));
+    let metadata = parsed
+        .metadata
+        .unwrap_or(serde_json::Value::Object(serde_json::Map::new()));
 
     let owner_pubkey = messages
         .first()
@@ -176,22 +175,26 @@ fn migrate_conversation_json(
     let created_at = messages.first().and_then(|m| m.timestamp);
     let last_activity = messages.last().and_then(|m| m.timestamp);
 
-    let title = pick_string(&metadata, "title")
-        .or_else(|| catalog_headers.get(conversation_id).and_then(|h| h.title.clone()));
-    let summary = pick_string(&metadata, "summary")
-        .or_else(|| catalog_headers.get(conversation_id).and_then(|h| h.summary.clone()));
-    let last_user_message = pick_string(&metadata, "lastUserMessage")
-        .or_else(|| {
-            catalog_headers
-                .get(conversation_id)
-                .and_then(|h| h.last_user_message.clone())
-        });
-    let status_label = pick_string(&metadata, "statusLabel")
-        .or_else(|| {
-            catalog_headers
-                .get(conversation_id)
-                .and_then(|h| h.status_label.clone())
-        });
+    let title = pick_string(&metadata, "title").or_else(|| {
+        catalog_headers
+            .get(conversation_id)
+            .and_then(|h| h.title.clone())
+    });
+    let summary = pick_string(&metadata, "summary").or_else(|| {
+        catalog_headers
+            .get(conversation_id)
+            .and_then(|h| h.summary.clone())
+    });
+    let last_user_message = pick_string(&metadata, "lastUserMessage").or_else(|| {
+        catalog_headers
+            .get(conversation_id)
+            .and_then(|h| h.last_user_message.clone())
+    });
+    let status_label = pick_string(&metadata, "statusLabel").or_else(|| {
+        catalog_headers
+            .get(conversation_id)
+            .and_then(|h| h.status_label.clone())
+    });
     let status_current_activity = pick_string(&metadata, "statusCurrentActivity").or_else(|| {
         catalog_headers
             .get(conversation_id)
@@ -472,9 +475,10 @@ fn migrate_tool_messages(
                 match migrate_one_tool_message_file(store, &tool_path, Some(&conversation_id)) {
                     Ok(true) => stats.migrated += 1,
                     Ok(false) => {}
-                    Err(err) => report
-                        .warnings
-                        .push(format!("tool-message {} failed: {err}", tool_path.display())),
+                    Err(err) => report.warnings.push(format!(
+                        "tool-message {} failed: {err}",
+                        tool_path.display()
+                    )),
                 }
             }
             // The nested directory is per-conversation and was consumed; rename it.
@@ -495,8 +499,7 @@ fn migrate_tool_messages(
                         stats.skipped_flat += 1;
                         continue;
                     }
-                    if migrate_one_tool_message_file(store, &path, Some(&parsed.conversation_id))?
-                    {
+                    if migrate_one_tool_message_file(store, &path, Some(&parsed.conversation_id))? {
                         stats.migrated += 1;
                         archive_path(&path, report)?;
                     }
@@ -554,7 +557,10 @@ fn migrate_one_tool_message_file(
                             .and_then(|v| v.as_str())
                             .unwrap_or_default()
                             .to_owned(),
-                        input: part.get("input").cloned().unwrap_or(serde_json::Value::Null),
+                        input: part
+                            .get("input")
+                            .cloned()
+                            .unwrap_or(serde_json::Value::Null),
                     });
                 }
                 "tool-result" => {
@@ -600,10 +606,14 @@ fn read_flat_tool_message(path: &Path) -> Result<Option<FlatToolMessage>> {
         Err(_) => return Ok(None),
     };
     if let Some(id) = parsed.conversation_id {
-        return Ok(Some(FlatToolMessage { conversation_id: id }));
+        return Ok(Some(FlatToolMessage {
+            conversation_id: id,
+        }));
     }
     if let Some(id) = parsed.event_id {
-        return Ok(Some(FlatToolMessage { conversation_id: id }));
+        return Ok(Some(FlatToolMessage {
+            conversation_id: id,
+        }));
     }
     Ok(None)
 }
@@ -668,8 +678,7 @@ struct LegacyConversationJson {
     #[serde(default, rename = "agentPromptHistories")]
     agent_prompt_histories: Option<std::collections::BTreeMap<String, LegacyAgentPromptHistory>>,
     #[serde(default, rename = "contextManagementCompactions")]
-    context_management_compactions:
-        Option<std::collections::BTreeMap<String, serde_json::Value>>,
+    context_management_compactions: Option<std::collections::BTreeMap<String, serde_json::Value>>,
     #[serde(default, rename = "contextManagementReminderStates")]
     context_management_reminder_states:
         Option<std::collections::BTreeMap<String, serde_json::Value>>,

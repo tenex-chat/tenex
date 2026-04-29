@@ -17,12 +17,9 @@ use anyhow::Result;
 use nostr_sdk::{Client, EventBuilder, Keys, Kind, Tag};
 use serde_json::Value;
 
-use crate::store::project_members::{
-    is_deleted_project_event, read_persisted_project_event,
-};
+use crate::store::project_members::{is_deleted_project_event, read_persisted_project_event};
 use crate::store::project_mutation::{
-    apply_mutation, AppliedProjectMutation, MetadataKey,
-    PublishProjectMutationParams,
+    apply_mutation, AppliedProjectMutation, MetadataKey, PublishProjectMutationParams,
 };
 use crate::store::tenex_config::TenexConfigDoc;
 
@@ -128,10 +125,7 @@ pub async fn publish_project_mutation(
     }
 
     let base_tags = extract_tags(&parsed);
-    let base_content = parsed
-        .get("content")
-        .and_then(Value::as_str)
-        .unwrap_or("");
+    let base_content = parsed.get("content").and_then(Value::as_str).unwrap_or("");
 
     // ── 2. Apply mutation ─────────────────────────────────────────────
     let applied = apply_mutation(&base_tags, base_content, params);
@@ -419,7 +413,9 @@ mod tests {
         let keys = Keys::generate();
         let pk_hex = keys.public_key().to_hex();
         let params = empty_params(&pk_hex, "ghost");
-        let result = publish_project_mutation(&base, &keys, &params).await.unwrap();
+        let result = publish_project_mutation(&base, &keys, &params)
+            .await
+            .unwrap();
         assert_eq!(result.outcome, PublishOutcome::ProjectNotFound);
         assert!(result.event_id.is_none());
         assert!(result.added_pubkeys.is_empty());
@@ -433,7 +429,9 @@ mod tests {
         let pk_hex = keys.public_key().to_hex();
         write_project_event(&base, "rip", &pk_hex, &[], "", true);
         let params = empty_params(&pk_hex, "rip");
-        let result = publish_project_mutation(&base, &keys, &params).await.unwrap();
+        let result = publish_project_mutation(&base, &keys, &params)
+            .await
+            .unwrap();
         assert_eq!(result.outcome, PublishOutcome::ProjectNotFound);
         std::fs::remove_dir_all(&base).ok();
     }
@@ -443,9 +441,18 @@ mod tests {
         let base = unique_temp();
         let keys = Keys::generate();
         let pk_hex = keys.public_key().to_hex();
-        write_project_event(&base, "static", &pk_hex, &["alice".repeat(8).as_str()], "", false);
+        write_project_event(
+            &base,
+            "static",
+            &pk_hex,
+            &["alice".repeat(8).as_str()],
+            "",
+            false,
+        );
         let params = empty_params(&pk_hex, "static"); // no add/remove/set
-        let result = publish_project_mutation(&base, &keys, &params).await.unwrap();
+        let result = publish_project_mutation(&base, &keys, &params)
+            .await
+            .unwrap();
         assert_eq!(result.outcome, PublishOutcome::NoChanges);
         std::fs::remove_dir_all(&base).ok();
     }
@@ -460,7 +467,9 @@ mod tests {
 
         let mut params = empty_params(&owner_pubkey, "p1");
         params.add_agent_pubkeys = vec!["a".repeat(64)];
-        let result = publish_project_mutation(&base, &other_keys, &params).await.unwrap();
+        let result = publish_project_mutation(&base, &other_keys, &params)
+            .await
+            .unwrap();
         assert_eq!(result.outcome, PublishOutcome::SigningFailed);
         let expected = format!("Owner nsec does not match project owner {}", owner_pubkey);
         assert_eq!(result.reason.as_deref(), Some(expected.as_str()));
@@ -471,7 +480,10 @@ mod tests {
     async fn outcome_as_str_matches_ts_literals() {
         // The TS literal strings are visible to consumers — preserve verbatim.
         assert_eq!(PublishOutcome::Published.as_str(), "published");
-        assert_eq!(PublishOutcome::ProjectNotFound.as_str(), "project_not_found");
+        assert_eq!(
+            PublishOutcome::ProjectNotFound.as_str(),
+            "project_not_found"
+        );
         assert_eq!(PublishOutcome::SigningFailed.as_str(), "signing_failed");
         assert_eq!(PublishOutcome::PublishFailed.as_str(), "publish_failed");
         assert_eq!(PublishOutcome::NoChanges.as_str(), "no_changes");
@@ -479,10 +491,8 @@ mod tests {
 
     #[test]
     fn extract_tags_pulls_arrays_from_event_json() {
-        let v: Value = serde_json::from_str(
-            r#"{"tags":[["d","p1"],["p","alice"],["title","T"]]}"#,
-        )
-        .unwrap();
+        let v: Value =
+            serde_json::from_str(r#"{"tags":[["d","p1"],["p","alice"],["title","T"]]}"#).unwrap();
         let tags = extract_tags(&v);
         assert_eq!(tags.len(), 3);
         assert_eq!(tags[0], vec!["d".to_string(), "p1".into()]);
@@ -491,8 +501,7 @@ mod tests {
 
     #[test]
     fn extract_tags_skips_non_arrays() {
-        let v: Value =
-            serde_json::from_str(r#"{"tags":[null,42,["d","p1"],"oops"]}"#).unwrap();
+        let v: Value = serde_json::from_str(r#"{"tags":[null,42,["d","p1"],"oops"]}"#).unwrap();
         let tags = extract_tags(&v);
         assert_eq!(tags.len(), 1);
         assert_eq!(tags[0], vec!["d".to_string(), "p1".into()]);
@@ -510,7 +519,9 @@ mod tests {
     async fn sync_returns_project_not_found_when_event_missing() {
         let base = unique_temp();
         let keys = Keys::generate();
-        let result = sync_project_membership(&base, &keys, "ghost").await.unwrap();
+        let result = sync_project_membership(&base, &keys, "ghost")
+            .await
+            .unwrap();
         assert_eq!(result.outcome, PublishOutcome::ProjectNotFound);
         assert_eq!(result.project_dtag, "ghost");
         std::fs::remove_dir_all(&base).ok();
@@ -536,7 +547,9 @@ mod tests {
         let owner = keys.public_key().to_hex();
         let alice = "a".repeat(64);
         write_project_event(&base, "stable", &owner, &[&alice], "", false);
-        let result = sync_project_membership(&base, &keys, "stable").await.unwrap();
+        let result = sync_project_membership(&base, &keys, "stable")
+            .await
+            .unwrap();
         assert_eq!(result.outcome, PublishOutcome::NoChanges);
         std::fs::remove_dir_all(&base).ok();
     }
@@ -563,8 +576,7 @@ mod tests {
         let results = sync_many_project_memberships(&base, &keys, &inputs)
             .await
             .unwrap();
-        let dtags: Vec<&str> =
-            results.iter().map(|r| r.project_dtag.as_str()).collect();
+        let dtags: Vec<&str> = results.iter().map(|r| r.project_dtag.as_str()).collect();
         assert_eq!(dtags, vec!["z", "a", "m"]);
         for r in &results {
             assert_eq!(r.outcome, PublishOutcome::ProjectNotFound);

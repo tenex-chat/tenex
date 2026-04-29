@@ -1,7 +1,7 @@
 use crate::config::ResolvedModel;
 use crate::emit::EmitState;
-use rig::{client::CompletionClient, completion::Prompt, completion::ToolDefinition, tool::Tool};
 use rig::providers::{anthropic, ollama, openai, openrouter};
+use rig::{client::CompletionClient, completion::Prompt, completion::ToolDefinition, tool::Tool};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::path::PathBuf;
@@ -29,7 +29,11 @@ pub struct LearnTool {
 
 impl LearnTool {
     pub fn new(state: Arc<EmitState>, agent_home: PathBuf, resolved: Arc<ResolvedModel>) -> Self {
-        Self { state, agent_home, resolved }
+        Self {
+            state,
+            agent_home,
+            resolved,
+        }
     }
 
     async fn call_llm(&self, prompt: String) -> anyhow::Result<String> {
@@ -37,17 +41,34 @@ impl LearnTool {
 
         let result = match self.resolved.provider.as_str() {
             "openrouter" => {
-                let key = self.resolved.api_key.as_deref()
+                let key = self
+                    .resolved
+                    .api_key
+                    .as_deref()
                     .ok_or_else(|| anyhow::anyhow!("no OpenRouter API key"))?;
-                let agent = openrouter::Client::new(key)?.agent(&self.resolved.model).build();
-                agent.prompt(prompt).await.map_err(|e| anyhow::anyhow!("{e:?}"))?
+                let agent = openrouter::Client::new(key)?
+                    .agent(&self.resolved.model)
+                    .build();
+                agent
+                    .prompt(prompt)
+                    .await
+                    .map_err(|e| anyhow::anyhow!("{e:?}"))?
             }
             "openai" => {
-                let key = self.resolved.api_key.as_deref()
+                let key = self
+                    .resolved
+                    .api_key
+                    .as_deref()
                     .ok_or_else(|| anyhow::anyhow!("no OpenAI API key"))?;
-                let agent = openai::CompletionsClient::builder().api_key(key).build()?
-                    .agent(&self.resolved.model).build();
-                agent.prompt(prompt).await.map_err(|e| anyhow::anyhow!("{e:?}"))?
+                let agent = openai::CompletionsClient::builder()
+                    .api_key(key)
+                    .build()?
+                    .agent(&self.resolved.model)
+                    .build();
+                agent
+                    .prompt(prompt)
+                    .await
+                    .map_err(|e| anyhow::anyhow!("{e:?}"))?
             }
             "ollama" => {
                 let mut builder = ollama::Client::builder().api_key(Nothing);
@@ -55,20 +76,36 @@ impl LearnTool {
                     builder = builder.base_url(url);
                 }
                 let agent = builder.build()?.agent(&self.resolved.model).build();
-                agent.prompt(prompt).await.map_err(|e| anyhow::anyhow!("{e:?}"))?
+                agent
+                    .prompt(prompt)
+                    .await
+                    .map_err(|e| anyhow::anyhow!("{e:?}"))?
             }
             _ => {
-                let key = self.resolved.api_key.as_deref()
+                let key = self
+                    .resolved
+                    .api_key
+                    .as_deref()
                     .ok_or_else(|| anyhow::anyhow!("no Anthropic API key"))?;
-                let agent = anthropic::Client::new(key)?.agent(&self.resolved.model).build();
-                agent.prompt(prompt).await.map_err(|e| anyhow::anyhow!("{e:?}"))?
+                let agent = anthropic::Client::new(key)?
+                    .agent(&self.resolved.model)
+                    .build();
+                agent
+                    .prompt(prompt)
+                    .await
+                    .map_err(|e| anyhow::anyhow!("{e:?}"))?
             }
         };
 
         Ok(result)
     }
 
-    async fn update_index(&self, title: &str, lesson: &str, category: Option<&str>) -> anyhow::Result<()> {
+    async fn update_index(
+        &self,
+        title: &str,
+        lesson: &str,
+        category: Option<&str>,
+    ) -> anyhow::Result<()> {
         let index_path = self.agent_home.join("+INDEX.md");
         let current = std::fs::read_to_string(&index_path).unwrap_or_default();
 
@@ -116,8 +153,15 @@ fn strip_llm_preamble(s: &str) -> &str {
     };
 
     // If there's a `#` heading, start from there.
-    if let Some(pos) = s.find("\n#").or_else(|| if s.starts_with('#') { Some(0) } else { None }) {
-        if pos == 0 { s } else { s[pos + 1..].trim() }
+    if let Some(pos) = s
+        .find("\n#")
+        .or_else(|| if s.starts_with('#') { Some(0) } else { None })
+    {
+        if pos == 0 {
+            s
+        } else {
+            s[pos + 1..].trim()
+        }
     } else {
         s
     }
@@ -182,6 +226,9 @@ impl Tool for LearnTool {
             .await
             .map_err(|e| LearnError(format!("failed to update +INDEX.md: {e}")))?;
 
-        Ok(format!("Lesson '{}' published and +INDEX.md updated.", args.title))
+        Ok(format!(
+            "Lesson '{}' published and +INDEX.md updated.",
+            args.title
+        ))
     }
 }

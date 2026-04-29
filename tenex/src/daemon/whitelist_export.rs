@@ -16,8 +16,7 @@ use tracing::{info, warn};
 /// observes a partial write.
 pub fn write_backend_pubkey(base_dir: &Path, secret_key: Option<&str>) -> Result<()> {
     let dir = base_dir.join("whitelist");
-    fs::create_dir_all(&dir)
-        .with_context(|| format!("create {}", dir.display()))?;
+    fs::create_dir_all(&dir).with_context(|| format!("create {}", dir.display()))?;
 
     let final_path = dir.join("pubkeys.txt");
 
@@ -35,9 +34,8 @@ pub fn write_backend_pubkey(base_dir: &Path, secret_key: Option<&str>) -> Result
     let tmp_path = dir.join(format!("pubkeys.txt.tmp-{}", std::process::id()));
     fs::write(&tmp_path, format!("{pubkey_hex}\n"))
         .with_context(|| format!("write {}", tmp_path.display()))?;
-    fs::rename(&tmp_path, &final_path).with_context(|| {
-        format!("rename {} -> {}", tmp_path.display(), final_path.display())
-    })?;
+    fs::rename(&tmp_path, &final_path)
+        .with_context(|| format!("rename {} -> {}", tmp_path.display(), final_path.display()))?;
 
     info!(
         path = %final_path.display(),

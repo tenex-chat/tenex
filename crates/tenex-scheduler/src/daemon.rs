@@ -13,7 +13,9 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use chrono::Utc;
 use croner::Cron;
-use notify::{Config as NotifyConfig, Event as NotifyEvent, RecommendedWatcher, RecursiveMode, Watcher};
+use notify::{
+    Config as NotifyConfig, Event as NotifyEvent, RecommendedWatcher, RecursiveMode, Watcher,
+};
 use tokio::signal::unix::{signal, SignalKind};
 use tokio::sync::{watch, Mutex};
 use tokio::task::JoinHandle;
@@ -209,7 +211,10 @@ async fn catch_up_and_arm(
                 "firing catch-up occurrences"
             );
             for _ in missed {
-                if let Err(e) = publisher.publish_task(&task, target_pubkey.as_deref()).await {
+                if let Err(e) = publisher
+                    .publish_task(&task, target_pubkey.as_deref())
+                    .await
+                {
                     error!(task_id = %task.id, error = %e, "catch-up publish failed");
                 }
                 tokio::time::sleep(Duration::from_millis(CATCHUP_SPACING_MS)).await;
@@ -220,7 +225,10 @@ async fn catch_up_and_arm(
     } else if task.is_oneoff() {
         if let Some(fire_at) = oneoff_catchup_deadline(&task) {
             if fire_at <= Utc::now() {
-                if let Err(e) = publisher.publish_task(&task, target_pubkey.as_deref()).await {
+                if let Err(e) = publisher
+                    .publish_task(&task, target_pubkey.as_deref())
+                    .await
+                {
                     error!(task_id = %task.id, error = %e, "one-off catch-up publish failed");
                 }
                 // Remove the one-off task after firing.
@@ -279,9 +287,7 @@ async fn run_cron_loop(
             }
         };
 
-        let delay = (next - Utc::now())
-            .to_std()
-            .unwrap_or(Duration::ZERO);
+        let delay = (next - Utc::now()).to_std().unwrap_or(Duration::ZERO);
 
         tokio::select! {
             _ = tokio::time::sleep(delay) => {}
@@ -299,7 +305,10 @@ async fn run_cron_loop(
                 return;
             }
         };
-        if let Err(e) = publisher.publish_task(&task, target_pubkey.as_deref()).await {
+        if let Err(e) = publisher
+            .publish_task(&task, target_pubkey.as_deref())
+            .await
+        {
             error!(task_id = %task.id, error = %e, "publish failed");
         } else {
             let now_iso = Utc::now().to_rfc3339();
@@ -356,7 +365,10 @@ async fn run_oneoff_loop(
             return;
         }
     };
-    if let Err(e) = publisher.publish_task(&task, target_pubkey.as_deref()).await {
+    if let Err(e) = publisher
+        .publish_task(&task, target_pubkey.as_deref())
+        .await
+    {
         error!(task_id = %task.id, error = %e, "one-off publish failed");
     } else {
         storage::remove_task(&d_tag, &task.id).ok();

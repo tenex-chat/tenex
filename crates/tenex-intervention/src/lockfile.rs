@@ -15,8 +15,7 @@ pub struct Lockfile {
 impl Lockfile {
     pub fn acquire(path: &Path) -> Result<Self> {
         if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)
-                .with_context(|| format!("create {}", parent.display()))?;
+            fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
         }
 
         let file = OpenOptions::new()

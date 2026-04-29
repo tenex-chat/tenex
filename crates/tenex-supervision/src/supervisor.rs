@@ -1,5 +1,7 @@
 use crate::heuristic::{PostCompletionHeuristic, PreToolHeuristic};
-use crate::types::{AgentCategory, EnforcementMode, PostCompletionContext, PreToolContext, TodoEntry};
+use crate::types::{
+    AgentCategory, EnforcementMode, PostCompletionContext, PreToolContext, TodoEntry,
+};
 use std::collections::HashSet;
 
 const MAX_RETRIES: u32 = 3;
@@ -43,7 +45,11 @@ impl Supervisor {
         todos: &[TodoEntry],
         category: &AgentCategory,
     ) -> Option<String> {
-        let ctx = PreToolContext { tool_name, todos, agent_category: category };
+        let ctx = PreToolContext {
+            tool_name,
+            todos,
+            agent_category: category,
+        };
         for h in &self.pre_heuristics {
             if let Some(reason) = h.check(&ctx) {
                 return Some(reason);
@@ -71,9 +77,8 @@ impl Supervisor {
         };
 
         for h in &self.post_heuristics {
-            let detection = match h.check(&ctx) {
-                Some(d) => d,
-                None => continue,
+            let Some(detection) = h.check(&ctx) else {
+                continue;
             };
 
             if detection.enforcement == EnforcementMode::OncePerExecution {
@@ -87,7 +92,9 @@ impl Supervisor {
             self.retry_count += 1;
 
             if detection.re_engage {
-                return PostCompletionOutcome::ReEngage { message: detection.message };
+                return PostCompletionOutcome::ReEngage {
+                    message: detection.message,
+                };
             }
             return PostCompletionOutcome::Accept;
         }

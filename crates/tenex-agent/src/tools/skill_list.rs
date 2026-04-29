@@ -49,7 +49,7 @@ impl Tool for SkillListTool {
         let mut total = 0usize;
 
         for key in &scope_keys {
-            let bucket = grouped.get(key).map(|v| v.as_slice()).unwrap_or(&[]);
+            let bucket = grouped.get(key).map_or(&[][..], Vec::as_slice);
             let count = bucket.len();
             total += count;
             let bucket_json: Vec<serde_json::Value> = bucket
@@ -67,7 +67,6 @@ impl Tool for SkillListTool {
             "counts": counts,
         });
 
-        serde_json::to_string_pretty(&result)
-            .map_err(|e| SkillListError(e.to_string()))
+        serde_json::to_string_pretty(&result).map_err(|e| SkillListError(e.to_string()))
     }
 }

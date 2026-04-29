@@ -57,7 +57,12 @@ mod tests {
 
     #[test]
     fn format_codex_model_adds_default_marker_only_for_default() {
-        let m = opt("gpt-5.1-codex-max", "Codex Max", "max-tier coding model", true);
+        let m = opt(
+            "gpt-5.1-codex-max",
+            "Codex Max",
+            "max-tier coding model",
+            true,
+        );
         assert_eq!(
             format_codex_model(&m),
             "gpt-5.1-codex-max (default)\n  max-tier coding model"
@@ -66,7 +71,12 @@ mod tests {
 
     #[test]
     fn format_codex_model_omits_default_marker_for_non_default() {
-        let m = opt("gpt-5.1-codex-mini", "Codex Mini", "smaller coding model", false);
+        let m = opt(
+            "gpt-5.1-codex-mini",
+            "Codex Mini",
+            "smaller coding model",
+            false,
+        );
         assert_eq!(
             format_codex_model(&m),
             "gpt-5.1-codex-mini\n  smaller coding model"

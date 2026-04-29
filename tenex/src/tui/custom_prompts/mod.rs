@@ -42,6 +42,4 @@ pub use provider_select_prompt::{
 };
 pub use raw_mode::RawMode;
 pub use relay_prompt::{relay_prompt, RelayItem, RelayPromptConfig};
-pub use role_menu_prompt::{
-    role_menu_prompt, RoleKey, RoleMenuResult, RoleMenuState, ROLES,
-};
+pub use role_menu_prompt::{role_menu_prompt, RoleKey, RoleMenuResult, RoleMenuState, ROLES};

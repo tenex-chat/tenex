@@ -21,11 +21,10 @@ fn projects_base(base_dir: &std::path::Path) -> std::path::PathBuf {
     base_dir.join(PROJECTS_DIRNAME)
 }
 
-fn conversations_dir(
-    base_dir: &std::path::Path,
-    project_dtag: &str,
-) -> std::path::PathBuf {
-    projects_base(base_dir).join(project_dtag).join(CONVERSATIONS_DIRNAME)
+fn conversations_dir(base_dir: &std::path::Path, project_dtag: &str) -> std::path::PathBuf {
+    projects_base(base_dir)
+        .join(project_dtag)
+        .join(CONVERSATIONS_DIRNAME)
 }
 
 fn conversation_file(
@@ -165,12 +164,7 @@ mod tests {
         p
     }
 
-    fn write_conversation(
-        base: &std::path::Path,
-        project: &str,
-        id: &str,
-        body: &str,
-    ) {
+    fn write_conversation(base: &std::path::Path, project: &str, id: &str, body: &str) {
         let dir = conversations_dir(base, project);
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join(format!("{id}.json")), body).unwrap();
@@ -286,12 +280,7 @@ mod tests {
     #[test]
     fn metadata_zero_last_activity_when_messages_missing_timestamp() {
         let base = unique_temp();
-        write_conversation(
-            &base,
-            "p1",
-            "no-ts",
-            r#"{"messages":[{"content":"x"}]}"#,
-        );
+        write_conversation(&base, "p1", "no-ts", r#"{"messages":[{"content":"x"}]}"#);
         let m = read_lightweight_metadata(&base, "p1", "no-ts").unwrap();
         assert_eq!(m.last_activity, 0);
         std::fs::remove_dir_all(&base).ok();

@@ -41,9 +41,7 @@ impl TenexConfigDoc {
                 Ok(Self { raw })
             }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Self::default()),
-            Err(e) => {
-                Err(anyhow!(e)).with_context(|| format!("reading {}", path.display()))
-            }
+            Err(e) => Err(anyhow!(e)).with_context(|| format!("reading {}", path.display())),
         }
     }
 
@@ -101,7 +99,8 @@ impl TenexConfigDoc {
     }
 
     pub fn set_tenex_private_key(&mut self, key: String) {
-        self.raw.insert("tenexPrivateKey".into(), Value::String(key));
+        self.raw
+            .insert("tenexPrivateKey".into(), Value::String(key));
     }
 
     /// Owner private key (hex or bech32) used by `tenex agent manage` to
@@ -152,7 +151,8 @@ impl TenexConfigDoc {
     }
 
     pub fn set_blossom_server_url(&mut self, url: String) {
-        self.raw.insert("blossomServerUrl".into(), Value::String(url));
+        self.raw
+            .insert("blossomServerUrl".into(), Value::String(url));
     }
 
     pub fn project_naddr(&self) -> Option<String> {
@@ -386,11 +386,7 @@ impl TenexConfigDoc {
     /// `existingConfig.telemetry = { ...telemetry, analysis: undefined }`
     /// at `telemetry.ts:60-64`).
     pub fn clear_telemetry_analysis(&mut self) {
-        if let Some(t) = self
-            .raw
-            .get_mut("telemetry")
-            .and_then(Value::as_object_mut)
-        {
+        if let Some(t) = self.raw.get_mut("telemetry").and_then(Value::as_object_mut) {
             t.shift_remove("analysis");
         }
     }
@@ -473,9 +469,7 @@ impl TenexConfigDoc {
 
     /// Borrow the `contextManagement` JSON block read-only.
     pub fn context_management_block(&self) -> Option<&serde_json::Map<String, Value>> {
-        self.raw
-            .get("contextManagement")
-            .and_then(Value::as_object)
+        self.raw.get("contextManagement").and_then(Value::as_object)
     }
 
     /// Replace the entire `contextManagement` block. Source:
@@ -522,10 +516,7 @@ impl TenexConfigDoc {
         obj.insert("toolResultDecay".into(), Value::Object(decay));
 
         let mut strategies = serde_json::Map::new();
-        strategies.insert(
-            "reminders".into(),
-            Value::Bool(fields.strategies_reminders),
-        );
+        strategies.insert("reminders".into(), Value::Bool(fields.strategies_reminders));
         strategies.insert(
             "toolResultDecay".into(),
             Value::Bool(fields.strategies_tool_result_decay),
@@ -578,18 +569,12 @@ impl TenexConfigDoc {
             .expect("contextDiscovery just inserted as object");
         block.insert("enabled".into(), Value::Bool(fields.enabled));
         block.insert("trigger".into(), Value::String(fields.trigger));
-        block.insert(
-            "timeoutMs".into(),
-            Value::Number(fields.timeout_ms.into()),
-        );
+        block.insert("timeoutMs".into(), Value::Number(fields.timeout_ms.into()));
         block.insert(
             "maxQueries".into(),
             Value::Number(fields.max_queries.into()),
         );
-        block.insert(
-            "maxHints".into(),
-            Value::Number(fields.max_hints.into()),
-        );
+        block.insert("maxHints".into(), Value::Number(fields.max_hints.into()));
         block.insert(
             "minScore".into(),
             serde_json::Number::from_f64(fields.min_score)
@@ -598,13 +583,7 @@ impl TenexConfigDoc {
         );
         block.insert(
             "sources".into(),
-            Value::Array(
-                fields
-                    .sources
-                    .into_iter()
-                    .map(Value::String)
-                    .collect(),
-            ),
+            Value::Array(fields.sources.into_iter().map(Value::String).collect()),
         );
         block.insert(
             "usePlannerModel".into(),
@@ -674,7 +653,6 @@ pub struct TelemetryAnalysisFields {
 }
 
 impl TenexConfigDoc {
-
     /// Replace the `intervention` block with `{enabled, agent?, timeoutSeconds?}`.
     /// `agent: None` writes the field absent (matches TS
     /// `agent: answers.agent || undefined`). When the disabled-branch is
@@ -843,7 +821,9 @@ mod tests {
             _ => return,
         };
         let path = std::path::PathBuf::from(home).join(".tenex/config.json");
-        let Ok(original) = std::fs::read(&path) else { return };
+        let Ok(original) = std::fs::read(&path) else {
+            return;
+        };
 
         let raw: IndexMap<String, Value> = match serde_json::from_slice(&original) {
             Ok(r) => r,

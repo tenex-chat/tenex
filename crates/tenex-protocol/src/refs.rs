@@ -23,12 +23,20 @@ pub enum PrincipalRef {
 impl PrincipalRef {
     /// Convenience constructor for a Nostr agent principal.
     pub fn nostr_agent(pubkey: PublicKey) -> Self {
-        Self::Nostr { pubkey, kind: PrincipalKind::Agent, display_name: None }
+        Self::Nostr {
+            pubkey,
+            kind: PrincipalKind::Agent,
+            display_name: None,
+        }
     }
 
     /// Convenience constructor for a Nostr human principal.
     pub fn nostr_human(pubkey: PublicKey) -> Self {
-        Self::Nostr { pubkey, kind: PrincipalKind::Human, display_name: None }
+        Self::Nostr {
+            pubkey,
+            kind: PrincipalKind::Human,
+            display_name: None,
+        }
     }
 }
 

@@ -10,7 +10,9 @@ const MAX_INJECTED_FILES: usize = 10;
 const MAX_INJECTED_FILE_LENGTH: usize = 1500;
 
 pub fn agent_home_dir(base_dir: &Path, pubkey_hex: &str) -> PathBuf {
-    base_dir.join("home").join(&pubkey_hex[..8.min(pubkey_hex.len())])
+    base_dir
+        .join("home")
+        .join(&pubkey_hex[..8.min(pubkey_hex.len())])
 }
 
 pub fn ensure_agent_home_dir(home_dir: &Path) -> bool {
@@ -105,7 +107,11 @@ pub fn get_injected_files(home_dir: &Path) -> Vec<InjectedFile> {
             let content = fs::read_to_string(home_dir.join(&filename)).ok()?;
             let truncated = content.len() > MAX_INJECTED_FILE_LENGTH;
             let content: String = content.chars().take(MAX_INJECTED_FILE_LENGTH).collect();
-            Some(InjectedFile { filename, content, truncated })
+            Some(InjectedFile {
+                filename,
+                content,
+                truncated,
+            })
         })
         .collect()
 }
@@ -125,14 +131,21 @@ pub fn count_home_files(home_dir: &Path) -> String {
         return "(empty)".to_string();
     }
 
-    let file_count =
-        entries.iter().filter(|e| e.file_type().map(|t| t.is_file()).unwrap_or(false)).count();
-    let dir_count =
-        entries.iter().filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false)).count();
+    let file_count = entries
+        .iter()
+        .filter(|e| e.file_type().map(|t| t.is_file()).unwrap_or(false))
+        .count();
+    let dir_count = entries
+        .iter()
+        .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
+        .count();
 
     let mut parts: Vec<String> = Vec::new();
     if file_count > 0 {
-        parts.push(format!("{file_count} file{}", if file_count != 1 { "s" } else { "" }));
+        parts.push(format!(
+            "{file_count} file{}",
+            if file_count != 1 { "s" } else { "" }
+        ));
     }
     if dir_count > 0 {
         parts.push(format!(

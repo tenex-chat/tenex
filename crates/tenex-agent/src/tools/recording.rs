@@ -83,8 +83,8 @@ impl ToolDyn for RecordingTool {
         Box::pin(async move {
             let call_id = uuid::Uuid::new_v4().to_string();
             let tool_name = self.inner.name();
-            let args_json: serde_json::Value =
-                serde_json::from_str(&args).unwrap_or_else(|_| serde_json::Value::String(args.clone()));
+            let args_json: serde_json::Value = serde_json::from_str(&args)
+                .unwrap_or_else(|_| serde_json::Value::String(args.clone()));
             let timestamp_ms = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_millis() as i64)

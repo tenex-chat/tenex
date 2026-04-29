@@ -25,7 +25,11 @@ fn write_event_json(base: &std::path::Path, d_tag: &str, extra_tags: &[serde_jso
         "created_at": 1_700_000_000_i64,
         "tags": tags,
     });
-    fs::write(projects_dir.join("event.json"), serde_json::to_vec(&event).unwrap()).unwrap();
+    fs::write(
+        projects_dir.join("event.json"),
+        serde_json::to_vec(&event).unwrap(),
+    )
+    .unwrap();
 }
 
 fn write_agent_json(base: &std::path::Path, pubkey: &str) {
@@ -160,7 +164,11 @@ fn project_agents_derives_pm_from_first_p_tag() {
             ["p", second_pk],
         ],
     });
-    fs::write(projects_dir.join("event.json"), serde_json::to_vec(&event).unwrap()).unwrap();
+    fs::write(
+        projects_dir.join("event.json"),
+        serde_json::to_vec(&event).unwrap(),
+    )
+    .unwrap();
 
     let p = Project::open("my-project", tmp.path()).unwrap();
     let pas = p.project_agents().unwrap();
@@ -168,11 +176,17 @@ fn project_agents_derives_pm_from_first_p_tag() {
     assert_eq!(pas.len(), 2);
     assert_eq!(
         pas[0],
-        ProjectAgent { agent_pubkey: AGENT_PK.into(), is_pm: true }
+        ProjectAgent {
+            agent_pubkey: AGENT_PK.into(),
+            is_pm: true
+        }
     );
     assert_eq!(
         pas[1],
-        ProjectAgent { agent_pubkey: second_pk.into(), is_pm: false }
+        ProjectAgent {
+            agent_pubkey: second_pk.into(),
+            is_pm: false
+        }
     );
 }
 
@@ -185,13 +199,19 @@ fn agent_by_pubkey_and_slug() {
     let p = Project::open("my-project", tmp.path()).unwrap();
 
     assert_eq!(p.agent_by_pubkey(AGENT_PK).unwrap(), Some(expected_agent()));
-    assert_eq!(p.agent_by_slug("transparent").unwrap(), Some(expected_agent()));
+    assert_eq!(
+        p.agent_by_slug("transparent").unwrap(),
+        Some(expected_agent())
+    );
     assert_eq!(
         p.resolve_slug("transparent").unwrap().as_deref(),
         Some(AGENT_PK)
     );
     assert!(p.agent_by_slug("missing").unwrap().is_none());
-    assert!(p.agent_by_pubkey("0000000000000000000000000000000000000000000000000000000000000000").unwrap().is_none());
+    assert!(p
+        .agent_by_pubkey("0000000000000000000000000000000000000000000000000000000000000000")
+        .unwrap()
+        .is_none());
 }
 
 #[test]
@@ -216,8 +236,16 @@ fn agent_json_fields_round_trip() {
 
     let p = Project::open("my-project", tmp.path()).unwrap();
     let a = p.agent_by_pubkey(AGENT_PK).unwrap().unwrap();
-    assert!(a.default_config_json.as_deref().unwrap().contains("write-access"));
-    assert!(a.telegram_config_json.as_deref().unwrap().contains("botToken"));
+    assert!(a
+        .default_config_json
+        .as_deref()
+        .unwrap()
+        .contains("write-access"));
+    assert!(a
+        .telegram_config_json
+        .as_deref()
+        .unwrap()
+        .contains("botToken"));
     assert!(a.mcp_servers_json.as_deref().unwrap().contains("repomix"));
 }
 

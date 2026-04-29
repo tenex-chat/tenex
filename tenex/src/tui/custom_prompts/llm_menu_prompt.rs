@@ -49,9 +49,7 @@ const ANSI214_ACCENT: Color = crate::tui::theme::DISPLAY_ACCENT_CROSSTERM;
 pub const RULE_WIDTH: usize = 40;
 
 /// Spinner frames. Source: `:39` `SPINNER_FRAMES`.
-pub const SPINNER_FRAMES: &[&str] = &[
-    "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏",
-];
+pub const SPINNER_FRAMES: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
 /// Action button. `key` is the single-letter shortcut.
 #[derive(Debug, Clone)]
@@ -110,9 +108,7 @@ pub enum LlmMenuInput {
 
 impl LlmMenuInput {
     pub fn from_key_event(ev: KeyEvent) -> Self {
-        if ev.modifiers.contains(KeyModifiers::CONTROL)
-            && matches!(ev.code, KeyCode::Char('c'))
-        {
+        if ev.modifiers.contains(KeyModifiers::CONTROL) && matches!(ev.code, KeyCode::Char('c')) {
             return LlmMenuInput::CtrlC;
         }
         match ev.code {
@@ -133,11 +129,15 @@ pub enum LlmMenuOutcome {
     /// Caller routes on the value: action values for action rows; `"done"`
     /// for Done; `"delete:<name>"` for `d` on a config row; the item's own
     /// `value` for Enter on a config row.
-    Selected { value: String },
+    Selected {
+        value: String,
+    },
     /// `t` pressed on a config row that has no existing result.
     /// Caller spawns the test, then later calls [`finish_test`] with the
     /// outcome.
-    RequestTest { config_name: String },
+    RequestTest {
+        config_name: String,
+    },
 }
 
 /// Drive the state machine with one input.
@@ -274,11 +274,19 @@ pub fn compose_lines(
     out.push(format!("? {message}"));
 
     for (i, action) in actions.iter().enumerate() {
-        let pfx = if i == state.active { cursor_active.as_str() } else { "  " };
+        let pfx = if i == state.active {
+            cursor_active.as_str()
+        } else {
+            "  "
+        };
         out.push(format!("{pfx}{}", action.name));
     }
 
-    let pfx = if state.active == done_index { cursor_active.as_str() } else { "  " };
+    let pfx = if state.active == done_index {
+        cursor_active.as_str()
+    } else {
+        "  "
+    };
     out.push(format!("{pfx}  Done"));
 
     out.push(format!("  {}", "─".repeat(RULE_WIDTH)));
@@ -289,15 +297,21 @@ pub fn compose_lines(
         for (i, item) in items.iter().enumerate() {
             let row_index = done_index + 1 + i;
             let is_active = row_index == state.active;
-            let pfx = if is_active { cursor_active.as_str() } else { "  " };
+            let pfx = if is_active {
+                cursor_active.as_str()
+            } else {
+                "  "
+            };
             let prefix_glyph = render_status_glyph(state, item);
-            out.push(format!("{pfx}{prefix_glyph} {}{}", item.name, render_error_suffix(state, item)));
+            out.push(format!(
+                "{pfx}{prefix_glyph} {}{}",
+                item.name,
+                render_error_suffix(state, item)
+            ));
         }
     }
 
-    out.push(
-        "  ↑↓ navigate • ⏎ select • t test • d delete".to_string(),
-    );
+    out.push("  ↑↓ navigate • ⏎ select • t test • d delete".to_string());
 
     out
 }
@@ -321,8 +335,12 @@ fn render_status_glyph(state: &LlmMenuState, item: &ConfigItem) -> &'static str 
 }
 
 fn render_error_suffix(state: &LlmMenuState, item: &ConfigItem) -> String {
-    let Some(name) = &item.config_name else { return String::new() };
-    let Some(result) = state.results.get(name) else { return String::new() };
+    let Some(name) = &item.config_name else {
+        return String::new();
+    };
+    let Some(result) = state.results.get(name) else {
+        return String::new();
+    };
     if result.success {
         return String::new();
     }
@@ -416,7 +434,12 @@ fn render_frame<W: Write>(
     // TS `inquirerTheme.prefix.idle = chalk.hex("#FFC107")("?")` —
     // closes with SGR 39 (FG default), not SGR 0 (full reset). Use the
     // raw FG_RESET constant for byte-perfect chalk-prefix match.
-    queue!(stdout, SetForegroundColor(AMBER), Print("?"), Print(crate::tui::theme::FG_RESET))?;
+    queue!(
+        stdout,
+        SetForegroundColor(AMBER),
+        Print("?"),
+        Print(crate::tui::theme::FG_RESET)
+    )?;
     queue!(
         stdout,
         Print(" "),
@@ -566,7 +589,12 @@ fn render_frame<W: Write>(
                 queue!(stdout, Print("  "))?;
             }
             if is_active {
-                queue!(stdout, SetForegroundColor(AMBER), Print(&item.name), ResetColor)?;
+                queue!(
+                    stdout,
+                    SetForegroundColor(AMBER),
+                    Print(&item.name),
+                    ResetColor
+                )?;
             } else {
                 queue!(stdout, Print(&item.name))?;
             }
@@ -749,7 +777,10 @@ mod tests {
         let mut s = state();
         s.results.insert(
             "Config0".to_owned(),
-            TestResult { success: true, error: None },
+            TestResult {
+                success: true,
+                error: None,
+            },
         );
         s.active = actions.len() + 1;
         let outcome = handle_key(&mut s, &actions, &items, LlmMenuInput::Char('t'));
@@ -869,7 +900,10 @@ mod tests {
         finish_test(
             &mut s,
             "Config0",
-            TestResult { success: true, error: None },
+            TestResult {
+                success: true,
+                error: None,
+            },
         );
         assert!(s.testing.is_none());
         assert_eq!(s.spinner_frame, 0);
@@ -885,7 +919,10 @@ mod tests {
         finish_test(
             &mut s,
             "ConfigB",
-            TestResult { success: false, error: Some("e".into()) },
+            TestResult {
+                success: false,
+                error: Some("e".into()),
+            },
         );
         assert_eq!(s.testing.as_deref(), Some("ConfigA"));
         assert!(s.results.contains_key("ConfigB"));
@@ -939,7 +976,10 @@ mod tests {
         let mut s = state();
         s.results.insert(
             "Config0".to_owned(),
-            TestResult { success: true, error: None },
+            TestResult {
+                success: true,
+                error: None,
+            },
         );
         let lines = compose_lines(&s, "Configurations", &actions, &items);
         let row = lines.iter().find(|l| l.contains("Config0")).unwrap();
@@ -953,7 +993,10 @@ mod tests {
         let mut s = state();
         s.results.insert(
             "Config0".to_owned(),
-            TestResult { success: false, error: Some("invalid or expired API key".into()) },
+            TestResult {
+                success: false,
+                error: Some("invalid or expired API key".into()),
+            },
         );
         let lines = compose_lines(&s, "Configurations", &actions, &items);
         let row = lines.iter().find(|l| l.contains("Config0")).unwrap();
@@ -977,18 +1020,40 @@ mod tests {
 
     #[test]
     fn from_key_event_maps_arrows_enter_esc_chars_ctrl_c() {
-        fn ke(c: KeyCode) -> KeyEvent { KeyEvent::new(c, KeyModifiers::NONE) }
-        fn ke_ctrl(c: KeyCode) -> KeyEvent { KeyEvent::new(c, KeyModifiers::CONTROL) }
-        assert_eq!(LlmMenuInput::from_key_event(ke(KeyCode::Up)), LlmMenuInput::Up);
-        assert_eq!(LlmMenuInput::from_key_event(ke(KeyCode::Down)), LlmMenuInput::Down);
-        assert_eq!(LlmMenuInput::from_key_event(ke(KeyCode::Enter)), LlmMenuInput::Enter);
-        assert_eq!(LlmMenuInput::from_key_event(ke(KeyCode::Esc)), LlmMenuInput::Escape);
-        assert_eq!(LlmMenuInput::from_key_event(ke(KeyCode::Char('t'))), LlmMenuInput::Char('t'));
+        fn ke(c: KeyCode) -> KeyEvent {
+            KeyEvent::new(c, KeyModifiers::NONE)
+        }
+        fn ke_ctrl(c: KeyCode) -> KeyEvent {
+            KeyEvent::new(c, KeyModifiers::CONTROL)
+        }
+        assert_eq!(
+            LlmMenuInput::from_key_event(ke(KeyCode::Up)),
+            LlmMenuInput::Up
+        );
+        assert_eq!(
+            LlmMenuInput::from_key_event(ke(KeyCode::Down)),
+            LlmMenuInput::Down
+        );
+        assert_eq!(
+            LlmMenuInput::from_key_event(ke(KeyCode::Enter)),
+            LlmMenuInput::Enter
+        );
+        assert_eq!(
+            LlmMenuInput::from_key_event(ke(KeyCode::Esc)),
+            LlmMenuInput::Escape
+        );
+        assert_eq!(
+            LlmMenuInput::from_key_event(ke(KeyCode::Char('t'))),
+            LlmMenuInput::Char('t')
+        );
         assert_eq!(
             LlmMenuInput::from_key_event(ke_ctrl(KeyCode::Char('c'))),
             LlmMenuInput::CtrlC
         );
-        assert_eq!(LlmMenuInput::from_key_event(ke(KeyCode::Tab)), LlmMenuInput::Other);
+        assert_eq!(
+            LlmMenuInput::from_key_event(ke(KeyCode::Tab)),
+            LlmMenuInput::Other
+        );
     }
 
     /// Pin: the active-row cursor's trailing space lands OUTSIDE the
@@ -1033,12 +1098,10 @@ mod tests {
         let mut buf: Vec<u8> = Vec::new();
         render_frame(&mut buf, "Configure LLM models", &s, &actions, &items, 0).unwrap();
         let bytes = String::from_utf8(buf).expect("render output must be UTF-8");
-        let with_full_reset = bytes.contains(
-            "\x1b[38;2;255;193;7m❯\x1b[0m \x1b[38;5;214m\x1b[1m  Done",
-        );
-        let with_fg_reset = bytes.contains(
-            "\x1b[38;2;255;193;7m❯\x1b[39m \x1b[38;5;214m\x1b[1m  Done",
-        );
+        let with_full_reset =
+            bytes.contains("\x1b[38;2;255;193;7m❯\x1b[0m \x1b[38;5;214m\x1b[1m  Done");
+        let with_fg_reset =
+            bytes.contains("\x1b[38;2;255;193;7m❯\x1b[39m \x1b[38;5;214m\x1b[1m  Done");
         assert!(
             with_full_reset || with_fg_reset,
             "Done row must emit cursor + close + literal space + ansi256(214)+bold for the label; got {bytes:?}",

@@ -71,8 +71,8 @@ async fn main() -> Result<()> {
 }
 
 fn init_tracing() {
-    let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new("info,nostr_sdk=warn"));
+    let filter =
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info,nostr_sdk=warn"));
     tracing_subscriber::fmt().with_env_filter(filter).init();
 }
 
@@ -104,7 +104,12 @@ mod tests {
 
         let by_name: std::collections::HashMap<&str, String> = cmd
             .get_subcommands()
-            .map(|s| (s.get_name(), s.get_about().map(|h| h.to_string()).unwrap_or_default()))
+            .map(|s| {
+                (
+                    s.get_name(),
+                    s.get_about().map(|h| h.to_string()).unwrap_or_default(),
+                )
+            })
             .collect();
 
         assert_eq!(

@@ -63,24 +63,32 @@ mod tests {
     fn fires_after_threshold_with_no_todos() {
         let h = ConsecutiveToolsWithoutTodoHeuristic;
         assert!(h.check(&ctx(TOOL_CALL_THRESHOLD, false, false)).is_some());
-        assert!(h.check(&ctx(TOOL_CALL_THRESHOLD + 5, false, false)).is_some());
+        assert!(h
+            .check(&ctx(TOOL_CALL_THRESHOLD + 5, false, false))
+            .is_some());
     }
 
     #[test]
     fn does_not_fire_below_threshold() {
         let h = ConsecutiveToolsWithoutTodoHeuristic;
-        assert!(h.check(&ctx(TOOL_CALL_THRESHOLD - 1, false, false)).is_none());
+        assert!(h
+            .check(&ctx(TOOL_CALL_THRESHOLD - 1, false, false))
+            .is_none());
     }
 
     #[test]
     fn does_not_fire_when_todos_exist() {
         let h = ConsecutiveToolsWithoutTodoHeuristic;
-        assert!(h.check(&ctx(TOOL_CALL_THRESHOLD + 2, true, false)).is_none());
+        assert!(h
+            .check(&ctx(TOOL_CALL_THRESHOLD + 2, true, false))
+            .is_none());
     }
 
     #[test]
     fn does_not_fire_when_already_nudged() {
         let h = ConsecutiveToolsWithoutTodoHeuristic;
-        assert!(h.check(&ctx(TOOL_CALL_THRESHOLD + 2, false, true)).is_none());
+        assert!(h
+            .check(&ctx(TOOL_CALL_THRESHOLD + 2, false, true))
+            .is_none());
     }
 }

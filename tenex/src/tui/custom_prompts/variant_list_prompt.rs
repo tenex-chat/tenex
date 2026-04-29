@@ -110,9 +110,7 @@ pub enum VariantInput {
 
 impl VariantInput {
     pub fn from_key_event(ev: KeyEvent) -> Self {
-        if ev.modifiers.contains(KeyModifiers::CONTROL)
-            && matches!(ev.code, KeyCode::Char('c'))
-        {
+        if ev.modifiers.contains(KeyModifiers::CONTROL) && matches!(ev.code, KeyCode::Char('c')) {
             return VariantInput::CtrlC;
         }
         match ev.code {
@@ -179,12 +177,8 @@ pub fn handle_key(state: &mut VariantListState, key: VariantInput) -> VariantOut
                 let to_delete = names[state.active].clone();
                 state.variants.shift_remove(&to_delete);
                 if state.default_variant == to_delete {
-                    state.default_variant = state
-                        .variants
-                        .keys()
-                        .next()
-                        .cloned()
-                        .unwrap_or_default();
+                    state.default_variant =
+                        state.variants.keys().next().cloned().unwrap_or_default();
                 }
                 let new_count = state.variants.len();
                 if state.active >= new_count {
@@ -253,9 +247,7 @@ pub fn compose_lines(state: &VariantListState, message: &str) -> Vec<String> {
         out.push(format!("{done_pfx}  Done"));
     }
 
-    out.push(
-        "  ↑↓ navigate • ⏎ edit • d set default • ⌫ remove".to_string(),
-    );
+    out.push("  ↑↓ navigate • ⏎ edit • d set default • ⌫ remove".to_string());
 
     out
 }
@@ -343,7 +335,12 @@ fn render_frame<W: Write>(
     // TS `inquirerTheme.prefix.idle = chalk.hex("#FFC107")("?")` —
     // closes with SGR 39 (FG default), not SGR 0 (full reset). Use the
     // raw FG_RESET constant for byte-perfect chalk-prefix match.
-    queue!(stdout, SetForegroundColor(AMBER), Print("?"), Print(crate::tui::theme::FG_RESET))?;
+    queue!(
+        stdout,
+        SetForegroundColor(AMBER),
+        Print("?"),
+        Print(crate::tui::theme::FG_RESET)
+    )?;
     queue!(
         stdout,
         Print(" "),
@@ -565,14 +562,22 @@ mod tests {
         let mut state = state_with(three_variants(), "fast");
         state.active = 1;
         let outcome = handle_key(&mut state, VariantInput::Enter);
-        assert_eq!(outcome, VariantOutcome::Edit { variant_name: "smart".into() });
+        assert_eq!(
+            outcome,
+            VariantOutcome::Edit {
+                variant_name: "smart".into()
+            }
+        );
     }
 
     #[test]
     fn enter_on_add_row_yields_add() {
         let mut state = state_with(three_variants(), "fast");
         state.active = 3;
-        assert_eq!(handle_key(&mut state, VariantInput::Enter), VariantOutcome::Add);
+        assert_eq!(
+            handle_key(&mut state, VariantInput::Enter),
+            VariantOutcome::Add
+        );
     }
 
     #[test]
@@ -582,7 +587,10 @@ mod tests {
         variants.insert("b".into(), variant("mb"));
         let mut state = state_with(variants, "a");
         state.active = 3; // 2 variants + Add + Done = 4 rows; done_index=3
-        assert_eq!(handle_key(&mut state, VariantInput::Enter), VariantOutcome::Done);
+        assert_eq!(
+            handle_key(&mut state, VariantInput::Enter),
+            VariantOutcome::Done
+        );
     }
 
     #[test]
@@ -666,13 +674,19 @@ mod tests {
     #[test]
     fn ctrl_c_cancels() {
         let mut state = state_with(three_variants(), "fast");
-        assert_eq!(handle_key(&mut state, VariantInput::CtrlC), VariantOutcome::Cancel);
+        assert_eq!(
+            handle_key(&mut state, VariantInput::CtrlC),
+            VariantOutcome::Cancel
+        );
     }
 
     #[test]
     fn esc_cancels() {
         let mut state = state_with(three_variants(), "fast");
-        assert_eq!(handle_key(&mut state, VariantInput::Escape), VariantOutcome::Cancel);
+        assert_eq!(
+            handle_key(&mut state, VariantInput::Escape),
+            VariantOutcome::Cancel
+        );
     }
 
     // ---- compose lines --------------------------------------------------
@@ -705,7 +719,10 @@ mod tests {
             .iter()
             .find(|l| l.contains("fast") && l.contains("[m-fast]"))
             .unwrap();
-        assert!(active_row.starts_with(glyphs::CURSOR_THIN), "got: {active_row}");
+        assert!(
+            active_row.starts_with(glyphs::CURSOR_THIN),
+            "got: {active_row}"
+        );
     }
 
     #[test]
@@ -713,7 +730,9 @@ mod tests {
         let state = state_with(three_variants(), "fast");
         let lines = compose_lines(&state, "Edit variants");
         // The done row appears between rule and help; check verbatim text.
-        assert!(lines.iter().any(|l| l.trim_start() == "Done" || l.contains("  Done")));
+        assert!(lines
+            .iter()
+            .any(|l| l.trim_start() == "Done" || l.contains("  Done")));
     }
 
     #[test]
@@ -832,9 +851,18 @@ mod tests {
 
     #[test]
     fn from_key_event_maps_arrows_enter_and_d() {
-        assert_eq!(VariantInput::from_key_event(ke(KeyCode::Up)), VariantInput::Up);
-        assert_eq!(VariantInput::from_key_event(ke(KeyCode::Down)), VariantInput::Down);
-        assert_eq!(VariantInput::from_key_event(ke(KeyCode::Enter)), VariantInput::Enter);
+        assert_eq!(
+            VariantInput::from_key_event(ke(KeyCode::Up)),
+            VariantInput::Up
+        );
+        assert_eq!(
+            VariantInput::from_key_event(ke(KeyCode::Down)),
+            VariantInput::Down
+        );
+        assert_eq!(
+            VariantInput::from_key_event(ke(KeyCode::Enter)),
+            VariantInput::Enter
+        );
         assert_eq!(
             VariantInput::from_key_event(ke(KeyCode::Char('d'))),
             VariantInput::SetDefault,

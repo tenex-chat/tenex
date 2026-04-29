@@ -73,8 +73,16 @@ pub struct DelegationIntent {
 /// One question inside an [`AskIntent`].
 #[derive(Debug, Clone)]
 pub enum AskQuestion {
-    SingleSelect { title: String, prompt: String, suggestions: Vec<String> },
-    MultiSelect { title: String, prompt: String, options: Vec<String> },
+    SingleSelect {
+        title: String,
+        prompt: String,
+        suggestions: Vec<String>,
+    },
+    MultiSelect {
+        title: String,
+        prompt: String,
+        options: Vec<String>,
+    },
 }
 
 /// Ask a human a structured question. Always p-tags the recipient and ships

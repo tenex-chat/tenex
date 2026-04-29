@@ -260,8 +260,7 @@ impl LlmsDoc {
     fn ensure_configurations_obj_mut(&mut self) -> &mut Map<String, Value> {
         if !self.raw.contains_key(CONFIGURATIONS) {
             // configurations is the schema-defined first key; insert at index 0.
-            self.raw
-                .shift_insert(0, CONFIGURATIONS.into(), json!({}));
+            self.raw.shift_insert(0, CONFIGURATIONS.into(), json!({}));
         }
         self.raw
             .get_mut(CONFIGURATIONS)
@@ -367,7 +366,12 @@ impl<'a> MetaVariantEntry<'a> {
         self.obj
             .get("keywords")
             .and_then(Value::as_array)
-            .map(|arr| arr.iter().filter_map(Value::as_str).map(str::to_owned).collect())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(Value::as_str)
+                    .map(str::to_owned)
+                    .collect()
+            })
             .unwrap_or_default()
     }
 
@@ -529,10 +533,7 @@ mod tests {
     #[test]
     fn standard_config_writes_provider_and_model_first() {
         let mut doc = LlmsDoc::new();
-        doc.set_standard_config(
-            "a",
-            StandardConfig::new("anthropic", "claude-haiku-4-5"),
-        );
+        doc.set_standard_config("a", StandardConfig::new("anthropic", "claude-haiku-4-5"));
         let s = String::from_utf8(serialize(doc.raw()).unwrap()).unwrap();
         let p_pos = s.find("\"provider\"").unwrap();
         let m_pos = s.find("\"model\"").unwrap();
@@ -558,7 +559,9 @@ mod tests {
 
     #[test]
     fn standard_config_clearing_removes_existing_field() {
-        let mut doc = parse(br#"{"configurations":{"a":{"provider":"codex","model":"gpt-5.4","effort":"xhigh"}}}"#);
+        let mut doc = parse(
+            br#"{"configurations":{"a":{"provider":"codex","model":"gpt-5.4","effort":"xhigh"}}}"#,
+        );
         doc.set_standard_config(
             "a",
             StandardConfig::new("codex", "gpt-5.4").clearing("effort"),
@@ -657,7 +660,9 @@ mod tests {
             _ => return,
         };
         let path = std::path::PathBuf::from(home).join(".tenex/llms.json");
-        let Ok(original) = std::fs::read(&path) else { return };
+        let Ok(original) = std::fs::read(&path) else {
+            return;
+        };
 
         let raw: IndexMap<String, Value> = serde_json::from_slice(&original)
             .unwrap_or_else(|e| panic!("failed to parse {}: {e}", path.display()));

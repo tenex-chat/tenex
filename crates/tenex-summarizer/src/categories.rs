@@ -18,8 +18,8 @@ pub fn load() -> Result<Tally> {
         return Ok(HashMap::new());
     }
     let bytes = fs::read(&path).with_context(|| format!("read {}", path.display()))?;
-    let tally: Tally = serde_json::from_slice(&bytes)
-        .with_context(|| format!("parse {}", path.display()))?;
+    let tally: Tally =
+        serde_json::from_slice(&bytes).with_context(|| format!("parse {}", path.display()))?;
     Ok(tally)
 }
 
@@ -29,8 +29,7 @@ pub fn record(new: &[String]) -> Result<()> {
     }
     let path = paths::categories_file();
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("create {}", parent.display()))?;
+        fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
     }
     let mut tally = load().unwrap_or_default();
     for c in new {
@@ -43,13 +42,8 @@ pub fn record(new: &[String]) -> Result<()> {
     let serialized = serde_json::to_vec_pretty(&tally)?;
     let tmp = path.with_extension("json.tmp");
     fs::write(&tmp, &serialized).with_context(|| format!("write {}", tmp.display()))?;
-    fs::rename(&tmp, &path).with_context(|| {
-        format!(
-            "rename {} -> {}",
-            tmp.display(),
-            path.display()
-        )
-    })?;
+    fs::rename(&tmp, &path)
+        .with_context(|| format!("rename {} -> {}", tmp.display(), path.display()))?;
     Ok(())
 }
 

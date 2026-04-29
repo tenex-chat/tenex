@@ -178,16 +178,15 @@ fn run_configure(base_dir: &std::path::Path, resolved: &ResolvedAnalysis) -> Res
         | Err(inquire::InquireError::OperationInterrupted) => return Ok(()),
         Err(e) => return Err(anyhow!("endpoint prompt: {e}")),
     };
-    let analysis_enabled =
-        match prompts::confirm("Enable local analysis telemetry store?")
-            .with_default(prev_analysis_enabled)
-            .prompt()
-        {
-            Ok(b) => b,
-            Err(inquire::InquireError::OperationCanceled)
-            | Err(inquire::InquireError::OperationInterrupted) => return Ok(()),
-            Err(e) => return Err(anyhow!("analysis enable confirm: {e}")),
-        };
+    let analysis_enabled = match prompts::confirm("Enable local analysis telemetry store?")
+        .with_default(prev_analysis_enabled)
+        .prompt()
+    {
+        Ok(b) => b,
+        Err(inquire::InquireError::OperationCanceled)
+        | Err(inquire::InquireError::OperationInterrupted) => return Ok(()),
+        Err(e) => return Err(anyhow!("analysis enable confirm: {e}")),
+    };
 
     let analysis_fields = if analysis_enabled {
         let db_path = match prompts::input("Analysis SQLite DB path:")
@@ -226,16 +225,15 @@ fn run_configure(base_dir: &std::path::Path, resolved: &ResolvedAnalysis) -> Res
         };
         let threshold: u64 = threshold_raw.trim().parse()?;
 
-        let store_previews =
-            match prompts::confirm("Store prompt message previews?")
-                .with_default(prev_store_previews)
-                .prompt()
-            {
-                Ok(b) => b,
-                Err(inquire::InquireError::OperationCanceled)
-                | Err(inquire::InquireError::OperationInterrupted) => return Ok(()),
-                Err(e) => return Err(anyhow!("storeMessagePreviews confirm: {e}")),
-            };
+        let store_previews = match prompts::confirm("Store prompt message previews?")
+            .with_default(prev_store_previews)
+            .prompt()
+        {
+            Ok(b) => b,
+            Err(inquire::InquireError::OperationCanceled)
+            | Err(inquire::InquireError::OperationInterrupted) => return Ok(()),
+            Err(e) => return Err(anyhow!("storeMessagePreviews confirm: {e}")),
+        };
 
         let max_preview_chars = if store_previews {
             let raw = match prompts::input("Maximum preview length:")
@@ -295,7 +293,6 @@ fn run_configure(base_dir: &std::path::Path, resolved: &ResolvedAnalysis) -> Res
     crate::tui::display::config_success("Telemetry config saved.");
     Ok(())
 }
-
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TopAction {
@@ -361,7 +358,10 @@ mod tests {
         assert_eq!(DEFAULT_RETENTION_DAYS, 14);
         assert_eq!(DEFAULT_LARGE_MESSAGE_THRESHOLD_TOKENS, 2000);
         assert_eq!(DEFAULT_MAX_PREVIEW_CHARS, 256);
-        let defaults = (DEFAULT_STORE_MESSAGE_PREVIEWS, DEFAULT_STORE_FULL_MESSAGE_TEXT);
+        let defaults = (
+            DEFAULT_STORE_MESSAGE_PREVIEWS,
+            DEFAULT_STORE_FULL_MESSAGE_TEXT,
+        );
         assert_eq!(defaults, (true, true));
     }
 
@@ -431,10 +431,7 @@ mod tests {
 
         let r = TenexConfigDoc::load(&base).unwrap();
         assert_eq!(r.telemetry_analysis_enabled(), Some(true));
-        assert_eq!(
-            r.telemetry_analysis_db_path().as_deref(),
-            Some("/tmp/y.db")
-        );
+        assert_eq!(r.telemetry_analysis_db_path().as_deref(), Some("/tmp/y.db"));
         assert_eq!(r.telemetry_analysis_retention_days(), Some(30));
         assert_eq!(
             r.telemetry_analysis_large_message_threshold_tokens(),

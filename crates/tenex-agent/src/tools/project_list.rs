@@ -43,9 +43,8 @@ impl Tool for ProjectListTool {
     async fn call(&self, _args: ProjectListArgs) -> Result<String, ProjectListError> {
         let projects_dir = paths::projects_dir(&self.base_dir);
 
-        let entries = std::fs::read_dir(&projects_dir).map_err(|e| {
-            ProjectListError(format!("failed to read projects directory: {e}"))
-        })?;
+        let entries = std::fs::read_dir(&projects_dir)
+            .map_err(|e| ProjectListError(format!("failed to read projects directory: {e}")))?;
 
         let mut lines = vec!["Available projects:".to_string()];
         let mut count = 0;

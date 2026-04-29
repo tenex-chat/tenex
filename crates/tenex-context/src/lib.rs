@@ -15,8 +15,8 @@
 //! they enter this crate only so strategies can resolve `preserve_results`
 //! by name.
 
-pub mod strategies;
 mod projection;
+pub mod strategies;
 mod tokens;
 mod turn;
 pub mod types;

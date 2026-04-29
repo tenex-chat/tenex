@@ -52,7 +52,11 @@ struct StoredAgent {
     role: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     instructions: String,
-    #[serde(default, rename = "useCriteria", skip_serializing_if = "String::is_empty")]
+    #[serde(
+        default,
+        rename = "useCriteria",
+        skip_serializing_if = "String::is_empty"
+    )]
     use_criteria: String,
     #[serde(default = "default_status")]
     status: String,
@@ -106,8 +110,12 @@ fn find_agent_by_slug(
         if path.extension().and_then(|s| s.to_str()) != Some("json") {
             continue;
         }
-        let Ok(text) = fs::read_to_string(&path) else { continue };
-        let Ok(parsed) = serde_json::from_str::<StoredAgent>(&text) else { continue };
+        let Ok(text) = fs::read_to_string(&path) else {
+            continue;
+        };
+        let Ok(parsed) = serde_json::from_str::<StoredAgent>(&text) else {
+            continue;
+        };
         if parsed.slug == slug {
             return Ok(Some((path, parsed)));
         }
@@ -117,12 +125,11 @@ fn find_agent_by_slug(
 
 /// Write JSON atomically: write to `<path>.tmp` then rename onto `<path>`.
 fn write_json_atomic(path: &Path, agent: &StoredAgent) -> Result<(), AgentsWriteError> {
-    let parent = path.parent().ok_or_else(|| {
-        AgentsWriteError(format!("Agent path has no parent: {}", path.display()))
-    })?;
-    fs::create_dir_all(parent).map_err(|e| {
-        AgentsWriteError(format!("Failed to create dir {}: {e}", parent.display()))
-    })?;
+    let parent = path
+        .parent()
+        .ok_or_else(|| AgentsWriteError(format!("Agent path has no parent: {}", path.display())))?;
+    fs::create_dir_all(parent)
+        .map_err(|e| AgentsWriteError(format!("Failed to create dir {}: {e}", parent.display())))?;
 
     let serialized = serde_json::to_vec_pretty(agent)
         .map_err(|e| AgentsWriteError(format!("Failed to serialize agent: {e}")))?;
@@ -133,13 +140,22 @@ fn write_json_atomic(path: &Path, agent: &StoredAgent) -> Result<(), AgentsWrite
 
     {
         let mut f = fs::File::create(&tmp_path).map_err(|e| {
-            AgentsWriteError(format!("Failed to create temp file {}: {e}", tmp_path.display()))
+            AgentsWriteError(format!(
+                "Failed to create temp file {}: {e}",
+                tmp_path.display()
+            ))
         })?;
         f.write_all(&serialized).map_err(|e| {
-            AgentsWriteError(format!("Failed to write temp file {}: {e}", tmp_path.display()))
+            AgentsWriteError(format!(
+                "Failed to write temp file {}: {e}",
+                tmp_path.display()
+            ))
         })?;
         f.sync_all().map_err(|e| {
-            AgentsWriteError(format!("Failed to fsync temp file {}: {e}", tmp_path.display()))
+            AgentsWriteError(format!(
+                "Failed to fsync temp file {}: {e}",
+                tmp_path.display()
+            ))
         })?;
     }
 
@@ -156,7 +172,9 @@ fn write_json_atomic(path: &Path, agent: &StoredAgent) -> Result<(), AgentsWrite
 fn apply_llm_config(agent: &mut StoredAgent, llm_config: Option<String>) {
     let Some(model) = llm_config else { return };
     let trimmed = model.trim();
-    let default = agent.default.get_or_insert_with(AgentDefaultConfig::default);
+    let default = agent
+        .default
+        .get_or_insert_with(AgentDefaultConfig::default);
     if trimmed.is_empty() {
         default.model = None;
     } else {
@@ -204,10 +222,7 @@ fn perform_write(
             .and_then(|s| s.to_str())
             .map(|s| s.to_string())
             .ok_or_else(|| {
-                AgentsWriteError(format!(
-                    "Agent file has no valid stem: {}",
-                    path.display()
-                ))
+                AgentsWriteError(format!("Agent file has no valid stem: {}", path.display()))
             })?;
 
         return Ok(AgentsWriteOutput {
@@ -223,9 +238,10 @@ fn perform_write(
 
     let keys = Keys::generate();
     let pubkey_hex = keys.public_key().to_hex();
-    let nsec_bech32 = keys.secret_key().to_bech32().map_err(|e| {
-        AgentsWriteError(format!("Failed to encode nsec: {e}"))
-    })?;
+    let nsec_bech32 = keys
+        .secret_key()
+        .to_bech32()
+        .map_err(|e| AgentsWriteError(format!("Failed to encode nsec: {e}")))?;
 
     let mut agent = StoredAgent {
         nsec: nsec_bech32,
@@ -330,8 +346,11 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let dir = tmp.path().to_path_buf();
 
-        let out =
-            perform_write(&dir, args("alpha", "Alpha", Some("anthropic:claude-sonnet-4"))).unwrap();
+        let out = perform_write(
+            &dir,
+            args("alpha", "Alpha", Some("anthropic:claude-sonnet-4")),
+        )
+        .unwrap();
         assert!(out.success);
         let agent = out.agent.expect("agent returned");
         assert_eq!(agent.slug, "alpha");
@@ -372,7 +391,10 @@ mod tests {
         let out = perform_write(&dir, updated).unwrap();
         assert!(out.success);
         let agent = out.agent.unwrap();
-        assert_eq!(agent.pubkey, pubkey, "pubkey must be preserved across update");
+        assert_eq!(
+            agent.pubkey, pubkey,
+            "pubkey must be preserved across update"
+        );
 
         let raw = std::fs::read_to_string(&path).unwrap();
         let v: Value = serde_json::from_str(&raw).unwrap();
@@ -401,14 +423,12 @@ mod tests {
 
         let raw = std::fs::read_to_string(&path).unwrap();
         let mut v: Value = serde_json::from_str(&raw).unwrap();
-        v.as_object_mut().unwrap().insert(
-            "category".to_string(),
-            Value::String("worker".to_string()),
-        );
-        v.as_object_mut().unwrap().insert(
-            "eventId".to_string(),
-            Value::String("abc123".to_string()),
-        );
+        v.as_object_mut()
+            .unwrap()
+            .insert("category".to_string(), Value::String("worker".to_string()));
+        v.as_object_mut()
+            .unwrap()
+            .insert("eventId".to_string(), Value::String("abc123".to_string()));
         std::fs::write(&path, serde_json::to_vec_pretty(&v).unwrap()).unwrap();
 
         perform_write(&dir, args("gamma", "Gamma 2", None)).unwrap();

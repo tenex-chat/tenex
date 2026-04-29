@@ -299,7 +299,10 @@ fn record_turn_round_trip_writes_prompt_history() {
         .expect("state")
         .expect("state row exists");
     assert_eq!(state.next_prompt_sequence, 3);
-    assert!(state.cache_anchored, "cache_anchored set when hit_tokens > 0");
+    assert!(
+        state.cache_anchored,
+        "cache_anchored set when hit_tokens > 0"
+    );
     let compaction = state.compaction_state.expect("compaction state set");
     assert_eq!(compaction["cache_observed"]["hit_tokens"], 10);
 }

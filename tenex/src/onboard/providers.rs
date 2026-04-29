@@ -194,10 +194,7 @@ fn append_key(
     } else {
         ApiKeyValue::Multiple(entries)
     };
-    providers.insert(
-        provider_id.to_owned(),
-        ProviderCredentialsLite { api_key },
-    );
+    providers.insert(provider_id.to_owned(), ProviderCredentialsLite { api_key });
 }
 
 fn display_name_for(provider_id: &str) -> String {
@@ -314,7 +311,9 @@ mod tests {
         for (pid, ak) in providers {
             m.insert(
                 (*pid).to_owned(),
-                ProviderCredentialsLite { api_key: ak.clone() },
+                ProviderCredentialsLite {
+                    api_key: ak.clone(),
+                },
             );
         }
         m
@@ -325,7 +324,14 @@ mod tests {
         // `src/llm/types.ts:28-35` — the canonical 6-provider list.
         assert_eq!(
             PROVIDER_IDS,
-            &["openrouter", "anthropic", "openai", "ollama", "codex", "claude-code"]
+            &[
+                "openrouter",
+                "anthropic",
+                "openai",
+                "ollama",
+                "codex",
+                "claude-code"
+            ]
         );
     }
 
@@ -364,10 +370,7 @@ mod tests {
     #[test]
     fn mirror_into_doc_inserts_new_provider() {
         let doc = ProvidersDoc::new();
-        let st = state(&[(
-            "anthropic",
-            ApiKeyValue::Single("sk-1".to_owned()),
-        )]);
+        let st = state(&[("anthropic", ApiKeyValue::Single("sk-1".to_owned()))]);
         let updated = mirror_into_doc(doc, &st);
         let entry = updated.get("anthropic").unwrap();
         assert_eq!(entry.api_keys(), vec!["sk-1".to_owned()]);
@@ -375,14 +378,8 @@ mod tests {
 
     #[test]
     fn mirror_into_doc_removes_provider_absent_from_state() {
-        let doc = doc_with(&[
-            ("anthropic", &["sk-1"]),
-            ("openai", &["sk-o"]),
-        ]);
-        let st = state(&[(
-            "anthropic",
-            ApiKeyValue::Single("sk-1".to_owned()),
-        )]);
+        let doc = doc_with(&[("anthropic", &["sk-1"]), ("openai", &["sk-o"])]);
+        let st = state(&[("anthropic", ApiKeyValue::Single("sk-1".to_owned()))]);
         let updated = mirror_into_doc(doc, &st);
         assert!(updated.get("openai").is_none());
         assert!(updated.get("anthropic").is_some());
@@ -391,10 +388,7 @@ mod tests {
     #[test]
     fn mirror_into_doc_collapses_array_to_string_when_one_remains() {
         let doc = doc_with(&[("anthropic", &["k1", "k2", "k3"])]);
-        let st = state(&[(
-            "anthropic",
-            ApiKeyValue::Multiple(vec!["only".to_owned()]),
-        )]);
+        let st = state(&[("anthropic", ApiKeyValue::Multiple(vec!["only".to_owned()]))]);
         let updated = mirror_into_doc(doc, &st);
         let entry = updated.get("anthropic").unwrap();
         // The persistence layer collapses 1 key to a bare string.
@@ -413,10 +407,7 @@ mod tests {
 
     #[test]
     fn append_key_to_provider_with_one_key_promotes_to_multiple() {
-        let mut providers = state(&[(
-            "anthropic",
-            ApiKeyValue::Single("sk-old".to_owned()),
-        )]);
+        let mut providers = state(&[("anthropic", ApiKeyValue::Single("sk-old".to_owned()))]);
         append_key(&mut providers, "anthropic", "sk-new".into());
         match &providers["anthropic"].api_key {
             ApiKeyValue::Multiple(v) => {
@@ -428,10 +419,7 @@ mod tests {
 
     #[test]
     fn append_key_strips_none_sentinel_before_appending() {
-        let mut providers = state(&[(
-            "codex",
-            ApiKeyValue::Single("none".to_owned()),
-        )]);
+        let mut providers = state(&[("codex", ApiKeyValue::Single("none".to_owned()))]);
         append_key(&mut providers, "codex", "sk-real".into());
         match &providers["codex"].api_key {
             ApiKeyValue::Single(s) => assert_eq!(s, "sk-real"),
@@ -469,7 +457,10 @@ mod tests {
 
         // And mirror back — output should preserve the same order.
         let updated = mirror_into_doc(ProvidersDoc::new(), &st.providers);
-        assert_eq!(updated.provider_ids(), vec!["openrouter", "ollama", "anthropic"]);
+        assert_eq!(
+            updated.provider_ids(),
+            vec!["openrouter", "ollama", "anthropic"]
+        );
     }
 
     /// Pin the `claude setup-token` hint line byte-for-byte against the

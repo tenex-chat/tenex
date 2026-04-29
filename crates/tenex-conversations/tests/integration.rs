@@ -4,11 +4,11 @@ use std::path::PathBuf;
 
 use serde_json::json;
 use tempfile::TempDir;
+use tenex_conversations::model::{AgentContextState, CompletionStatus, ConversationRow};
 use tenex_conversations::{
     ConversationListFilter, ConversationStore, MessageQuery, NewCompletion, NewMessage,
     NewPromptHistoryEntry, NewToolMessage, Project,
 };
-use tenex_conversations::model::{AgentContextState, CompletionStatus, ConversationRow};
 
 fn make_conversation(store: &ConversationStore, id: &str, last_activity: i64) {
     store
@@ -37,7 +37,10 @@ fn open_creates_db_and_runs_migrations() {
     drop(store);
     assert!(path.is_file());
     let store = ConversationStore::open(&path).unwrap();
-    assert!(store.list_recent(ConversationListFilter::default()).unwrap().is_empty());
+    assert!(store
+        .list_recent(ConversationListFilter::default())
+        .unwrap()
+        .is_empty());
 }
 
 #[test]
@@ -413,11 +416,15 @@ fn list_by_participant_returns_conversations_with_author_or_target() {
         human_readable: None,
         transcript_tool_attributes: None,
     };
-    store.append_message("c1", &dummy("c1", "alice", None)).unwrap();
+    store
+        .append_message("c1", &dummy("c1", "alice", None))
+        .unwrap();
     store
         .append_message("c2", &dummy("c2", "bob", Some(vec!["alice".into()])))
         .unwrap();
-    store.append_message("c3", &dummy("c3", "carol", None)).unwrap();
+    store
+        .append_message("c3", &dummy("c3", "carol", None))
+        .unwrap();
 
     let rows = store.list_by_participant("alice", None).unwrap();
     let ids: std::collections::HashSet<_> = rows.iter().map(|r| r.id.clone()).collect();
@@ -575,7 +582,8 @@ fn migration_from_legacy_is_idempotent() {
         ]
     });
     std::fs::write(
-        base.join("tool-messages").join(format!("{conversation_id}.json")),
+        base.join("tool-messages")
+            .join(format!("{conversation_id}.json")),
         serde_json::to_string(&flat_payload).unwrap(),
     )
     .unwrap();
@@ -594,7 +602,10 @@ fn migration_from_legacy_is_idempotent() {
         .exists());
     assert!(base
         .join("tool-messages")
-        .join(format!("{conversation_id}.json{}", tenex_conversations::paths::LEGACY_BAK_SUFFIX))
+        .join(format!(
+            "{conversation_id}.json{}",
+            tenex_conversations::paths::LEGACY_BAK_SUFFIX
+        ))
         .exists());
 
     // Re-running yields no duplicates.
@@ -616,7 +627,10 @@ fn migration_from_legacy_is_idempotent() {
     // Originals archived, not deleted.
     assert!(!project_dir.join("conversations").exists());
     assert!(project_dir
-        .join(format!("conversations{}", tenex_conversations::paths::LEGACY_BAK_SUFFIX))
+        .join(format!(
+            "conversations{}",
+            tenex_conversations::paths::LEGACY_BAK_SUFFIX
+        ))
         .exists());
 
     let _ = report2;

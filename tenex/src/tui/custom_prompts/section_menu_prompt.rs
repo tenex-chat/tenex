@@ -77,9 +77,7 @@ pub enum SectionMenuInput {
 
 impl SectionMenuInput {
     pub fn from_key_event(ev: KeyEvent) -> Self {
-        if ev.modifiers.contains(KeyModifiers::CONTROL)
-            && matches!(ev.code, KeyCode::Char('c'))
-        {
+        if ev.modifiers.contains(KeyModifiers::CONTROL) && matches!(ev.code, KeyCode::Char('c')) {
             return SectionMenuInput::CtrlC;
         }
         match ev.code {
@@ -187,9 +185,9 @@ pub fn handle_key(
             },
             _ => SectionMenuOutcome::Continue,
         },
-        SectionMenuInput::Other
-        | SectionMenuInput::Escape
-        | SectionMenuInput::CtrlC => SectionMenuOutcome::Continue,
+        SectionMenuInput::Other | SectionMenuInput::Escape | SectionMenuInput::CtrlC => {
+            SectionMenuOutcome::Continue
+        }
     }
 }
 
@@ -229,14 +227,22 @@ pub fn compose_lines(rows: &[Row<'_>], message: &str, active: usize) -> Vec<Stri
             // default blank separator. Mirror that single-space prefix.
             Row::Header(h) => out.push(format!(" ── {h} ──")),
             Row::Entry(entry) => {
-                let pfx = if i == active { cursor_active.as_str() } else { "  " };
+                let pfx = if i == active {
+                    cursor_active.as_str()
+                } else {
+                    "  "
+                };
                 out.push(format!("{pfx}{}", entry.label));
             }
             Row::BlankSeparator => {
                 out.push(format!(" {}", "─".repeat(BLANK_SEPARATOR_DASHES)));
             }
             Row::Back => {
-                let pfx = if i == active { cursor_active.as_str() } else { "  " };
+                let pfx = if i == active {
+                    cursor_active.as_str()
+                } else {
+                    "  "
+                };
                 out.push(format!("{pfx}Back"));
             }
         }
@@ -309,7 +315,12 @@ fn render_frame<W: Write>(
     // TS `inquirerTheme.prefix.idle = chalk.hex("#FFC107")("?")` —
     // closes with SGR 39 (FG default), not SGR 0 (full reset). Use the
     // raw FG_RESET constant for byte-perfect chalk-prefix match.
-    queue!(stdout, SetForegroundColor(AMBER), Print("?"), Print(crate::tui::theme::FG_RESET))?;
+    queue!(
+        stdout,
+        SetForegroundColor(AMBER),
+        Print("?"),
+        Print(crate::tui::theme::FG_RESET)
+    )?;
     queue!(
         stdout,
         Print(" "),
@@ -341,7 +352,11 @@ fn render_frame<W: Write>(
             }
             Row::Entry(entry) => {
                 let is_active = i == active;
-                let pfx = if is_active { cursor_active.as_str() } else { "  " };
+                let pfx = if is_active {
+                    cursor_active.as_str()
+                } else {
+                    "  "
+                };
                 if is_active {
                     // Outer amber wrap is FG-only (no inner bold/dim).
                     // Close with raw SGR 39 so the wire bytes match TS
@@ -396,7 +411,11 @@ fn render_frame<W: Write>(
                 // byte exactness is documented as out-of-scope in
                 // `docs/tui-port/QUESTIONS.md`.
                 let is_active = i == active;
-                let pfx = if is_active { cursor_active.as_str() } else { "  " };
+                let pfx = if is_active {
+                    cursor_active.as_str()
+                } else {
+                    "  "
+                };
                 if is_active {
                     // The inner dim span is already closed by
                     // `NormalIntensity` (SGR 22) before the outer
@@ -477,10 +496,7 @@ mod tests {
         vec![
             MenuSection {
                 header: "AI".to_owned(),
-                entries: vec![
-                    entry("Providers", "providers"),
-                    entry("LLMs", "llm"),
-                ],
+                entries: vec![entry("Providers", "providers"), entry("LLMs", "llm")],
             },
             MenuSection {
                 header: "Network".to_owned(),
@@ -558,7 +574,9 @@ mod tests {
         let outcome = handle_key(&mut state, &rows, SectionMenuInput::Enter);
         assert_eq!(
             outcome,
-            SectionMenuOutcome::Selected { value: "relays".to_owned() }
+            SectionMenuOutcome::Selected {
+                value: "relays".to_owned()
+            }
         );
     }
 
@@ -659,17 +677,36 @@ mod tests {
 
     #[test]
     fn from_key_event_maps_arrows_enter_esc_ctrl_c() {
-        fn ke(c: KeyCode) -> KeyEvent { KeyEvent::new(c, KeyModifiers::NONE) }
-        fn ke_ctrl(c: KeyCode) -> KeyEvent { KeyEvent::new(c, KeyModifiers::CONTROL) }
-        assert_eq!(SectionMenuInput::from_key_event(ke(KeyCode::Up)), SectionMenuInput::Up);
-        assert_eq!(SectionMenuInput::from_key_event(ke(KeyCode::Down)), SectionMenuInput::Down);
-        assert_eq!(SectionMenuInput::from_key_event(ke(KeyCode::Enter)), SectionMenuInput::Enter);
-        assert_eq!(SectionMenuInput::from_key_event(ke(KeyCode::Esc)), SectionMenuInput::Escape);
+        fn ke(c: KeyCode) -> KeyEvent {
+            KeyEvent::new(c, KeyModifiers::NONE)
+        }
+        fn ke_ctrl(c: KeyCode) -> KeyEvent {
+            KeyEvent::new(c, KeyModifiers::CONTROL)
+        }
+        assert_eq!(
+            SectionMenuInput::from_key_event(ke(KeyCode::Up)),
+            SectionMenuInput::Up
+        );
+        assert_eq!(
+            SectionMenuInput::from_key_event(ke(KeyCode::Down)),
+            SectionMenuInput::Down
+        );
+        assert_eq!(
+            SectionMenuInput::from_key_event(ke(KeyCode::Enter)),
+            SectionMenuInput::Enter
+        );
+        assert_eq!(
+            SectionMenuInput::from_key_event(ke(KeyCode::Esc)),
+            SectionMenuInput::Escape
+        );
         assert_eq!(
             SectionMenuInput::from_key_event(ke_ctrl(KeyCode::Char('c'))),
             SectionMenuInput::CtrlC
         );
-        assert_eq!(SectionMenuInput::from_key_event(ke(KeyCode::Tab)), SectionMenuInput::Other);
+        assert_eq!(
+            SectionMenuInput::from_key_event(ke(KeyCode::Tab)),
+            SectionMenuInput::Other
+        );
     }
 
     /// Pin: the active Back row preserves the dim styling on "  Back".

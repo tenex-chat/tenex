@@ -55,8 +55,7 @@ pub struct SkillLookupCtx {
 fn strip_quotes(s: &str) -> String {
     let s = s.trim();
     if s.len() >= 2
-        && ((s.starts_with('"') && s.ends_with('"'))
-            || (s.starts_with('\'') && s.ends_with('\'')))
+        && ((s.starts_with('"') && s.ends_with('"')) || (s.starts_with('\'') && s.ends_with('\'')))
     {
         return s[1..s.len() - 1].to_string();
     }
@@ -108,9 +107,7 @@ pub fn parse_skill_document(raw: &str) -> (Option<SkillFrontmatter>, String) {
     // Find closing ---
     let rest = lines[1];
     let rest_lines: Vec<&str> = rest.lines().collect();
-    let closing = rest_lines
-        .iter()
-        .position(|l| l.trim() == "---");
+    let closing = rest_lines.iter().position(|l| l.trim() == "---");
 
     let Some(closing_idx) = closing else {
         return (None, normalized.trim().to_string());
@@ -187,7 +184,11 @@ fn parse_frontmatter(lines: &[&str]) -> SkillFrontmatter {
 // ─── Directory discovery ──────────────────────────────────────────────────────
 
 fn short_pubkey(pubkey: &str) -> &str {
-    if pubkey.len() >= 8 { &pubkey[..8] } else { pubkey }
+    if pubkey.len() >= 8 {
+        &pubkey[..8]
+    } else {
+        pubkey
+    }
 }
 
 /// Returns skill lookup directories in precedence order (first-seen-wins).
@@ -203,8 +204,8 @@ pub fn lookup_dirs(ctx: &SkillLookupCtx) -> Vec<(PathBuf, SkillScope)> {
         dirs.push((builtin, SkillScope::BuiltIn));
     } else {
         // Dev fallback: source tree relative to this crate's manifest directory
-        let dev_builtin = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../src/skills/built-in");
+        let dev_builtin =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../src/skills/built-in");
         if dev_builtin.exists() {
             dirs.push((dev_builtin, SkillScope::BuiltIn));
         }
@@ -438,10 +439,7 @@ pub fn render_loaded_skills_block(skills: &[SkillData], path_vars: &[(&str, &str
         parts.push(perm_block);
     }
 
-    let rendered_skills: Vec<String> = skills
-        .iter()
-        .map(|s| render_skill(s, path_vars))
-        .collect();
+    let rendered_skills: Vec<String> = skills.iter().map(|s| render_skill(s, path_vars)).collect();
 
     let header = "The following skills have been loaded for this conversation. These provide additional context and capabilities:";
     parts.push(format!("{}\n{}", header, rendered_skills.join("\n\n")));
@@ -453,10 +451,7 @@ pub fn render_loaded_skills_block(skills: &[SkillData], path_vars: &[(&str, &str
 
 /// Update the agent JSON config's `default.skills` field.
 /// Uses atomic write (temp file + rename) to avoid partial writes.
-pub fn write_skills_to_agent_config(
-    config_path: &str,
-    skill_ids: &[String],
-) -> anyhow::Result<()> {
+pub fn write_skills_to_agent_config(config_path: &str, skill_ids: &[String]) -> anyhow::Result<()> {
     let content = std::fs::read_to_string(config_path)?;
     let mut value: serde_json::Value = serde_json::from_str(&content)?;
 
@@ -503,15 +498,13 @@ const MAX_DESCRIPTION_LEN: usize = 150;
 impl SkillSummary {
     pub fn from_data(skill: &SkillData) -> Self {
         let fm = skill.frontmatter.as_ref();
-        let raw_description = fm
-            .and_then(|f| f.description.clone())
-            .or_else(|| {
-                if skill.content.is_empty() {
-                    None
-                } else {
-                    Some(skill.content.clone())
-                }
-            });
+        let raw_description = fm.and_then(|f| f.description.clone()).or_else(|| {
+            if skill.content.is_empty() {
+                None
+            } else {
+                Some(skill.content.clone())
+            }
+        });
 
         let description = raw_description.map(|d| {
             let flat = d.replace('\n', " ");
@@ -539,7 +532,9 @@ pub fn group_by_scope(skills: &[SkillData]) -> HashMap<&'static str, Vec<SkillSu
     }
     for skill in skills {
         let key = skill.scope.as_key();
-        map.entry(key).or_default().push(SkillSummary::from_data(skill));
+        map.entry(key)
+            .or_default()
+            .push(SkillSummary::from_data(skill));
     }
     map
 }

@@ -73,11 +73,13 @@ fn encode_completion(
     let mut builder = EventBuilder::new(Kind::TextNote, &intent.content);
     builder = add_conversation_tags(builder, ctx)?;
 
-    let recipient = ctx.completion_recipient.as_ref().unwrap_or(&ctx.triggering_principal);
+    let recipient = ctx
+        .completion_recipient
+        .as_ref()
+        .unwrap_or(&ctx.triggering_principal);
     builder = builder.tag(p_tag(recipient)?);
-    builder = builder.tag(
-        Tag::parse(["status", "completed"]).map_err(|e| EncodeError::Tag(e.to_string()))?,
-    );
+    builder = builder
+        .tag(Tag::parse(["status", "completed"]).map_err(|e| EncodeError::Tag(e.to_string()))?);
 
     if let Some(usage) = intent.usage.as_ref() {
         builder = add_llm_usage_tags(builder, usage)?;
@@ -98,8 +100,8 @@ fn encode_conversation(
     builder = add_conversation_tags(builder, ctx)?;
 
     if intent.is_reasoning {
-        builder = builder
-            .tag(Tag::parse(["reasoning"]).map_err(|e| EncodeError::Tag(e.to_string()))?);
+        builder =
+            builder.tag(Tag::parse(["reasoning"]).map_err(|e| EncodeError::Tag(e.to_string()))?);
     }
     if let Some(usage) = intent.usage.as_ref() {
         builder = add_llm_usage_tags(builder, usage)?;
@@ -122,8 +124,8 @@ fn encode_delegation(
         .iter()
         .map(|d| {
             let prefixed = prepend_recipient_label(&d.request, &d.recipient_label);
-            let mut builder = EventBuilder::new(Kind::TextNote, prefixed)
-                .custom_created_at(now_plus_one);
+            let mut builder =
+                EventBuilder::new(Kind::TextNote, prefixed).custom_created_at(now_plus_one);
 
             // Followup delegations carry an e-tag referencing the original event.
             // Fresh delegations start a new conversation without any e-tag.
@@ -154,38 +156,41 @@ fn encode_ask(intent: &AskIntent, ctx: &EncodingContext) -> Result<EventBuilder,
     let mut builder = EventBuilder::new(Kind::TextNote, &intent.context);
     builder = add_conversation_tags(builder, ctx)?;
     builder = builder.tag(p_tag(&intent.recipient)?);
-    builder = builder.tag(
-        Tag::parse(["title", &intent.title]).map_err(|e| EncodeError::Tag(e.to_string()))?,
-    );
+    builder = builder
+        .tag(Tag::parse(["title", &intent.title]).map_err(|e| EncodeError::Tag(e.to_string()))?);
 
     for question in &intent.questions {
         let parts = match question {
-            AskQuestion::SingleSelect { title, prompt, suggestions } => {
+            AskQuestion::SingleSelect {
+                title,
+                prompt,
+                suggestions,
+            } => {
                 let mut v = vec!["question", title.as_str(), prompt.as_str()];
                 v.extend(suggestions.iter().map(|s| s.as_str()));
                 v
             }
-            AskQuestion::MultiSelect { title, prompt, options } => {
+            AskQuestion::MultiSelect {
+                title,
+                prompt,
+                options,
+            } => {
                 let mut v = vec!["multiselect", title.as_str(), prompt.as_str()];
                 v.extend(options.iter().map(|s| s.as_str()));
                 v
             }
         };
-        builder =
-            builder.tag(Tag::parse(parts).map_err(|e| EncodeError::Tag(e.to_string()))?);
+        builder = builder.tag(Tag::parse(parts).map_err(|e| EncodeError::Tag(e.to_string()))?);
     }
 
-    builder = builder
-        .tag(Tag::parse(["intent", "ask"]).map_err(|e| EncodeError::Tag(e.to_string()))?);
+    builder =
+        builder.tag(Tag::parse(["intent", "ask"]).map_err(|e| EncodeError::Tag(e.to_string()))?);
     builder = add_standard_tags(builder, ctx)?;
     builder = forward_branch_team(builder, ctx)?;
     Ok(builder)
 }
 
-fn encode_error(
-    intent: &ErrorIntent,
-    ctx: &EncodingContext,
-) -> Result<EventBuilder, EncodeError> {
+fn encode_error(intent: &ErrorIntent, ctx: &EncodingContext) -> Result<EventBuilder, EncodeError> {
     let mut builder = EventBuilder::new(Kind::TextNote, &intent.message);
     builder = add_conversation_tags(builder, ctx)?;
 
@@ -194,9 +199,8 @@ fn encode_error(
         .tag(Tag::parse(["error", error_type]).map_err(|e| EncodeError::Tag(e.to_string()))?);
 
     builder = builder.tag(p_tag(&ctx.triggering_principal)?);
-    builder = builder.tag(
-        Tag::parse(["status", "completed"]).map_err(|e| EncodeError::Tag(e.to_string()))?,
-    );
+    builder = builder
+        .tag(Tag::parse(["status", "completed"]).map_err(|e| EncodeError::Tag(e.to_string()))?);
     builder = add_standard_tags(builder, ctx)?;
     builder = forward_branch_team(builder, ctx)?;
     Ok(builder)
@@ -210,13 +214,12 @@ fn encode_lesson(
     builder = builder
         .tag(Tag::parse(["title", &intent.title]).map_err(|e| EncodeError::Tag(e.to_string()))?);
     if let Some(category) = intent.category.as_deref() {
-        builder = builder.tag(
-            Tag::parse(["category", category]).map_err(|e| EncodeError::Tag(e.to_string()))?,
-        );
+        builder = builder
+            .tag(Tag::parse(["category", category]).map_err(|e| EncodeError::Tag(e.to_string()))?);
     }
     for hashtag in &intent.hashtags {
-        builder = builder
-            .tag(Tag::parse(["t", hashtag]).map_err(|e| EncodeError::Tag(e.to_string()))?);
+        builder =
+            builder.tag(Tag::parse(["t", hashtag]).map_err(|e| EncodeError::Tag(e.to_string()))?);
     }
     if let Some(agent_def) = intent.agent_definition_id.as_ref() {
         builder = builder.tag(e_agent_definition_tag(agent_def)?);
@@ -231,9 +234,8 @@ fn encode_tool_use(
 ) -> Result<EventBuilder, EncodeError> {
     let mut builder = EventBuilder::new(Kind::TextNote, &intent.content);
     builder = add_conversation_tags(builder, ctx)?;
-    builder = builder.tag(
-        Tag::parse(["tool", &intent.tool_name]).map_err(|e| EncodeError::Tag(e.to_string()))?,
-    );
+    builder = builder
+        .tag(Tag::parse(["tool", &intent.tool_name]).map_err(|e| EncodeError::Tag(e.to_string()))?);
 
     if let Some(args) = intent.args_json.as_deref() {
         let tag = if args.len() <= 100_000 {
@@ -262,8 +264,7 @@ fn encode_stream_text_delta(
     intent: &StreamTextDeltaIntent,
     ctx: &EncodingContext,
 ) -> Result<EventBuilder, EncodeError> {
-    let mut builder =
-        EventBuilder::new(kinds::custom(kinds::STREAM_TEXT_DELTA), &intent.delta);
+    let mut builder = EventBuilder::new(kinds::custom(kinds::STREAM_TEXT_DELTA), &intent.delta);
     builder = add_conversation_tags(builder, ctx)?;
     builder = builder.tag(project_a_tag(&ctx.project)?);
 
@@ -310,10 +311,9 @@ fn encode_publish_article(
     intent: &PublishArticleIntent,
     ctx: &EncodingContext,
 ) -> Result<EventBuilder, EncodeError> {
-    let mut builder =
-        EventBuilder::new(kinds::custom(kinds::LONG_FORM_ARTICLE), &intent.content);
-    builder = builder
-        .tag(Tag::parse(["d", &intent.d_tag]).map_err(|e| EncodeError::Tag(e.to_string()))?);
+    let mut builder = EventBuilder::new(kinds::custom(kinds::LONG_FORM_ARTICLE), &intent.content);
+    builder =
+        builder.tag(Tag::parse(["d", &intent.d_tag]).map_err(|e| EncodeError::Tag(e.to_string()))?);
     builder = builder.tag(
         Tag::parse(["document", &intent.document_tag])
             .map_err(|e| EncodeError::Tag(e.to_string()))?,
@@ -351,7 +351,11 @@ fn starts_with_slug_prefix(s: &str) -> bool {
 }
 
 fn shorten_conversation_id(id: &str) -> String {
-    if id.len() <= 8 { id.to_string() } else { id[..8].to_string() }
+    if id.len() <= 8 {
+        id.to_string()
+    } else {
+        id[..8].to_string()
+    }
 }
 
 #[cfg(test)]
@@ -364,11 +368,16 @@ mod tests {
     fn test_ctx() -> EncodingContext {
         let keys = Keys::generate();
         EncodingContext {
-            project: ProjectRef { author: keys.public_key(), d_tag: "demo".into() },
+            project: ProjectRef {
+                author: keys.public_key(),
+                d_tag: "demo".into(),
+            },
             conversation_root: Some(ConversationRef::Nostr {
                 root_event_id: EventId::all_zeros(),
             }),
-            triggering_message: Some(MessageRef::Nostr { event_id: EventId::all_zeros() }),
+            triggering_message: Some(MessageRef::Nostr {
+                event_id: EventId::all_zeros(),
+            }),
             completion_recipient: None,
             triggering_principal: PrincipalRef::Nostr {
                 pubkey: keys.public_key(),
@@ -389,11 +398,7 @@ mod tests {
     fn signed_tags(builder: EventBuilder) -> Vec<Vec<String>> {
         let keys = Keys::generate();
         let event = builder.sign_with_keys(&keys).expect("sign");
-        event
-            .tags
-            .iter()
-            .map(|t| t.clone().to_vec())
-            .collect()
+        event.tags.iter().map(|t| t.clone().to_vec()).collect()
     }
 
     #[test]
@@ -408,15 +413,20 @@ mod tests {
             }),
             metadata: None,
         };
-        let builders =
-            NostrEncoder::encode(&Intent::Completion(intent), &ctx).expect("encode");
+        let builders = NostrEncoder::encode(&Intent::Completion(intent), &ctx).expect("encode");
         assert_eq!(builders.len(), 1);
         let tags = signed_tags(builders.into_iter().next().unwrap());
         assert!(tags.iter().any(|t| t[0] == "status" && t[1] == "completed"));
         assert!(tags.iter().any(|t| t[0] == "p"));
-        assert!(tags.iter().any(|t| t[0] == "e" && t.len() >= 4 && t[3] == "root"));
-        assert!(tags.iter().any(|t| t[0] == "llm-prompt-tokens" && t[1] == "100"));
-        assert!(tags.iter().any(|t| t[0] == "llm-total-tokens" && t[1] == "150"));
+        assert!(tags
+            .iter()
+            .any(|t| t[0] == "e" && t.len() >= 4 && t[3] == "root"));
+        assert!(tags
+            .iter()
+            .any(|t| t[0] == "llm-prompt-tokens" && t[1] == "100"));
+        assert!(tags
+            .iter()
+            .any(|t| t[0] == "llm-total-tokens" && t[1] == "150"));
     }
 
     #[test]
@@ -428,8 +438,7 @@ mod tests {
             usage: None,
             metadata: None,
         };
-        let builders =
-            NostrEncoder::encode(&Intent::Conversation(intent), &ctx).expect("encode");
+        let builders = NostrEncoder::encode(&Intent::Conversation(intent), &ctx).expect("encode");
         let tags = signed_tags(builders.into_iter().next().unwrap());
         assert!(!tags.iter().any(|t| t[0] == "p"));
         assert!(!tags.iter().any(|t| t[0] == "status"));
@@ -450,7 +459,9 @@ mod tests {
         let builders = NostrEncoder::encode(&Intent::ToolUse(intent), &ctx).expect("encode");
         let tags = signed_tags(builders.into_iter().next().unwrap());
         assert!(tags.iter().any(|t| t[0] == "tool" && t[1] == "delegate"));
-        assert!(tags.iter().any(|t| t[0] == "tool-args" && t[1] == "{\"x\":1}"));
+        assert!(tags
+            .iter()
+            .any(|t| t[0] == "tool-args" && t[1] == "{\"x\":1}"));
         assert!(tags.iter().any(|t| t[0] == "q"));
     }
 
@@ -463,8 +474,7 @@ mod tests {
             usage: None,
             metadata: None,
         };
-        let builders =
-            NostrEncoder::encode(&Intent::Conversation(intent), &ctx).expect("encode");
+        let builders = NostrEncoder::encode(&Intent::Conversation(intent), &ctx).expect("encode");
         let tags = signed_tags(builders.into_iter().next().unwrap());
         let e_tags: Vec<&Vec<String>> = tags.iter().filter(|t| t[0] == "e").collect();
         assert_eq!(e_tags.len(), 2, "expected one root and one reply e-tag");
@@ -480,13 +490,16 @@ mod tests {
             document_tag: "notes".into(),
             content: "# Hello\nWorld".into(),
         };
-        let builders =
-            NostrEncoder::encode(&Intent::PublishArticle(intent), &ctx).expect("encode");
+        let builders = NostrEncoder::encode(&Intent::PublishArticle(intent), &ctx).expect("encode");
         assert_eq!(builders.len(), 1);
         let tags = signed_tags(builders.into_iter().next().unwrap());
-        assert!(tags.iter().any(|t| t[0] == "d" && t[1] == "notes/2024-01-01"));
+        assert!(tags
+            .iter()
+            .any(|t| t[0] == "d" && t[1] == "notes/2024-01-01"));
         assert!(tags.iter().any(|t| t[0] == "document" && t[1] == "notes"));
-        assert!(tags.iter().any(|t| t[0] == "a" && t[1].starts_with("31933:")));
+        assert!(tags
+            .iter()
+            .any(|t| t[0] == "a" && t[1].starts_with("31933:")));
         // Must NOT carry conversation threading tags
         assert!(!tags.iter().any(|t| t[0] == "e"));
         assert!(!tags.iter().any(|t| t[0] == "p"));
@@ -514,9 +527,13 @@ mod tests {
         let builders = NostrEncoder::encode(&Intent::Delegation(intent), &ctx).expect("encode");
         assert_eq!(builders.len(), 1);
         let keys = Keys::generate();
-        let event = builders.into_iter().next().unwrap().sign_with_keys(&keys).unwrap();
-        let tags: Vec<Vec<String>> =
-            event.tags.iter().map(|t| t.clone().to_vec()).collect();
+        let event = builders
+            .into_iter()
+            .next()
+            .unwrap()
+            .sign_with_keys(&keys)
+            .unwrap();
+        let tags: Vec<Vec<String>> = event.tags.iter().map(|t| t.clone().to_vec()).collect();
         assert!(!tags.iter().any(|t| t[0] == "e"));
         assert!(tags.iter().any(|t| t[0] == "p"));
         assert_eq!(event.content, "@architect: Please review");

@@ -86,8 +86,7 @@ mod tests {
         let reloaded = TenexConfigDoc::load(&base).unwrap();
         assert!(reloaded.escalation_agent().is_none());
         // The whole "escalation" key should be absent (TS sets to undefined).
-        let written =
-            std::fs::read_to_string(base.join("config.json")).unwrap();
+        let written = std::fs::read_to_string(base.join("config.json")).unwrap();
         assert!(!written.contains("escalation"));
         std::fs::remove_dir_all(&base).ok();
     }

@@ -59,7 +59,10 @@ impl Tool for ConversationGetTool {
         let messages = store
             .list_messages(
                 &args.conversation_id,
-                MessageQuery { limit: args.limit, ..Default::default() },
+                MessageQuery {
+                    limit: args.limit,
+                    ..Default::default()
+                },
             )
             .map_err(|e| ConversationGetError(format!("failed to list messages: {e}")))?;
 

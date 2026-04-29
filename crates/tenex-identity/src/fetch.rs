@@ -55,8 +55,7 @@ pub async fn fetch_identity(pubkey: &str, relays: &[String]) -> Result<Option<Id
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0);
 
-    let metadata: nostr::Metadata = serde_json::from_str(&event.content)
-        .unwrap_or_default();
+    let metadata: nostr::Metadata = serde_json::from_str(&event.content).unwrap_or_default();
 
     Ok(Some(IdentityView {
         pubkey: pubkey.to_string(),

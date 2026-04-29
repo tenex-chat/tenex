@@ -65,9 +65,12 @@ pub trait Signer: Send + Sync {
 /// Returns `Err(UnsupportedScheme)` for `bunker:` references — the abstraction
 /// is in place, the implementation lands when NIP-46 does.
 pub fn signer_for(agent: &Agent) -> std::result::Result<Box<dyn Signer>, SignerError> {
-    let reference = agent.signer_ref.as_deref().ok_or_else(|| SignerError::Missing {
-        pubkey: agent.pubkey.clone(),
-    })?;
+    let reference = agent
+        .signer_ref
+        .as_deref()
+        .ok_or_else(|| SignerError::Missing {
+            pubkey: agent.pubkey.clone(),
+        })?;
 
     let (scheme, payload) = SignerScheme::parse(reference)?;
     match scheme {
@@ -111,4 +114,3 @@ impl std::fmt::Debug for NsecSigner {
             .finish()
     }
 }
-

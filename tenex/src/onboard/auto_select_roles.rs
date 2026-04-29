@@ -84,8 +84,7 @@ impl<'a> ModelsDevSource<'a> {
 
 impl ModelInfoSource for ModelsDevSource<'_> {
     fn info(&self, provider: &str, model: &str) -> Option<ModelInfo> {
-        let (_, data) =
-            crate::store::models_dev::resolve_model_data(self.cache, provider, model)?;
+        let (_, data) = crate::store::models_dev::resolve_model_data(self.cache, provider, model)?;
         let cost = data.cost.as_ref()?;
         let limit = data.limit.as_ref()?;
         Some(ModelInfo {
@@ -164,8 +163,8 @@ pub fn auto_select_roles(doc: &mut LlmsDoc, source: &dyn ModelInfoSource) {
     if let Some(name) = most_expensive(&scored, Some(100_000)) {
         doc.set_prompt_compilation(Some(name));
     }
-    let context_discovery = cheapest_with_context(&scored, 32_000)
-        .or_else(|| cheapest_with_context(&scored, 8_000));
+    let context_discovery =
+        cheapest_with_context(&scored, 32_000).or_else(|| cheapest_with_context(&scored, 8_000));
     if let Some(name) = context_discovery {
         doc.set_context_discovery(Some(name));
     }
@@ -189,7 +188,9 @@ fn score_configs(doc: &LlmsDoc, source: &dyn ModelInfoSource) -> Vec<ScoredConfi
             Some(m) => m,
             None => continue,
         };
-        let Some(info) = source.info(provider, model) else { continue };
+        let Some(info) = source.info(provider, model) else {
+            continue;
+        };
         out.push(ScoredConfig {
             name,
             input_cost: info.input_cost,
@@ -374,14 +375,13 @@ mod tests {
 
     #[test]
     fn context_discovery_prefers_cheapest_at_32k_then_falls_back_to_8k() {
-        let mut doc = doc_with_configs(&[
-            ("OK32K", "p", "m32"),
-            ("OK8K", "p", "m8"),
-        ]);
+        let mut doc = doc_with_configs(&[("OK32K", "p", "m32"), ("OK8K", "p", "m8")]);
         // Both qualify at 32K — pick cheapest.
-        let source_a = MockSource::new()
-            .with("p", "m32", info(2.0, 32_000))
-            .with("p", "m8", info(1.0, 32_000));
+        let source_a = MockSource::new().with("p", "m32", info(2.0, 32_000)).with(
+            "p",
+            "m8",
+            info(1.0, 32_000),
+        );
         let mut doc_a = doc.clone();
         auto_select_roles(&mut doc_a, &source_a);
         assert_eq!(doc_a.context_discovery(), Some("OK8K"));
@@ -417,13 +417,12 @@ mod tests {
 
     #[test]
     fn ties_break_consistently_by_first_in_iteration_order() {
-        let mut doc = doc_with_configs(&[
-            ("A", "p", "ma"),
-            ("B", "p", "mb"),
-        ]);
-        let source = MockSource::new()
-            .with("p", "ma", info(1.0, 200_000))
-            .with("p", "mb", info(1.0, 200_000)); // identical
+        let mut doc = doc_with_configs(&[("A", "p", "ma"), ("B", "p", "mb")]);
+        let source = MockSource::new().with("p", "ma", info(1.0, 200_000)).with(
+            "p",
+            "mb",
+            info(1.0, 200_000),
+        ); // identical
         auto_select_roles(&mut doc, &source);
         // With equal cost, the stable sort keeps the first-seen entry.
         assert_eq!(doc.summarization(), Some("A"));
@@ -462,9 +461,10 @@ mod tests {
                 "Good": { "provider": "p", "model": "m" }
             }),
         );
-        let source = MockSource::new()
-            .with("", "", info(1.0, 200_000))
-            .with("p", "m", info(2.0, 200_000));
+        let source =
+            MockSource::new()
+                .with("", "", info(1.0, 200_000))
+                .with("p", "m", info(2.0, 200_000));
         auto_select_roles(&mut doc, &source);
         // Empty provider/model with mock info should still score (mock has
         // no special handling), so the malformed config might get picked.
@@ -564,14 +564,23 @@ mod tests {
             ModelsDevModel {
                 id: "claude-x".into(),
                 name: "Claude X".into(),
-                cost: Some(ModelCost { input: 1.5, output: 5.0 }),
-                limit: Some(ModelLimits { context: 100_000, output: 4096 }),
+                cost: Some(ModelCost {
+                    input: 1.5,
+                    output: 5.0,
+                }),
+                limit: Some(ModelLimits {
+                    context: 100_000,
+                    output: 4096,
+                }),
                 last_updated: None,
             },
         );
         response.insert("anthropic".into(), ProviderModels { models });
 
-        let cache = CacheData { fetched_at: 0, data: response };
+        let cache = CacheData {
+            fetched_at: 0,
+            data: response,
+        };
         let owned = OwnedModelsDevSource::new(cache);
         let info = owned.info("anthropic", "claude-x").unwrap();
         assert_eq!(info.input_cost, 1.5);
@@ -613,11 +622,7 @@ mod tests {
         let base = unique_temp("parses");
         std::fs::create_dir_all(base.join("cache")).unwrap();
         let payload = br#"{"fetchedAt":0,"data":{"anthropic":{"models":{"claude-x":{"id":"claude-x","name":"Claude X","cost":{"input":2.0,"output":10.0},"limit":{"context":150000,"output":4096}}}}}}"#;
-        std::fs::write(
-            base.join("cache").join("models-dev.json"),
-            payload,
-        )
-        .unwrap();
+        std::fs::write(base.join("cache").join("models-dev.json"), payload).unwrap();
 
         let source = load_or_empty(&base);
         let info = source.info("anthropic", "claude-x").unwrap();

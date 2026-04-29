@@ -107,19 +107,15 @@ pub enum PubkeyError {
 impl fmt::Display for PubkeyError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Hex64WrongLength { len } => write!(
-                f,
-                "must be 64 hex characters; got {len} characters"
-            ),
+            Self::Hex64WrongLength { len } => {
+                write!(f, "must be 64 hex characters; got {len} characters")
+            }
             Self::Hex64NotHex => write!(f, "must be hex characters only (0-9, a-f)"),
             Self::Bech32 { kind, message } => write!(f, "invalid {kind}: {message}"),
             Self::UnsupportedNip19Variant { variant } => {
                 write!(f, "Unsupported identifier type: {variant}")
             }
-            Self::UnknownForm => write!(
-                f,
-                "must be 64-char hex, npub1..., or nprofile1..."
-            ),
+            Self::UnknownForm => write!(f, "must be 64-char hex, npub1..., or nprofile1..."),
         }
     }
 }

@@ -58,7 +58,9 @@ impl<S: VectorStore> RagStore<S> {
         let id = format!("{collection}_{hash}");
 
         let vector = self.embed.embed(content).await?;
-        self.store.upsert(&id, collection, content, title, &vector).await?;
+        self.store
+            .upsert(&id, collection, content, title, &vector)
+            .await?;
         Ok(id)
     }
 

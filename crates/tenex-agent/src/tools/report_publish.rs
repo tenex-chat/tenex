@@ -43,9 +43,9 @@ fn collect_files(
     input_path: &Path,
     allowed_root: &Path,
 ) -> Result<Vec<FileEntry>, ReportPublishError> {
-    let real_path = input_path
-        .canonicalize()
-        .map_err(|_| ReportPublishError(format!("path does not exist: {}", input_path.display())))?;
+    let real_path = input_path.canonicalize().map_err(|_| {
+        ReportPublishError(format!("path does not exist: {}", input_path.display()))
+    })?;
 
     assert_contained(&real_path, allowed_root)?;
 
@@ -74,7 +74,13 @@ fn collect_files(
         .to_string();
 
     let mut entries: Vec<FileEntry> = Vec::new();
-    walk_dir(&real_path, &real_path, &dir_name, allowed_root, &mut entries)?;
+    walk_dir(
+        &real_path,
+        &real_path,
+        &dir_name,
+        allowed_root,
+        &mut entries,
+    )?;
     entries.sort_by(|a, b| a.d_tag.cmp(&b.d_tag));
     Ok(entries)
 }
@@ -125,7 +131,10 @@ pub struct ReportPublishTool {
 
 impl ReportPublishTool {
     pub fn new(state: Arc<EmitState>, project_base: String) -> Self {
-        Self { state, project_base }
+        Self {
+            state,
+            project_base,
+        }
     }
 }
 
@@ -182,8 +191,12 @@ impl Tool for ReportPublishTool {
         let mut published: Vec<String> = Vec::new();
 
         for file in files {
-            let content = std::fs::read_to_string(&file.absolute_path)
-                .map_err(|e| ReportPublishError(format!("Failed to read {}: {e}", file.absolute_path.display())))?;
+            let content = std::fs::read_to_string(&file.absolute_path).map_err(|e| {
+                ReportPublishError(format!(
+                    "Failed to read {}: {e}",
+                    file.absolute_path.display()
+                ))
+            })?;
 
             let intent = PublishArticleIntent {
                 d_tag: file.d_tag.clone(),
@@ -195,7 +208,9 @@ impl Tool for ReportPublishTool {
                 .channel
                 .send(Intent::PublishArticle(intent), &ctx)
                 .await
-                .map_err(|e| ReportPublishError(format!("Failed to publish {}: {e}", file.d_tag)))?;
+                .map_err(|e| {
+                    ReportPublishError(format!("Failed to publish {}: {e}", file.d_tag))
+                })?;
 
             published.push(file.d_tag);
         }

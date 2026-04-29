@@ -64,27 +64,33 @@ impl Tool for DelegateCrossProjectTool {
         }
     }
 
-    async fn call(&self, args: DelegateCrossProjectArgs) -> Result<String, DelegateCrossProjectError> {
+    async fn call(
+        &self,
+        args: DelegateCrossProjectArgs,
+    ) -> Result<String, DelegateCrossProjectError> {
         let project = Project::open_default(&args.project_id).map_err(|e| {
+            DelegateCrossProjectError(format!("failed to open project '{}': {e}", args.project_id))
+        })?;
+
+        let agents = project.agents().map_err(|e| {
             DelegateCrossProjectError(format!(
-                "failed to open project '{}': {e}",
+                "failed to read agents for '{}': {e}",
                 args.project_id
             ))
         })?;
 
-        let agents = project.agents().map_err(|e| {
-            DelegateCrossProjectError(format!("failed to read agents for '{}': {e}", args.project_id))
-        })?;
-
-        let agent = agents.iter().find(|a| a.slug == args.recipient).ok_or_else(|| {
-            let slugs: Vec<&str> = agents.iter().map(|a| a.slug.as_str()).collect();
-            DelegateCrossProjectError(format!(
-                "no agent '{}' in project '{}'. Available: {}",
-                args.recipient,
-                args.project_id,
-                slugs.join(", ")
-            ))
-        })?;
+        let agent = agents
+            .iter()
+            .find(|a| a.slug == args.recipient)
+            .ok_or_else(|| {
+                let slugs: Vec<&str> = agents.iter().map(|a| a.slug.as_str()).collect();
+                DelegateCrossProjectError(format!(
+                    "no agent '{}' in project '{}'. Available: {}",
+                    args.recipient,
+                    args.project_id,
+                    slugs.join(", ")
+                ))
+            })?;
 
         let pubkey = nostr::PublicKey::from_hex(&agent.pubkey)
             .map_err(|e| DelegateCrossProjectError(format!("invalid agent pubkey: {e}")))?;

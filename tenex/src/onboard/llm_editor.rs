@@ -19,7 +19,6 @@
 //! is its own subsystem (provider-aware streaming + 30s timeout +
 //! four-string error-hint mapping).
 
-
 use anyhow::{anyhow, Context, Result};
 
 use crate::store::llms::{LlmConfigKind, LlmsDoc};
@@ -95,9 +94,7 @@ pub fn route(base_dir: &std::path::Path, value: &str) -> Result<bool> {
     match value {
         "done" => Ok(false),
         "add" => {
-            display::hint(
-                "Adding a new configuration is pending port (see `tenex config llm`).",
-            );
+            display::hint("Adding a new configuration is pending port (see `tenex config llm`).");
             Ok(true)
         }
         "addMultiModal" => {
@@ -306,7 +303,9 @@ mod tests {
         assert!(actions[0].name.ends_with("\x1b[2m(a)\x1b[22m"));
         assert_eq!(actions[0].key, 'a');
         assert_eq!(actions[0].value, "add");
-        assert!(actions[1].name.starts_with("Add multi-modal configuration "));
+        assert!(actions[1]
+            .name
+            .starts_with("Add multi-modal configuration "));
         assert!(actions[1].name.ends_with("\x1b[2m(m)\x1b[22m"));
         assert_eq!(actions[1].key, 'm');
         // TS uses camelCase 'addMultiModal' (LLMConfigEditor.ts:211).
@@ -318,7 +317,10 @@ mod tests {
         // TS LLMConfigEditor.ts:199 — `return ${cfg.model}` (no
         // provider prefix).
         let mut doc = LlmsDoc::new();
-        doc.set_standard_config("Sonnet", StandardConfig::new("anthropic", "claude-sonnet-4-6"));
+        doc.set_standard_config(
+            "Sonnet",
+            StandardConfig::new("anthropic", "claude-sonnet-4-6"),
+        );
         assert_eq!(detail_string_for(&doc, "Sonnet"), "claude-sonnet-4-6");
     }
 
@@ -385,11 +387,7 @@ mod tests {
         //   name: `${name} ${chalk.dim(detail)}`,
         // — SINGLE space between name and the dim-wrapped detail.
         let s = compose_display_name("Sonnet", "anthropic/claude");
-        assert_eq!(
-            s,
-            "Sonnet \x1b[2manthropic/claude\x1b[22m",
-            "got: {s:?}",
-        );
+        assert_eq!(s, "Sonnet \x1b[2manthropic/claude\x1b[22m", "got: {s:?}",);
     }
 
     #[test]

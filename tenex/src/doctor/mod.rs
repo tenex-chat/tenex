@@ -128,9 +128,7 @@ async fn run_agents(args: AgentsArgs) -> Result<()> {
                 Err(e) => {
                     eprintln!(
                         "{}",
-                        crate::tui::theme::chalk_red(&format!(
-                            "Failed to categorize agents: {e}"
-                        )),
+                        crate::tui::theme::chalk_red(&format!("Failed to categorize agents: {e}")),
                     );
                     Err(e)
                 }
@@ -212,9 +210,7 @@ fn preview_categorize(dry_run: bool) -> Result<()> {
 /// - "Purging N orphaned agent(s)..." (blue), "  ✓ deleted <slug>" (green),
 ///   "Done: N deleted" (blue)
 fn find_orphaned_agents(purge: bool) -> Result<()> {
-    use crate::store::agent_storage::{
-        derive_agent_pubkey_from_nsec, AgentStorage,
-    };
+    use crate::store::agent_storage::{derive_agent_pubkey_from_nsec, AgentStorage};
     use crate::store::project_members::list_projects_for_agent;
 
     let base_dir = crate::store::resolve_base_dir(None);
@@ -445,7 +441,10 @@ fn reindex_conversations(confirm: bool) -> Result<()> {
                 "This may take several minutes depending on the number of conversations.\n",
             ),
         );
-        println!("{}", chalk_gray_str("Run with --confirm to skip this prompt.\n"));
+        println!(
+            "{}",
+            chalk_gray_str("Run with --confirm to skip this prompt.\n")
+        );
 
         // TS at `commands/doctor.ts:245`:
         //   rl.question(chalk.blue("Continue? (yes/no): "), resolve)

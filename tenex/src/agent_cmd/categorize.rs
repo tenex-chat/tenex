@@ -14,9 +14,7 @@ use anyhow::Result;
 use indexmap::IndexMap;
 use regex::Regex;
 
-use crate::store::agent_storage::{
-    derive_agent_pubkey_from_nsec, AgentDoc, AgentStorage,
-};
+use crate::store::agent_storage::{derive_agent_pubkey_from_nsec, AgentDoc, AgentStorage};
 use crate::store::role_categories::{is_valid_category, AgentCategory, VALID_CATEGORIES};
 
 /// Mirror of `BackfillResult` (`backfillAgentCategories.ts:9-14`).
@@ -395,8 +393,7 @@ mod tests {
         let mut storage = AgentStorage::open(&base).unwrap();
         let stub_cat = stub(&[("without", AgentCategory::Worker)]);
         let result =
-            backfill_agent_categories(&mut storage, &stub_cat, BackfillOptions::default())
-                .unwrap();
+            backfill_agent_categories(&mut storage, &stub_cat, BackfillOptions::default()).unwrap();
         assert_eq!(result.processed, 1);
         assert_eq!(result.categorized, 1);
         assert_eq!(result.skipped, 1);
@@ -411,8 +408,7 @@ mod tests {
         let mut storage = AgentStorage::open(&base).unwrap();
         let stub_cat = stub(&[("already-inferred", AgentCategory::Reviewer)]);
         let result =
-            backfill_agent_categories(&mut storage, &stub_cat, BackfillOptions::default())
-                .unwrap();
+            backfill_agent_categories(&mut storage, &stub_cat, BackfillOptions::default()).unwrap();
         assert_eq!(result.processed, 0);
         assert_eq!(result.skipped, 1);
         std::fs::remove_dir_all(&base).ok();
@@ -426,8 +422,7 @@ mod tests {
         // Empty stub: classify returns None → failed++.
         let stub_cat = stub(&[]);
         let result =
-            backfill_agent_categories(&mut storage, &stub_cat, BackfillOptions::default())
-                .unwrap();
+            backfill_agent_categories(&mut storage, &stub_cat, BackfillOptions::default()).unwrap();
         assert_eq!(result.processed, 1);
         assert_eq!(result.categorized, 0);
         assert_eq!(result.failed, 1);
@@ -441,8 +436,7 @@ mod tests {
         {
             let mut storage = AgentStorage::open(&base).unwrap();
             let stub_cat = stub(&[("alpha", AgentCategory::Generalist)]);
-            backfill_agent_categories(&mut storage, &stub_cat, BackfillOptions::default())
-                .unwrap();
+            backfill_agent_categories(&mut storage, &stub_cat, BackfillOptions::default()).unwrap();
         }
         let storage = AgentStorage::open(&base).unwrap();
         let agent = storage.load_agent(&pk).unwrap().unwrap();
@@ -479,8 +473,7 @@ mod tests {
         let mut storage = AgentStorage::open(&base).unwrap();
         let stub_cat = stub(&[]);
         let result =
-            backfill_agent_categories(&mut storage, &stub_cat, BackfillOptions::default())
-                .unwrap();
+            backfill_agent_categories(&mut storage, &stub_cat, BackfillOptions::default()).unwrap();
         assert_eq!(result, BackfillResult::default());
         std::fs::remove_dir_all(&base).ok();
     }
@@ -514,7 +507,10 @@ Valid categories: principal, orchestrator, worker, reviewer, domain-expert, gene
         // Fast-path: input trims + lowercases to a canonical literal.
         assert_eq!(parse_category("worker"), Some(AgentCategory::Worker));
         assert_eq!(parse_category("WORKER"), Some(AgentCategory::Worker));
-        assert_eq!(parse_category("  reviewer \n"), Some(AgentCategory::Reviewer));
+        assert_eq!(
+            parse_category("  reviewer \n"),
+            Some(AgentCategory::Reviewer)
+        );
         assert_eq!(
             parse_category("DOMAIN-EXPERT"),
             Some(AgentCategory::DomainExpert)

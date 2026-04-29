@@ -114,7 +114,8 @@ impl Tool for SkillsSetTool {
                 "message": msg,
                 "activeSkills": current.clone(),
                 "skillContent": ""
-            }).to_string());
+            })
+            .to_string());
         }
 
         // Snapshot before applying remove so we can restore on add-validation failure.
@@ -143,14 +144,18 @@ impl Tool for SkillsSetTool {
             let msg = if final_skills.is_empty() {
                 "All self-applied skills cleared.".to_string()
             } else {
-                format!("Removed skill(s). Active skills: {}.", final_skills.join(", "))
+                format!(
+                    "Removed skill(s). Active skills: {}.",
+                    final_skills.join(", ")
+                )
             };
             return Ok(json!({
                 "success": true,
                 "message": msg,
                 "activeSkills": final_skills,
                 "skillContent": ""
-            }).to_string());
+            })
+            .to_string());
         }
 
         // Validate add IDs against available skills
@@ -206,7 +211,8 @@ impl Tool for SkillsSetTool {
                     ),
                     "activeSkills": [],
                     "skillContent": ""
-                }).to_string());
+                })
+                .to_string());
             }
             // Build path vars for rendering
             let user_home = dirs_next::home_dir()
@@ -260,6 +266,7 @@ impl Tool for SkillsSetTool {
             "message": msg,
             "activeSkills": final_skills,
             "skillContent": rendered_content
-        }).to_string())
+        })
+        .to_string())
     }
 }

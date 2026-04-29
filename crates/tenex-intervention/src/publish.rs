@@ -54,7 +54,9 @@ impl Publisher {
 
         let conversation_event_id =
             EventId::from_hex(conversation_id).context("parse conversation id")?;
-        let conversation = ConversationRef::Nostr { root_event_id: conversation_event_id };
+        let conversation = ConversationRef::Nostr {
+            root_event_id: conversation_event_id,
+        };
 
         let intent = InterventionReviewIntent {
             target: target.clone(),

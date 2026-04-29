@@ -22,7 +22,11 @@ fn is_valid_chat_id(s: &str) -> bool {
         return false;
     }
     let bytes = s.as_bytes();
-    let (start, _) = if bytes[0] == b'-' { (1, true) } else { (0, false) };
+    let (start, _) = if bytes[0] == b'-' {
+        (1, true)
+    } else {
+        (0, false)
+    };
     if start == s.len() {
         return false; // just "-"
     }
@@ -76,10 +80,7 @@ fn denormalize_numeric_segment(value: &str) -> String {
 ///
 /// Both args are stringified by the caller (the TS source accepts
 /// `string | number` and calls `String(…)`).
-pub fn create_telegram_channel_id(
-    chat_id: &str,
-    message_thread_id: Option<&str>,
-) -> String {
+pub fn create_telegram_channel_id(chat_id: &str, message_thread_id: Option<&str>) -> String {
     match message_thread_id {
         Some(thread) => format!("telegram:group:{chat_id}:topic:{thread}"),
         None => format!("telegram:chat:{chat_id}"),
@@ -156,12 +157,10 @@ pub fn parse_telegram_channel_id(channel_id: &str) -> Option<ParsedTelegramChann
         // `telegram:group:<chat>:topic` with no thread segment — TS
         // returns `{ chatId, messageThreadId: undefined }` because
         // `parts[4]` is out of bounds. Mirror that.
-        [_, "group", chat_id, _topic] if !chat_id.is_empty() => {
-            Some(ParsedTelegramChannel {
-                chat_id: (*chat_id).to_owned(),
-                message_thread_id: None,
-            })
-        }
+        [_, "group", chat_id, _topic] if !chat_id.is_empty() => Some(ParsedTelegramChannel {
+            chat_id: (*chat_id).to_owned(),
+            message_thread_id: None,
+        }),
         _ => None,
     }
 }
@@ -265,8 +264,7 @@ mod tests {
 
     #[test]
     fn parse_channel_id_group_form() {
-        let parsed =
-            parse_telegram_channel_id("telegram:group:-100123:topic:42").unwrap();
+        let parsed = parse_telegram_channel_id("telegram:group:-100123:topic:42").unwrap();
         assert_eq!(parsed.chat_id, "-100123");
         assert_eq!(parsed.message_thread_id.as_deref(), Some("42"));
     }
@@ -329,12 +327,8 @@ mod tests {
     #[test]
     fn validation_passes_when_thread_is_empty_or_whitespace() {
         // TS: `if (!normalizedThreadId) return undefined;`
-        assert!(
-            get_telegram_thread_target_validation_error("12345", Some("")).is_none()
-        );
-        assert!(
-            get_telegram_thread_target_validation_error("12345", Some("   ")).is_none()
-        );
+        assert!(get_telegram_thread_target_validation_error("12345", Some("")).is_none());
+        assert!(get_telegram_thread_target_validation_error("12345", Some("   ")).is_none());
     }
 
     #[test]
@@ -345,8 +339,7 @@ mod tests {
         );
         // Negative thread IDs aren't valid.
         assert_eq!(
-            get_telegram_thread_target_validation_error("-100", Some("-1"))
-                .as_deref(),
+            get_telegram_thread_target_validation_error("-100", Some("-1")).as_deref(),
             Some("Invalid Telegram message thread ID: -1. Thread IDs must be numeric.")
         );
     }
@@ -361,9 +354,7 @@ mod tests {
 
     #[test]
     fn validation_passes_when_group_chat_with_numeric_thread() {
-        assert!(
-            get_telegram_thread_target_validation_error("-100", Some("42")).is_none()
-        );
+        assert!(get_telegram_thread_target_validation_error("-100", Some("42")).is_none());
     }
 
     // ── native message id ──────────────────────────────────────────────
@@ -402,7 +393,7 @@ mod tests {
         assert!(parse_telegram_native_message_id("not_tg").is_none());
         assert!(parse_telegram_native_message_id("tg_").is_none()); // no payload
         assert!(parse_telegram_native_message_id("tg_only").is_none()); // no separator
-        // Empty chat segment.
+                                                                        // Empty chat segment.
         assert!(parse_telegram_native_message_id("tg__42").is_none());
         // Empty message segment.
         assert!(parse_telegram_native_message_id("tg_chat_").is_none());

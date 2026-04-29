@@ -25,8 +25,8 @@ pub fn load_state(project_id: &str) -> Result<(InterventionState, bool)> {
     let canonical = paths::intervention_state_file(d_tag);
 
     if canonical.exists() {
-        let bytes = fs::read(&canonical)
-            .with_context(|| format!("read {}", canonical.display()))?;
+        let bytes =
+            fs::read(&canonical).with_context(|| format!("read {}", canonical.display()))?;
         let state: InterventionState = serde_json::from_slice(&bytes)
             .with_context(|| format!("parse {}", canonical.display()))?;
         return Ok((prune_notified(state), false));
@@ -35,8 +35,7 @@ pub fn load_state(project_id: &str) -> Result<(InterventionState, bool)> {
     // Legacy path: the full project_id was used as the filename component.
     let legacy = paths::intervention_state_file_legacy(project_id);
     if legacy.exists() {
-        let bytes = fs::read(&legacy)
-            .with_context(|| format!("read {}", legacy.display()))?;
+        let bytes = fs::read(&legacy).with_context(|| format!("read {}", legacy.display()))?;
         let state: InterventionState = serde_json::from_slice(&bytes)
             .with_context(|| format!("parse {}", legacy.display()))?;
         // Migrate pending entries that used "projectPubkey" instead of "projectId".
@@ -53,8 +52,7 @@ pub fn save_state(project_id: &str, state: &InterventionState) -> Result<()> {
     let path = paths::intervention_state_file(d_tag);
 
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("create {}", parent.display()))?;
+        fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
     }
 
     let pruned = prune_notified(state.clone());

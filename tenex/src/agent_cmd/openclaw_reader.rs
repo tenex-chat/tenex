@@ -55,9 +55,7 @@ fn read_file_or_none(path: &Path) -> Option<String> {
 }
 
 fn config_exists(dir: &Path) -> bool {
-    CONFIG_FILE_NAMES
-        .iter()
-        .any(|name| dir.join(name).exists())
+    CONFIG_FILE_NAMES.iter().any(|name| dir.join(name).exists())
 }
 
 /// Mirror `findOpenClawStateDir` (`openclaw-reader.ts:41-56`):
@@ -313,10 +311,7 @@ mod tests {
     fn convert_model_format_only_swaps_first_slash() {
         // The TS code does `slice(0, firstSlash) + ":" + slice(firstSlash + 1)`
         // so subsequent slashes survive.
-        assert_eq!(
-            convert_model_format("openrouter/x/y"),
-            "openrouter:x/y"
-        );
+        assert_eq!(convert_model_format("openrouter/x/y"), "openrouter:x/y");
     }
 
     #[test]
@@ -543,8 +538,7 @@ mod tests {
         )
         .unwrap();
         let creds = read_openclaw_credentials(&base).unwrap();
-        let providers: Vec<&str> =
-            creds.iter().map(|c| c.provider.as_str()).collect();
+        let providers: Vec<&str> = creds.iter().map(|c| c.provider.as_str()).collect();
         assert_eq!(providers, vec!["valid"]);
         std::fs::remove_dir_all(&base).ok();
     }
@@ -563,8 +557,7 @@ mod tests {
         )
         .unwrap();
         let creds = read_openclaw_credentials(&base).unwrap();
-        let providers: Vec<&str> =
-            creds.iter().map(|c| c.provider.as_str()).collect();
+        let providers: Vec<&str> = creds.iter().map(|c| c.provider.as_str()).collect();
         assert_eq!(providers, vec!["ok"]);
         std::fs::remove_dir_all(&base).ok();
     }

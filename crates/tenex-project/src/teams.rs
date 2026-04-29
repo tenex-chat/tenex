@@ -61,12 +61,20 @@ fn normalize(name: String, def: TeamDefinition) -> Team {
     if !members.contains(&def.team_lead) {
         members.insert(0, def.team_lead.clone());
     }
-    Team { name, description: def.description, team_lead: def.team_lead, members }
+    Team {
+        name,
+        description: def.description,
+        team_lead: def.team_lead,
+        members,
+    }
 }
 
 /// Returns references to teams whose members list contains `agent_slug`.
 pub fn teams_for_agent<'a>(teams: &'a [Team], agent_slug: &str) -> Vec<&'a Team> {
-    teams.iter().filter(|t| t.members.iter().any(|m| m == agent_slug)).collect()
+    teams
+        .iter()
+        .filter(|t| t.members.iter().any(|m| m == agent_slug))
+        .collect()
 }
 
 /// Render the `<teams-context>` system-prompt fragment.
@@ -103,7 +111,10 @@ pub fn render_teams_context(member_teams: &[&Team], active_team: Option<&str>) -
     }
 
     if let Some(active) = active_team {
-        if !member_teams.iter().any(|t| t.name.eq_ignore_ascii_case(active)) {
+        if !member_teams
+            .iter()
+            .any(|t| t.name.eq_ignore_ascii_case(active))
+        {
             lines.push(format!("  You are operating in team scope: {active}"));
         }
     }

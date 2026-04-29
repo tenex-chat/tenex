@@ -26,8 +26,8 @@ pub use cache::IdentityCache;
 pub use error::{IdentityError, Result};
 pub use fetch::fetch_identity;
 pub use model::IdentityView;
-pub use resolve::resolve;
 pub use resolve::batch_resolve;
+pub use resolve::resolve;
 
 use std::fs;
 use std::os::unix::io::AsRawFd;
@@ -54,8 +54,7 @@ fn ensure_daemon_then_connect() -> AnyResult<std::os::unix::net::UnixStream> {
         return Ok(stream);
     }
 
-    fs::create_dir_all(paths::default_base_dir())
-        .context("create identity base dir")?;
+    fs::create_dir_all(paths::default_base_dir()).context("create identity base dir")?;
 
     match daemonize::spawn_daemon()? {
         daemonize::Role::Daemon => run_daemon_role(),
@@ -91,8 +90,7 @@ async fn run_daemon_async() -> AnyResult<()> {
     use tokio::net::UnixListener;
 
     let base_dir = paths::default_base_dir();
-    fs::create_dir_all(&base_dir)
-        .with_context(|| format!("create {}", base_dir.display()))?;
+    fs::create_dir_all(&base_dir).with_context(|| format!("create {}", base_dir.display()))?;
 
     let pid_path = paths::pid_path();
     let pid_file = fs::OpenOptions::new()
@@ -108,7 +106,11 @@ async fn run_daemon_async() -> AnyResult<()> {
     }
     std::mem::forget(pid_file);
 
-    if let Ok(mut f) = fs::OpenOptions::new().write(true).truncate(true).open(&pid_path) {
+    if let Ok(mut f) = fs::OpenOptions::new()
+        .write(true)
+        .truncate(true)
+        .open(&pid_path)
+    {
         use std::io::Write;
         let _ = writeln!(f, "{}", std::process::id());
     }

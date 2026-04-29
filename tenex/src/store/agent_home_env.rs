@@ -84,9 +84,7 @@ pub fn build_agent_home_env_bootstrap(
 ) -> String {
     let mut out = String::new();
     out.push_str("# TENEX agent shell environment\n");
-    out.push_str(
-        "# Shell sessions auto-load this file. Add additional KEY=value entries below.\n",
-    );
+    out.push_str("# Shell sessions auto-load this file. Add additional KEY=value entries below.\n");
     out.push_str(&format!("NSEC={normalized_nsec}\n"));
     out.push_str(&format!("PUBKEY={pubkey}\n"));
     out.push_str(&format!("NPUB={npub}\n"));
@@ -117,23 +115,16 @@ pub fn ensure_agent_home_env_file(
     let home_dir = get_agent_home_directory(base_dir, agent_pubkey);
     let env_path = home_dir.join(".env");
     let normalized = normalize_nsec_to_bech32(agent_nsec)?;
-    let keys = Keys::parse(&normalized)
-        .map_err(|e| anyhow!("parse normalized nsec: {e}"))?;
+    let keys = Keys::parse(&normalized).map_err(|e| anyhow!("parse normalized nsec: {e}"))?;
     let pubkey_hex = keys.public_key().to_hex();
     let npub_bech32 = keys
         .public_key()
         .to_bech32()
         .map_err(|e| anyhow!("encode npub: {e}"))?;
 
-    std::fs::create_dir_all(&home_dir)
-        .with_context(|| format!("create {}", home_dir.display()))?;
+    std::fs::create_dir_all(&home_dir).with_context(|| format!("create {}", home_dir.display()))?;
 
-    let body = build_agent_home_env_bootstrap(
-        &normalized,
-        &pubkey_hex,
-        &npub_bech32,
-        relays,
-    );
+    let body = build_agent_home_env_bootstrap(&normalized, &pubkey_hex, &npub_bech32, relays);
 
     match try_create_exclusive(&env_path, body.as_bytes()) {
         Ok(()) => Ok(EnsureAgentHomeEnvFileResult {
@@ -146,8 +137,7 @@ pub fn ensure_agent_home_env_file(
                 created: false,
             })
         }
-        Err(e) => Err(anyhow::Error::new(e)
-            .context(format!("write {}", env_path.display()))),
+        Err(e) => Err(anyhow::Error::new(e).context(format!("write {}", env_path.display()))),
     }
 }
 
@@ -270,28 +260,15 @@ NPUB=npub1abc
 
     #[test]
     fn bootstrap_appends_relays_when_present() {
-        let relays = vec![
-            "wss://relay.example".to_string(),
-            "wss://other".to_string(),
-        ];
-        let body = build_agent_home_env_bootstrap(
-            "nsec1abc",
-            "PK",
-            "npub1",
-            Some(&relays),
-        );
+        let relays = vec!["wss://relay.example".to_string(), "wss://other".to_string()];
+        let body = build_agent_home_env_bootstrap("nsec1abc", "PK", "npub1", Some(&relays));
         assert!(body.contains("RELAYS=wss://relay.example,wss://other\n"));
     }
 
     #[test]
     fn bootstrap_omits_relays_when_empty() {
         let relays: Vec<String> = Vec::new();
-        let body = build_agent_home_env_bootstrap(
-            "nsec1abc",
-            "PK",
-            "npub1",
-            Some(&relays),
-        );
+        let body = build_agent_home_env_bootstrap("nsec1abc", "PK", "npub1", Some(&relays));
         assert!(!body.contains("RELAYS"));
     }
 
@@ -320,13 +297,7 @@ NPUB=npub1abc
         // string with at least 8 chars — using a literal here so we
         // can predict the directory.
         let agent_pubkey = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789";
-        let result = ensure_agent_home_env_file(
-            &base,
-            agent_pubkey,
-            &bech_nsec,
-            None,
-        )
-        .unwrap();
+        let result = ensure_agent_home_env_file(&base, agent_pubkey, &bech_nsec, None).unwrap();
         assert!(result.created);
         let body = std::fs::read_to_string(&result.path).unwrap();
         assert!(body.contains("# TENEX agent shell environment"));
@@ -352,16 +323,14 @@ NPUB=npub1abc
         let agent_pubkey = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789";
 
         // First call creates.
-        let first = ensure_agent_home_env_file(&base, agent_pubkey, &bech_nsec, None)
-            .unwrap();
+        let first = ensure_agent_home_env_file(&base, agent_pubkey, &bech_nsec, None).unwrap();
         assert!(first.created);
 
         // Mutate the file — user-customised content.
         std::fs::write(&first.path, b"USER_CUSTOM_CONTENT\n").unwrap();
 
         // Second call respects existing file.
-        let second = ensure_agent_home_env_file(&base, agent_pubkey, &bech_nsec, None)
-            .unwrap();
+        let second = ensure_agent_home_env_file(&base, agent_pubkey, &bech_nsec, None).unwrap();
         assert!(!second.created);
         let body = std::fs::read_to_string(&second.path).unwrap();
         assert_eq!(body, "USER_CUSTOM_CONTENT\n");
@@ -374,8 +343,7 @@ NPUB=npub1abc
         let (bech_nsec, _, _) = fixture_keys();
         let agent_pubkey = "fffefdfcfbfaf9f8fffefdfcfbfaf9f8fffefdfcfbfaf9f8fffefdfcfbfaf9f8";
         // No `home/` dir exists in `base` yet — ensure mkdir's it.
-        let result = ensure_agent_home_env_file(&base, agent_pubkey, &bech_nsec, None)
-            .unwrap();
+        let result = ensure_agent_home_env_file(&base, agent_pubkey, &bech_nsec, None).unwrap();
         assert!(result.created);
         assert!(result.path.exists());
         assert!(base.join("home").is_dir());
@@ -386,8 +354,7 @@ NPUB=npub1abc
     fn ensure_propagates_normalize_error() {
         let base = unique_temp();
         let agent_pubkey = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789";
-        let err =
-            ensure_agent_home_env_file(&base, agent_pubkey, "", None).unwrap_err();
+        let err = ensure_agent_home_env_file(&base, agent_pubkey, "", None).unwrap_err();
         assert_eq!(err.to_string(), "Agent nsec is empty");
         std::fs::remove_dir_all(&base).ok();
     }

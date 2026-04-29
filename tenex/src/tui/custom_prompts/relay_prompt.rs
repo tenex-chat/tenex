@@ -194,11 +194,7 @@ impl RelayState {
     /// Compose the rendered lines (without ANSI styling) — used by the I/O
     /// layer for layout calculations and by tests for verification. The
     /// styled render lives in [`relay_prompt`].
-    pub fn compose_lines(
-        &self,
-        items: &[RelayItem],
-        cfg: &RelayPromptConfig<'_>,
-    ) -> Vec<String> {
+    pub fn compose_lines(&self, items: &[RelayItem], cfg: &RelayPromptConfig<'_>) -> Vec<String> {
         self.compose_line_segments(items, cfg)
             .into_iter()
             .map(|(label, desc)| {
@@ -231,7 +227,9 @@ impl RelayState {
                 " "
             };
             match item {
-                RelayItem::Choice { name, description, .. } => {
+                RelayItem::Choice {
+                    name, description, ..
+                } => {
                     let label = format!("{cursor} {name}");
                     let desc = if description.is_empty() {
                         String::new()

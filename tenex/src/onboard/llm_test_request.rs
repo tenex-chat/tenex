@@ -31,9 +31,7 @@ pub const TEST_AGENT_NAME: &str = "configuration-tester";
 
 /// Spinner frames rendered while a test is in progress. Spec doc 06
 /// §3.1, source: `LLMConfigEditor.ts:39`. Braille dots, 10 frames.
-pub const SPINNER_FRAMES: &[&str] = &[
-    "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏",
-];
+pub const SPINNER_FRAMES: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
 /// Spinner tick interval (`setInterval(…, 80)` at
 /// `LLMConfigEditor.ts:65-67`). Yellow chalk; row format
@@ -77,9 +75,7 @@ mod tests {
         // Source: `LLMConfigEditor.ts:39`. Each frame is a single Braille
         // codepoint in the U+2840-U+28FF range.
         assert_eq!(SPINNER_FRAMES.len(), 10);
-        let expected: [&str; 10] = [
-            "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏",
-        ];
+        let expected: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
         for (i, frame) in SPINNER_FRAMES.iter().enumerate() {
             assert_eq!(*frame, expected[i]);
         }

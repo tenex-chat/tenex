@@ -63,10 +63,9 @@ impl AgentDoc {
         if !path.exists() {
             return Ok(None);
         }
-        let bytes = std::fs::read(&path)
-            .with_context(|| format!("read {}", path.display()))?;
-        let mut raw: IndexMap<String, Value> = serde_json::from_slice(&bytes)
-            .with_context(|| format!("parse {}", path.display()))?;
+        let bytes = std::fs::read(&path).with_context(|| format!("read {}", path.display()))?;
+        let mut raw: IndexMap<String, Value> =
+            serde_json::from_slice(&bytes).with_context(|| format!("parse {}", path.display()))?;
 
         let normalized_changed = normalize_loaded_agent(&mut raw);
         let migrated = migrate_agent_data(&mut raw);
@@ -149,9 +148,7 @@ impl AgentDoc {
     /// Auto-inferred category (set by the categorize backfill). Distinct
     /// from `category` so explicit operator provenance is preserved.
     /// Source field: `inferredCategory` (`storage.ts:48`).
-    pub fn inferred_category(
-        &self,
-    ) -> Option<crate::store::role_categories::AgentCategory> {
+    pub fn inferred_category(&self) -> Option<crate::store::role_categories::AgentCategory> {
         let raw = self.raw.get("inferredCategory").and_then(Value::as_str);
         crate::store::role_categories::resolve_category(raw)
     }
@@ -232,10 +229,9 @@ impl AgentIndexDoc {
         if !path.exists() {
             return Ok(Self::default());
         }
-        let bytes = std::fs::read(&path)
-            .with_context(|| format!("read {}", path.display()))?;
-        let raw: Value = serde_json::from_slice(&bytes)
-            .with_context(|| format!("parse {}", path.display()))?;
+        let bytes = std::fs::read(&path).with_context(|| format!("read {}", path.display()))?;
+        let raw: Value =
+            serde_json::from_slice(&bytes).with_context(|| format!("parse {}", path.display()))?;
 
         let (doc, needs_migration) = parse_index(&raw)?;
 
@@ -340,12 +336,16 @@ fn parse_index(raw: &Value) -> Result<(AgentIndexDoc, bool)> {
                                 .collect::<Vec<_>>()
                         })
                         .unwrap_or_default();
-                    by_slug.insert(slug.clone(), SlugEntry { pubkey, project_ids });
+                    by_slug.insert(
+                        slug.clone(),
+                        SlugEntry {
+                            pubkey,
+                            project_ids,
+                        },
+                    );
                 }
                 _ => {
-                    return Err(anyhow!(
-                        "bySlug.{slug} must be string (legacy) or object"
-                    ));
+                    return Err(anyhow!("bySlug.{slug} must be string (legacy) or object"));
                 }
             }
         }
@@ -548,7 +548,9 @@ fn sanitize_default_inplace(value: &mut Value) -> bool {
 }
 
 fn value_object_is_empty(v: &Value) -> bool {
-    v.as_object().map(serde_json::Map::is_empty).unwrap_or(false)
+    v.as_object()
+        .map(serde_json::Map::is_empty)
+        .unwrap_or(false)
 }
 
 // ───────────────────────── helpers ────────────────────────────────────────
@@ -586,11 +588,9 @@ pub fn derive_agent_pubkey_from_nsec(nsec: &str) -> Result<String> {
         return Ok(Keys::new(sk).public_key().to_hex());
     }
     // Fall back to hex.
-    let bytes = hex_to_bytes32(nsec).ok_or_else(|| {
-        anyhow!("invalid nsec: must be bech32 (`nsec1…`) or 64-char hex string")
-    })?;
-    let sk = SecretKey::from_slice(&bytes)
-        .map_err(|e| anyhow!("invalid secret key bytes: {e}"))?;
+    let bytes = hex_to_bytes32(nsec)
+        .ok_or_else(|| anyhow!("invalid nsec: must be bech32 (`nsec1…`) or 64-char hex string"))?;
+    let sk = SecretKey::from_slice(&bytes).map_err(|e| anyhow!("invalid secret key bytes: {e}"))?;
     Ok(Keys::new(sk).public_key().to_hex())
 }
 
@@ -654,9 +654,8 @@ impl AgentStorage {
     /// Creates the directory + an empty index file when missing — matches
     /// `initialize()` (`AgentStorage.ts:279-282`).
     pub fn open(base_dir: &std::path::Path) -> Result<Self> {
-        std::fs::create_dir_all(agents_dir(base_dir)).with_context(|| {
-            format!("create agents dir {}", agents_dir(base_dir).display())
-        })?;
+        std::fs::create_dir_all(agents_dir(base_dir))
+            .with_context(|| format!("create agents dir {}", agents_dir(base_dir).display()))?;
         let index = AgentIndexDoc::load(base_dir)?;
         Ok(Self {
             base_dir: base_dir.to_path_buf(),
@@ -968,8 +967,7 @@ impl AgentStorage {
         };
 
         let path = agent_file_path(&self.base_dir, pubkey);
-        std::fs::remove_file(&path)
-            .with_context(|| format!("remove {}", path.display()))?;
+        std::fs::remove_file(&path).with_context(|| format!("remove {}", path.display()))?;
 
         if let Some(slug) = agent.slug() {
             if let Some(entry) = self.index.by_slug.get(slug) {
@@ -994,11 +992,7 @@ impl AgentStorage {
     /// Reactivates an inactive agent if necessary, evicts other agents that
     /// own the same slug in this project, and writes back the agent file
     /// with `status: "active"`.
-    pub fn add_agent_to_project(
-        &mut self,
-        pubkey: &str,
-        project_dtag: &str,
-    ) -> Result<()> {
+    pub fn add_agent_to_project(&mut self, pubkey: &str, project_dtag: &str) -> Result<()> {
         let mut agent = AgentDoc::load(&self.base_dir, pubkey)?
             .ok_or_else(|| anyhow!("Agent {pubkey} not found"))?;
         let slug = agent
@@ -1035,11 +1029,7 @@ impl AgentStorage {
     }
 
     /// `removeAgentFromProject` (`AgentStorage.ts:895-916`).
-    pub fn remove_agent_from_project(
-        &mut self,
-        pubkey: &str,
-        project_dtag: &str,
-    ) -> Result<()> {
+    pub fn remove_agent_from_project(&mut self, pubkey: &str, project_dtag: &str) -> Result<()> {
         let Some(mut agent) = AgentDoc::load(&self.base_dir, pubkey)? else {
             return Ok(());
         };
@@ -1054,7 +1044,11 @@ impl AgentStorage {
         }
 
         let remaining = self.get_index_projects_for_agent(pubkey);
-        let new_status = if remaining.is_empty() { "inactive" } else { "active" };
+        let new_status = if remaining.is_empty() {
+            "inactive"
+        } else {
+            "active"
+        };
         agent
             .raw_mut()
             .insert("status".into(), Value::String(new_status.into()));
@@ -1158,16 +1152,10 @@ impl AgentStorage {
                     block.insert("apiBaseUrl".into(), Value::String(u.clone()));
                 }
                 if let Some(b) = c.publish_reasoning_to_telegram {
-                    block.insert(
-                        "publishReasoningToTelegram".into(),
-                        Value::Bool(b),
-                    );
+                    block.insert("publishReasoningToTelegram".into(), Value::Bool(b));
                 }
                 if let Some(b) = c.publish_conversation_to_telegram {
-                    block.insert(
-                        "publishConversationToTelegram".into(),
-                        Value::Bool(b),
-                    );
+                    block.insert("publishConversationToTelegram".into(), Value::Bool(b));
                 }
                 agent
                     .raw_mut()
@@ -1212,10 +1200,7 @@ impl AgentStorage {
 
                 let existing = by_slug.get(&slug).cloned();
                 if let Some(existing) = existing {
-                    if existing.pubkey != pubkey
-                        && active
-                        && !active_owners.contains(&slug)
-                    {
+                    if existing.pubkey != pubkey && active && !active_owners.contains(&slug) {
                         by_slug.insert(
                             slug.clone(),
                             SlugEntry {
@@ -1256,9 +1241,7 @@ impl AgentStorage {
 /// Validate an agent's pubkey by re-deriving from `nsec`. Convenience
 /// wrapper for callers that already have a parsed `AgentDoc`.
 pub fn pubkey_for(agent: &AgentDoc) -> Result<String> {
-    let nsec = agent
-        .nsec()
-        .ok_or_else(|| anyhow!("missing nsec"))?;
+    let nsec = agent.nsec().ok_or_else(|| anyhow!("missing nsec"))?;
     derive_agent_pubkey_from_nsec(nsec)
 }
 
@@ -1323,7 +1306,11 @@ mod tests {
         write_file(&index_file_path(&base), canonical);
         let doc = AgentIndexDoc::load(&base).unwrap();
         let bytes = doc.serialize_bytes().unwrap();
-        assert_eq!(bytes.as_slice(), canonical.as_slice(), "byte-identical roundtrip");
+        assert_eq!(
+            bytes.as_slice(),
+            canonical.as_slice(),
+            "byte-identical roundtrip"
+        );
         std::fs::remove_dir_all(&base).ok();
     }
 
@@ -1342,10 +1329,15 @@ mod tests {
         let doc = AgentIndexDoc::load(&base).unwrap();
         assert_eq!(doc.by_slug().len(), 2);
         assert_eq!(doc.by_slug().get("alpha").unwrap().pubkey, "aaaa");
-        assert_eq!(doc.by_slug().get("alpha").unwrap().project_ids, Vec::<String>::new());
+        assert_eq!(
+            doc.by_slug().get("alpha").unwrap().project_ids,
+            Vec::<String>::new()
+        );
         // Disk should now be canonicalized.
         let on_disk = std::fs::read(index_file_path(&base)).unwrap();
-        assert!(std::str::from_utf8(&on_disk).unwrap().contains("\"projectIds\""));
+        assert!(std::str::from_utf8(&on_disk)
+            .unwrap()
+            .contains("\"projectIds\""));
         std::fs::remove_dir_all(&base).ok();
     }
 
@@ -1460,7 +1452,8 @@ mod tests {
         let doc = AgentDoc::load(&base, pubkey).unwrap().unwrap();
         assert!(!doc.raw.contains_key("projectOverrides"));
         // Should have been written back.
-        let on_disk = String::from_utf8(std::fs::read(agent_file_path(&base, pubkey)).unwrap()).unwrap();
+        let on_disk =
+            String::from_utf8(std::fs::read(agent_file_path(&base, pubkey)).unwrap()).unwrap();
         assert!(!on_disk.contains("projectOverrides"));
         std::fs::remove_dir_all(&base).ok();
     }
@@ -1502,8 +1495,12 @@ mod tests {
         let doc = AgentDoc::from_raw(raw);
         doc.save(&base, pubkey).unwrap();
 
-        let on_disk = String::from_utf8(std::fs::read(agent_file_path(&base, pubkey)).unwrap()).unwrap();
-        assert!(!on_disk.contains("chatBindings"), "chatBindings must be stripped: {on_disk}");
+        let on_disk =
+            String::from_utf8(std::fs::read(agent_file_path(&base, pubkey)).unwrap()).unwrap();
+        assert!(
+            !on_disk.contains("chatBindings"),
+            "chatBindings must be stripped: {on_disk}"
+        );
         assert!(on_disk.contains("botToken"));
         std::fs::remove_dir_all(&base).ok();
     }
@@ -1749,7 +1746,9 @@ mod tests {
             publish_reasoning_to_telegram: None,
             publish_conversation_to_telegram: None,
         };
-        let written = storage.update_agent_telegram_config(&pk, Some(&cfg)).unwrap();
+        let written = storage
+            .update_agent_telegram_config(&pk, Some(&cfg))
+            .unwrap();
         assert!(written);
         let agent = AgentDoc::load(&base, &pk).unwrap().unwrap();
         assert_eq!(agent.telegram_config().unwrap().bot_token, "tok");
@@ -1767,7 +1766,9 @@ mod tests {
     fn update_agent_telegram_config_returns_false_for_missing_agent() {
         let base = unique_temp();
         let mut storage = AgentStorage::open(&base).unwrap();
-        let result = storage.update_agent_telegram_config("notfound", None).unwrap();
+        let result = storage
+            .update_agent_telegram_config("notfound", None)
+            .unwrap();
         assert!(!result);
         std::fs::remove_dir_all(&base).ok();
     }
@@ -1820,11 +1821,10 @@ mod tests {
             }
             // Try to parse and round-trip.
             let original = std::fs::read(&path).unwrap();
-            let mut raw: IndexMap<String, Value> =
-                match serde_json::from_slice(&original) {
-                    Ok(r) => r,
-                    Err(_) => continue,
-                };
+            let mut raw: IndexMap<String, Value> = match serde_json::from_slice(&original) {
+                Ok(r) => r,
+                Err(_) => continue,
+            };
             let normalized = normalize_loaded_agent(&mut raw);
             let migrated = migrate_agent_data(&mut raw);
             if normalized || migrated {
@@ -2039,7 +2039,10 @@ mod tests {
         let entry = storage.index().by_slug.get("shared").unwrap();
         assert_eq!(entry.pubkey, pk2);
         let pk1_agent = AgentDoc::load(&base, &pk1).unwrap().unwrap();
-        assert!(!pk1_agent.is_active(), "pk1 evicted from P1, no other projects");
+        assert!(
+            !pk1_agent.is_active(),
+            "pk1 evicted from P1, no other projects"
+        );
         std::fs::remove_dir_all(&base).ok();
     }
 
@@ -2150,7 +2153,10 @@ mod tests {
         std::fs::remove_file(index_file_path(&base)).unwrap();
         // Re-open and rebuild.
         let mut storage = AgentStorage::open(&base).unwrap();
-        assert!(storage.index().by_slug.is_empty(), "fresh open w/o index = empty");
+        assert!(
+            storage.index().by_slug.is_empty(),
+            "fresh open w/o index = empty"
+        );
         storage.rebuild_index().unwrap();
         let pks: std::collections::HashSet<_> = storage
             .index()

@@ -136,13 +136,17 @@ impl McpDoc {
                 Value::Object(m)
             }),
         );
-        set_or_clear(&mut entry, "description", config.description.map(Value::String));
+        set_or_clear(
+            &mut entry,
+            "description",
+            config.description.map(Value::String),
+        );
         set_or_clear(
             &mut entry,
             "allowedPaths",
-            config.allowed_paths.map(|paths| {
-                Value::Array(paths.into_iter().map(Value::String).collect())
-            }),
+            config
+                .allowed_paths
+                .map(|paths| Value::Array(paths.into_iter().map(Value::String).collect())),
         );
         set_or_clear(&mut entry, "eventId", config.event_id.map(Value::String));
 
@@ -195,8 +199,7 @@ impl McpDoc {
         if !self.raw.contains_key(SERVERS_KEY) {
             // Place servers before enabled if enabled already exists, to match
             // the natural TS shape `{servers, enabled}`.
-            self.raw
-                .shift_insert(0, SERVERS_KEY.into(), json!({}));
+            self.raw.shift_insert(0, SERVERS_KEY.into(), json!({}));
         }
         self.raw
             .get_mut(SERVERS_KEY)
@@ -244,7 +247,12 @@ impl ServerEntry<'_> {
         self.obj
             .get("args")
             .and_then(Value::as_array)
-            .map(|arr| arr.iter().filter_map(Value::as_str).map(str::to_owned).collect())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(Value::as_str)
+                    .map(str::to_owned)
+                    .collect()
+            })
             .unwrap_or_default()
     }
 
@@ -268,7 +276,12 @@ impl ServerEntry<'_> {
         self.obj
             .get("allowedPaths")
             .and_then(Value::as_array)
-            .map(|arr| arr.iter().filter_map(Value::as_str).map(str::to_owned).collect())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(Value::as_str)
+                    .map(str::to_owned)
+                    .collect()
+            })
             .unwrap_or_default()
     }
 
@@ -396,7 +409,9 @@ mod tests {
     fn upsert_drops_forbidden_transport_fields() {
         // Construct a document with a stray "transport" field, upsert through
         // the typed API, expect the forbidden field to be removed.
-        let mut doc = parse(br#"{"servers":{"x":{"command":"node","args":[],"transport":"http","url":"http://"}}}"#);
+        let mut doc = parse(
+            br#"{"servers":{"x":{"command":"node","args":[],"transport":"http","url":"http://"}}}"#,
+        );
         doc.upsert_server("x", ServerConfig::stdio("node", vec!["s.js".into()]));
         let s = String::from_utf8(serialize(doc.raw()).unwrap()).unwrap();
         assert!(!s.contains("transport"), "expected transport stripped: {s}");
@@ -418,9 +433,8 @@ mod tests {
 
     #[test]
     fn remove_drops_named_server() {
-        let mut doc = parse(
-            br#"{"servers":{"a":{"command":"x","args":[]},"b":{"command":"y","args":[]}}}"#,
-        );
+        let mut doc =
+            parse(br#"{"servers":{"a":{"command":"x","args":[]},"b":{"command":"y","args":[]}}}"#);
         doc.remove("a");
         assert_eq!(doc.server_names(), vec!["b"]);
     }
@@ -498,7 +512,9 @@ mod tests {
             _ => return,
         };
         let path = std::path::PathBuf::from(home).join(".tenex/mcp.json");
-        let Ok(original) = std::fs::read(&path) else { return };
+        let Ok(original) = std::fs::read(&path) else {
+            return;
+        };
 
         let raw: IndexMap<String, Value> = serde_json::from_slice(&original)
             .unwrap_or_else(|e| panic!("failed to parse {}: {e}", path.display()));

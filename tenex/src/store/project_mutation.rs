@@ -145,8 +145,7 @@ pub fn apply_mutation(
 
     // ── 1. Retain filter ──────────────────────────────────────────────
     if !retain_agent_pubkeys.is_empty() {
-        let retain_set: indexmap::IndexSet<&String> =
-            retain_agent_pubkeys.iter().collect();
+        let retain_set: indexmap::IndexSet<&String> = retain_agent_pubkeys.iter().collect();
         let mut filtered: Vec<Vec<String>> = Vec::with_capacity(tags.len());
         for tag in tags.into_iter() {
             // Keep non-`p` tags, `p` tags missing a value, and `p` tags
@@ -237,9 +236,8 @@ pub fn apply_mutation(
         }
     }
 
-    let has_changes = !added_pubkeys.is_empty()
-        || !removed_pubkeys.is_empty()
-        || !updated_fields.is_empty();
+    let has_changes =
+        !added_pubkeys.is_empty() || !removed_pubkeys.is_empty() || !updated_fields.is_empty();
 
     AppliedProjectMutation {
         tags,
@@ -309,12 +307,7 @@ mod tests {
 
     #[test]
     fn unique_ordered_trims_and_drops_empty() {
-        let v = unique_ordered(&[
-            "  alice  ".into(),
-            "".into(),
-            "   ".into(),
-            "bob".into(),
-        ]);
+        let v = unique_ordered(&["  alice  ".into(), "".into(), "   ".into(), "bob".into()]);
         assert_eq!(v, vec!["alice".to_string(), "bob".to_string()]);
     }
 
@@ -327,7 +320,10 @@ mod tests {
             "carol".into(),
             "bob".into(),
         ]);
-        assert_eq!(v, vec!["alice".to_string(), "bob".to_string(), "carol".to_string()]);
+        assert_eq!(
+            v,
+            vec!["alice".to_string(), "bob".to_string(), "carol".to_string()]
+        );
     }
 
     // ── add agent ────────────────────────────────────────────────────────
@@ -418,7 +414,9 @@ mod tests {
         base.push(tag("repo", "https://example.com/repo"));
         let result = apply_mutation(&base, "", &params);
         assert!(result.tags.contains(&tag("title", "My Project")));
-        assert!(result.tags.contains(&tag("repo", "https://example.com/repo")));
+        assert!(result
+            .tags
+            .contains(&tag("repo", "https://example.com/repo")));
         assert!(result.tags.contains(&tag("p", "alice")));
     }
 
@@ -482,7 +480,10 @@ mod tests {
         base.push(tag("repo", "old"));
         let result = apply_mutation(&base, "", &params);
         assert!(result.has_changes);
-        assert!(!result.tags.iter().any(|t| t.first().map(String::as_str) == Some("repo")));
+        assert!(!result
+            .tags
+            .iter()
+            .any(|t| t.first().map(String::as_str) == Some("repo")));
         assert_eq!(result.updated_fields, vec![MetadataKey::Repo]);
     }
 
@@ -558,10 +559,7 @@ mod tests {
         assert_eq!(result.added_pubkeys, vec!["carol".to_string()]);
         let mut updated = result.updated_fields.clone();
         updated.sort_by_key(|k| k.as_str());
-        assert_eq!(
-            updated,
-            vec![MetadataKey::Description, MetadataKey::Title]
-        );
+        assert_eq!(updated, vec![MetadataKey::Description, MetadataKey::Title]);
     }
 
     #[test]

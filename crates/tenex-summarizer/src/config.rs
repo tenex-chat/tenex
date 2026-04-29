@@ -61,10 +61,8 @@ struct GlobalConfig {
 impl GlobalConfig {
     fn load() -> Result<Self> {
         let path = paths::config_file();
-        let bytes = fs::read(&path)
-            .with_context(|| format!("read {}", path.display()))?;
-        serde_json::from_slice(&bytes)
-            .with_context(|| format!("parse {}", path.display()))
+        let bytes = fs::read(&path).with_context(|| format!("read {}", path.display()))?;
+        serde_json::from_slice(&bytes).with_context(|| format!("parse {}", path.display()))
     }
 }
 
@@ -159,12 +157,8 @@ impl ProvidersConfig {
 
 impl LlmSelection {
     fn resolve(llms: Option<&LlmsConfig>, providers: Option<&ProvidersConfig>) -> Result<Self> {
-        let llms = llms.ok_or_else(|| {
-            anyhow!(
-                "{} is missing or unreadable",
-                paths::llms_file().display()
-            )
-        })?;
+        let llms = llms
+            .ok_or_else(|| anyhow!("{} is missing or unreadable", paths::llms_file().display()))?;
 
         let preset_name = llms
             .summarization

@@ -101,12 +101,9 @@ async fn run_manage() -> Result<()> {
 /// any NIP-42 challenge.
 async fn run_delete(pubkey: &str) -> Result<()> {
     let base_dir = crate::store::resolve_base_dir(None);
-    let deleted = provisioning::delete_stored_agent(
-        &base_dir,
-        pubkey,
-        provisioning::DeleteOptions::new(),
-    )
-    .await?;
+    let deleted =
+        provisioning::delete_stored_agent(&base_dir, pubkey, provisioning::DeleteOptions::new())
+            .await?;
 
     if !deleted {
         eprintln!(
@@ -193,13 +190,11 @@ async fn run_openclaw_import(
 
     // ── 2. Read + filter agents ───────────────────────────────────────
     let all_agents = openclaw_reader::read_openclaw_agents(&state_dir)?;
-    let filtered: Vec<openclaw_reader::OpenClawAgent> = openclaw_preview::filter_agents(
-        &all_agents,
-        &slugs,
-    )
-    .into_iter()
-    .cloned()
-    .collect();
+    let filtered: Vec<openclaw_reader::OpenClawAgent> =
+        openclaw_preview::filter_agents(&all_agents, &slugs)
+            .into_iter()
+            .cloned()
+            .collect();
 
     if filtered.is_empty() {
         if json {
@@ -233,10 +228,7 @@ async fn run_openclaw_import(
     );
     println!(
         "{}",
-        crate::tui::theme::chalk_blue(&format!(
-            "Found {} agent(s) to import.",
-            filtered.len()
-        )),
+        crate::tui::theme::chalk_blue(&format!("Found {} agent(s) to import.", filtered.len())),
     );
     crate::tui::display::hint(
         "Identity distillation requires the LLM service (spec doc 10 §5.1, \

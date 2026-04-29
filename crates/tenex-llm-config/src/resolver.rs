@@ -45,16 +45,23 @@ pub struct ParsedKey {
 impl ParsedKey {
     fn parse(raw: &str) -> Self {
         let raw = raw.trim();
-        match raw.find(' ') {
-            Some(idx) => {
+        raw.find(' ').map_or_else(
+            || Self {
+                key: raw.to_string(),
+                alias: None,
+            },
+            |idx| {
                 let alias = raw[idx + 1..].trim();
-                ParsedKey {
+                Self {
                     key: raw[..idx].to_string(),
-                    alias: if alias.is_empty() { None } else { Some(alias.to_string()) },
+                    alias: if alias.is_empty() {
+                        None
+                    } else {
+                        Some(alias.to_string())
+                    },
                 }
-            }
-            None => ParsedKey { key: raw.to_string(), alias: None },
-        }
+            },
+        )
     }
 }
 
@@ -99,7 +106,10 @@ pub fn load_llms(base_dir: &Path) -> Result<LlmDocs> {
         }
     }
 
-    Ok(LlmDocs { configurations, roles })
+    Ok(LlmDocs {
+        configurations,
+        roles,
+    })
 }
 
 pub fn load_providers(base_dir: &Path) -> Result<ProviderDocs> {
@@ -133,7 +143,14 @@ pub fn load_providers(base_dir: &Path) -> Result<ProviderDocs> {
                 .and_then(|v| v.as_str())
                 .map(str::to_string);
             let timeout = obj.get("timeout").and_then(Value::as_u64);
-            providers.insert(id.clone(), ProviderEntry { api_keys, base_url, timeout });
+            providers.insert(
+                id.clone(),
+                ProviderEntry {
+                    api_keys,
+                    base_url,
+                    timeout,
+                },
+            );
         }
     }
 
@@ -194,7 +211,7 @@ pub(crate) fn resolve_standard(
         .to_string();
 
     let entry = providers.providers.get(&provider);
-    let all_keys: &[ParsedKey] = entry.map(|e| e.api_keys.as_slice()).unwrap_or(&[]);
+    let all_keys: &[ParsedKey] = entry.map_or(&[], |e| e.api_keys.as_slice());
     let base_url = entry.and_then(|e| e.base_url.clone());
     let timeout = entry.and_then(|e| e.timeout);
 
@@ -210,7 +227,10 @@ pub(crate) fn resolve_standard(
         }
         healthy
             .into_iter()
-            .map(|i| ApiKey { key: all_keys[i].key.clone(), alias: all_keys[i].alias.clone() })
+            .map(|i| ApiKey {
+                key: all_keys[i].key.clone(),
+                alias: all_keys[i].alias.clone(),
+            })
             .collect()
     };
 
@@ -239,9 +259,8 @@ fn resolve_meta(
     providers: &ProviderDocs,
     key_health: &KeyHealthTracker,
 ) -> Value {
-    let obj = match config.as_object() {
-        Some(o) => o,
-        None => return err_val("meta config is not a JSON object"),
+    let Some(obj) = config.as_object() else {
+        return err_val("meta config is not a JSON object");
     };
 
     let default = match obj.get("default").and_then(Value::as_str) {
@@ -249,38 +268,38 @@ fn resolve_meta(
         None => return err_val("meta config missing 'default'"),
     };
 
-    let variants_obj = match obj.get("variants").and_then(Value::as_object) {
-        Some(v) => v,
-        None => return err_val("meta config missing 'variants'"),
+    let Some(variants_obj) = obj.get("variants").and_then(Value::as_object) else {
+        return err_val("meta config missing 'variants'");
     };
 
     let mut variants: IndexMap<String, ResolvedVariant> = IndexMap::new();
 
     for (variant_name, variant_val) in variants_obj {
-        let variant_obj = match variant_val.as_object() {
-            Some(o) => o,
-            None => return err_val(format!("variant '{variant_name}' is not a JSON object")),
+        let Some(variant_object) = variant_val.as_object() else {
+            return err_val(format!("variant '{variant_name}' is not a JSON object"));
         };
 
-        let model_config = match variant_obj.get("model").and_then(Value::as_str) {
+        let model_config = match variant_object.get("model").and_then(Value::as_str) {
             Some(m) => m.to_string(),
-            None => {
-                return err_val(format!("variant '{variant_name}' missing 'model'"))
-            }
+            None => return err_val(format!("variant '{variant_name}' missing 'model'")),
         };
 
-        let keywords: Vec<String> = variant_obj
+        let keywords: Vec<String> = variant_object
             .get("keywords")
             .and_then(Value::as_array)
-            .map(|arr| arr.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(str::to_string))
+                    .collect()
+            })
             .unwrap_or_default();
 
-        let description = variant_obj
+        let description = variant_object
             .get("description")
             .and_then(Value::as_str)
             .map(str::to_string);
 
-        let system_prompt = variant_obj
+        let system_prompt = variant_object
             .get("systemPrompt")
             .and_then(Value::as_str)
             .map(str::to_string);
@@ -296,9 +315,7 @@ fn resolve_meta(
 
         let resolved = match resolve_standard(&model_config, underlying, providers, key_health) {
             Ok(r) => r,
-            Err(e) => {
-                return err_val(format!("variant '{variant_name}' -> '{model_config}': {e}"))
-            }
+            Err(e) => return err_val(format!("variant '{variant_name}' -> '{model_config}': {e}")),
         };
 
         variants.insert(
@@ -325,6 +342,9 @@ fn resolve_meta(
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 fn err_val(msg: impl Into<String>) -> Value {
-    serde_json::to_value(ErrorResponse { ok: false, error: msg.into() })
-        .expect("serialization of ErrorResponse")
+    serde_json::to_value(ErrorResponse {
+        ok: false,
+        error: msg.into(),
+    })
+    .expect("serialization of ErrorResponse")
 }

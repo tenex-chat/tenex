@@ -33,7 +33,12 @@ impl ScheduleTaskTool {
         agent_slug: String,
         project_id: String,
     ) -> Self {
-        Self { project_d_tag, agent_pubkey, agent_slug, project_id }
+        Self {
+            project_d_tag,
+            agent_pubkey,
+            agent_slug,
+            project_id,
+        }
     }
 }
 
@@ -64,8 +69,7 @@ fn is_valid_cron(s: &str) -> bool {
 fn now_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0)
+        .map_or(0, |d| d.as_millis() as u64)
 }
 
 fn random_hex6() -> String {
@@ -85,9 +89,10 @@ fn generate_task_id() -> String {
 
 fn ms_to_iso(ms: u64) -> String {
     let secs = (ms / 1000) as i64;
-    chrono::DateTime::from_timestamp(secs, 0)
-        .map(|dt| dt.with_timezone(&Utc).to_rfc3339())
-        .unwrap_or_else(|| format!("{secs}"))
+    chrono::DateTime::from_timestamp(secs, 0).map_or_else(
+        || format!("{secs}"),
+        |dt| dt.with_timezone(&Utc).to_rfc3339(),
+    )
 }
 
 impl Tool for ScheduleTaskTool {
@@ -130,7 +135,11 @@ impl Tool for ScheduleTaskTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<String, Self::Error> {
-        let target_slug = args.target_agent.as_deref().unwrap_or(&self.agent_slug).to_string();
+        let target_slug = args
+            .target_agent
+            .as_deref()
+            .unwrap_or(&self.agent_slug)
+            .to_string();
         let task_id = generate_task_id();
         let created_at = Utc::now().to_rfc3339();
 
@@ -149,7 +158,7 @@ impl Tool for ScheduleTaskTool {
                 project_id: self.project_id.clone(),
                 project_ref: None,
                 task_type: Some(TaskType::Oneoff),
-                execute_at: Some(execute_at.clone()),
+                execute_at: Some(execute_at),
                 target_channel: args.target_channel,
             }
         } else if is_valid_cron(&args.when) {

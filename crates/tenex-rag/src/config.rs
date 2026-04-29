@@ -32,9 +32,18 @@ impl EmbedConfig {
         let providers = load_providers(&base_dir).ok()?;
 
         let entry = providers.providers.get(&doc.provider);
-        let api_key = entry.and_then(|e| e.api_keys.first()).map(|k| k.key.clone());
-        let base_url = doc.base_url.or_else(|| entry.and_then(|e| e.base_url.clone()));
+        let api_key = entry
+            .and_then(|e| e.api_keys.first())
+            .map(|k| k.key.clone());
+        let base_url = doc
+            .base_url
+            .or_else(|| entry.and_then(|e| e.base_url.clone()));
 
-        Some(Self { provider: doc.provider, model: doc.model, api_key, base_url })
+        Some(Self {
+            provider: doc.provider,
+            model: doc.model,
+            api_key,
+            base_url,
+        })
     }
 }

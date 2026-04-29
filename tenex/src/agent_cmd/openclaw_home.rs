@@ -67,9 +67,8 @@ fn copy_recursive(src: &Path, dst: &Path) -> Result<()> {
         if let Some(parent) = dst.parent() {
             fs::create_dir_all(parent)?;
         }
-        fs::copy(src, dst).with_context(|| {
-            format!("copy {} → {}", src.display(), dst.display())
-        })?;
+        fs::copy(src, dst)
+            .with_context(|| format!("copy {} → {}", src.display(), dst.display()))?;
     }
     Ok(())
 }
@@ -84,14 +83,12 @@ fn remove_anything(path: &Path) -> Result<()> {
                 fs::remove_dir_all(path)
                     .with_context(|| format!("remove dir {}", path.display()))?;
             } else {
-                fs::remove_file(path)
-                    .with_context(|| format!("remove {}", path.display()))?;
+                fs::remove_file(path).with_context(|| format!("remove {}", path.display()))?;
             }
             Ok(())
         }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(e) => Err(anyhow::Error::new(e)
-            .context(format!("stat {}", path.display()))),
+        Err(e) => Err(anyhow::Error::new(e).context(format!("stat {}", path.display()))),
     }
 }
 
@@ -105,8 +102,7 @@ pub fn create_home_dir(
     no_sync: bool,
 ) -> Result<PathBuf> {
     let home_dir = get_agent_home_directory(base_dir, pubkey);
-    fs::create_dir_all(&home_dir)
-        .with_context(|| format!("create {}", home_dir.display()))?;
+    fs::create_dir_all(&home_dir).with_context(|| format!("create {}", home_dir.display()))?;
 
     if no_sync {
         copy_recursive(workspace_path, &home_dir)?;
@@ -226,8 +222,7 @@ mod tests {
             "long-term"
         );
         assert_eq!(
-            fs::read_to_string(home.join("memory").join("2026-04-28.md"))
-                .unwrap(),
+            fs::read_to_string(home.join("memory").join("2026-04-28.md")).unwrap(),
             "session log"
         );
         let index = fs::read_to_string(home.join("+INDEX.md")).unwrap();
@@ -301,12 +296,14 @@ mod tests {
         let meta = fs::symlink_metadata(home.join("memory")).unwrap();
         assert!(meta.file_type().is_symlink());
         // Stale file inside the old `memory/` dir is gone.
-        assert!(!home.join("memory").join("stale.md").exists() || {
-            // It might still resolve through the new symlink if the
-            // target dir exists with that file — but we didn't create
-            // workspace/memory/stale.md, so it should not resolve.
-            !workspace.join("memory").join("stale.md").exists()
-        });
+        assert!(
+            !home.join("memory").join("stale.md").exists() || {
+                // It might still resolve through the new symlink if the
+                // target dir exists with that file — but we didn't create
+                // workspace/memory/stale.md, so it should not resolve.
+                !workspace.join("memory").join("stale.md").exists()
+            }
+        );
         fs::remove_dir_all(&base).ok();
     }
 
@@ -343,7 +340,10 @@ mod tests {
         fs::write(src.join("sub").join("nested").join("deep.txt"), "D").unwrap();
         copy_recursive(&src, &dst).unwrap();
         assert_eq!(fs::read_to_string(dst.join("top.txt")).unwrap(), "T");
-        assert_eq!(fs::read_to_string(dst.join("sub").join("mid.txt")).unwrap(), "M");
+        assert_eq!(
+            fs::read_to_string(dst.join("sub").join("mid.txt")).unwrap(),
+            "M"
+        );
         assert_eq!(
             fs::read_to_string(dst.join("sub").join("nested").join("deep.txt")).unwrap(),
             "D"

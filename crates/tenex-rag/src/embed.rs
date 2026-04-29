@@ -29,10 +29,12 @@ struct EmbedResponse {
 
 impl EmbeddingClient {
     pub fn new(config: &EmbedConfig) -> Result<Self> {
-        let api_key = config
-            .api_key
-            .clone()
-            .ok_or_else(|| anyhow!("no API key configured for embedding provider '{}'", config.provider))?;
+        let api_key = config.api_key.clone().ok_or_else(|| {
+            anyhow!(
+                "no API key configured for embedding provider '{}'",
+                config.provider
+            )
+        })?;
 
         let base_url = match config.base_url.as_deref() {
             Some(u) => u.trim_end_matches('/').to_string(),
@@ -43,11 +45,19 @@ impl EmbeddingClient {
             },
         };
 
-        Ok(Self { http: Client::new(), api_key, base_url, model: config.model.clone() })
+        Ok(Self {
+            http: Client::new(),
+            api_key,
+            base_url,
+            model: config.model.clone(),
+        })
     }
 
     pub async fn embed(&self, text: &str) -> Result<Vec<f32>> {
-        let body = EmbedRequest { model: &self.model, input: text };
+        let body = EmbedRequest {
+            model: &self.model,
+            input: text,
+        };
         let resp: EmbedResponse = self
             .http
             .post(format!("{}/embeddings", self.base_url))

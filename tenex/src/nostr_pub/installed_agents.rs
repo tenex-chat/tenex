@@ -20,9 +20,7 @@
 use anyhow::{anyhow, Context, Result};
 use nostr_sdk::{Client, Event, EventBuilder, Keys, Kind, Tag, TagKind};
 
-use crate::store::agent_storage::{
-    derive_agent_pubkey_from_nsec, AgentStorage,
-};
+use crate::store::agent_storage::{derive_agent_pubkey_from_nsec, AgentStorage};
 use crate::store::tenex_config::TenexConfigDoc;
 
 const KIND_INSTALLED_AGENT_LIST: u16 = 24011;
@@ -39,9 +37,7 @@ pub struct AgentEntry {
 /// canonical inventory ordering (slug ASC, then pubkey ASC). Mirrors the
 /// TS `agentStorage.getAllStoredAgents()` + `.map().sort()` pipeline at
 /// `InstalledAgentListService.ts:50-59`.
-pub fn collect_inventory_entries(
-    base_dir: &std::path::Path,
-) -> Result<Vec<AgentEntry>> {
+pub fn collect_inventory_entries(base_dir: &std::path::Path) -> Result<Vec<AgentEntry>> {
     let storage = AgentStorage::open(base_dir)?;
     let stored = storage.get_all_stored_agents()?;
     let mut entries: Vec<AgentEntry> = stored
@@ -86,8 +82,7 @@ pub fn build_inventory_event(
     // iteration order, so we mirror that.
     for pk in whitelisted_pubkeys {
         tags.push(
-            Tag::parse(["p", pk.as_str()])
-                .map_err(|e| anyhow!("build p tag for {pk}: {e}"))?,
+            Tag::parse(["p", pk.as_str()]).map_err(|e| anyhow!("build p tag for {pk}: {e}"))?,
         );
     }
 
@@ -124,9 +119,7 @@ fn resolve_relays(doc: &TenexConfigDoc) -> Vec<String> {
 /// Best-effort by design — TS catches the publish error and logs a warning
 /// (`AgentProvisioningService.ts:28-32`), continuing on. We mirror that:
 /// errors during publish surface but are not fatal in callers that catch.
-pub async fn publish_installed_agents_inventory(
-    base_dir: &std::path::Path,
-) -> Result<()> {
+pub async fn publish_installed_agents_inventory(base_dir: &std::path::Path) -> Result<()> {
     let doc = TenexConfigDoc::load(base_dir)?;
     let whitelisted = doc.whitelisted_pubkeys();
     let relays = resolve_relays(&doc);
@@ -224,11 +217,7 @@ mod tests {
     #[test]
     fn build_event_emits_one_p_tag_per_whitelisted_pubkey() {
         let keys = make_keys();
-        let whitelisted: Vec<String> = vec![
-            "a".repeat(64),
-            "b".repeat(64),
-            "c".repeat(64),
-        ];
+        let whitelisted: Vec<String> = vec!["a".repeat(64), "b".repeat(64), "c".repeat(64)];
         let event = build_inventory_event(&keys, &whitelisted, &[]).unwrap();
         let p_tags: Vec<Vec<&str>> = event
             .tags
@@ -276,10 +265,7 @@ mod tests {
             .collect();
         assert_eq!(
             agent_tags,
-            vec![
-                vec!["agent", "p1", "alpha"],
-                vec!["agent", "p2", "beta"],
-            ]
+            vec![vec!["agent", "p1", "alpha"], vec!["agent", "p2", "beta"],]
         );
     }
 

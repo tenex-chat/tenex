@@ -137,11 +137,8 @@ mod tests {
 
     #[test]
     fn configured_providers_preserves_disk_order() {
-        let doc = doc_with_providers(&[
-            ("openrouter", "k1"),
-            ("anthropic", "k2"),
-            ("openai", "k3"),
-        ]);
+        let doc =
+            doc_with_providers(&[("openrouter", "k1"), ("anthropic", "k2"), ("openai", "k3")]);
         assert_eq!(
             configured_providers(&doc),
             vec!["openrouter", "anthropic", "openai"]

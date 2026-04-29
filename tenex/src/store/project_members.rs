@@ -39,8 +39,7 @@ pub fn read_persisted_project_event(
             Ok(Some(parsed))
         }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(e) => Err(anyhow::Error::new(e)
-            .context(format!("read {}", path.display()))),
+        Err(e) => Err(anyhow::Error::new(e).context(format!("read {}", path.display()))),
     }
 }
 
@@ -49,10 +48,7 @@ pub fn read_persisted_project_event(
 /// behavior at `ProjectMembersReader.ts:37-66`).
 ///
 /// De-duplicates while preserving order of first occurrence.
-pub fn read_project_agent_pubkeys(
-    base_dir: &std::path::Path,
-    dtag: &str,
-) -> Result<Vec<String>> {
+pub fn read_project_agent_pubkeys(base_dir: &std::path::Path, dtag: &str) -> Result<Vec<String>> {
     let parsed = match read_persisted_project_event(base_dir, dtag) {
         Ok(p) => p,
         // TS `logger.warn` and returns `[]` for malformed input — match that.
@@ -91,10 +87,7 @@ pub fn list_project_dtags_on_disk(base_dir: &std::path::Path) -> Result<Vec<Stri
     let entries = match std::fs::read_dir(&base) {
         Ok(it) => it,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(e) => {
-            return Err(anyhow::Error::new(e)
-                .context(format!("read {}", base.display())))
-        }
+        Err(e) => return Err(anyhow::Error::new(e).context(format!("read {}", base.display()))),
     };
 
     let mut out = Vec::new();
@@ -117,10 +110,7 @@ pub fn list_project_dtags_on_disk(base_dir: &std::path::Path) -> Result<Vec<Stri
 
 /// Reverse lookup: every dTag whose persisted event lists `pubkey` as a
 /// `p`-tag. Matches `listProjectsForAgent` (`ProjectMembersReader.ts:98-108`).
-pub fn list_projects_for_agent(
-    base_dir: &std::path::Path,
-    pubkey: &str,
-) -> Result<Vec<String>> {
+pub fn list_projects_for_agent(base_dir: &std::path::Path, pubkey: &str) -> Result<Vec<String>> {
     let dtags = list_project_dtags_on_disk(base_dir)?;
     let mut matches = Vec::new();
     for dtag in dtags {
@@ -141,12 +131,8 @@ pub fn is_deleted_project_event(event: &Value) -> bool {
     let Some(tags) = event.get("tags").and_then(Value::as_array) else {
         return false;
     };
-    tags.iter().any(|t| {
-        t.as_array()
-            .and_then(|a| a.first())
-            .and_then(Value::as_str)
-            == Some("deleted")
-    })
+    tags.iter()
+        .any(|t| t.as_array().and_then(|a| a.first()).and_then(Value::as_str) == Some("deleted"))
 }
 
 /// `ProjectVisibilityStatus`, mirrored from
@@ -202,10 +188,7 @@ pub fn list_assignable_project_dtags(base_dir: &std::path::Path) -> Result<Vec<S
 /// - `Unknown` when no `event.json` exists
 /// - `Deleted` when the event has a `["deleted", …]` tag
 /// - `Active` otherwise
-pub fn get_project_visibility(
-    base_dir: &std::path::Path,
-    dtag: &str,
-) -> Result<ProjectVisibility> {
+pub fn get_project_visibility(base_dir: &std::path::Path, dtag: &str) -> Result<ProjectVisibility> {
     let Some(parsed) = read_persisted_project_event(base_dir, dtag)? else {
         return Ok(ProjectVisibility::Unknown);
     };
@@ -262,9 +245,7 @@ mod tests {
         let base = unique_temp();
         assert!(list_project_dtags_on_disk(&base).unwrap().is_empty());
         assert!(read_project_agent_pubkeys(&base, "any").unwrap().is_empty());
-        assert!(collect_all_project_agent_pubkeys(&base)
-            .unwrap()
-            .is_empty());
+        assert!(collect_all_project_agent_pubkeys(&base).unwrap().is_empty());
         std::fs::remove_dir_all(&base).ok();
     }
 
@@ -340,7 +321,9 @@ mod tests {
     fn read_project_agent_pubkeys_returns_empty_when_tags_missing() {
         let base = unique_temp();
         write_event(&base, "no-tags", r#"{}"#);
-        assert!(read_project_agent_pubkeys(&base, "no-tags").unwrap().is_empty());
+        assert!(read_project_agent_pubkeys(&base, "no-tags")
+            .unwrap()
+            .is_empty());
         std::fs::remove_dir_all(&base).ok();
     }
 
@@ -369,8 +352,10 @@ mod tests {
         write_event(&base, "p1", r#"{"tags":[["p","alice"],["p","bob"]]}"#);
         write_event(&base, "p2", r#"{"tags":[["p","bob"],["p","carol"]]}"#);
         let all = collect_all_project_agent_pubkeys(&base).unwrap();
-        let expected: std::collections::HashSet<String> =
-            ["alice", "bob", "carol"].iter().map(|s| s.to_string()).collect();
+        let expected: std::collections::HashSet<String> = ["alice", "bob", "carol"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
         assert_eq!(all, expected);
         std::fs::remove_dir_all(&base).ok();
     }
@@ -379,7 +364,9 @@ mod tests {
     fn read_persisted_project_event_returns_none_for_missing() {
         let base = unique_temp();
         std::fs::create_dir_all(projects_base_path(&base).join("ghost")).unwrap();
-        assert!(read_persisted_project_event(&base, "ghost").unwrap().is_none());
+        assert!(read_persisted_project_event(&base, "ghost")
+            .unwrap()
+            .is_none());
         std::fs::remove_dir_all(&base).ok();
     }
 
@@ -442,11 +429,7 @@ mod tests {
         let base = unique_temp();
         write_event(&base, "zebra", r#"{"tags":[["d","zebra"]]}"#);
         write_event(&base, "alpha", r#"{"tags":[["d","alpha"]]}"#);
-        write_event(
-            &base,
-            "rip",
-            r#"{"tags":[["d","rip"],["deleted",""]]}"#,
-        );
+        write_event(&base, "rip", r#"{"tags":[["d","rip"],["deleted",""]]}"#);
         write_event(&base, "mango", r#"{"tags":[["d","mango"]]}"#);
         let assignable = list_assignable_project_dtags(&base).unwrap();
         assert_eq!(
@@ -490,9 +473,7 @@ mod tests {
         // Brutal-verify pin: every real persisted event.json under
         // ~/.tenex/projects/ must parse and yield ≥0 p-tags. Skip silently
         // when absent.
-        let real = std::env::var("HOME")
-            .ok()
-            .map(std::path::PathBuf::from);
+        let real = std::env::var("HOME").ok().map(std::path::PathBuf::from);
         let Some(home) = real else { return };
         if !home.join(".tenex/projects").exists() {
             return;

@@ -59,8 +59,7 @@ fn hex_of(keys: &Keys) -> String {
 /// Test-only helper: reconstruct keys from a hex string.
 #[cfg(test)]
 fn keys_from_hex(hex: &str) -> Result<Keys> {
-    let sk = SecretKey::from_hex(hex)
-        .map_err(|e| anyhow!("from_hex: {e}"))?;
+    let sk = SecretKey::from_hex(hex).map_err(|e| anyhow!("from_hex: {e}"))?;
     Ok(Keys::new(sk))
 }
 

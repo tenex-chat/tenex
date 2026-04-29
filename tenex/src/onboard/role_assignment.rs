@@ -48,7 +48,10 @@ pub enum RoleAssignmentResult {
 }
 
 /// Run the role-assignment screen against `<base_dir>/llms.json`.
-pub fn run(base_dir: &std::path::Path, source: &dyn ModelInfoSource) -> Result<RoleAssignmentResult> {
+pub fn run(
+    base_dir: &std::path::Path,
+    source: &dyn ModelInfoSource,
+) -> Result<RoleAssignmentResult> {
     let mut doc = LlmsDoc::load(base_dir)
         .with_context(|| format!("loading llms.json from {}", base_dir.display()))?;
 
@@ -188,9 +191,7 @@ fn format_choice_label(doc: &LlmsDoc, name: &str, source: &dyn ModelInfoSource) 
     if entry.kind() == LlmConfigKind::Meta {
         let n_variants = entry.variant_names().len();
         // TS: `${name}  ${chalk.dim(\`(multi-modal, ${count} variants)\`)}`
-        return format!(
-            "{name}  {dim_open}(multi-modal, {n_variants} variants){dim_close}"
-        );
+        return format!("{name}  {dim_open}(multi-modal, {n_variants} variants){dim_close}");
     }
 
     let provider = entry.provider().unwrap_or("");
@@ -226,10 +227,7 @@ fn strip_trailing_zero(value: f64) -> String {
     }
 }
 
-fn collect_assignments(
-    doc: &LlmsDoc,
-    default_config: &str,
-) -> IndexMap<RoleKey, String> {
+fn collect_assignments(doc: &LlmsDoc, default_config: &str) -> IndexMap<RoleKey, String> {
     let mut out = IndexMap::new();
     for role in ROLES {
         let value = get_role(doc, role)
@@ -397,14 +395,19 @@ mod tests {
         doc.set_supervision(Some("B".into()));
 
         let assignments = collect_assignments(&doc, "A");
-        assert_eq!(assignments.get(&RoleKey::Default).map(String::as_str), Some("A"));
+        assert_eq!(
+            assignments.get(&RoleKey::Default).map(String::as_str),
+            Some("A")
+        );
         assert_eq!(
             assignments.get(&RoleKey::Supervision).map(String::as_str),
             Some("B")
         );
         // Unset roles fall back to default.
         assert_eq!(
-            assignments.get(&RoleKey::Categorization).map(String::as_str),
+            assignments
+                .get(&RoleKey::Categorization)
+                .map(String::as_str),
             Some("A")
         );
     }
@@ -428,9 +431,18 @@ mod tests {
     #[test]
     fn starting_cursor_finds_current_value_by_name() {
         let choices = vec![
-            ConfigChoice { name: "A".into(), label: "A".into() },
-            ConfigChoice { name: "B".into(), label: "B".into() },
-            ConfigChoice { name: "C".into(), label: "C".into() },
+            ConfigChoice {
+                name: "A".into(),
+                label: "A".into(),
+            },
+            ConfigChoice {
+                name: "B".into(),
+                label: "B".into(),
+            },
+            ConfigChoice {
+                name: "C".into(),
+                label: "C".into(),
+            },
         ];
         assert_eq!(starting_cursor(&choices, "B"), 1);
         assert_eq!(starting_cursor(&choices, "C"), 2);
@@ -438,7 +450,10 @@ mod tests {
 
     #[test]
     fn starting_cursor_defaults_to_zero_when_current_missing() {
-        let choices = vec![ConfigChoice { name: "A".into(), label: "A".into() }];
+        let choices = vec![ConfigChoice {
+            name: "A".into(),
+            label: "A".into(),
+        }];
         assert_eq!(starting_cursor(&choices, "Z"), 0);
     }
 

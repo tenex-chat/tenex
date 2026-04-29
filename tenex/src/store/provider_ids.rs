@@ -89,7 +89,15 @@ mod tests {
         // `Object.values(PROVIDER_IDS)`. Pin it.
         assert_eq!(
             ALL_PROVIDER_IDS,
-            &["claude-code", "codex", "openrouter", "anthropic", "openai", "ollama", "mock"]
+            &[
+                "claude-code",
+                "codex",
+                "openrouter",
+                "anthropic",
+                "openai",
+                "ollama",
+                "mock"
+            ]
         );
     }
 
@@ -118,15 +126,9 @@ mod tests {
         );
         assert_eq!(provider_display_name("anthropic"), "Anthropic (Claude)");
         assert_eq!(provider_display_name("openai"), "OpenAI (GPT)");
-        assert_eq!(
-            provider_display_name("ollama"),
-            "Ollama (Local models)"
-        );
+        assert_eq!(provider_display_name("ollama"), "Ollama (Local models)");
         assert_eq!(provider_display_name("codex"), "Codex");
-        assert_eq!(
-            provider_display_name("claude-code"),
-            "Claude Code (Agents)"
-        );
+        assert_eq!(provider_display_name("claude-code"), "Claude Code (Agents)");
     }
 
     #[test]

@@ -204,9 +204,8 @@ pub fn format_stream_error(
     // verbatim.
     let provider = extract_quoted_field(error_str, "provider_name")
         .unwrap_or_else(|| "AI provider".to_owned());
-    let mut msg = format!(
-        "Failed to process request with {provider}. The AI service returned an error."
-    );
+    let mut msg =
+        format!("Failed to process request with {provider}. The AI service returned an error.");
     if let Some(raw) = extract_quoted_field(error_str, "raw") {
         msg.push_str(&format!(" Details: {raw}"));
     }
@@ -406,10 +405,7 @@ mod tests {
     #[test]
     fn format_stream_error_plain_error_uses_error_prefix() {
         // No AI markers in toString → "Error: <msg>".
-        let (msg, ty) = format_stream_error(
-            Some("Error: file not found"),
-            Some("file not found"),
-        );
+        let (msg, ty) = format_stream_error(Some("Error: file not found"), Some("file not found"));
         assert_eq!(msg, "Error: file not found");
         assert_eq!(ty, StreamErrorType::System);
     }

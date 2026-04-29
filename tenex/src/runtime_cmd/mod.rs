@@ -13,7 +13,7 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter};
 use tracing::{info, warn};
 
 use tenex_conversations::{ConversationStore, NewMessage, Project as ConversationsProject};
-use tenex_project::{Agent, Project, models::ProjectAgent};
+use tenex_project::{models::ProjectAgent, Agent, Project};
 
 use crate::daemon::config;
 use crate::nostr_pub::{backend_signer, operations_status, project_status};
@@ -159,8 +159,7 @@ pub async fn run(args: RuntimeArgs) -> Result<()> {
     // Deduplicate across the two overlapping subscriptions.
     let mut seen: HashSet<EventId> = HashSet::new();
 
-    let mut sigterm =
-        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
+    let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
     let mut notifications = client.notifications();
 
     loop {
@@ -409,7 +408,9 @@ fn conversation_id_from_event(event: &Event) -> String {
         }
         let parts = tag.as_slice();
         // parts[0]="e", parts[1]=event-id, parts[2]=relay, parts[3]=marker
-        let Some(event_id) = parts.get(1) else { continue };
+        let Some(event_id) = parts.get(1) else {
+            continue;
+        };
         let marker = parts.get(3).map(|s| s.as_str());
         match marker {
             Some("root") => return event_id.clone(),
@@ -495,7 +496,10 @@ impl RuntimeLockfile {
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_millis() as u64)
             .unwrap_or(0);
-        let info = LockInfo { pid: std::process::id() as i32, started_at };
+        let info = LockInfo {
+            pid: std::process::id() as i32,
+            started_at,
+        };
         std::fs::write(&path, serde_json::to_vec(&info)?)?;
         Ok(Self { path })
     }

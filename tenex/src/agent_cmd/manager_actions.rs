@@ -30,8 +30,8 @@ use anyhow::{anyhow, Result};
 use nostr_sdk::Keys;
 
 use crate::agent_cmd::manager_logic::{
-    find_duplicate_slug_groups, format_managed_agent_list_line, format_projects,
-    load_agents, pick_merge_survivor, ManagedAgent,
+    find_duplicate_slug_groups, format_managed_agent_list_line, format_projects, load_agents,
+    pick_merge_survivor, ManagedAgent,
 };
 use crate::agent_cmd::provisioning::{delete_stored_agent, DeleteOptions};
 use crate::nostr_pub::owner_signer::resolve_owner_signer;
@@ -81,11 +81,9 @@ pub async fn bulk_delete_agents(
 
     let n = selected.len();
     let plural = if n == 1 { "" } else { "s" };
-    let confirmed = match prompts::confirm(&format!(
-        "Permanently delete {n} agent{plural}?"
-    ))
-    .with_default(false)
-    .prompt()
+    let confirmed = match prompts::confirm(&format!("Permanently delete {n} agent{plural}?"))
+        .with_default(false)
+        .prompt()
     {
         Ok(b) => b,
         Err(inquire::InquireError::OperationCanceled)
@@ -100,12 +98,8 @@ pub async fn bulk_delete_agents(
 
     let mut deleted_count = 0usize;
     for agent in &selected {
-        let was_deleted = delete_stored_agent(
-            base_dir,
-            &agent.pubkey,
-            DeleteOptions::new(),
-        )
-        .await?;
+        let was_deleted =
+            delete_stored_agent(base_dir, &agent.pubkey, DeleteOptions::new()).await?;
         if was_deleted {
             deleted_count += 1;
         }
@@ -292,7 +286,13 @@ pub async fn assign_agent_to_projects(
     let default_indices: Vec<usize> = choices
         .iter()
         .enumerate()
-        .filter_map(|(i, c)| if current_set.contains(c) { Some(i) } else { None })
+        .filter_map(|(i, c)| {
+            if current_set.contains(c) {
+                Some(i)
+            } else {
+                None
+            }
+        })
         .collect();
 
     let selected = match prompts::multi_select("Assigned to projects", choices.clone())
@@ -366,18 +366,16 @@ pub async fn confirm_and_delete(
         return Ok(());
     };
 
-    let confirmed = match prompts::confirm(&format!(
-        "Permanently delete {} from storage?",
-        entry.slug,
-    ))
-    .with_default(false)
-    .prompt()
-    {
-        Ok(b) => b,
-        Err(inquire::InquireError::OperationCanceled)
-        | Err(inquire::InquireError::OperationInterrupted) => false,
-        Err(e) => return Err(anyhow!("confirm-and-delete: {e}")),
-    };
+    let confirmed =
+        match prompts::confirm(&format!("Permanently delete {} from storage?", entry.slug,))
+            .with_default(false)
+            .prompt()
+        {
+            Ok(b) => b,
+            Err(inquire::InquireError::OperationCanceled)
+            | Err(inquire::InquireError::OperationInterrupted) => false,
+            Err(e) => return Err(anyhow!("confirm-and-delete: {e}")),
+        };
     if !confirmed {
         return Ok(());
     }
@@ -446,10 +444,7 @@ pub async fn offer_auto_merge_for_duplicate_slugs(
     let summary = groups
         .iter()
         .map(|g| {
-            let slug = g
-                .first()
-                .map(|a| a.slug.as_str())
-                .unwrap_or("");
+            let slug = g.first().map(|a| a.slug.as_str()).unwrap_or("");
             format!("{slug} ({})", g.len())
         })
         .collect::<Vec<_>>()
@@ -565,8 +560,7 @@ pub async fn show_agent_detail(
             CHOICE_ASSIGN => {
                 let keys = ensure_owner_signer(owner_keys, base_dir)?;
                 let snapshot = entry.clone();
-                assign_agent_to_projects(base_dir, &keys, Some(&snapshot), page_size)
-                    .await?;
+                assign_agent_to_projects(base_dir, &keys, Some(&snapshot), page_size).await?;
                 continue;
             }
             CHOICE_DELETE => {
@@ -576,9 +570,7 @@ pub async fn show_agent_detail(
                 return Ok(());
             }
             other => {
-                return Err(anyhow!(
-                    "show_agent_detail: unexpected action {other:?}"
-                ));
+                return Err(anyhow!("show_agent_detail: unexpected action {other:?}"));
             }
         }
     }
@@ -638,9 +630,7 @@ pub async fn show_main_menu(base_dir: &std::path::Path) -> Result<()> {
 
         display::blank();
         display::step(0, 0, "Agent Manager");
-        display::context(
-            "Inspect current agent memberships or permanently delete stored agents.",
-        );
+        display::context("Inspect current agent memberships or permanently delete stored agents.");
 
         let items: Vec<AgentItem> = agents
             .iter()
@@ -664,10 +654,7 @@ pub async fn show_main_menu(base_dir: &std::path::Path) -> Result<()> {
             },
         ];
 
-        let message = format!(
-            "Agents {}",
-            chalk_dim(&format!("({})", agents.len())),
-        );
+        let message = format!("Agents {}", chalk_dim(&format!("({})", agents.len())),);
         let result = match agent_select_prompt(&message, &actions, &items)? {
             Some(r) => r,
             None => return Ok(()), // Esc / Ctrl-C → done
@@ -698,9 +685,7 @@ pub async fn show_main_menu(base_dir: &std::path::Path) -> Result<()> {
                 continue;
             }
             other => {
-                return Err(anyhow!(
-                    "show_main_menu: unexpected action {other:?}"
-                ));
+                return Err(anyhow!("show_main_menu: unexpected action {other:?}"));
             }
         }
     }
@@ -708,10 +693,7 @@ pub async fn show_main_menu(base_dir: &std::path::Path) -> Result<()> {
 
 /// Resolve the owner signer once per session, then return cached keys.
 /// Mirrors `AgentManager.getOwnerSigner` (`AgentManager.ts:252-257`).
-fn ensure_owner_signer(
-    cache: &mut Option<Keys>,
-    base_dir: &std::path::Path,
-) -> Result<Keys> {
+fn ensure_owner_signer(cache: &mut Option<Keys>, base_dir: &std::path::Path) -> Result<Keys> {
     if cache.is_none() {
         *cache = Some(resolve_owner_signer(base_dir)?);
     }
@@ -758,8 +740,7 @@ mod tests {
         // Generate a random pubkey so Set-based dedupe across tests doesn't
         // bleed; we only use this in tests that don't read the storage.
         let nsec = generate_nsec_bech32().unwrap();
-        let pubkey =
-            crate::store::agent_storage::derive_agent_pubkey_from_nsec(&nsec).unwrap();
+        let pubkey = crate::store::agent_storage::derive_agent_pubkey_from_nsec(&nsec).unwrap();
         ManagedAgent {
             slug: slug.to_owned(),
             name: format!("{slug}-name"),
@@ -824,8 +805,7 @@ mod tests {
         let base = unique_temp();
         let keys = Keys::generate();
         let a = agent("alpha", vec!["P1"]);
-        let result =
-            bulk_delete_agents(&base, &keys, &[a], &["does-not-match".to_owned()]).await;
+        let result = bulk_delete_agents(&base, &keys, &[a], &["does-not-match".to_owned()]).await;
         assert!(result.is_ok());
         std::fs::remove_dir_all(&base).ok();
     }
@@ -919,14 +899,9 @@ mod tests {
         let keys = Keys::generate();
         let a = agent("alpha", vec![]);
         let b = agent("beta", vec![]);
-        let outcome = offer_auto_merge_for_duplicate_slugs(
-            &base,
-            &keys,
-            vec![a, b],
-            false,
-        )
-        .await
-        .unwrap();
+        let outcome = offer_auto_merge_for_duplicate_slugs(&base, &keys, vec![a, b], false)
+            .await
+            .unwrap();
         assert!(!outcome.dismissed);
         assert_eq!(outcome.agents.len(), 2);
         std::fs::remove_dir_all(&base).ok();

@@ -25,7 +25,9 @@ pub struct StdoutNdjsonSink {
 
 impl StdoutNdjsonSink {
     pub fn new() -> Self {
-        Self { out: Mutex::new(tokio::io::stdout()) }
+        Self {
+            out: Mutex::new(tokio::io::stdout()),
+        }
     }
 }
 
@@ -56,7 +58,9 @@ pub struct CapturingSink {
 #[cfg(test)]
 impl CapturingSink {
     pub fn new() -> Self {
-        Self { events: Mutex::new(Vec::new()) }
+        Self {
+            events: Mutex::new(Vec::new()),
+        }
     }
     pub async fn into_events(self) -> Vec<nostr::Event> {
         self.events.into_inner()

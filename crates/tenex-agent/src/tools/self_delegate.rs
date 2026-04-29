@@ -81,6 +81,9 @@ impl Tool for SelfDelegateTool {
             .await
             .map_err(|e| SelfDelegateError(format!("failed to emit self-delegation: {e}")))?;
 
-        Ok("Self-delegation queued. Stop here — do not take further actions this turn.".to_string())
+        Ok(
+            "Self-delegation queued. Stop here — do not take further actions this turn."
+                .to_string(),
+        )
     }
 }

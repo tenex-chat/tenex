@@ -18,9 +18,7 @@ use tracing::{debug, error, info, warn};
 use crate::categories;
 use crate::config::Config;
 use crate::publish::Publisher;
-use crate::source::{
-    self, MetadataUpdate, ProjectEvent, ProjectRef,
-};
+use crate::source::{self, MetadataUpdate, ProjectEvent, ProjectRef};
 use crate::state::SummaryStateStore;
 use crate::summarize::{self, Summary};
 
@@ -55,11 +53,7 @@ pub async fn run(cfg: Config, state: SummaryStateStore) -> Result<()> {
     }
 }
 
-async fn scan_once(
-    cfg: &Config,
-    state: &SummaryStateStore,
-    publisher: &Publisher,
-) -> Result<()> {
+async fn scan_once(cfg: &Config, state: &SummaryStateStore, publisher: &Publisher) -> Result<()> {
     let projects = match source::discover_projects() {
         Ok(p) => p,
         Err(e) => {
@@ -225,7 +219,12 @@ async fn process_inner(
     source::write_metadata(project, conversation_id, &update)?;
 
     publisher
-        .publish(conversation_id, &content.project_event, &cfg.llm.model, &summary)
+        .publish(
+            conversation_id,
+            &content.project_event,
+            &cfg.llm.model,
+            &summary,
+        )
         .await?;
 
     Ok(Some((summary, content.last_activity)))
@@ -255,5 +254,9 @@ fn now_secs() -> i64 {
 }
 
 fn short(id: &str) -> String {
-    if id.len() > 8 { id[..8].to_string() } else { id.to_string() }
+    if id.len() > 8 {
+        id[..8].to_string()
+    } else {
+        id.to_string()
+    }
 }

@@ -91,8 +91,8 @@ pub fn load_project_event(project: &ProjectRef) -> Result<ProjectEvent> {
 
     let path = project.root.join("event.json");
     let bytes = fs::read(&path).with_context(|| format!("read {}", path.display()))?;
-    let parsed: OnDisk = serde_json::from_slice(&bytes)
-        .with_context(|| format!("parse {}", path.display()))?;
+    let parsed: OnDisk =
+        serde_json::from_slice(&bytes).with_context(|| format!("parse {}", path.display()))?;
     let d_tag = parsed
         .tags
         .iter()
@@ -183,8 +183,8 @@ pub fn fetch_content(
         messages: Vec<OnDiskMessage>,
     }
 
-    let parsed: OnDiskConversation = serde_json::from_slice(&bytes)
-        .with_context(|| format!("parse {}", path.display()))?;
+    let parsed: OnDiskConversation =
+        serde_json::from_slice(&bytes).with_context(|| format!("parse {}", path.display()))?;
 
     let mut lines = Vec::new();
     for m in parsed.messages.iter().filter(|m| m.message_type == "text") {
@@ -243,8 +243,8 @@ pub fn write_metadata(
         return Ok(());
     }
     let bytes = fs::read(&path).with_context(|| format!("read {}", path.display()))?;
-    let mut value: serde_json::Value = serde_json::from_slice(&bytes)
-        .with_context(|| format!("parse {}", path.display()))?;
+    let mut value: serde_json::Value =
+        serde_json::from_slice(&bytes).with_context(|| format!("parse {}", path.display()))?;
 
     let metadata = value
         .as_object_mut()

@@ -117,7 +117,9 @@ pub fn auto_detect_providers(
         ),
     ];
     for (env_var, provider_id, label) in env_map {
-        let Some(value) = env.get(*env_var) else { continue };
+        let Some(value) = env.get(*env_var) else {
+            continue;
+        };
         if value.is_empty() {
             continue;
         }
@@ -171,10 +173,16 @@ impl DetectionProbes for SystemProbes {
         let Ok(mut stream) = TcpStream::connect_timeout(&addr, Duration::from_secs(2)) else {
             return false;
         };
-        if stream.set_read_timeout(Some(Duration::from_secs(2))).is_err() {
+        if stream
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .is_err()
+        {
             return false;
         }
-        if stream.set_write_timeout(Some(Duration::from_secs(2))).is_err() {
+        if stream
+            .set_write_timeout(Some(Duration::from_secs(2)))
+            .is_err()
+        {
             return false;
         }
         if stream
@@ -253,7 +261,9 @@ mod tests {
         let det = auto_detect_providers(ProvidersDoc::new(), &empty_env(), &probes);
         let entry = det.doc.get("codex").expect("codex provider present");
         assert_eq!(entry.api_keys(), vec!["none".to_owned()]);
-        assert!(det.detected_sources.contains(&"Codex CLI (codex)".to_owned()));
+        assert!(det
+            .detected_sources
+            .contains(&"Codex CLI (codex)".to_owned()));
     }
 
     #[test]
@@ -315,7 +325,9 @@ mod tests {
         let det = auto_detect_providers(ProvidersDoc::new(), &empty_env(), &probes);
         let entry = det.doc.get("ollama").unwrap();
         assert_eq!(entry.api_keys(), vec!["http://localhost:11434".to_owned()]);
-        assert!(det.detected_sources.contains(&"Ollama (localhost:11434)".to_owned()));
+        assert!(det
+            .detected_sources
+            .contains(&"Ollama (localhost:11434)".to_owned()));
     }
 
     #[test]
@@ -345,7 +357,9 @@ mod tests {
         let det = auto_detect_providers(ProvidersDoc::new(), &env, &MockProbes::new());
         let entry = det.doc.get("anthropic").unwrap();
         assert_eq!(entry.api_keys(), vec!["sk-ant-real".to_owned()]);
-        assert!(det.detected_sources.contains(&"Anthropic (from ANTHROPIC_API_KEY)".to_owned()));
+        assert!(det
+            .detected_sources
+            .contains(&"Anthropic (from ANTHROPIC_API_KEY)".to_owned()));
     }
 
     #[test]
@@ -356,7 +370,9 @@ mod tests {
             det.doc.get("openai").unwrap().api_keys(),
             vec!["sk-openai".to_owned()]
         );
-        assert!(det.detected_sources.contains(&"OpenAI (from OPENAI_API_KEY)".to_owned()));
+        assert!(det
+            .detected_sources
+            .contains(&"OpenAI (from OPENAI_API_KEY)".to_owned()));
     }
 
     #[test]
@@ -364,7 +380,10 @@ mod tests {
         let env = one_env("OPENROUTER_API_KEY", "sk-or-v1");
         let det = auto_detect_providers(ProvidersDoc::new(), &env, &MockProbes::new());
         assert!(det.doc.get("openrouter").is_some());
-        assert!(det.detected_sources.iter().any(|s| s.contains("OPENROUTER_API_KEY")));
+        assert!(det
+            .detected_sources
+            .iter()
+            .any(|s| s.contains("OPENROUTER_API_KEY")));
     }
 
     #[test]
@@ -394,10 +413,7 @@ mod tests {
         let env = one_env("ANTHROPIC_AUTH_TOKEN", "sk-ant-oat01-realtoken");
         let det = auto_detect_providers(ProvidersDoc::new(), &env, &MockProbes::new());
         let entry = det.doc.get("anthropic").unwrap();
-        assert_eq!(
-            entry.api_keys(),
-            vec!["sk-ant-oat01-realtoken".to_owned()]
-        );
+        assert_eq!(entry.api_keys(), vec!["sk-ant-oat01-realtoken".to_owned()]);
         assert!(det
             .detected_sources
             .contains(&"Anthropic (from ANTHROPIC_AUTH_TOKEN)".to_owned()));

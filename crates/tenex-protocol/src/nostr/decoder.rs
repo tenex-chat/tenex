@@ -97,7 +97,9 @@ pub fn decode(event: &Event) -> Result<InboundEnvelope, DecodeError> {
     }
 
     let root_id = root_event_id.unwrap_or(event.id);
-    let conversation = ConversationRef::Nostr { root_event_id: root_id };
+    let conversation = ConversationRef::Nostr {
+        root_event_id: root_id,
+    };
     let message = MessageRef::Nostr { event_id: event.id };
     let root = MessageRef::Nostr { event_id: root_id };
 
@@ -138,8 +140,7 @@ pub fn decode(event: &Event) -> Result<InboundEnvelope, DecodeError> {
 impl InboundEnvelope {
     /// Match TS `isDelegationCompletion`: kind:1 + `["status","completed"]`.
     pub fn is_completion(&self) -> bool {
-        self.metadata.event_kind == Some(1)
-            && self.metadata.status.as_deref() == Some("completed")
+        self.metadata.event_kind == Some(1) && self.metadata.status.as_deref() == Some("completed")
     }
 
     /// Match TS `isAgentInternalMessage`: has tool tag or status tag.

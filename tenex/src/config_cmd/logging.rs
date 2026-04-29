@@ -64,7 +64,6 @@ pub fn run(base_dir: &std::path::Path) -> Result<()> {
     Ok(())
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -88,10 +87,7 @@ mod tests {
     #[test]
     fn log_levels_pinned_to_ts_array_in_order() {
         // Source: `logging.ts:7` `LOG_LEVELS = [...] as const`.
-        assert_eq!(
-            LOG_LEVELS,
-            &["silent", "error", "warn", "info", "debug"],
-        );
+        assert_eq!(LOG_LEVELS, &["silent", "error", "warn", "info", "debug"],);
     }
 
     #[test]
@@ -116,7 +112,10 @@ mod tests {
 
         let reloaded = TenexConfigDoc::load(&base).unwrap();
         assert_eq!(reloaded.logging_level().as_deref(), Some("warn"));
-        assert_eq!(reloaded.logging_log_file().as_deref(), Some("/tmp/tenex.log"));
+        assert_eq!(
+            reloaded.logging_log_file().as_deref(),
+            Some("/tmp/tenex.log")
+        );
         std::fs::remove_dir_all(&base).ok();
     }
 

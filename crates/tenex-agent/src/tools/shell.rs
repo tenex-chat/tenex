@@ -22,7 +22,10 @@ pub struct ShellTool {
 
 impl ShellTool {
     pub fn new(working_dir: String, extra_env: Vec<(String, String)>) -> Self {
-        Self { working_dir, extra_env }
+        Self {
+            working_dir,
+            extra_env,
+        }
     }
 }
 
@@ -96,11 +99,7 @@ Commands run with a timeout in seconds (default 30, max 600)."
             cmd.env(k, v);
         }
 
-        let result = tokio::time::timeout(
-            Duration::from_secs(timeout_secs),
-            cmd.output(),
-        )
-        .await;
+        let result = tokio::time::timeout(Duration::from_secs(timeout_secs), cmd.output()).await;
 
         match result {
             Err(_) => Ok(format!(

@@ -25,7 +25,9 @@ fn normalize_lexically(path: &Path) -> PathBuf {
     let mut out = PathBuf::new();
     for component in path.components() {
         match component {
-            std::path::Component::ParentDir => { out.pop(); }
+            std::path::Component::ParentDir => {
+                out.pop();
+            }
             std::path::Component::CurDir => {}
             c => out.push(c),
         }
@@ -124,7 +126,11 @@ impl Tool for FsReadTool {
                 .map(|e| e.file_name().to_string_lossy().to_string())
                 .collect();
             entries.sort();
-            let listing = entries.iter().map(|e| format!("  - {e}")).collect::<Vec<_>>().join("\n");
+            let listing = entries
+                .iter()
+                .map(|e| format!("  - {e}"))
+                .collect::<Vec<_>>()
+                .join("\n");
             return Ok(format!(
                 "Directory listing for {}:\n{listing}\n\nTo read a specific file, pass its absolute path.",
                 path.display()
@@ -220,7 +226,11 @@ impl Tool for FsWriteTool {
         }
         fs::write(&path, &args.content)
             .map_err(|e| FsError(format!("Error writing {}: {e}", path.display())))?;
-        Ok(format!("Successfully wrote {} bytes to {}", args.content.len(), path.display()))
+        Ok(format!(
+            "Successfully wrote {} bytes to {}",
+            args.content.len(),
+            path.display()
+        ))
     }
 }
 
@@ -270,7 +280,9 @@ impl Tool for FsEditTool {
 
     async fn call(&self, args: FsEditArgs) -> Result<Self::Output, FsError> {
         if args.old_string == args.new_string {
-            return Err(FsError("old_string and new_string must be different".to_string()));
+            return Err(FsError(
+                "old_string and new_string must be different".to_string(),
+            ));
         }
 
         let path = resolve_path(&self.working_dir, &args.path);
@@ -301,7 +313,10 @@ impl Tool for FsEditTool {
 
         fs::write(&path, &new_content)
             .map_err(|e| FsError(format!("Error writing {}: {e}", path.display())))?;
-        Ok(format!("Successfully replaced {count} occurrence(s) in {}", path.display()))
+        Ok(format!(
+            "Successfully replaced {count} occurrence(s) in {}",
+            path.display()
+        ))
     }
 }
 
@@ -361,7 +376,9 @@ impl Tool for FsGlobTool {
         };
 
         let mut all_paths: Vec<String> = Vec::new();
-        for entry in glob(&full_pattern).map_err(|e| FsError(format!("Invalid glob pattern: {e}")))? {
+        for entry in
+            glob(&full_pattern).map_err(|e| FsError(format!("Invalid glob pattern: {e}")))?
+        {
             match entry {
                 Ok(path) => {
                     if path.is_file() && !has_excluded_segment(&path) {
@@ -373,8 +390,13 @@ impl Tool for FsGlobTool {
         }
         all_paths.sort();
 
-        let effective_limit = if head_limit == 0 { usize::MAX } else { head_limit };
-        let paginated: Vec<&str> = all_paths.iter()
+        let effective_limit = if head_limit == 0 {
+            usize::MAX
+        } else {
+            head_limit
+        };
+        let paginated: Vec<&str> = all_paths
+            .iter()
             .skip(offset)
             .take(effective_limit)
             .map(String::as_str)
@@ -467,7 +489,9 @@ impl Tool for FsGrepTool {
         let offset = args.offset.unwrap_or(0);
         let output_mode = args.output_mode.as_deref().unwrap_or("files_with_matches");
 
-        let search_path = args.path.as_deref()
+        let search_path = args
+            .path
+            .as_deref()
             .map(|p| resolve_path(&self.working_dir, p))
             .unwrap_or_else(|| PathBuf::from(&self.working_dir));
 
@@ -479,8 +503,13 @@ impl Tool for FsGrepTool {
             return Ok(format!("No matches found for pattern: {}", args.pattern));
         }
 
-        let effective_limit = if head_limit == 0 { usize::MAX } else { head_limit };
-        let paginated: Vec<&str> = lines.iter()
+        let effective_limit = if head_limit == 0 {
+            usize::MAX
+        } else {
+            head_limit
+        };
+        let paginated: Vec<&str> = lines
+            .iter()
             .skip(offset)
             .take(effective_limit)
             .map(String::as_str)
@@ -490,8 +519,16 @@ impl Tool for FsGrepTool {
 
         // Content mode size guard: fall back to files_with_matches if too large
         if output_mode == "content" && joined.len() > MAX_CONTENT_SIZE {
-            let file_lines = run_search(use_rg, &args, &search_path, "files_with_matches", &self.working_dir).await?;
-            let file_paginated: Vec<&str> = file_lines.iter()
+            let file_lines = run_search(
+                use_rg,
+                &args,
+                &search_path,
+                "files_with_matches",
+                &self.working_dir,
+            )
+            .await?;
+            let file_paginated: Vec<&str> = file_lines
+                .iter()
                 .skip(offset)
                 .take(effective_limit)
                 .map(String::as_str)
@@ -549,7 +586,11 @@ async fn run_search(
         for dir in EXCLUDED_DIRS {
             cmd_args.extend(["--glob".to_string(), format!("!{dir}")]);
         }
-        cmd_args.extend(["--".to_string(), args.pattern.clone(), search_path.display().to_string()]);
+        cmd_args.extend([
+            "--".to_string(),
+            args.pattern.clone(),
+            search_path.display().to_string(),
+        ]);
 
         Command::new("rg")
             .args(&cmd_args)
@@ -619,7 +660,10 @@ fn relativize_grep_line(line: &str, working_dir: &str, output_mode: &str) -> Str
             if let Some(pos) = line.rfind(':') {
                 let path_part = &line[..pos];
                 let count_part = &line[pos..];
-                format!("{}{count_part}", make_relative(Path::new(path_part), working_dir))
+                format!(
+                    "{}{count_part}",
+                    make_relative(Path::new(path_part), working_dir)
+                )
             } else {
                 line.to_string()
             }
@@ -702,7 +746,11 @@ impl Tool for HomeFsReadTool {
                 .map(|e| e.file_name().to_string_lossy().to_string())
                 .collect();
             entries.sort();
-            let listing = entries.iter().map(|e| format!("  - {e}")).collect::<Vec<_>>().join("\n");
+            let listing = entries
+                .iter()
+                .map(|e| format!("  - {e}"))
+                .collect::<Vec<_>>()
+                .join("\n");
             return Ok(format!(
                 "Directory listing for {}:\n{listing}\n\nTo read a specific file, pass its path relative to your home directory.",
                 path.display()
@@ -793,7 +841,11 @@ impl Tool for HomeFsWriteTool {
         }
         fs::write(&path, &args.content)
             .map_err(|e| FsError(format!("Error writing {}: {e}", path.display())))?;
-        Ok(format!("Successfully wrote {} bytes to {}", args.content.len(), path.display()))
+        Ok(format!(
+            "Successfully wrote {} bytes to {}",
+            args.content.len(),
+            path.display()
+        ))
     }
 }
 
@@ -840,7 +892,9 @@ impl Tool for HomeFsEditTool {
 
     async fn call(&self, args: FsEditArgs) -> Result<Self::Output, FsError> {
         if args.old_string == args.new_string {
-            return Err(FsError("old_string and new_string must be different".to_string()));
+            return Err(FsError(
+                "old_string and new_string must be different".to_string(),
+            ));
         }
         let path = resolve_home_path(&self.home_dir, &args.path)?;
         let content = fs::read_to_string(&path)
@@ -867,7 +921,10 @@ impl Tool for HomeFsEditTool {
         };
         fs::write(&path, &new_content)
             .map_err(|e| FsError(format!("Error writing {}: {e}", path.display())))?;
-        Ok(format!("Successfully replaced {count} occurrence(s) in {}", path.display()))
+        Ok(format!(
+            "Successfully replaced {count} occurrence(s) in {}",
+            path.display()
+        ))
     }
 }
 
@@ -929,7 +986,9 @@ impl Tool for HomeFsGlobTool {
         };
 
         let mut all_paths: Vec<String> = Vec::new();
-        for entry in glob(&full_pattern).map_err(|e| FsError(format!("Invalid glob pattern: {e}")))? {
+        for entry in
+            glob(&full_pattern).map_err(|e| FsError(format!("Invalid glob pattern: {e}")))?
+        {
             match entry {
                 Ok(path) => {
                     if path.is_file() && !has_excluded_segment(&path) {
@@ -941,8 +1000,13 @@ impl Tool for HomeFsGlobTool {
         }
         all_paths.sort();
 
-        let effective_limit = if head_limit == 0 { usize::MAX } else { head_limit };
-        let paginated: Vec<&str> = all_paths.iter()
+        let effective_limit = if head_limit == 0 {
+            usize::MAX
+        } else {
+            head_limit
+        };
+        let paginated: Vec<&str> = all_paths
+            .iter()
             .skip(offset)
             .take(effective_limit)
             .map(String::as_str)
@@ -1015,7 +1079,10 @@ impl Tool for HomeFsGrepTool {
     async fn call(&self, args: FsGrepArgs) -> Result<Self::Output, FsError> {
         let head_limit = args.head_limit.unwrap_or(DEFAULT_GREP_LIMIT);
         let offset = args.offset.unwrap_or(0);
-        let output_mode = args.output_mode.clone().unwrap_or_else(|| "files_with_matches".to_string());
+        let output_mode = args
+            .output_mode
+            .clone()
+            .unwrap_or_else(|| "files_with_matches".to_string());
         let output_mode = output_mode.as_str();
 
         let search_path = if let Some(ref p) = args.path {
@@ -1032,14 +1099,29 @@ impl Tool for HomeFsGrepTool {
             ..args
         };
 
-        let lines = run_search(use_rg, &adapted_args, &search_path, output_mode, &self.home_dir).await?;
+        let lines = run_search(
+            use_rg,
+            &adapted_args,
+            &search_path,
+            output_mode,
+            &self.home_dir,
+        )
+        .await?;
 
         if lines.is_empty() {
-            return Ok(format!("No matches found for pattern: {}", adapted_args.pattern));
+            return Ok(format!(
+                "No matches found for pattern: {}",
+                adapted_args.pattern
+            ));
         }
 
-        let effective_limit = if head_limit == 0 { usize::MAX } else { head_limit };
-        let paginated: Vec<&str> = lines.iter()
+        let effective_limit = if head_limit == 0 {
+            usize::MAX
+        } else {
+            head_limit
+        };
+        let paginated: Vec<&str> = lines
+            .iter()
             .skip(offset)
             .take(effective_limit)
             .map(String::as_str)
@@ -1048,8 +1130,16 @@ impl Tool for HomeFsGrepTool {
         let joined = paginated.join("\n");
 
         if output_mode == "content" && joined.len() > MAX_CONTENT_SIZE {
-            let file_lines = run_search(use_rg, &adapted_args, &search_path, "files_with_matches", &self.home_dir).await?;
-            let file_paginated: Vec<&str> = file_lines.iter()
+            let file_lines = run_search(
+                use_rg,
+                &adapted_args,
+                &search_path,
+                "files_with_matches",
+                &self.home_dir,
+            )
+            .await?;
+            let file_paginated: Vec<&str> = file_lines
+                .iter()
                 .skip(offset)
                 .take(effective_limit)
                 .map(String::as_str)

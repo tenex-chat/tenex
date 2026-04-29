@@ -113,7 +113,9 @@ mod tests {
             Color::Rgb { r, g, b } => {
                 assert_eq!((r, g, b), (0xFF, 0xC1, 0x07));
             }
-            _ => panic!("INQUIRER_AMBER must be RGB truecolor (not ansi256-214 — see spec doc 12 §0)"),
+            _ => panic!(
+                "INQUIRER_AMBER must be RGB truecolor (not ansi256-214 — see spec doc 12 §0)"
+            ),
         }
     }
 

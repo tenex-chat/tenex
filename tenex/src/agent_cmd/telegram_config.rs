@@ -70,7 +70,14 @@ pub fn mask_token(token: &str) -> String {
         return token.to_owned();
     }
     let first: String = chars.iter().take(4).collect();
-    let last: String = chars.iter().rev().take(4).collect::<Vec<_>>().into_iter().rev().collect();
+    let last: String = chars
+        .iter()
+        .rev()
+        .take(4)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
     format!("{first}…{last}")
 }
 
@@ -178,10 +185,7 @@ mod tests {
     #[test]
     fn mask_token_long_replaces_middle_with_ellipsis() {
         assert_eq!(mask_token("123456789"), "1234…6789");
-        assert_eq!(
-            mask_token("abcdefghijklmnopqrstuvwxyz"),
-            "abcd…wxyz"
-        );
+        assert_eq!(mask_token("abcdefghijklmnopqrstuvwxyz"), "abcd…wxyz");
     }
 
     #[test]
@@ -196,8 +200,18 @@ mod tests {
     fn mask_token_handles_unicode_correctly() {
         // Char-aware not byte-aware — leading/trailing chars are real chars.
         let masked = mask_token("αβγδεζηθικλμνξο");
-        assert_eq!(masked, "αβγδ…λμνξο".chars().take(4).collect::<String>()
-            + "…"
-            + &"αβγδεζηθικλμνξο".chars().rev().take(4).collect::<Vec<_>>().into_iter().rev().collect::<String>());
+        assert_eq!(
+            masked,
+            "αβγδ…λμνξο".chars().take(4).collect::<String>()
+                + "…"
+                + &"αβγδεζηθικλμνξο"
+                    .chars()
+                    .rev()
+                    .take(4)
+                    .collect::<Vec<_>>()
+                    .into_iter()
+                    .rev()
+                    .collect::<String>()
+        );
     }
 }

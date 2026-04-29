@@ -26,7 +26,10 @@ impl Project {
     /// bare dTag.
     pub fn open(project_id: &str, base_dir: &Path) -> Result<Self> {
         let d_tag = normalize_project_id(project_id)?;
-        Ok(Self { d_tag, base_dir: base_dir.to_path_buf() })
+        Ok(Self {
+            d_tag,
+            base_dir: base_dir.to_path_buf(),
+        })
     }
 
     /// Open under [`paths::default_base_dir`].
@@ -209,7 +212,10 @@ fn read_agent_file(path: &Path, pubkey: &str) -> Result<Agent> {
     Ok(Agent {
         pubkey: pubkey.to_string(),
         slug: raw.slug.clone().unwrap_or_else(|| pubkey[..8].to_string()),
-        name: raw.name.clone().unwrap_or_else(|| raw.slug.clone().unwrap_or_default()),
+        name: raw
+            .name
+            .clone()
+            .unwrap_or_else(|| raw.slug.clone().unwrap_or_default()),
         role: raw.role,
         description: raw.description,
         instructions: raw.instructions,

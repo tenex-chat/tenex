@@ -15,7 +15,11 @@ mod summarize;
 use lockfile::Lockfile;
 
 #[derive(Parser)]
-#[command(name = "tenex-summarizer", version, about = "TENEX kind:513 metadata daemon")]
+#[command(
+    name = "tenex-summarizer",
+    version,
+    about = "TENEX kind:513 metadata daemon"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Option<Command>,
@@ -54,8 +58,8 @@ async fn run() -> Result<()> {
         .context("acquire singleton lockfile (another tenex-summarizer is already running)")?;
 
     let cfg = config::Config::load().context("load TENEX configuration")?;
-    let state_db = state::SummaryStateStore::open(&paths::state_db())
-        .context("open summarizer state db")?;
+    let state_db =
+        state::SummaryStateStore::open(&paths::state_db()).context("open summarizer state db")?;
 
     scheduler::run(cfg, state_db).await
 }

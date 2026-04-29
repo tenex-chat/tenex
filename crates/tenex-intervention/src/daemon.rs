@@ -66,15 +66,9 @@ pub async fn run(cfg: Config) -> Result<()> {
 
     // Load per-project state from disk and rebuild catch-up timers.
     let ds: Arc<Mutex<DaemonState>> = Arc::new(Mutex::new(DaemonState::new()));
-    let (trigger_tx, mut trigger_rx) =
-        tokio::sync::mpsc::channel::<PendingIntervention>(64);
+    let (trigger_tx, mut trigger_rx) = tokio::sync::mpsc::channel::<PendingIntervention>(64);
 
-    load_all_project_states(
-        Arc::clone(&ds),
-        timeout_ms,
-        trigger_tx.clone(),
-    )
-    .await;
+    load_all_project_states(Arc::clone(&ds), timeout_ms, trigger_tx.clone()).await;
 
     // Nostr subscription.
     let nostr_client = build_nostr_client(&cfg).await?;
@@ -180,7 +174,12 @@ async fn handle_event(
         let mut guard = ds.lock().await;
         if let Some(pending) = guard.pending.get(&conv_id).cloned() {
             if pending.user_pubkey == author_hex
-                && detector::is_response_cancelling(&event, &whitelisted, pending.completed_at, timeout_ms)
+                && detector::is_response_cancelling(
+                    &event,
+                    &whitelisted,
+                    pending.completed_at,
+                    timeout_ms,
+                )
             {
                 guard.pending.remove(&conv_id);
                 if let Some(h) = guard.timers.remove(&conv_id) {
@@ -322,7 +321,10 @@ async fn handle_trigger(
     };
 
     let Some(ref pk) = intervention_agent_pk else {
-        warn!(slug = agent_slug, "intervention agent slug not found, dropping trigger");
+        warn!(
+            slug = agent_slug,
+            "intervention agent slug not found, dropping trigger"
+        );
         let mut guard = ds.lock().await;
         guard.pending.remove(&conv_id);
         guard.timers.remove(&conv_id);
@@ -424,7 +426,9 @@ async fn load_all_project_states(
 
         if let Some(notified_list) = &loaded_state.notified {
             for entry in notified_list {
-                guard.notified.insert(entry.conversation_id.clone(), entry.notified_at);
+                guard
+                    .notified
+                    .insert(entry.conversation_id.clone(), entry.notified_at);
             }
         }
 
@@ -472,7 +476,11 @@ fn save_state_for_project(guard: &DaemonState, project_id: &str) {
 
     let save_state = InterventionState {
         pending,
-        notified: if notified.is_empty() { None } else { Some(notified) },
+        notified: if notified.is_empty() {
+            None
+        } else {
+            Some(notified)
+        },
     };
 
     if let Err(e) = state::save_state(project_id, &save_state) {

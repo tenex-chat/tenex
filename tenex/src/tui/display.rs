@@ -211,7 +211,6 @@ fn format_summary_line(label: &str, value: &str) -> String {
     format!("    {INFO_OPEN}{padded}{FG_RESET}{value}")
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -225,10 +224,7 @@ mod tests {
     #[test]
     fn success_line_matches_ts_chalk_byte_sequence() {
         let s = format_success_line("All set");
-        assert_eq!(
-            s,
-            "  \x1b[32m\x1b[1m✓\x1b[22m\x1b[39m All set",
-        );
+        assert_eq!(s, "  \x1b[32m\x1b[1m✓\x1b[22m\x1b[39m All set",);
     }
 
     #[test]
@@ -298,8 +294,7 @@ mod tests {
     fn step_rule_line_matches_ts_chalk_byte_sequence() {
         let (_, rule) = format_step_lines(1, 7, "Identity");
         let dashes = "─".repeat(45);
-        let expected =
-            format!("  \x1b[38;5;214m\x1b[2m{dashes}\x1b[22m\x1b[39m");
+        let expected = format!("  \x1b[38;5;214m\x1b[2m{dashes}\x1b[22m\x1b[39m");
         assert_eq!(rule, expected);
     }
 
@@ -318,7 +313,10 @@ mod tests {
         // "username:" is 9 chars; padEnd(16) → 7 trailing spaces.
         let s = format_summary_line("username", "alice");
         assert_eq!(s, "    \x1b[38;5;117musername:       \x1b[39malice");
-        assert_eq!(strip_ansi_codes(&s).into_owned(), "    username:       alice");
+        assert_eq!(
+            strip_ansi_codes(&s).into_owned(),
+            "    username:       alice"
+        );
     }
 
     #[test]

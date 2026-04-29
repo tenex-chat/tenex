@@ -13,8 +13,8 @@ pub mod learn;
 pub mod no_response;
 pub mod project_list;
 pub mod rag_add_documents;
-pub mod recording;
 pub mod rag_search;
+pub mod recording;
 pub mod report_publish;
 pub mod schedule_task;
 pub mod self_delegate;
@@ -33,16 +33,16 @@ pub use delegate::DelegateTool;
 pub use delegate_crossproject::DelegateCrossProjectTool;
 pub use delegate_followup::DelegateFollowupTool;
 pub use fs::{
-    FsEditTool, FsGlobTool, FsGrepTool, FsReadTool, FsWriteTool,
-    HomeFsEditTool, HomeFsGlobTool, HomeFsGrepTool, HomeFsReadTool, HomeFsWriteTool,
+    FsEditTool, FsGlobTool, FsGrepTool, FsReadTool, FsWriteTool, HomeFsEditTool, HomeFsGlobTool,
+    HomeFsGrepTool, HomeFsReadTool, HomeFsWriteTool,
 };
 pub use kill::KillTool;
 pub use learn::LearnTool;
 pub use no_response::NoResponseTool;
 pub use project_list::ProjectListTool;
 pub use rag_add_documents::RagAddDocumentsTool;
-pub use recording::{RecordingTool, ToolRecorder};
 pub use rag_search::RagSearchTool;
+pub use recording::{RecordingTool, ToolRecorder};
 pub use report_publish::ReportPublishTool;
 pub use schedule_task::ScheduleTaskTool;
 pub use self_delegate::SelfDelegateTool;

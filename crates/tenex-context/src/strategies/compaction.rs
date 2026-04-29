@@ -95,9 +95,13 @@ mod tests {
         user_msgs: &[&str],
         p: &'a ModelProfile,
     ) -> ProjectionContext<'a> {
-        let mut messages = vec![Message::System { content: system.to_string() }];
+        let mut messages = vec![Message::System {
+            content: system.to_string(),
+        }];
         for u in user_msgs {
-            messages.push(Message::User { content: u.to_string() });
+            messages.push(Message::User {
+                content: u.to_string(),
+            });
         }
         ProjectionContext {
             messages,
@@ -111,7 +115,7 @@ mod tests {
     #[test]
     fn no_compaction_below_threshold() {
         let p = profile(1000); // threshold = 800
-        // System(4 chars) + 3 user(4 chars each) = 5 tokens total — far below 800
+                               // System(4 chars) + 3 user(4 chars each) = 5 tokens total — far below 800
         let mut ctx = ctx_with_messages("sys.", &["msg1", "msg2", "msg3"], &p);
         CompactionToolStrategy::default().apply(&mut ctx).unwrap();
         assert_eq!(ctx.telemetry.compacted_count, 0);
@@ -136,7 +140,9 @@ mod tests {
         // Messages[1..4] (3 messages) → 1 summary
         // Final message count: 1(sys) + 1(summary) + 6(tail) = 8
         let p = profile(100);
-        let user_msgs: Vec<&str> = (0..9).map(|_| "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").collect();
+        let user_msgs: Vec<&str> = (0..9)
+            .map(|_| "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+            .collect();
         let sys_content = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"; // 40 chars
         let mut ctx = ctx_with_messages(sys_content, &user_msgs, &p);
 
@@ -158,7 +164,10 @@ mod tests {
         });
         assert!(has_summary, "summary marker must be present");
         // Strategy recorded in telemetry
-        assert!(ctx.telemetry.strategies_applied.contains(&"compaction".to_string()));
+        assert!(ctx
+            .telemetry
+            .strategies_applied
+            .contains(&"compaction".to_string()));
     }
 
     #[test]
@@ -167,26 +176,34 @@ mod tests {
         // Build enough messages to trigger compaction.
         let p = profile(100);
         // 40-char system + 14 user(40-char each) = 10 + 14*10 = 150 > 80
-        let msgs: Vec<&str> = (0..14).map(|_| "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").collect();
+        let msgs: Vec<&str> = (0..14)
+            .map(|_| "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+            .collect();
         let tag = "SENTINEL_TAIL_MESSAGE_AAAAAAAAAAAAAAAAAAA"; // will be placed at the tail
         let mut ctx = ctx_with_messages("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", &msgs, &p);
         // Replace the last message with a sentinel so we can check it survived
         let last = ctx.messages.len() - 1;
-        ctx.messages[last] = Message::User { content: tag.to_string() };
+        ctx.messages[last] = Message::User {
+            content: tag.to_string(),
+        };
 
         CompactionToolStrategy::default().apply(&mut ctx).unwrap();
 
-        let tail_survived = ctx.messages.iter().any(|m| {
-            matches!(m, Message::User { content } if content == tag)
-        });
-        assert!(tail_survived, "last message in tail must survive compaction");
+        let tail_survived = ctx
+            .messages
+            .iter()
+            .any(|m| matches!(m, Message::User { content } if content == tag));
+        assert!(
+            tail_survived,
+            "last message in tail must survive compaction"
+        );
     }
 
     #[test]
     fn no_compaction_when_too_few_messages() {
         // keep_tail = 6, so total_msgs must be > 7 to have anything to compact.
         let p = profile(10); // very small budget
-        // Only 4 messages total — can't compact (1 + keep_tail = 7 > 4)
+                             // Only 4 messages total — can't compact (1 + keep_tail = 7 > 4)
         let mut ctx = ctx_with_messages("s", &["a", "b", "c"], &p);
         CompactionToolStrategy::default().apply(&mut ctx).unwrap();
         // Even if over threshold, can't compact fewer messages than required

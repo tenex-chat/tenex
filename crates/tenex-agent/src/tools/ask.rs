@@ -33,7 +33,10 @@ pub struct AskTool {
 
 impl AskTool {
     pub fn new(state: Arc<EmitState>, owner_pubkey: String) -> Self {
-        Self { state, owner_pubkey }
+        Self {
+            state,
+            owner_pubkey,
+        }
     }
 }
 

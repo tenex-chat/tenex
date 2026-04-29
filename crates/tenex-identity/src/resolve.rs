@@ -7,7 +7,7 @@ use nostr::Kind;
 use nostr::PublicKey;
 use nostr_sdk::Client;
 
-use crate::cache::{IdentityCache, now_secs};
+use crate::cache::{now_secs, IdentityCache};
 use crate::error::{IdentityError, Result};
 use crate::fetch::fetch_identity;
 use crate::model::IdentityView;
@@ -120,9 +120,7 @@ pub async fn batch_resolve(
     client.connect().await;
 
     let authors: Vec<PublicKey> = parsed.iter().map(|(_, pk)| *pk).collect();
-    let filter = Filter::new()
-        .authors(authors)
-        .kind(Kind::Metadata);
+    let filter = Filter::new().authors(authors).kind(Kind::Metadata);
 
     let events = client
         .fetch_events(filter, Duration::from_secs(8))
@@ -148,8 +146,7 @@ pub async fn batch_resolve(
     }
 
     for (hex_pk, event) in by_author {
-        let metadata: nostr::Metadata =
-            serde_json::from_str(&event.content).unwrap_or_default();
+        let metadata: nostr::Metadata = serde_json::from_str(&event.content).unwrap_or_default();
 
         let view = IdentityView {
             pubkey: hex_pk.clone(),

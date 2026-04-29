@@ -62,13 +62,12 @@ fn run_create(json_mode: bool) -> Result<IdentityResult> {
     let default_name = random_username();
 
     let validator = prompts::adapt_string_validator(validate_username);
-    let username_raw = prompts::input(
-        "Choose a username (this is how agents and other nostr users will see you)",
-    )
-    .with_default(&default_name)
-    .with_validator(validator)
-    .prompt()
-    .map_err(|e| anyhow!("username prompt: {e}"))?;
+    let username_raw =
+        prompts::input("Choose a username (this is how agents and other nostr users will see you)")
+            .with_default(&default_name)
+            .with_validator(validator)
+            .prompt()
+            .map_err(|e| anyhow!("username prompt: {e}"))?;
     let username = username_raw.trim().to_owned();
 
     let keys = Keys::generate();
@@ -79,7 +78,9 @@ fn run_create(json_mode: bool) -> Result<IdentityResult> {
         .public_key()
         .to_bech32()
         .context("encode npub for new identity")?;
-    let nsec = secret_key.to_bech32().context("encode nsec for new identity")?;
+    let nsec = secret_key
+        .to_bech32()
+        .context("encode nsec for new identity")?;
 
     if !json_mode {
         display::blank();

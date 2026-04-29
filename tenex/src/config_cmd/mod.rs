@@ -173,7 +173,12 @@ pub async fn run(args: ConfigArgs) -> Result<()> {
             std::process::exit(1);
         }
 
-        if let ConfigCommand::SystemPrompt { show, disable, enable } = cmd {
+        if let ConfigCommand::SystemPrompt {
+            show,
+            disable,
+            enable,
+        } = cmd
+        {
             // TS evaluates the flags in source order: --show, --disable,
             // --enable. Each branch returns immediately, so when more
             // than one flag is set the leftmost wins.
@@ -410,9 +415,21 @@ pub fn build_menu_sections() -> Vec<MenuSection> {
         (
             "Agents",
             &[
-                ("Escalation", "escalation", "Route ask() through an agent first"),
-                ("Intervention", "intervention", "Auto-review when you're idle"),
-                ("Telegram", "telegram", "Agent bot transport and global DM access"),
+                (
+                    "Escalation",
+                    "escalation",
+                    "Route ask() through an agent first",
+                ),
+                (
+                    "Intervention",
+                    "intervention",
+                    "Auto-review when you're idle",
+                ),
+                (
+                    "Telegram",
+                    "telegram",
+                    "Agent bot transport and global DM access",
+                ),
             ][..],
         ),
         (
@@ -423,14 +440,22 @@ pub fn build_menu_sections() -> Vec<MenuSection> {
             "Conversations",
             &[
                 ("Summarization", "summarization", "Auto-summary timing"),
-                ("Context", "context-management", "Context management settings"),
+                (
+                    "Context",
+                    "context-management",
+                    "Context management settings",
+                ),
             ][..],
         ),
         (
             "Advanced",
             &[
                 ("Identity", "identity", "Authorized pubkeys"),
-                ("System Prompt", "system-prompt", "Global prompt for all projects"),
+                (
+                    "System Prompt",
+                    "system-prompt",
+                    "Global prompt for all projects",
+                ),
                 ("Paths", "paths", "File paths and storage"),
                 ("Logging", "logging", "Log level and file path"),
                 ("Telemetry", "telemetry", "OpenTelemetry tracing"),

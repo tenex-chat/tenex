@@ -153,9 +153,8 @@ fn run_edit(base_dir: &Path) -> Result<()> {
     let _ = std::fs::remove_file(&temp_path);
 
     edit_result?;
-    let edited = read_result.with_context(|| {
-        format!("reading edited file at {}", temp_path.display())
-    })?;
+    let edited =
+        read_result.with_context(|| format!("reading edited file at {}", temp_path.display()))?;
 
     let cleaned = extract_content_after_delimiter(&edited);
 
@@ -260,7 +259,6 @@ fn make_temp_path() -> Result<PathBuf> {
     Ok(std::env::temp_dir().join(format!("tenex-global-prompt-{now}.md")))
 }
 
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Action {
     Show,
@@ -332,10 +330,7 @@ mod tests {
     fn delimiter_line_is_verbatim_ts_string() {
         // Pin the exact delimiter; the TS port and the Rust port must agree
         // on this byte-for-byte or roundtrip breaks.
-        assert_eq!(
-            CONTENT_DELIMITER,
-            "---- YOUR PROMPT BELOW THIS LINE ----"
-        );
+        assert_eq!(CONTENT_DELIMITER, "---- YOUR PROMPT BELOW THIS LINE ----");
     }
 
     #[test]
@@ -349,24 +344,14 @@ mod tests {
 
     #[test]
     fn extract_after_delimiter_returns_trimmed_user_content() {
-        let edited = format!(
-            "# header\nstuff\n{CONTENT_DELIMITER}\nthe real prompt\n"
-        );
-        assert_eq!(
-            extract_content_after_delimiter(&edited),
-            "the real prompt"
-        );
+        let edited = format!("# header\nstuff\n{CONTENT_DELIMITER}\nthe real prompt\n");
+        assert_eq!(extract_content_after_delimiter(&edited), "the real prompt");
     }
 
     #[test]
     fn extract_after_delimiter_preserves_markdown_headings_below() {
-        let edited = format!(
-            "preface\n{CONTENT_DELIMITER}\n# Heading\nbody\n"
-        );
-        assert_eq!(
-            extract_content_after_delimiter(&edited),
-            "# Heading\nbody"
-        );
+        let edited = format!("preface\n{CONTENT_DELIMITER}\n# Heading\nbody\n");
+        assert_eq!(extract_content_after_delimiter(&edited), "# Heading\nbody");
     }
 
     #[test]
@@ -470,7 +455,13 @@ mod tests {
             .collect();
         assert_eq!(
             labels,
-            vec!["Show current", "Edit (open in $EDITOR)", "Enable", "Disable", "Back"],
+            vec![
+                "Show current",
+                "Edit (open in $EDITOR)",
+                "Enable",
+                "Disable",
+                "Back"
+            ],
         );
     }
 
@@ -502,10 +493,7 @@ mod tests {
             assert!(label.contains("characters"));
             // Reading just the count out of the label and comparing
             // proves the formatter consumed the codepoint count.
-            let count_str: String = label
-                .chars()
-                .filter(|c| c.is_ascii_digit())
-                .collect();
+            let count_str: String = label.chars().filter(|c| c.is_ascii_digit()).collect();
             assert_eq!(count_str.parse::<usize>().unwrap(), s.chars().count());
         }
     }

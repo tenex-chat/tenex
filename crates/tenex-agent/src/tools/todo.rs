@@ -75,8 +75,7 @@ fn slug_from_title(title: &str) -> String {
 fn now_ms() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0)
+        .map_or(0, |d| d.as_millis() as i64)
 }
 
 pub fn format_todos_reminder(todos: &[TodoItem]) -> String {
@@ -84,10 +83,22 @@ pub fn format_todos_reminder(todos: &[TodoItem]) -> String {
         return String::new();
     }
 
-    let pending = todos.iter().filter(|t| t.status == TodoStatus::Pending).count();
-    let in_progress = todos.iter().filter(|t| t.status == TodoStatus::InProgress).count();
-    let done = todos.iter().filter(|t| t.status == TodoStatus::Done).count();
-    let skipped = todos.iter().filter(|t| t.status == TodoStatus::Skipped).count();
+    let pending = todos
+        .iter()
+        .filter(|t| t.status == TodoStatus::Pending)
+        .count();
+    let in_progress = todos
+        .iter()
+        .filter(|t| t.status == TodoStatus::InProgress)
+        .count();
+    let done = todos
+        .iter()
+        .filter(|t| t.status == TodoStatus::Done)
+        .count();
+    let skipped = todos
+        .iter()
+        .filter(|t| t.status == TodoStatus::Skipped)
+        .count();
 
     let mut lines = vec![
         "<system-reminder>".to_string(),
@@ -119,8 +130,7 @@ pub fn format_todos_reminder(todos: &[TodoItem]) -> String {
     if pending > 0 {
         lines.push(String::new());
         lines.push(format!(
-            "**ATTENTION:** You have {} pending todo item(s) that need to be addressed.",
-            pending
+            "**ATTENTION:** You have {pending} pending todo item(s) that need to be addressed."
         ));
     }
 
@@ -211,10 +221,7 @@ impl Tool for TodoWriteTool {
             let new_ids: std::collections::HashSet<String> = args
                 .todos
                 .iter()
-                .map(|t| {
-                    t.id.clone()
-                        .unwrap_or_else(|| slug_from_title(&t.title))
-                })
+                .map(|t| t.id.clone().unwrap_or_else(|| slug_from_title(&t.title)))
                 .collect();
             let missing: Vec<&str> = todos
                 .iter()
@@ -237,13 +244,17 @@ impl Tool for TodoWriteTool {
             .map(|item| {
                 let id = item.id.unwrap_or_else(|| slug_from_title(&item.title));
                 let existing = todos.iter().find(|t| t.id == id);
-                let created_at = existing.map(|e| e.created_at).unwrap_or(now);
+                let created_at = existing.map_or(now, |e| e.created_at);
                 let description = item
                     .description
                     .or_else(|| existing.map(|e| e.description.clone()))
                     .unwrap_or_default();
-                let status_changed = existing.map(|e| e.status != item.status).unwrap_or(true);
-                let updated_at = if status_changed { now } else { existing.map(|e| e.updated_at).unwrap_or(now) };
+                let status_changed = existing.is_none_or(|e| e.status != item.status);
+                let updated_at = if status_changed {
+                    now
+                } else {
+                    existing.map_or(now, |e| e.updated_at)
+                };
                 TodoItem {
                     id,
                     title: item.title,

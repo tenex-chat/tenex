@@ -62,8 +62,14 @@ mod tests {
     fn fires_when_pending_todos_remain() {
         let h = PendingTodosHeuristic;
         let todos = vec![
-            TodoEntry { id: "t1".to_string(), status: TodoStatus::Pending },
-            TodoEntry { id: "t2".to_string(), status: TodoStatus::Done },
+            TodoEntry {
+                id: "t1".to_string(),
+                status: TodoStatus::Pending,
+            },
+            TodoEntry {
+                id: "t2".to_string(),
+                status: TodoStatus::Done,
+            },
         ];
         let detection = h.check(&ctx(todos, 0));
         assert!(detection.is_some());
@@ -76,7 +82,10 @@ mod tests {
     #[test]
     fn suppressed_when_delegation_pending() {
         let h = PendingTodosHeuristic;
-        let todos = vec![TodoEntry { id: "t1".to_string(), status: TodoStatus::Pending }];
+        let todos = vec![TodoEntry {
+            id: "t1".to_string(),
+            status: TodoStatus::Pending,
+        }];
         assert!(h.check(&ctx(todos, 1)).is_none());
     }
 
@@ -84,8 +93,14 @@ mod tests {
     fn suppressed_when_all_done() {
         let h = PendingTodosHeuristic;
         let todos = vec![
-            TodoEntry { id: "t1".to_string(), status: TodoStatus::Done },
-            TodoEntry { id: "t2".to_string(), status: TodoStatus::Skipped },
+            TodoEntry {
+                id: "t1".to_string(),
+                status: TodoStatus::Done,
+            },
+            TodoEntry {
+                id: "t2".to_string(),
+                status: TodoStatus::Skipped,
+            },
         ];
         assert!(h.check(&ctx(todos, 0)).is_none());
     }

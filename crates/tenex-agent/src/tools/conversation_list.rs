@@ -58,8 +58,9 @@ impl Tool for ConversationListTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<String, Self::Error> {
-        let store = ConversationStore::open(&self.db_path)
-            .map_err(|e| ConversationListError(format!("failed to open conversation store: {e}")))?;
+        let store = ConversationStore::open(&self.db_path).map_err(|e| {
+            ConversationListError(format!("failed to open conversation store: {e}"))
+        })?;
 
         let filter = ConversationListFilter {
             limit: Some(args.limit.unwrap_or(20)),
@@ -86,7 +87,11 @@ impl Tool for ConversationListTool {
                 .as_deref()
                 .map(|m| {
                     let truncated: String = m.chars().take(60).collect();
-                    if m.chars().count() > 60 { format!("{truncated}…") } else { truncated }
+                    if m.chars().count() > 60 {
+                        format!("{truncated}…")
+                    } else {
+                        truncated
+                    }
                 })
                 .unwrap_or_default();
             let activity = conv
@@ -98,7 +103,11 @@ impl Tool for ConversationListTool {
                 id_short,
                 title,
                 activity,
-                if last_msg.is_empty() { String::new() } else { format!(" | {last_msg}") },
+                if last_msg.is_empty() {
+                    String::new()
+                } else {
+                    format!(" | {last_msg}")
+                },
                 conv.id,
             ));
         }

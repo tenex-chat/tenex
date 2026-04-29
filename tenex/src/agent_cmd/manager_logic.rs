@@ -62,7 +62,11 @@ pub fn compare_agents(a: &ManagedAgent, b: &ManagedAgent) -> Ordering {
     let a_inactive = a.is_inactive();
     let b_inactive = b.is_inactive();
     if a_inactive != b_inactive {
-        return if a_inactive { Ordering::Greater } else { Ordering::Less };
+        return if a_inactive {
+            Ordering::Greater
+        } else {
+            Ordering::Less
+        };
     }
     a.slug.cmp(&b.slug)
 }
@@ -130,11 +134,11 @@ pub fn format_managed_agent_list_line(entry: &ManagedAgent) -> String {
         String::new()
     };
     let middle_dot = chalk_dim("·");
-    let projects_chunk = chalk_dim(&format!(
-        "projects: {}",
-        format_projects(&entry.projects),
-    ));
-    format!("{inactive_tag}{slug} {middle_dot} {projects_chunk}", slug = entry.slug)
+    let projects_chunk = chalk_dim(&format!("projects: {}", format_projects(&entry.projects),));
+    format!(
+        "{inactive_tag}{slug} {middle_dot} {projects_chunk}",
+        slug = entry.slug
+    )
 }
 
 /// `pickMergeSurvivor` (`AgentManager.ts:209-228`).
@@ -175,15 +179,9 @@ pub fn pick_merge_survivor(agents: &[ManagedAgent]) -> &ManagedAgent {
 pub fn find_duplicate_slug_groups(agents: &[ManagedAgent]) -> Vec<Vec<&ManagedAgent>> {
     let mut groups: IndexMap<String, Vec<&ManagedAgent>> = IndexMap::new();
     for agent in agents {
-        groups
-            .entry(agent.slug.clone())
-            .or_default()
-            .push(agent);
+        groups.entry(agent.slug.clone()).or_default().push(agent);
     }
-    groups
-        .into_values()
-        .filter(|g| g.len() > 1)
-        .collect()
+    groups.into_values().filter(|g| g.len() > 1).collect()
 }
 
 /// `loadAgents` (`AgentManager.ts:306-337`).
@@ -347,7 +345,10 @@ mod tests {
         // And every dim open is paired with a SGR-22 close (no SGR-0).
         let dim_closes = line.matches("\x1b[22m").count();
         assert_eq!(dim_closes, 2);
-        assert!(!line.contains("\x1b[0m"), "must use SGR 22 close, not SGR 0");
+        assert!(
+            !line.contains("\x1b[0m"),
+            "must use SGR 22 close, not SGR 0"
+        );
     }
 
     #[test]
@@ -378,8 +379,14 @@ mod tests {
     fn pick_merge_survivor_prefers_more_projects() {
         let many = agent("alpha", None, vec!["P1", "P2", "P3"]);
         let few = agent("alpha", None, vec!["P1"]);
-        assert_eq!(pick_merge_survivor(&[few.clone(), many.clone()]).pubkey, many.pubkey);
-        assert_eq!(pick_merge_survivor(&[many.clone(), few.clone()]).pubkey, many.pubkey);
+        assert_eq!(
+            pick_merge_survivor(&[few.clone(), many.clone()]).pubkey,
+            many.pubkey
+        );
+        assert_eq!(
+            pick_merge_survivor(&[many.clone(), few.clone()]).pubkey,
+            many.pubkey
+        );
     }
 
     #[test]
@@ -397,7 +404,10 @@ mod tests {
     fn pick_merge_survivor_alphabetical_tiebreak() {
         let alpha = agent("alpha", None, vec!["P1"]);
         let beta = agent("beta", None, vec!["P1"]);
-        assert_eq!(pick_merge_survivor(&[beta.clone(), alpha.clone()]).pubkey, alpha.pubkey);
+        assert_eq!(
+            pick_merge_survivor(&[beta.clone(), alpha.clone()]).pubkey,
+            alpha.pubkey
+        );
     }
 
     #[test]
@@ -459,11 +469,7 @@ mod tests {
         p
     }
 
-    fn save_stored_agent(
-        base: &std::path::Path,
-        slug: &str,
-        status: &str,
-    ) -> String {
+    fn save_stored_agent(base: &std::path::Path, slug: &str, status: &str) -> String {
         let mut storage = AgentStorage::open(base).unwrap();
         let nsec = generate_nsec_bech32().unwrap();
         let mut raw = indexmap::IndexMap::<String, Value>::new();

@@ -10,9 +10,11 @@ use config::{LlmsConfig, ResolvedModel};
 use emit::{AgentMeta, EmitState};
 use hook::EmitHook;
 use rig::client::{CompletionClient, Nothing};
-use rig::completion::{AssistantContent, Message as RigMessage};
 use rig::completion::message::{ToolResult, ToolResultContent, UserContent};
+use rig::completion::{AssistantContent, Message as RigMessage};
 use rig::providers::{anthropic, ollama, openai, openrouter};
+use rig::tool::ToolDyn;
+use rig::OneOrMany;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc, Mutex,
@@ -23,27 +25,24 @@ use tenex_context::{
 };
 use tenex_conversations::{AgentContextState, ConversationStore, NewToolMessage};
 use tenex_project::Project;
-use tenex_rag::{EmbedConfig, RagStore};
-use tenex_supervision::heuristics::default_supervisor;
-use tenex_supervision::supervisor::PostCompletionOutcome;
-use tenex_supervision::types::{TodoEntry as SupTodoEntry, TodoStatus as SupTodoStatus};
 use tenex_protocol::{
     nostr::{read_one_from_stdin, NostrChannel},
     sink::StdoutNdjsonSink,
     Channel, ConversationIntent, ConversationRef, Intent, LlmUsage, MessageRef, PrincipalRef,
     ProjectRef,
 };
-use rig::OneOrMany;
-use rig::tool::ToolDyn;
+use tenex_rag::{EmbedConfig, RagStore};
+use tenex_supervision::heuristics::default_supervisor;
+use tenex_supervision::supervisor::PostCompletionOutcome;
+use tenex_supervision::types::{TodoEntry as SupTodoEntry, TodoStatus as SupTodoStatus};
 use tools::{
     AgentsWriteTool, AskTool, ChangeModelTool, ConversationGetTool, ConversationListTool,
-    ConversationSearchTool,
-    DelegateCrossProjectTool, DelegateFollowupTool, DelegateTool,
-    FsEditTool, FsGlobTool, FsGrepTool, FsReadTool, FsWriteTool,
-    HomeFsEditTool, HomeFsGlobTool, HomeFsGrepTool, HomeFsReadTool, HomeFsWriteTool,
-    KillTool, LearnTool, NoResponseTool, ProjectListTool, RagAddDocumentsTool,
-    RagSearchTool, RecordingTool, ReportPublishTool, ScheduleTaskTool, SelfDelegateTool,
-    ShellTool, SkillListTool, SkillsSetTool, TodoItem, TodoStatus, TodoWriteTool, ToolRecorder,
+    ConversationSearchTool, DelegateCrossProjectTool, DelegateFollowupTool, DelegateTool,
+    FsEditTool, FsGlobTool, FsGrepTool, FsReadTool, FsWriteTool, HomeFsEditTool, HomeFsGlobTool,
+    HomeFsGrepTool, HomeFsReadTool, HomeFsWriteTool, KillTool, LearnTool, NoResponseTool,
+    ProjectListTool, RagAddDocumentsTool, RagSearchTool, RecordingTool, ReportPublishTool,
+    ScheduleTaskTool, SelfDelegateTool, ShellTool, SkillListTool, SkillsSetTool, TodoItem,
+    TodoStatus, TodoWriteTool, ToolRecorder,
 };
 
 /// Convert a `tenex_context::Message` to `rig::completion::Message` for passing
@@ -57,7 +56,10 @@ fn ctx_msg_to_rig(msg: CtxMessage) -> RigMessage {
         CtxMessage::User { content } => RigMessage::User {
             content: OneOrMany::one(UserContent::Text(Text { text: content })),
         },
-        CtxMessage::Assistant { content, tool_calls } => {
+        CtxMessage::Assistant {
+            content,
+            tool_calls,
+        } => {
             let mut parts: Vec<AssistantContent> = Vec::new();
             if !content.is_empty() {
                 parts.push(AssistantContent::Text(Text { text: content }));
@@ -69,27 +71,34 @@ fn ctx_msg_to_rig(msg: CtxMessage) -> RigMessage {
                 )));
             }
             if parts.is_empty() {
-                parts.push(AssistantContent::Text(Text { text: String::new() }));
+                parts.push(AssistantContent::Text(Text {
+                    text: String::new(),
+                }));
             }
             let content = if parts.len() == 1 {
                 OneOrMany::one(parts.remove(0))
             } else {
-                OneOrMany::many(parts)
-                    .unwrap_or_else(|_| OneOrMany::one(AssistantContent::Text(Text { text: String::new() })))
+                OneOrMany::many(parts).unwrap_or_else(|_| {
+                    OneOrMany::one(AssistantContent::Text(Text {
+                        text: String::new(),
+                    }))
+                })
             };
             RigMessage::Assistant { id: None, content }
         }
-        CtxMessage::ToolResult { tool_call_id, content, .. } => {
-            RigMessage::User {
-                content: OneOrMany::one(UserContent::ToolResult(ToolResult {
-                    id: tool_call_id,
-                    call_id: None,
-                    content: OneOrMany::one(ToolResultContent::Text(
-                        rig::completion::message::Text { text: content },
-                    )),
+        CtxMessage::ToolResult {
+            tool_call_id,
+            content,
+            ..
+        } => RigMessage::User {
+            content: OneOrMany::one(UserContent::ToolResult(ToolResult {
+                id: tool_call_id,
+                call_id: None,
+                content: OneOrMany::one(ToolResultContent::Text(rig::completion::message::Text {
+                    text: content,
                 })),
-            }
-        }
+            })),
+        },
     }
 }
 
@@ -140,33 +149,72 @@ fn build_recorded_tools(
         tools.push(RecordingTool::wrap_dyn(t, recorder.clone()));
     };
 
-    push(&mut tools, Box::new(ShellTool::new(input.working_dir.to_string(), input.shell_env.clone())));
+    push(
+        &mut tools,
+        Box::new(ShellTool::new(
+            input.working_dir.to_string(),
+            input.shell_env.clone(),
+        )),
+    );
 
     // fs tools — granted vs home-sandboxed.
     if input.granted_tools.contains("fs_read") {
-        push(&mut tools, Box::new(FsReadTool::new(input.working_dir.to_string())));
+        push(
+            &mut tools,
+            Box::new(FsReadTool::new(input.working_dir.to_string())),
+        );
     } else {
-        push(&mut tools, Box::new(HomeFsReadTool::new(input.agent_home_str.to_string())));
+        push(
+            &mut tools,
+            Box::new(HomeFsReadTool::new(input.agent_home_str.to_string())),
+        );
     }
     if input.granted_tools.contains("fs_write") {
-        push(&mut tools, Box::new(FsWriteTool::new(input.working_dir.to_string())));
-        push(&mut tools, Box::new(FsEditTool::new(input.working_dir.to_string())));
+        push(
+            &mut tools,
+            Box::new(FsWriteTool::new(input.working_dir.to_string())),
+        );
+        push(
+            &mut tools,
+            Box::new(FsEditTool::new(input.working_dir.to_string())),
+        );
     } else {
-        push(&mut tools, Box::new(HomeFsWriteTool::new(input.agent_home_str.to_string())));
-        push(&mut tools, Box::new(HomeFsEditTool::new(input.agent_home_str.to_string())));
+        push(
+            &mut tools,
+            Box::new(HomeFsWriteTool::new(input.agent_home_str.to_string())),
+        );
+        push(
+            &mut tools,
+            Box::new(HomeFsEditTool::new(input.agent_home_str.to_string())),
+        );
     }
     if input.granted_tools.contains("fs_glob") {
-        push(&mut tools, Box::new(FsGlobTool::new(input.working_dir.to_string())));
+        push(
+            &mut tools,
+            Box::new(FsGlobTool::new(input.working_dir.to_string())),
+        );
     } else {
-        push(&mut tools, Box::new(HomeFsGlobTool::new(input.agent_home_str.to_string())));
+        push(
+            &mut tools,
+            Box::new(HomeFsGlobTool::new(input.agent_home_str.to_string())),
+        );
     }
     if input.granted_tools.contains("fs_grep") {
-        push(&mut tools, Box::new(FsGrepTool::new(input.working_dir.to_string())));
+        push(
+            &mut tools,
+            Box::new(FsGrepTool::new(input.working_dir.to_string())),
+        );
     } else {
-        push(&mut tools, Box::new(HomeFsGrepTool::new(input.agent_home_str.to_string())));
+        push(
+            &mut tools,
+            Box::new(HomeFsGrepTool::new(input.agent_home_str.to_string())),
+        );
     }
 
-    push(&mut tools, Box::new(TodoWriteTool::new(input.todos.clone())));
+    push(
+        &mut tools,
+        Box::new(TodoWriteTool::new(input.todos.clone())),
+    );
     push(&mut tools, Box::new(input.skill_list.clone()));
     push(&mut tools, Box::new(input.skills_set.clone()));
 
@@ -177,55 +225,100 @@ fn build_recorded_tools(
     push(&mut tools, Box::new(input.rag_add_documents.clone()));
     push(&mut tools, Box::new(input.rag_search.clone()));
 
-    push(&mut tools, Box::new(LearnTool::new(
-        input.emit_state.clone(),
-        input.agent_home.to_path_buf(),
-        input.resolved_model.clone(),
-    )));
-    push(&mut tools, Box::new(AskTool::new(
-        input.emit_state.clone(),
-        input.owner_pubkey.to_string(),
-    )));
-    push(&mut tools, Box::new(ProjectListTool::new(input.base_dir.to_path_buf())));
-    push(&mut tools, Box::new(ConversationGetTool::new(input.conv_db_path.clone())));
-    push(&mut tools, Box::new(ConversationListTool::new(input.conv_db_path.clone())));
-    push(&mut tools, Box::new(ConversationSearchTool::new(
-        input.rag_store.clone(),
-        input.embed_config.clone(),
-        input.base_dir.to_path_buf(),
-        input.project_id.to_string(),
-    )));
-    push(&mut tools, Box::new(ChangeModelTool::new(
-        input.conv_db_path.clone(),
-        input.conversation_id.to_string(),
-        input.agent_pubkey.to_string(),
-    )));
-    push(&mut tools, Box::new(KillTool::new(input.project_d_tag.to_string())));
-    push(&mut tools, Box::new(ScheduleTaskTool::new(
-        input.project_d_tag.to_string(),
-        input.agent_pubkey.to_string(),
-        input.agent_slug.to_string(),
-        input.project_id.to_string(),
-    )));
+    push(
+        &mut tools,
+        Box::new(LearnTool::new(
+            input.emit_state.clone(),
+            input.agent_home.to_path_buf(),
+            input.resolved_model.clone(),
+        )),
+    );
+    push(
+        &mut tools,
+        Box::new(AskTool::new(
+            input.emit_state.clone(),
+            input.owner_pubkey.to_string(),
+        )),
+    );
+    push(
+        &mut tools,
+        Box::new(ProjectListTool::new(input.base_dir.to_path_buf())),
+    );
+    push(
+        &mut tools,
+        Box::new(ConversationGetTool::new(input.conv_db_path.clone())),
+    );
+    push(
+        &mut tools,
+        Box::new(ConversationListTool::new(input.conv_db_path.clone())),
+    );
+    push(
+        &mut tools,
+        Box::new(ConversationSearchTool::new(
+            input.rag_store.clone(),
+            input.embed_config.clone(),
+            input.base_dir.to_path_buf(),
+            input.project_id.to_string(),
+        )),
+    );
+    push(
+        &mut tools,
+        Box::new(ChangeModelTool::new(
+            input.conv_db_path.clone(),
+            input.conversation_id.to_string(),
+            input.agent_pubkey.to_string(),
+        )),
+    );
+    push(
+        &mut tools,
+        Box::new(KillTool::new(input.project_d_tag.to_string())),
+    );
+    push(
+        &mut tools,
+        Box::new(ScheduleTaskTool::new(
+            input.project_d_tag.to_string(),
+            input.agent_pubkey.to_string(),
+            input.agent_slug.to_string(),
+            input.project_id.to_string(),
+        )),
+    );
 
     if input.allows_delegation {
-        push(&mut tools, Box::new(SelfDelegateTool::new(input.emit_state.clone())));
-        push(&mut tools, Box::new(DelegateCrossProjectTool::new(input.emit_state.clone())));
-        push(&mut tools, Box::new(DelegateFollowupTool::new(
-            input.emit_state.clone(),
-            input.project_agents.clone(),
-            input.teams.clone(),
-        )));
+        push(
+            &mut tools,
+            Box::new(SelfDelegateTool::new(input.emit_state.clone())),
+        );
+        push(
+            &mut tools,
+            Box::new(DelegateCrossProjectTool::new(input.emit_state.clone())),
+        );
+        push(
+            &mut tools,
+            Box::new(DelegateFollowupTool::new(
+                input.emit_state.clone(),
+                input.project_agents.clone(),
+                input.teams.clone(),
+            )),
+        );
     }
 
-    push(&mut tools, Box::new(NoResponseTool::new(input.suppress_response.clone())));
-    push(&mut tools, Box::new(ReportPublishTool::new(
-        input.emit_state.clone(),
-        input.project_base.to_string(),
-    )));
-    push(&mut tools, Box::new(AgentsWriteTool::new(
-        tenex_project::paths::agents_dir(input.base_dir),
-    )));
+    push(
+        &mut tools,
+        Box::new(NoResponseTool::new(input.suppress_response.clone())),
+    );
+    push(
+        &mut tools,
+        Box::new(ReportPublishTool::new(
+            input.emit_state.clone(),
+            input.project_base.to_string(),
+        )),
+    );
+    push(
+        &mut tools,
+        Box::new(AgentsWriteTool::new(tenex_project::paths::agents_dir(
+            input.base_dir,
+        ))),
+    );
 
     tools
 }
@@ -302,26 +395,27 @@ fn save_context_state(
 
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0);
+        .map_or(0, |d| d.as_millis() as i64);
 
     let state = AgentContextState {
         conversation_id: conversation_id.to_string(),
         agent_pubkey: agent_pubkey.to_string(),
-        next_prompt_sequence: existing.as_ref().map(|s| s.next_prompt_sequence).unwrap_or(0),
-        cache_anchored: existing.as_ref().map(|s| s.cache_anchored).unwrap_or(false),
+        next_prompt_sequence: existing.as_ref().map_or(0, |s| s.next_prompt_sequence),
+        cache_anchored: existing.as_ref().is_some_and(|s| s.cache_anchored),
         seen_message_ids: existing
             .as_ref()
             .map(|s| s.seen_message_ids.clone())
             .unwrap_or_default(),
         compaction_state: existing.as_ref().and_then(|s| s.compaction_state.clone()),
         reminder_state: existing.as_ref().and_then(|s| s.reminder_state.clone()),
-        reminder_delta_state: existing.as_ref().and_then(|s| s.reminder_delta_state.clone()),
+        reminder_delta_state: existing
+            .as_ref()
+            .and_then(|s| s.reminder_delta_state.clone()),
         todos: Some(todos_json),
         self_applied_skills: skills_json,
         meta_model_variant: existing.as_ref().and_then(|s| s.meta_model_variant.clone()),
-        is_blocked: existing.as_ref().map(|s| s.is_blocked).unwrap_or(false),
-        todo_nudged: existing.as_ref().map(|s| s.todo_nudged).unwrap_or(false),
+        is_blocked: existing.as_ref().is_some_and(|s| s.is_blocked),
+        todo_nudged: existing.as_ref().is_some_and(|s| s.todo_nudged),
         updated_at: now,
     };
 
@@ -421,12 +515,18 @@ async fn main() -> Result<()> {
     // Check for a per-conversation model override stored by a prior change_model call.
     let model_override: Option<String> = conv_store
         .as_ref()
-        .and_then(|s| s.get_agent_context_state(&conversation_id, &pubkey_hex).ok().flatten())
+        .and_then(|s| {
+            s.get_agent_context_state(&conversation_id, &pubkey_hex)
+                .ok()
+                .flatten()
+        })
         .and_then(|state| state.meta_model_variant);
 
     // Resolve provider + model + API key (override takes precedence over static config).
     let resolved = ResolvedModel::resolve(
-        model_override.as_deref().or_else(|| agent_config.raw_model()),
+        model_override
+            .as_deref()
+            .or_else(|| agent_config.raw_model()),
         llms.as_ref(),
         providers.as_ref(),
     );
@@ -469,11 +569,10 @@ async fn main() -> Result<()> {
     }
 
     // Build env vars for shell commands: parse agent .env + inject computed vars.
-    let mut shell_env: Vec<(String, String)> =
-        home::parse_dotenv(&agent_home.join(".env"))
-            .into_iter()
-            .filter(|(k, _)| k != "HOME") // never override the real HOME
-            .collect();
+    let mut shell_env: Vec<(String, String)> = home::parse_dotenv(&agent_home.join(".env"))
+        .into_iter()
+        .filter(|(k, _)| k != "HOME") // never override the real HOME
+        .collect();
     shell_env.push(("AGENT_HOME".to_string(), agent_home.display().to_string()));
     shell_env.push(("PUBKEY".to_string(), pubkey_hex.clone()));
     shell_env.push(("TENEX_BASE_DIR".to_string(), base_dir.display().to_string()));
@@ -545,16 +644,18 @@ async fn main() -> Result<()> {
             ("$TENEX_BASE_DIR", &tenex_base_str),
             ("$PROJECT_BASE", &working_dir),
         ];
-        Some(skills::render_loaded_skills_block(&preloaded_skills, &path_vars))
+        Some(skills::render_loaded_skills_block(
+            &preloaded_skills,
+            &path_vars,
+        ))
     };
 
     // Shared self-applied skills state (pre-seeded from persistence; updated by skills_set tool).
-    let self_applied_skills: Arc<Mutex<Vec<String>>> =
-        Arc::new(Mutex::new(initial_self_applied));
+    let self_applied_skills: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(initial_self_applied));
 
     // Build system prompt
-    let mut system_prompt = tenex_system_prompt::build_system_prompt(
-        tenex_system_prompt::BuildSystemPromptInput {
+    let mut system_prompt =
+        tenex_system_prompt::build_system_prompt(tenex_system_prompt::BuildSystemPromptInput {
             identity_name: agent_config.identity_name(),
             pubkey_hex: &pubkey_hex,
             category_str: agent_config.category.as_deref(),
@@ -566,8 +667,7 @@ async fn main() -> Result<()> {
             teams_fragment: &teams_fragment,
             home: &home_info,
             preloaded_skills_block: preloaded_skills_block.as_deref(),
-        },
-    );
+        });
 
     // Load persisted todos and inject them as a system reminder into the user message.
     let initial_todos: Vec<TodoItem> = conv_store
@@ -603,14 +703,20 @@ async fn main() -> Result<()> {
     });
 
     // Parse category as supervision type (used by both hook and delegation check).
-    let sup_category: Option<tenex_supervision::types::AgentCategory> =
-        agent_config.category.as_deref().and_then(|s| s.parse().ok());
+    let sup_category: Option<tenex_supervision::types::AgentCategory> = agent_config
+        .category
+        .as_deref()
+        .and_then(|s| s.parse().ok());
     let supervisor = Arc::new(Mutex::new(default_supervisor()));
     let supervisor_ref = supervisor.clone();
     let hook = EmitHook::new(emit_state.clone(), supervisor, todos.clone(), sup_category);
     let allows_delegation = sup_category.map(|c| c.allows_delegation()).unwrap_or(true);
     let delegate_tool: Option<DelegateTool> = if allows_delegation {
-        Some(DelegateTool::new(emit_state.clone(), project_agents.clone(), teams.clone()))
+        Some(DelegateTool::new(
+            emit_state.clone(),
+            project_agents.clone(),
+            teams.clone(),
+        ))
     } else {
         None
     };
@@ -622,7 +728,10 @@ async fn main() -> Result<()> {
     let embed_config: Option<EmbedConfig> = EmbedConfig::load();
     let rag_store: Option<Arc<RagStore>> = embed_config.as_ref().and_then(|cfg| {
         let rag_base = dirs_next::home_dir()?.join(".tenex");
-        let db_path = rag_base.join("projects").join(&project_id).join("embeddings.db");
+        let db_path = rag_base
+            .join("projects")
+            .join(&project_id)
+            .join("embeddings.db");
         match RagStore::open(&db_path, cfg) {
             Ok(store) => Some(Arc::new(store)),
             Err(e) => {
@@ -632,7 +741,8 @@ async fn main() -> Result<()> {
         }
     });
 
-    let rag_add_documents = RagAddDocumentsTool::new(rag_store.clone(), project_id.clone(), pubkey_hex.clone());
+    let rag_add_documents =
+        RagAddDocumentsTool::new(rag_store.clone(), project_id.clone(), pubkey_hex.clone());
     let rag_search = RagSearchTool::new(rag_store.clone(), project_id.clone(), pubkey_hex.clone());
 
     // Proactive context: search RAG before the LLM call so relevant past
@@ -646,8 +756,7 @@ async fn main() -> Result<()> {
         let refs: Vec<&str> = collections.iter().map(|s| s.as_str()).collect();
         match store.search(&envelope.content, &refs, 5).await {
             Ok(results) => {
-                let relevant: Vec<_> =
-                    results.into_iter().filter(|r| r.score >= 0.65).collect();
+                let relevant: Vec<_> = results.into_iter().filter(|r| r.score >= 0.65).collect();
                 if !relevant.is_empty() {
                     let mut block = String::from("\n\n<proactive-context>\nPotentially relevant information retrieved based on your task:\n");
                     for (i, r) in relevant.iter().enumerate() {
@@ -658,7 +767,10 @@ async fn main() -> Result<()> {
                             i + 1,
                             r.score,
                             r.collection,
-                            r.title.as_deref().map(|t| format!(" title:{t}")).unwrap_or_default(),
+                            r.title
+                                .as_deref()
+                                .map(|t| format!(" title:{t}"))
+                                .unwrap_or_default(),
                             snippet,
                             ellipsis,
                         ));
@@ -712,7 +824,10 @@ async fn main() -> Result<()> {
         .unwrap_or_default();
 
     let initial_history = history;
-    eprintln!("[tenex-agent] Running agent (history: {} messages)...", initial_history.len());
+    eprintln!(
+        "[tenex-agent] Running agent (history: {} messages)...",
+        initial_history.len()
+    );
 
     let agent_home_str = agent_home.display().to_string();
 
@@ -898,7 +1013,9 @@ async fn main() -> Result<()> {
                 .collect();
             let turn = TurnRecord {
                 messages_visible: vec![
-                    CtxMessage::User { content: current_message.clone() },
+                    CtxMessage::User {
+                        content: current_message.clone(),
+                    },
                     CtxMessage::Assistant {
                         content: final_response.response().to_string(),
                         tool_calls: assistant_tool_calls,
@@ -967,7 +1084,9 @@ async fn main() -> Result<()> {
             PostCompletionOutcome::ReEngage { message } => {
                 use rig::completion::message::Text;
                 re_engage_history.push(RigMessage::User {
-                    content: OneOrMany::one(UserContent::Text(Text { text: current_message })),
+                    content: OneOrMany::one(UserContent::Text(Text {
+                        text: current_message,
+                    })),
                 });
                 re_engage_history.push(RigMessage::Assistant {
                     id: None,

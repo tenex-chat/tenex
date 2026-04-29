@@ -12,18 +12,16 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Verbatim list from `src/commands/onboard.ts:1516-1520`.
 pub const ADJECTIVES: &[&str] = &[
-    "swift", "bright", "calm", "bold", "keen", "warm", "wild", "cool", "fair", "glad",
-    "brave", "clever", "deft", "eager", "fierce", "gentle", "happy", "jolly", "kind",
-    "lively", "mighty", "noble", "plucky", "quick", "sharp", "steady", "true", "vivid",
-    "witty", "zesty",
+    "swift", "bright", "calm", "bold", "keen", "warm", "wild", "cool", "fair", "glad", "brave",
+    "clever", "deft", "eager", "fierce", "gentle", "happy", "jolly", "kind", "lively", "mighty",
+    "noble", "plucky", "quick", "sharp", "steady", "true", "vivid", "witty", "zesty",
 ];
 
 /// Verbatim list from `src/commands/onboard.ts:1522-1526`.
 pub const NOUNS: &[&str] = &[
-    "fox", "owl", "bear", "wolf", "hawk", "deer", "lynx", "crow", "hare", "wren",
-    "otter", "raven", "crane", "finch", "panda", "tiger", "eagle", "cobra", "bison",
-    "whale", "badger", "falcon", "heron", "robin", "viper", "squid", "gecko", "moose",
-    "stork", "manta",
+    "fox", "owl", "bear", "wolf", "hawk", "deer", "lynx", "crow", "hare", "wren", "otter", "raven",
+    "crane", "finch", "panda", "tiger", "eagle", "cobra", "bison", "whale", "badger", "falcon",
+    "heron", "robin", "viper", "squid", "gecko", "moose", "stork", "manta",
 ];
 
 thread_local! {

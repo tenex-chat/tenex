@@ -119,19 +119,15 @@ pub fn run(
     let accept_label = format!("Use {label} / {model}", model = recommended.model);
     let accept = AcceptOrChange::Accept(accept_label.clone());
     let change = AcceptOrChange::Change;
-    let action = match prompts::select(
-        "Embedding model",
-        vec![accept.clone(), change.clone()],
-    )
-    .prompt()
-    {
-        Ok(c) => c,
-        Err(inquire::InquireError::OperationCanceled)
-        | Err(inquire::InquireError::OperationInterrupted) => {
-            return Ok(EmbeddingsResult::Cancelled);
-        }
-        Err(e) => return Err(anyhow!("embedding accept/change prompt: {e}")),
-    };
+    let action =
+        match prompts::select("Embedding model", vec![accept.clone(), change.clone()]).prompt() {
+            Ok(c) => c,
+            Err(inquire::InquireError::OperationCanceled)
+            | Err(inquire::InquireError::OperationInterrupted) => {
+                return Ok(EmbeddingsResult::Cancelled);
+            }
+            Err(e) => return Err(anyhow!("embedding accept/change prompt: {e}")),
+        };
 
     // TS at `:425-428` (accept) and `:484-487` (change) emit asymmetric
     // success-line provider tokens: the accept branch labelizes the

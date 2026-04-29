@@ -101,7 +101,10 @@ pub fn serialize_api_key_entry(key: &str, label: Option<&str>) -> String {
 /// Used by services that only need a single key (embeddings, image
 /// gen) — returns the first key from the entry list (or `None`).
 pub fn resolve_api_key(api_key: ApiKeyValue<'_>) -> Option<String> {
-    get_api_key_entries(api_key).into_iter().next().map(|e| e.key)
+    get_api_key_entries(api_key)
+        .into_iter()
+        .next()
+        .map(|e| e.key)
 }
 
 /// Mirror `hasApiKey` (`key-manager.ts:338-340`).

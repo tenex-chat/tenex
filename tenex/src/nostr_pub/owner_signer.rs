@@ -23,8 +23,7 @@ use crate::tui::prompts;
 const ENV_VAR: &str = "TENEX_NSEC";
 
 fn build_signer(nsec: &str) -> Result<Keys> {
-    Keys::parse(nsec.trim())
-        .map_err(|e| anyhow!("Could not load owner nsec: {e}"))
+    Keys::parse(nsec.trim()).map_err(|e| anyhow!("Could not load owner nsec: {e}"))
 }
 
 /// Resolve the project owner's nsec and return signing keys.
@@ -88,26 +87,21 @@ struct PromptedNsec {
 
 fn prompt_for_nsec() -> Result<Option<PromptedNsec>> {
     // Password prompt (masked).
-    let nsec = match prompts::password(
-        "Owner nsec (hex or bech32) — leave blank to abort:",
-    )
-    .prompt()
-    {
-        Ok(s) => s,
-        Err(inquire::InquireError::OperationCanceled)
-        | Err(inquire::InquireError::OperationInterrupted) => return Ok(None),
-        Err(e) => return Err(anyhow!("nsec prompt: {e}")),
-    };
+    let nsec =
+        match prompts::password("Owner nsec (hex or bech32) — leave blank to abort:").prompt() {
+            Ok(s) => s,
+            Err(inquire::InquireError::OperationCanceled)
+            | Err(inquire::InquireError::OperationInterrupted) => return Ok(None),
+            Err(e) => return Err(anyhow!("nsec prompt: {e}")),
+        };
     let trimmed = nsec.trim().to_owned();
     if trimmed.is_empty() {
         return Ok(None);
     }
 
-    let persist = match prompts::confirm(
-        "Save this nsec to your TENEX config for future sessions?",
-    )
-    .with_default(false)
-    .prompt()
+    let persist = match prompts::confirm("Save this nsec to your TENEX config for future sessions?")
+        .with_default(false)
+        .prompt()
     {
         Ok(b) => b,
         Err(inquire::InquireError::OperationCanceled)
@@ -202,10 +196,7 @@ mod tests {
     #[test]
     fn build_signer_rejects_garbage_with_verbatim_message() {
         let err = build_signer("not-a-key").unwrap_err().to_string();
-        assert!(
-            err.starts_with("Could not load owner nsec:"),
-            "got: {err}"
-        );
+        assert!(err.starts_with("Could not load owner nsec:"), "got: {err}");
     }
 
     #[test]

@@ -76,9 +76,7 @@ mod tests {
     fn each_dot_emits_color_bold_per_attribute_close_no_sgr_0() {
         // Row 2 is the ACCENT row with two dots — `\x1b[38;5;214m`.
         // Plain spaces between/around them stay unstyled.
-        let one_dot = format!(
-            "{ACCENT_OPEN}{BOLD_OPEN}•{BOLD_CLOSE}{FG_RESET}",
-        );
+        let one_dot = format!("{ACCENT_OPEN}{BOLD_OPEN}•{BOLD_CLOSE}{FG_RESET}",);
         // Each chunk should contain SGR 22 + SGR 39 closes, never SGR 0.
         assert!(one_dot.contains("\x1b[38;5;214m"));
         assert!(one_dot.contains("\x1b[1m"));
@@ -102,9 +100,7 @@ mod tests {
     /// wire bytes.
     #[test]
     fn brand_letters_match_ts_accent_bold_byte_sequence() {
-        let chunk = format!(
-            "{ACCENT_OPEN}{BOLD_OPEN}T E N E X{BOLD_CLOSE}{FG_RESET}",
-        );
+        let chunk = format!("{ACCENT_OPEN}{BOLD_OPEN}T E N E X{BOLD_CLOSE}{FG_RESET}",);
         assert_eq!(chunk, "\x1b[38;5;214m\x1b[1mT E N E X\x1b[22m\x1b[39m");
         assert!(!chunk.contains("\x1b[0m"));
     }

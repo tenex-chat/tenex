@@ -98,8 +98,8 @@ fn read_whitelist(path: &Path) -> Result<HashSet<String>> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(HashSet::new()),
         Err(e) => return Err(e).with_context(|| format!("read {}", path.display())),
     };
-    let cfg: GlobalConfig = serde_json::from_slice(&bytes)
-        .with_context(|| format!("parse {}", path.display()))?;
+    let cfg: GlobalConfig =
+        serde_json::from_slice(&bytes).with_context(|| format!("parse {}", path.display()))?;
     Ok(cfg
         .whitelisted_pubkeys
         .into_iter()
@@ -146,8 +146,8 @@ fn read_event_p_tags(path: &Path) -> Result<HashSet<String>> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(HashSet::new()),
         Err(e) => return Err(e).with_context(|| format!("read {}", path.display())),
     };
-    let event: RawEvent = serde_json::from_slice(&bytes)
-        .with_context(|| format!("parse {}", path.display()))?;
+    let event: RawEvent =
+        serde_json::from_slice(&bytes).with_context(|| format!("parse {}", path.display()))?;
     let mut set = HashSet::new();
     for tag in event.tags {
         if tag.len() >= 2 && tag[0] == "p" {

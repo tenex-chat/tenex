@@ -36,7 +36,11 @@ impl ConversationSearchTool {
         base_dir: PathBuf,
         _current_project_id: String,
     ) -> Self {
-        Self { store, embed_config, base_dir }
+        Self {
+            store,
+            embed_config,
+            base_dir,
+        }
     }
 }
 
@@ -134,7 +138,11 @@ impl Tool for ConversationSearchTool {
                 return Ok(format!("No conversations found matching '{}'.", args.query));
             }
 
-            all_results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+            all_results.sort_by(|a, b| {
+                b.score
+                    .partial_cmp(&a.score)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
             all_results.truncate(limit);
 
             return serde_json::to_string_pretty(&all_results)

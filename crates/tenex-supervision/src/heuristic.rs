@@ -7,5 +7,5 @@ pub trait PostCompletionHeuristic: Send + Sync {
 
 pub trait PreToolHeuristic: Send + Sync {
     fn name(&self) -> &'static str;
-    fn check<'a>(&self, ctx: &PreToolContext<'a>) -> Option<String>;
+    fn check(&self, ctx: &PreToolContext<'_>) -> Option<String>;
 }

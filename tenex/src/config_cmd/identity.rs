@@ -49,7 +49,10 @@ pub fn run(base_dir: &std::path::Path) -> Result<()> {
 /// the dim'd payload.
 fn render_listing(pubkeys: &[String]) {
     if pubkeys.is_empty() {
-        println!("{}", crate::tui::theme::chalk_dim("  No authorized pubkeys.\n"));
+        println!(
+            "{}",
+            crate::tui::theme::chalk_dim("  No authorized pubkeys.\n")
+        );
     } else {
         println!("  Authorized pubkeys:");
         for pk in pubkeys {
@@ -207,11 +210,7 @@ mod tests {
     fn remove_filters_chosen_pubkey_and_persists() {
         let base = unique_temp();
         let mut doc = TenexConfigDoc::load(&base).unwrap();
-        doc.set_whitelisted_pubkeys(vec![
-            "aa".to_owned(),
-            "bb".to_owned(),
-            "cc".to_owned(),
-        ]);
+        doc.set_whitelisted_pubkeys(vec!["aa".to_owned(), "bb".to_owned(), "cc".to_owned()]);
         doc.save(&base).unwrap();
 
         let mut doc = TenexConfigDoc::load(&base).unwrap();

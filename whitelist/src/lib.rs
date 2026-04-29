@@ -116,8 +116,10 @@ fn ensure_daemon_then_connect() -> Result<UnixStream> {
 
     match daemonize::spawn_daemon()? {
         daemonize::Role::Daemon => run_daemon_role(),
-        daemonize::Role::Caller => client::connect_with_retry(&socket, 60, Duration::from_millis(50))
-            .context("connect to freshly-spawned daemon"),
+        daemonize::Role::Caller => {
+            client::connect_with_retry(&socket, 60, Duration::from_millis(50))
+                .context("connect to freshly-spawned daemon")
+        }
     }
 }
 

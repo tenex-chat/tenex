@@ -74,8 +74,8 @@ async fn handle_client(
                                 created_at: None,
                                 fetched_at: crate::cache::now_secs(),
                             };
-                            let mut json = serde_json::to_string(&empty)
-                                .unwrap_or_else(|_| "ERR".to_string());
+                            let mut json =
+                                serde_json::to_string(&empty).unwrap_or_else(|_| "ERR".to_string());
                             json.push('\n');
                             json
                         }

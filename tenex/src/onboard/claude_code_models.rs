@@ -51,14 +51,8 @@ mod tests {
 
     #[test]
     fn display_names_match_ts_verbatim() {
-        let names: Vec<&str> = CLAUDE_CODE_MODELS
-            .iter()
-            .map(|m| m.display_name)
-            .collect();
-        assert_eq!(
-            names,
-            vec!["Claude Sonnet", "Claude Opus", "Claude Haiku"]
-        );
+        let names: Vec<&str> = CLAUDE_CODE_MODELS.iter().map(|m| m.display_name).collect();
+        assert_eq!(names, vec!["Claude Sonnet", "Claude Opus", "Claude Haiku"]);
     }
 
     #[test]

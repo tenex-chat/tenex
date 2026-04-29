@@ -157,9 +157,7 @@ pub fn cache_file_path(base_dir: &std::path::Path) -> std::path::PathBuf {
 /// cases (the `readJsonFile` helper logs and returns `null`). The Rust
 /// port distinguishes them so the caller can surface a parse error
 /// loudly instead of silently fetching from the network.
-pub fn load_from_disk(
-    base_dir: &std::path::Path,
-) -> std::io::Result<Option<CacheData>> {
+pub fn load_from_disk(base_dir: &std::path::Path) -> std::io::Result<Option<CacheData>> {
     let path = cache_file_path(base_dir);
     let bytes = match std::fs::read(&path) {
         Ok(b) => b,
@@ -234,8 +232,16 @@ pub fn get_model_info(
     model: &str,
 ) -> Option<ModelsDevModel> {
     let (resolved_id, data) = resolve_model_data(cache, provider, model)?;
-    let id = if data.id.is_empty() { resolved_id.clone() } else { data.id.clone() };
-    let name = if data.name.is_empty() { resolved_id } else { data.name.clone() };
+    let id = if data.id.is_empty() {
+        resolved_id.clone()
+    } else {
+        data.id.clone()
+    };
+    let name = if data.name.is_empty() {
+        resolved_id
+    } else {
+        data.name.clone()
+    };
     Some(ModelsDevModel {
         id,
         name,
@@ -247,11 +253,7 @@ pub fn get_model_info(
 
 /// Mirror `getContextWindowFromModelsdev` (`models-dev-cache.ts:311-314`).
 /// Convenience getter for the context limit when present.
-pub fn context_window(
-    cache: &ModelsDevResponse,
-    provider: &str,
-    model: &str,
-) -> Option<u64> {
+pub fn context_window(cache: &ModelsDevResponse, provider: &str, model: &str) -> Option<u64> {
     let (_, data) = resolve_model_data(cache, provider, model)?;
     data.limit.as_ref().map(|l| l.context)
 }
@@ -334,10 +336,7 @@ pub fn default_model_for_provider(provider: &str) -> &'static str {
 /// by treating `None` as `""`. Entries with a real `last_updated` sort
 /// before entries without (since `"2024-..." > ""` lexicographically),
 /// and ties fall back to insertion order via Rust's stable sort.
-pub fn get_provider_models(
-    cache: &ModelsDevResponse,
-    provider: &str,
-) -> Vec<ModelsDevModel> {
+pub fn get_provider_models(cache: &ModelsDevResponse, provider: &str) -> Vec<ModelsDevModel> {
     let Some(models_dev_provider) = map_to_models_dev_provider(provider) else {
         return Vec::new();
     };
@@ -561,9 +560,7 @@ mod tests {
     fn build_cache(entries: &[(&str, &str, ModelsDevModel)]) -> ModelsDevResponse {
         let mut out: ModelsDevResponse = BTreeMap::new();
         for (provider, model_id, data) in entries {
-            let entry = out
-                .entry((*provider).to_owned())
-                .or_default();
+            let entry = out.entry((*provider).to_owned()).or_default();
             entry.models.insert((*model_id).to_owned(), data.clone());
         }
         out
@@ -588,7 +585,11 @@ mod tests {
     #[test]
     fn resolve_direct_lookup_via_provider_mapping() {
         // anthropic → models.dev "anthropic" section.
-        let cache = build_cache(&[("anthropic", "claude-sonnet-4-6", model("claude-sonnet-4-6", 200_000, 3.0))]);
+        let cache = build_cache(&[(
+            "anthropic",
+            "claude-sonnet-4-6",
+            model("claude-sonnet-4-6", 200_000, 3.0),
+        )]);
         let resolved = resolve_model_data(&cache, "anthropic", "claude-sonnet-4-6").unwrap();
         assert_eq!(resolved.0, "claude-sonnet-4-6");
         assert_eq!(resolved.1.limit.as_ref().unwrap().context, 200_000);
@@ -621,7 +622,11 @@ mod tests {
 
     #[test]
     fn resolve_returns_none_for_truly_missing_model() {
-        let cache = build_cache(&[("anthropic", "claude-sonnet-4-6", model("claude-sonnet-4-6", 200_000, 3.0))]);
+        let cache = build_cache(&[(
+            "anthropic",
+            "claude-sonnet-4-6",
+            model("claude-sonnet-4-6", 200_000, 3.0),
+        )]);
         assert!(resolve_model_data(&cache, "openai", "gpt-4o").is_none());
         assert!(resolve_model_data(&cache, "anthropic", "missing-model").is_none());
     }
@@ -631,7 +636,11 @@ mod tests {
         // ollama maps to None in the provider mapping → step 1 skipped.
         // The model ID also has no slash → step 2 skipped. Step 3
         // global-scans and may find a match.
-        let cache = build_cache(&[("anthropic", "claude-sonnet-4-6", model("claude-sonnet-4-6", 200_000, 3.0))]);
+        let cache = build_cache(&[(
+            "anthropic",
+            "claude-sonnet-4-6",
+            model("claude-sonnet-4-6", 200_000, 3.0),
+        )]);
         let resolved = resolve_model_data(&cache, "ollama", "claude-sonnet-4-6").unwrap();
         assert_eq!(resolved.0, "claude-sonnet-4-6");
     }
@@ -652,7 +661,10 @@ mod tests {
     #[test]
     fn context_window_returns_limit_context_when_present() {
         let cache = build_cache(&[("anthropic", "claude-x", model("claude-x", 200_000, 3.0))]);
-        assert_eq!(context_window(&cache, "anthropic", "claude-x"), Some(200_000));
+        assert_eq!(
+            context_window(&cache, "anthropic", "claude-x"),
+            Some(200_000)
+        );
     }
 
     #[test]
@@ -724,7 +736,9 @@ mod tests {
         let cache = load_from_disk(&base).unwrap().unwrap();
         assert_eq!(cache.fetched_at, 1_234_567);
         assert_eq!(
-            cache.data.get("anthropic")
+            cache
+                .data
+                .get("anthropic")
                 .and_then(|p| p.models.get("claude-x"))
                 .map(|m| m.name.as_str()),
             Some("Claude X"),
@@ -879,7 +893,10 @@ mod tests {
     fn default_model_for_each_canonical_provider_matches_ts_table() {
         // Mirror the `defaults` table at ConfigurationManager.ts:261-268.
         assert_eq!(default_model_for_provider("openrouter"), "openai/gpt-4");
-        assert_eq!(default_model_for_provider("anthropic"), "claude-3-5-sonnet-latest");
+        assert_eq!(
+            default_model_for_provider("anthropic"),
+            "claude-3-5-sonnet-latest"
+        );
         assert_eq!(default_model_for_provider("openai"), "gpt-4");
         assert_eq!(default_model_for_provider("ollama"), "llama3.1:8b");
         assert_eq!(default_model_for_provider("codex"), "gpt-5.1-codex-max");

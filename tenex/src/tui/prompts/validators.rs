@@ -56,7 +56,10 @@ mod tests {
 
     #[test]
     fn validate_positive_integer_rejects_garbage_with_verbatim_message() {
-        assert_eq!(validate_positive_integer(""), Err("Please enter a positive number"));
+        assert_eq!(
+            validate_positive_integer(""),
+            Err("Please enter a positive number")
+        );
         assert_eq!(
             validate_positive_integer("-1"),
             Err("Please enter a positive number")

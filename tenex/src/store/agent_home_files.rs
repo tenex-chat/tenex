@@ -82,10 +82,7 @@ impl std::error::Error for HomeScopeViolationError {}
 /// Returns up to [`MAX_INJECTED_FILES`] entries with content truncated
 /// to [`MAX_INJECTED_FILE_LENGTH`] chars. Empty Vec on missing dir,
 /// scan errors, or zero matching files.
-pub fn get_agent_home_injected_files(
-    base_dir: &Path,
-    agent_pubkey: &str,
-) -> Vec<InjectedFile> {
+pub fn get_agent_home_injected_files(base_dir: &Path, agent_pubkey: &str) -> Vec<InjectedFile> {
     let home_dir = get_agent_home_directory(base_dir, agent_pubkey);
     // `ensureAgentHomeDirectory` is called by TS but we delegate that
     // to the caller that materialised the home — if the dir doesn't
@@ -105,7 +102,9 @@ fn get_injected_files_from_directory(directory: &Path) -> Vec<InjectedFile> {
     };
     let mut plus_candidates: Vec<(String, PathBuf)> = Vec::new();
     for entry in entries.flatten() {
-        let Ok(file_type) = entry.file_type() else { continue };
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
         if !file_type.is_file() {
             continue;
         }
@@ -373,8 +372,7 @@ mod tests {
         let base = unique_temp();
         home_for(&base, fixture_pubkey());
         let resolved =
-            resolve_home_scoped_path(&base, Path::new("notes/today.md"), fixture_pubkey())
-                .unwrap();
+            resolve_home_scoped_path(&base, Path::new("notes/today.md"), fixture_pubkey()).unwrap();
         assert!(resolved.ends_with("notes/today.md"));
         assert!(resolved.starts_with(&base));
         std::fs::remove_dir_all(&base).ok();
@@ -385,8 +383,7 @@ mod tests {
         let base = unique_temp();
         let home = home_for(&base, fixture_pubkey());
         let inside = home.join("memory.md");
-        let resolved =
-            resolve_home_scoped_path(&base, &inside, fixture_pubkey()).unwrap();
+        let resolved = resolve_home_scoped_path(&base, &inside, fixture_pubkey()).unwrap();
         assert_eq!(resolved, inside);
         std::fs::remove_dir_all(&base).ok();
     }
@@ -395,12 +392,8 @@ mod tests {
     fn rejects_dotdot_escape_with_verbatim_error() {
         let base = unique_temp();
         home_for(&base, fixture_pubkey());
-        let err = resolve_home_scoped_path(
-            &base,
-            Path::new("../escape"),
-            fixture_pubkey(),
-        )
-        .unwrap_err();
+        let err =
+            resolve_home_scoped_path(&base, Path::new("../escape"), fixture_pubkey()).unwrap_err();
         assert_eq!(
             err.to_string(),
             "Path \"../escape\" is outside your home directory. You can only access files within your home directory."

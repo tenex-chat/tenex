@@ -166,9 +166,7 @@ impl InputKey {
     /// Translate a crossterm `KeyEvent` into the prompt's input vocabulary.
     /// Unknown keys map to [`InputKey::Other`] which the state machine ignores.
     pub fn from_key_event(ev: KeyEvent) -> Self {
-        if ev.modifiers.contains(KeyModifiers::CONTROL)
-            && matches!(ev.code, KeyCode::Char('c'))
-        {
+        if ev.modifiers.contains(KeyModifiers::CONTROL) && matches!(ev.code, KeyCode::Char('c')) {
             return InputKey::CtrlC;
         }
         match ev.code {
@@ -420,9 +418,7 @@ pub fn compose_browse_lines(
     out.push(format!("{done_pfx}  Done"));
 
     // Help row — exact text per `provider-select-prompt.ts:247-252`.
-    out.push(
-        "  ↑↓ navigate • space toggle • ⏎ manage keys / done".to_string(),
-    );
+    out.push("  ↑↓ navigate • space toggle • ⏎ manage keys / done".to_string());
 
     out
 }
@@ -564,7 +560,14 @@ pub fn provider_select_prompt(
     let mut stdout = io::stdout();
 
     loop {
-        prev_height = render_frame(&mut stdout, message, &state, provider_ids, provider_hints, prev_height)?;
+        prev_height = render_frame(
+            &mut stdout,
+            message,
+            &state,
+            provider_ids,
+            provider_hints,
+            prev_height,
+        )?;
 
         let key = match event::read()? {
             Event::Key(k) => k,
@@ -618,7 +621,12 @@ fn render_frame<W: Write>(
     // crossterm's ResetColor would emit SGR 0 (full reset) — visually
     // identical but byte-different. Use the raw FG_RESET constant for
     // byte-perfect chalk-prefix match.
-    queue!(stdout, SetForegroundColor(AMBER), Print("?"), Print(crate::tui::theme::FG_RESET))?;
+    queue!(
+        stdout,
+        SetForegroundColor(AMBER),
+        Print("?"),
+        Print(crate::tui::theme::FG_RESET)
+    )?;
     queue!(
         stdout,
         Print(" "),
@@ -987,7 +995,10 @@ mod tests {
     #[test]
     fn mask_key_preserves_ollama_value_verbatim() {
         // Ollama stores its base URL in apiKey — never mask.
-        assert_eq!(mask_key("ollama", "http://localhost:11434"), "http://localhost:11434");
+        assert_eq!(
+            mask_key("ollama", "http://localhost:11434"),
+            "http://localhost:11434"
+        );
     }
 
     #[test]
@@ -999,7 +1010,11 @@ mod tests {
     #[test]
     fn mask_key_keeps_last_four_for_long_inputs() {
         let input = "sk-ant-1234567890ABCDEFGHIJ"; // 27 chars
-        let expected = format!("{}{}", "*".repeat(input.len() - 4), &input[input.len() - 4..]);
+        let expected = format!(
+            "{}{}",
+            "*".repeat(input.len() - 4),
+            &input[input.len() - 4..]
+        );
         assert_eq!(mask_key("anthropic", input), expected);
     }
 
@@ -1041,7 +1056,9 @@ mod tests {
     #[test]
     fn toggle_enabled_provider_moves_to_stash() {
         let mut state = empty_state();
-        state.providers.insert("anthropic".into(), cred_single("sk-1"));
+        state
+            .providers
+            .insert("anthropic".into(), cred_single("sk-1"));
         let pids = pids();
         state.active = pids.iter().position(|p| p == "anthropic").unwrap();
         handle_key(&mut state, &pids, InputKey::Space);
@@ -1052,7 +1069,9 @@ mod tests {
     #[test]
     fn toggle_disabled_with_stash_restores() {
         let mut state = empty_state();
-        state.stash.insert("anthropic".into(), cred_single("sk-old"));
+        state
+            .stash
+            .insert("anthropic".into(), cred_single("sk-old"));
         let pids = pids();
         state.active = pids.iter().position(|p| p == "anthropic").unwrap();
         let outcome = handle_key(&mut state, &pids, InputKey::Space);
@@ -1070,7 +1089,9 @@ mod tests {
     #[test]
     fn enter_key_mode_only_for_enabled_providers_that_need_keys() {
         let mut state = empty_state();
-        state.providers.insert("openrouter".into(), cred_single("sk-1"));
+        state
+            .providers
+            .insert("openrouter".into(), cred_single("sk-1"));
         let pids = pids();
         state.active = pids.iter().position(|p| p == "openrouter").unwrap();
         handle_key(&mut state, &pids, InputKey::Enter);
@@ -1166,7 +1187,9 @@ mod tests {
     #[test]
     fn d_on_last_key_drops_provider_and_exits_keys_mode() {
         let mut state = empty_state();
-        state.providers.insert("anthropic".into(), cred_single("k1"));
+        state
+            .providers
+            .insert("anthropic".into(), cred_single("k1"));
         state.mode = ProviderMode::Keys;
         state.keys_target = Some("anthropic".into());
         state.keys_active = 0;
@@ -1193,13 +1216,18 @@ mod tests {
     #[test]
     fn enter_on_add_index_emits_request_add_key_with_keys_return() {
         let mut state = empty_state();
-        state.providers.insert("anthropic".into(), cred_single("k1"));
+        state
+            .providers
+            .insert("anthropic".into(), cred_single("k1"));
         state.mode = ProviderMode::Keys;
         state.keys_target = Some("anthropic".into());
         state.keys_active = 1; // add_index when keys.len == 1
         let outcome = handle_key(&mut state, &pids(), InputKey::Enter);
         match outcome {
-            ProviderOutcome::RequestAddKey { provider_id, return_to } => {
+            ProviderOutcome::RequestAddKey {
+                provider_id,
+                return_to,
+            } => {
                 assert_eq!(provider_id, "anthropic");
                 assert_eq!(return_to, ProviderMode::Keys);
             }
@@ -1210,7 +1238,9 @@ mod tests {
     #[test]
     fn enter_on_back_index_returns_to_browse() {
         let mut state = empty_state();
-        state.providers.insert("anthropic".into(), cred_single("k1"));
+        state
+            .providers
+            .insert("anthropic".into(), cred_single("k1"));
         state.mode = ProviderMode::Keys;
         state.keys_target = Some("anthropic".into());
         state.keys_active = 2; // back_index when keys.len == 1
@@ -1222,7 +1252,9 @@ mod tests {
     #[test]
     fn esc_in_keys_mode_returns_to_browse() {
         let mut state = empty_state();
-        state.providers.insert("anthropic".into(), cred_single("k1"));
+        state
+            .providers
+            .insert("anthropic".into(), cred_single("k1"));
         state.mode = ProviderMode::Keys;
         state.keys_target = Some("anthropic".into());
         handle_key(&mut state, &pids(), InputKey::Escape);
@@ -1261,8 +1293,14 @@ mod tests {
 
     #[test]
     fn from_key_event_maps_enter_space_esc() {
-        assert_eq!(InputKey::from_key_event(ke(KeyCode::Enter)), InputKey::Enter);
-        assert_eq!(InputKey::from_key_event(ke(KeyCode::Char(' '))), InputKey::Space);
+        assert_eq!(
+            InputKey::from_key_event(ke(KeyCode::Enter)),
+            InputKey::Enter
+        );
+        assert_eq!(
+            InputKey::from_key_event(ke(KeyCode::Char(' '))),
+            InputKey::Space
+        );
         assert_eq!(InputKey::from_key_event(ke(KeyCode::Esc)), InputKey::Escape);
     }
 
@@ -1277,8 +1315,14 @@ mod tests {
 
     #[test]
     fn from_key_event_maps_other_chars_to_char() {
-        assert_eq!(InputKey::from_key_event(ke(KeyCode::Char('d'))), InputKey::Char('d'));
-        assert_eq!(InputKey::from_key_event(ke(KeyCode::Char('a'))), InputKey::Char('a'));
+        assert_eq!(
+            InputKey::from_key_event(ke(KeyCode::Char('d'))),
+            InputKey::Char('d')
+        );
+        assert_eq!(
+            InputKey::from_key_event(ke(KeyCode::Char('a'))),
+            InputKey::Char('a')
+        );
     }
 
     #[test]
@@ -1297,7 +1341,9 @@ mod tests {
     #[test]
     fn other_input_in_keys_is_continue() {
         let mut state = empty_state();
-        state.providers.insert("anthropic".into(), cred_single("k1"));
+        state
+            .providers
+            .insert("anthropic".into(), cred_single("k1"));
         state.mode = ProviderMode::Keys;
         state.keys_target = Some("anthropic".into());
         let outcome = handle_key(&mut state, &pids(), InputKey::Other);
@@ -1309,7 +1355,9 @@ mod tests {
     #[test]
     fn browse_view_shows_check_for_enabled_and_unchecked_for_disabled() {
         let mut state = empty_state();
-        state.providers.insert("openrouter".into(), cred_single("sk-1"));
+        state
+            .providers
+            .insert("openrouter".into(), cred_single("sk-1"));
         let pids = pids();
         let lines = compose_browse_lines(&state, &pids, &IndexMap::new());
         // First line: openrouter enabled.
@@ -1334,7 +1382,9 @@ mod tests {
     #[test]
     fn browse_view_appends_singular_when_one_key() {
         let mut state = empty_state();
-        state.providers.insert("anthropic".into(), cred_single("k1"));
+        state
+            .providers
+            .insert("anthropic".into(), cred_single("k1"));
         let lines = compose_browse_lines(&state, &pids(), &IndexMap::new());
         let line = lines.iter().find(|l| l.contains("Anthropic")).unwrap();
         assert!(line.contains("[1 key]"), "got: {line}");
@@ -1344,10 +1394,7 @@ mod tests {
     fn browse_view_renders_disabled_provider_hints() {
         let state = empty_state();
         let mut hints = IndexMap::new();
-        hints.insert(
-            "anthropic".into(),
-            "via claude setup-token".to_owned(),
-        );
+        hints.insert("anthropic".into(), "via claude setup-token".to_owned());
         let lines = compose_browse_lines(&state, &pids(), &hints);
         let line = lines.iter().find(|l| l.contains("Anthropic")).unwrap();
         assert!(line.contains("via claude setup-token"), "got: {line}");
@@ -1378,7 +1425,9 @@ mod tests {
     #[test]
     fn keys_view_renders_rule_separator_at_correct_width() {
         let mut state = empty_state();
-        state.providers.insert("anthropic".into(), cred_single("k1"));
+        state
+            .providers
+            .insert("anthropic".into(), cred_single("k1"));
         state.mode = ProviderMode::Keys;
         state.keys_target = Some("anthropic".into());
         let lines = compose_keys_lines(&state);
@@ -1390,38 +1439,42 @@ mod tests {
     #[test]
     fn keys_view_help_text_verbatim() {
         let mut state = empty_state();
-        state.providers.insert("anthropic".into(), cred_single("k1"));
+        state
+            .providers
+            .insert("anthropic".into(), cred_single("k1"));
         state.mode = ProviderMode::Keys;
         state.keys_target = Some("anthropic".into());
         let lines = compose_keys_lines(&state);
         let help = lines.last().unwrap();
-        assert_eq!(
-            help,
-            "  ↑↓ navigate • d delete key • ⏎ select • esc back"
-        );
+        assert_eq!(help, "  ↑↓ navigate • d delete key • ⏎ select • esc back");
     }
 
     #[test]
     fn keys_view_marks_active_row_with_thin_chevron_and_delete_hint() {
         let mut state = empty_state();
-        state
-            .providers
-            .insert("anthropic".into(), cred_multi(&["sk-aaaa1234", "sk-bbbb5678"]));
+        state.providers.insert(
+            "anthropic".into(),
+            cred_multi(&["sk-aaaa1234", "sk-bbbb5678"]),
+        );
         state.mode = ProviderMode::Keys;
         state.keys_target = Some("anthropic".into());
         state.keys_active = 0;
         let lines = compose_keys_lines(&state);
         let active_row = &lines[2];
-        assert!(active_row.starts_with(glyphs::CURSOR_THIN), "got: {active_row}");
+        assert!(
+            active_row.starts_with(glyphs::CURSOR_THIN),
+            "got: {active_row}"
+        );
         assert!(active_row.contains("d delete"), "got: {active_row}");
     }
 
     #[test]
     fn keys_view_renders_label_after_masked_key() {
         let mut state = empty_state();
-        state
-            .providers
-            .insert("anthropic".into(), cred_single("sk-ant-oat01-abcdefghij pfer@me.com"));
+        state.providers.insert(
+            "anthropic".into(),
+            cred_single("sk-ant-oat01-abcdefghij pfer@me.com"),
+        );
         state.mode = ProviderMode::Keys;
         state.keys_target = Some("anthropic".into());
         let lines = compose_keys_lines(&state);
@@ -1469,12 +1522,9 @@ mod tests {
         let mut buf: Vec<u8> = Vec::new();
         render_browse(&mut buf, &state, &pids, &IndexMap::new()).unwrap();
         let s = String::from_utf8(buf).expect("render output must be UTF-8");
-        let with_full_reset = s.contains(
-            "\x1b[38;2;255;193;7m›\x1b[0m \x1b[38;5;214m\x1b[1m  Done",
-        );
-        let with_fg_reset = s.contains(
-            "\x1b[38;2;255;193;7m›\x1b[39m \x1b[38;5;214m\x1b[1m  Done",
-        );
+        let with_full_reset =
+            s.contains("\x1b[38;2;255;193;7m›\x1b[0m \x1b[38;5;214m\x1b[1m  Done");
+        let with_fg_reset = s.contains("\x1b[38;2;255;193;7m›\x1b[39m \x1b[38;5;214m\x1b[1m  Done");
         assert!(
             with_full_reset || with_fg_reset,
             "Done row must emit cursor + close + literal space + ansi256(214)+bold for the label; got {s:?}",
@@ -1485,9 +1535,10 @@ mod tests {
     #[test]
     fn render_keys_active_key_cursor_has_space_outside_amber_wrap() {
         let mut state = empty_state();
-        state
-            .providers
-            .insert("anthropic".into(), cred_multi(&["sk-aaaa1234", "sk-bbbb5678"]));
+        state.providers.insert(
+            "anthropic".into(),
+            cred_multi(&["sk-aaaa1234", "sk-bbbb5678"]),
+        );
         state.mode = ProviderMode::Keys;
         state.keys_target = Some("anthropic".into());
         state.keys_active = 0;
@@ -1515,7 +1566,10 @@ mod tests {
     /// losing the actual identifier in any rendered listing.
     #[test]
     fn provider_display_name_known_ids_match_ts_friendly_names() {
-        assert_eq!(provider_display_name("openrouter"), "OpenRouter (300+ models)");
+        assert_eq!(
+            provider_display_name("openrouter"),
+            "OpenRouter (300+ models)"
+        );
         assert_eq!(provider_display_name("anthropic"), "Anthropic (Claude)");
         assert_eq!(provider_display_name("openai"), "OpenAI (GPT)");
         assert_eq!(provider_display_name("ollama"), "Ollama (Local models)");

@@ -276,12 +276,8 @@ impl ConversationStore {
                     .as_ref()
                     .map(serde_json::to_string)
                     .transpose()?,
-                msg.sender_principal
-                    .as_ref()
-                    .map(|v| v.to_string()),
-                msg.targeted_principals
-                    .as_ref()
-                    .map(|v| v.to_string()),
+                msg.sender_principal.as_ref().map(|v| v.to_string()),
+                msg.targeted_principals.as_ref().map(|v| v.to_string()),
                 msg.tool_data.as_ref().map(|v| v.to_string()),
                 msg.delegation_marker.as_ref().map(|v| v.to_string()),
                 msg.human_readable,
@@ -315,7 +311,10 @@ impl ConversationStore {
                       LIMIT ?3 OFFSET ?4",
                 )?;
                 let mapped = stmt
-                    .query_map(params![conversation_id, pubkey, limit, offset], row_to_message)?
+                    .query_map(
+                        params![conversation_id, pubkey, limit, offset],
+                        row_to_message,
+                    )?
                     .collect::<std::result::Result<Vec<_>, _>>()?;
                 mapped
             }
@@ -382,11 +381,7 @@ impl ConversationStore {
     /// `(conversation_id, tool_call_id)` — re-inserts overwrite the
     /// result fields (so a "call" insert followed by a "result" insert
     /// upgrades the row in place).
-    pub fn record_tool_message(
-        &self,
-        conversation_id: &str,
-        tool: &NewToolMessage,
-    ) -> Result<i64> {
+    pub fn record_tool_message(&self, conversation_id: &str, tool: &NewToolMessage) -> Result<i64> {
         let call_input_bytes = serde_json::to_vec(&tool.call_input)?;
         let result_bytes = match &tool.result_output {
             Some(v) => Some(serde_json::to_vec(v)?),
@@ -521,7 +516,10 @@ impl ConversationStore {
               ORDER BY sequence ASC, id ASC",
         )?;
         let rows = stmt
-            .query_map(params![conversation_id, agent_pubkey], row_to_prompt_history)?
+            .query_map(
+                params![conversation_id, agent_pubkey],
+                row_to_prompt_history,
+            )?
             .collect::<std::result::Result<Vec<_>, _>>()?;
         Ok(rows)
     }
@@ -680,7 +678,9 @@ impl ConversationStore {
     }
 
     pub fn integrity_check(&self) -> Result<String> {
-        let result: String = self.conn.query_row("PRAGMA integrity_check", [], |row| row.get(0))?;
+        let result: String = self
+            .conn
+            .query_row("PRAGMA integrity_check", [], |row| row.get(0))?;
         Ok(result)
     }
 }

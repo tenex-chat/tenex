@@ -40,10 +40,22 @@ fn build_todos_reminder(todos_json: Option<&serde_json::Value>) -> String {
         return String::new();
     }
 
-    let pending = todos.iter().filter(|t| t.status == TodoStatus::Pending).count();
-    let in_progress = todos.iter().filter(|t| t.status == TodoStatus::InProgress).count();
-    let done = todos.iter().filter(|t| t.status == TodoStatus::Done).count();
-    let skipped = todos.iter().filter(|t| t.status == TodoStatus::Skipped).count();
+    let pending = todos
+        .iter()
+        .filter(|t| t.status == TodoStatus::Pending)
+        .count();
+    let in_progress = todos
+        .iter()
+        .filter(|t| t.status == TodoStatus::InProgress)
+        .count();
+    let done = todos
+        .iter()
+        .filter(|t| t.status == TodoStatus::Done)
+        .count();
+    let skipped = todos
+        .iter()
+        .filter(|t| t.status == TodoStatus::Skipped)
+        .count();
 
     let mut lines = vec![
         "<system-reminder>".to_string(),
@@ -174,15 +186,24 @@ mod tests {
         let p = profile();
         let mut ctx = ctx_with_todos(
             vec![
-                Message::System { content: "sys".into() },
-                Message::User { content: "hello".into() },
+                Message::System {
+                    content: "sys".into(),
+                },
+                Message::User {
+                    content: "hello".into(),
+                },
             ],
             None,
             &p,
         );
         RemindersStrategy.apply(&mut ctx).unwrap();
         assert_eq!(ctx.telemetry.reminders_overlayed, 0);
-        assert_eq!(ctx.messages[1], Message::User { content: "hello".into() });
+        assert_eq!(
+            ctx.messages[1],
+            Message::User {
+                content: "hello".into()
+            }
+        );
     }
 
     #[test]
@@ -194,8 +215,12 @@ mod tests {
         let todos = json!([done_todo("t1", "Task 1"), done_todo("t2", "Task 2")]);
         let mut ctx = ctx_with_todos(
             vec![
-                Message::System { content: "sys".into() },
-                Message::User { content: "hello".into() },
+                Message::System {
+                    content: "sys".into(),
+                },
+                Message::User {
+                    content: "hello".into(),
+                },
             ],
             Some(todos),
             &p,
@@ -207,7 +232,10 @@ mod tests {
             _ => panic!(),
         };
         assert!(last.contains("<system-reminder>"), "reminder block present");
-        assert!(!last.contains("ATTENTION"), "no ATTENTION block when no pending todos");
+        assert!(
+            !last.contains("ATTENTION"),
+            "no ATTENTION block when no pending todos"
+        );
     }
 
     #[test]
@@ -216,9 +244,15 @@ mod tests {
         let todos = json!([pending_todo("t1", "Write tests")]);
         let mut ctx = ctx_with_todos(
             vec![
-                Message::System { content: "sys".into() },
-                Message::User { content: "first".into() },
-                Message::User { content: "last".into() },
+                Message::System {
+                    content: "sys".into(),
+                },
+                Message::User {
+                    content: "first".into(),
+                },
+                Message::User {
+                    content: "last".into(),
+                },
             ],
             Some(todos),
             &p,
@@ -230,9 +264,18 @@ mod tests {
             Message::User { content } => content.clone(),
             _ => panic!("expected user message"),
         };
-        assert!(last.contains("<system-reminder>"), "reminder block must be present");
-        assert!(last.contains("Write tests"), "todo title must appear in reminder");
-        assert!(last.starts_with("last\n\n"), "original content must be preserved");
+        assert!(
+            last.contains("<system-reminder>"),
+            "reminder block must be present"
+        );
+        assert!(
+            last.contains("Write tests"),
+            "todo title must appear in reminder"
+        );
+        assert!(
+            last.starts_with("last\n\n"),
+            "original content must be preserved"
+        );
     }
 
     #[test]
@@ -240,7 +283,9 @@ mod tests {
         let p = profile();
         let todos = json!([pending_todo("t1", "Do something")]);
         let mut ctx = ctx_with_todos(
-            vec![Message::System { content: "sys only".into() }],
+            vec![Message::System {
+                content: "sys only".into(),
+            }],
             Some(todos),
             &p,
         );
@@ -260,8 +305,12 @@ mod tests {
         ]);
         let mut ctx = ctx_with_todos(
             vec![
-                Message::System { content: "sys".into() },
-                Message::User { content: "msg".into() },
+                Message::System {
+                    content: "sys".into(),
+                },
+                Message::User {
+                    content: "msg".into(),
+                },
             ],
             Some(todos),
             &p,
@@ -275,7 +324,10 @@ mod tests {
         assert!(last.contains("2 pending"), "should show 2 pending");
         assert!(last.contains("1 in progress"), "should show 1 in_progress");
         assert!(last.contains("1 done"), "should show 1 done");
-        assert!(last.contains("ATTENTION"), "ATTENTION block appears when pending > 0");
+        assert!(
+            last.contains("ATTENTION"),
+            "ATTENTION block appears when pending > 0"
+        );
     }
 
     #[test]
@@ -284,8 +336,12 @@ mod tests {
         let todos = json!([pending_todo("t1", "task")]);
         let mut ctx = ctx_with_todos(
             vec![
-                Message::System { content: "sys".into() },
-                Message::User { content: "user".into() },
+                Message::System {
+                    content: "sys".into(),
+                },
+                Message::User {
+                    content: "user".into(),
+                },
                 Message::ToolResult {
                     tool_call_id: "call-1".into(),
                     tool_name: "shell".into(),

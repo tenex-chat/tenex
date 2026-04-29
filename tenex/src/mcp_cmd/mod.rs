@@ -93,13 +93,18 @@ fn cmd_add(args: AddArgs) -> Result<()> {
     let transport = args.transport.as_deref().unwrap_or("stdio");
     let entry = match transport {
         "stdio" => build_stdio_entry(&args.command_or_url, &args.args, &args.env)?,
-        "http" | "sse" => build_url_entry(transport, &args.command_or_url, &args.header, &args.env)?,
+        "http" | "sse" => {
+            build_url_entry(transport, &args.command_or_url, &args.header, &args.env)?
+        }
         other => bail!("unknown transport: {other:?} (expected stdio, http, or sse)"),
     };
     let mut doc = load_doc()?;
     servers_mut(&mut doc).insert(args.name.clone(), entry);
     save_doc(&doc)?;
-    println!("Added {transport} MCP server {} to project config", args.name);
+    println!(
+        "Added {transport} MCP server {} to project config",
+        args.name
+    );
     Ok(())
 }
 
@@ -129,9 +134,15 @@ fn cmd_list() -> Result<()> {
     for (name, cfg) in servers {
         let transport = cfg.get("type").and_then(Value::as_str).unwrap_or("stdio");
         let target = if transport == "stdio" {
-            cfg.get("command").and_then(Value::as_str).unwrap_or("?").to_owned()
+            cfg.get("command")
+                .and_then(Value::as_str)
+                .unwrap_or("?")
+                .to_owned()
         } else {
-            cfg.get("url").and_then(Value::as_str).unwrap_or("?").to_owned()
+            cfg.get("url")
+                .and_then(Value::as_str)
+                .unwrap_or("?")
+                .to_owned()
         };
         println!("{name} ({transport}): {target}");
     }
@@ -184,7 +195,12 @@ fn build_stdio_entry(command: &str, args: &[String], env_kv: &[String]) -> Resul
     Ok(Value::Object(m))
 }
 
-fn build_url_entry(transport: &str, url: &str, header_kv: &[String], env_kv: &[String]) -> Result<Value> {
+fn build_url_entry(
+    transport: &str,
+    url: &str,
+    header_kv: &[String],
+    env_kv: &[String],
+) -> Result<Value> {
     if !env_kv.is_empty() {
         bail!("--env is not supported for {transport} transport");
     }

@@ -43,8 +43,10 @@ impl Config {
 
         let intervention = global.intervention.unwrap_or_default();
         let intervention_enabled = intervention.enabled.unwrap_or(false);
-        let timeout_ms =
-            intervention.timeout_seconds.unwrap_or(DEFAULT_TIMEOUT_SECONDS) * 1000;
+        let timeout_ms = intervention
+            .timeout_seconds
+            .unwrap_or(DEFAULT_TIMEOUT_SECONDS)
+            * 1000;
 
         Ok(Self {
             relays,

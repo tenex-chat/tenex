@@ -177,8 +177,7 @@ mod tests {
     fn adapt_string_validator_with_displayable_error() {
         use crate::types::pubkey::Pubkey;
         use inquire::validator::ErrorMessage;
-        let v =
-            adapt_string_validator(|input: &str| Pubkey::parse_hex64(input).map(|_| ()));
+        let v = adapt_string_validator(|input: &str| Pubkey::parse_hex64(input).map(|_| ()));
         let result = v("not-hex").unwrap();
         match result {
             Validation::Invalid(ErrorMessage::Custom(msg)) => {

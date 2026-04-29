@@ -109,14 +109,16 @@ impl ResolvedModel {
     ) -> Self {
         let (provider, model) = resolve_provider_model(raw_model, llms);
         let (api_key, base_url) = resolve_credentials(&provider, providers);
-        Self { provider, model, api_key, base_url }
+        Self {
+            provider,
+            model,
+            api_key,
+            base_url,
+        }
     }
 }
 
-fn resolve_provider_model(
-    raw_model: Option<&str>,
-    llms: Option<&LlmsConfig>,
-) -> (String, String) {
+fn resolve_provider_model(raw_model: Option<&str>, llms: Option<&LlmsConfig>) -> (String, String) {
     let raw = match raw_model {
         None | Some("default") | Some("") => {
             let default_key = llms
@@ -139,7 +141,14 @@ fn resolve_from_string(raw: &str, llms: Option<&LlmsConfig>) -> (String, String)
     // 2. Inline "provider/model" format — checked first because "ollama/model:tag"
     //    would otherwise be mis-split at the colon in step 3.
     if let Some((provider, model)) = raw.split_once('/') {
-        let known_providers = ["anthropic", "openai", "openrouter", "ollama", "groq", "mistral"];
+        let known_providers = [
+            "anthropic",
+            "openai",
+            "openrouter",
+            "ollama",
+            "groq",
+            "mistral",
+        ];
         if known_providers.contains(&provider) {
             return (provider.to_string(), model.to_string());
         }

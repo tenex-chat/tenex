@@ -97,10 +97,7 @@ pub fn seed_default_llm_configs(provider_ids: &[String], doc: &mut LlmsDoc) -> V
     }
 
     if has(PROVIDER_ID_OPENAI) {
-        doc.set_standard_config(
-            "GPT-4o",
-            StandardConfig::new(PROVIDER_ID_OPENAI, "gpt-4o"),
-        );
+        doc.set_standard_config("GPT-4o", StandardConfig::new(PROVIDER_ID_OPENAI, "gpt-4o"));
         if doc.default_config().is_none() {
             doc.set_default_config(Some("GPT-4o".to_owned()));
         }
@@ -132,10 +129,7 @@ mod tests {
     #[test]
     fn existing_configs_short_circuit_no_op() {
         let mut doc = LlmsDoc::new();
-        doc.set_standard_config(
-            "user-cfg",
-            StandardConfig::new("anthropic", "claude-foo"),
-        );
+        doc.set_standard_config("user-cfg", StandardConfig::new("anthropic", "claude-foo"));
         let seeded = seed_default_llm_configs(&pids(&["anthropic", "openai"]), &mut doc);
         assert!(seeded.is_empty(), "expected no-op when user has configs");
         // The user's cfg is unchanged.
@@ -167,10 +161,7 @@ mod tests {
         let opus = doc.get("Opus").unwrap();
         assert_eq!(opus.model(), Some("claude-opus-4-6"));
         let auto = doc.get("Auto").unwrap();
-        assert_eq!(
-            auto.kind(),
-            crate::store::llms::LlmConfigKind::Meta
-        );
+        assert_eq!(auto.kind(), crate::store::llms::LlmConfigKind::Meta);
         assert_eq!(auto.meta_default_variant(), Some("fast"));
         assert_eq!(auto.variant_names(), vec!["fast", "powerful"]);
         assert_eq!(doc.default_config(), Some("Auto"));
@@ -189,10 +180,7 @@ mod tests {
 
         let powerful = auto.variant("powerful").unwrap();
         assert_eq!(powerful.model(), Some("Opus"));
-        assert_eq!(
-            powerful.keywords(),
-            vec!["think", "ultrathink", "ponder"]
-        );
+        assert_eq!(powerful.keywords(), vec!["think", "ultrathink", "ponder"]);
         assert_eq!(
             powerful.description(),
             Some("Most capable, complex reasoning")
@@ -214,8 +202,7 @@ mod tests {
         // Per `:545-547`, when default already set by the Anthropic branch
         // OpenAI does NOT override.
         let mut doc = LlmsDoc::new();
-        let seeded =
-            seed_default_llm_configs(&pids(&["anthropic", "openai"]), &mut doc);
+        let seeded = seed_default_llm_configs(&pids(&["anthropic", "openai"]), &mut doc);
         assert_eq!(seeded.len(), 4);
         assert_eq!(doc.default_config(), Some("Auto"));
     }
@@ -244,7 +231,11 @@ mod tests {
             ("GPT-4o", "openai", "gpt-4o"),
         ] {
             let entry = doc.get(name).unwrap_or_else(|| panic!("missing {name}"));
-            assert_eq!(entry.provider(), Some(expected_provider), "provider for {name}");
+            assert_eq!(
+                entry.provider(),
+                Some(expected_provider),
+                "provider for {name}"
+            );
             assert_eq!(entry.model(), Some(expected_model), "model for {name}");
         }
     }
@@ -262,9 +253,6 @@ mod tests {
         let mut doc = LlmsDoc::new();
         let _ = seed_default_llm_configs(&pids(&["anthropic", "openai"]), &mut doc);
         // Insertion order on disk: Sonnet, Opus, Auto, GPT-4o.
-        assert_eq!(
-            doc.config_names(),
-            vec!["Sonnet", "Opus", "Auto", "GPT-4o"]
-        );
+        assert_eq!(doc.config_names(), vec!["Sonnet", "Opus", "Auto", "GPT-4o"]);
     }
 }

@@ -31,7 +31,11 @@ pub struct DotenvParseError {
 
 impl std::fmt::Display for DotenvParseError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Invalid .env syntax on line {}: {}", self.line, self.reason)
+        write!(
+            f,
+            "Invalid .env syntax on line {}: {}",
+            self.line, self.reason
+        )
     }
 }
 

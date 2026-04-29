@@ -4,7 +4,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::sync::Arc;
 use tenex_project::{Agent, Team};
-use tenex_protocol::{DelegationIntent, DelegationRequest, Intent, MessageRef, PrincipalKind, PrincipalRef};
+use tenex_protocol::{
+    DelegationIntent, DelegationRequest, Intent, MessageRef, PrincipalKind, PrincipalRef,
+};
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct DelegateFollowupArgs {
@@ -30,15 +32,25 @@ impl DelegateFollowupTool {
         project_agents: Arc<Vec<Agent>>,
         teams: Arc<Vec<Team>>,
     ) -> Self {
-        Self { state, project_agents, teams }
+        Self {
+            state,
+            project_agents,
+            teams,
+        }
     }
 
     fn resolve_recipient(&self, recipient: &str) -> Option<String> {
         if let Some(agent) = self.project_agents.iter().find(|a| a.slug == recipient) {
             return Some(agent.pubkey.clone());
         }
-        let team = self.teams.iter().find(|t| t.name.eq_ignore_ascii_case(recipient))?;
-        let agent = self.project_agents.iter().find(|a| a.slug == team.team_lead)?;
+        let team = self
+            .teams
+            .iter()
+            .find(|t| t.name.eq_ignore_ascii_case(recipient))?;
+        let agent = self
+            .project_agents
+            .iter()
+            .find(|a| a.slug == team.team_lead)?;
         Some(agent.pubkey.clone())
     }
 }
@@ -76,7 +88,11 @@ impl Tool for DelegateFollowupTool {
 
     async fn call(&self, args: DelegateFollowupArgs) -> Result<String, DelegateFollowupError> {
         let pubkey_hex = self.resolve_recipient(&args.recipient).ok_or_else(|| {
-            let slugs: Vec<&str> = self.project_agents.iter().map(|a| a.slug.as_str()).collect();
+            let slugs: Vec<&str> = self
+                .project_agents
+                .iter()
+                .map(|a| a.slug.as_str())
+                .collect();
             DelegateFollowupError(format!(
                 "no agent or team '{}'. Available: {}",
                 args.recipient,

@@ -132,9 +132,7 @@ impl Server {
     async fn dispatch(&self, line: &str) -> serde_json::Value {
         let request: Request = match serde_json::from_str(line) {
             Ok(r) => r,
-            Err(e) => {
-                return serde_json::json!({"ok": false, "error": format!("parse error: {e}")})
-            }
+            Err(e) => return serde_json::json!({"ok": false, "error": format!("parse error: {e}")}),
         };
 
         match request {
@@ -154,10 +152,18 @@ impl Server {
                         })
                     }
                 };
-                resolve_config(&config_name, &state.llms, &state.providers, &self.key_health)
+                resolve_config(
+                    &config_name,
+                    &state.llms,
+                    &state.providers,
+                    &self.key_health,
+                )
             }
 
-            Request::ReportFailure { provider, key_index } => {
+            Request::ReportFailure {
+                provider,
+                key_index,
+            } => {
                 self.key_health.mark_failed(&provider, key_index);
                 serde_json::to_value(AckResponse { ok: true })
                     .expect("serialization of AckResponse")

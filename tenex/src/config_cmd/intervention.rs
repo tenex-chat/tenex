@@ -50,9 +50,8 @@ pub fn run(base_dir: &std::path::Path) -> Result<()> {
             | Err(inquire::InquireError::OperationInterrupted) => return Ok(()),
             Err(e) => return Err(anyhow!("intervention agent prompt: {e}")),
         };
-        let validator = prompts::adapt_static_str_validator(
-            crate::config_cmd::summarization::validate_integer,
-        );
+        let validator =
+            prompts::adapt_static_str_validator(crate::config_cmd::summarization::validate_integer);
         let timeout_raw = match prompts::input("Review timeout (seconds):")
             .with_default(&prev_timeout.to_string())
             .with_validator(validator)
@@ -84,7 +83,6 @@ pub fn run(base_dir: &std::path::Path) -> Result<()> {
     crate::tui::display::config_success("Intervention config saved.");
     Ok(())
 }
-
 
 #[cfg(test)]
 mod tests {

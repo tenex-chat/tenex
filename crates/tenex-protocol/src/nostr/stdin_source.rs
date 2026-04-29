@@ -19,7 +19,9 @@ pub struct StdinNdjsonSource {
 
 impl StdinNdjsonSource {
     pub fn new() -> Self {
-        Self { reader: BufReader::new(tokio::io::stdin()) }
+        Self {
+            reader: BufReader::new(tokio::io::stdin()),
+        }
     }
 }
 

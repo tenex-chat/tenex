@@ -157,7 +157,11 @@ fn run_remove(current: &[String]) -> Result<Option<Vec<String>>> {
         | Err(inquire::InquireError::OperationInterrupted) => return Ok(None),
         Err(e) => return Err(anyhow!("remove identity prompt: {e}")),
     };
-    let updated: Vec<String> = current.iter().filter(|id| **id != chosen).cloned().collect();
+    let updated: Vec<String> = current
+        .iter()
+        .filter(|id| **id != chosen)
+        .cloned()
+        .collect();
     Ok(Some(updated))
 }
 
@@ -169,7 +173,6 @@ pub fn validate_telegram_principal(input: &str) -> Result<(), &'static str> {
         Err("Principal IDs must start with telegram:")
     }
 }
-
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TopAction {
@@ -296,12 +299,7 @@ fn run_agent_actions(base_dir: &std::path::Path, pubkey: &str) -> Result<()> {
         }
         println!();
 
-        let action = match prompts::select(
-            "Telegram transport",
-            agent_actions(),
-        )
-        .prompt()
-        {
+        let action = match prompts::select("Telegram transport", agent_actions()).prompt() {
             Ok(a) => a,
             Err(inquire::InquireError::OperationCanceled)
             | Err(inquire::InquireError::OperationInterrupted) => return Ok(()),
@@ -329,7 +327,12 @@ fn run_agent_actions(base_dir: &std::path::Path, pubkey: &str) -> Result<()> {
             AgentAction::ApiBaseUrl => {
                 let mut next = to_draft(current.as_ref()).unwrap_or_default();
                 if next.bot_token.is_none()
-                    || next.bot_token.as_deref().map(str::trim).unwrap_or("").is_empty()
+                    || next
+                        .bot_token
+                        .as_deref()
+                        .map(str::trim)
+                        .unwrap_or("")
+                        .is_empty()
                 {
                     println!(
                         "{}",
@@ -349,7 +352,12 @@ fn run_agent_actions(base_dir: &std::path::Path, pubkey: &str) -> Result<()> {
             AgentAction::ToggleDms => {
                 let mut next = to_draft(current.as_ref()).unwrap_or_default();
                 if next.bot_token.is_none()
-                    || next.bot_token.as_deref().map(str::trim).unwrap_or("").is_empty()
+                    || next
+                        .bot_token
+                        .as_deref()
+                        .map(str::trim)
+                        .unwrap_or("")
+                        .is_empty()
                 {
                     println!(
                         "{}",
@@ -432,19 +440,13 @@ fn choose_agent(base_dir: &std::path::Path) -> Result<Option<String>> {
         );
         return Ok(None);
     }
-    agents.sort_by(|a, b| {
-        a.slug()
-            .unwrap_or("")
-            .cmp(b.slug().unwrap_or(""))
-    });
+    agents.sort_by(|a, b| a.slug().unwrap_or("").cmp(b.slug().unwrap_or("")));
 
     let mut items: Vec<AgentChoice> = Vec::with_capacity(agents.len() + 1);
     for agent in &agents {
         let nsec = agent.nsec().ok_or_else(|| anyhow!("agent missing nsec"))?;
         let pubkey = crate::store::agent_storage::derive_agent_pubkey_from_nsec(nsec)?;
-        let projects = crate::store::project_members::list_projects_for_agent(
-            base_dir, &pubkey,
-        )?;
+        let projects = crate::store::project_members::list_projects_for_agent(base_dir, &pubkey)?;
         let n = projects.len();
         let plural = if n == 1 { "" } else { "s" };
         let slug = agent.slug().unwrap_or("?");

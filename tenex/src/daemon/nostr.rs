@@ -130,7 +130,9 @@ async fn handle_event(ctx: &RuntimeCtx<'_>, event: &Event) {
     match event.kind.as_u16() {
         PROJECT_KIND => handle_project(ctx, event).await,
         1 => handle_boot_trigger(ctx.supervisor, ctx.known, event, BootKind::TextNote).await,
-        BOOT_KIND => handle_boot_trigger(ctx.supervisor, ctx.known, event, BootKind::Explicit).await,
+        BOOT_KIND => {
+            handle_boot_trigger(ctx.supervisor, ctx.known, event, BootKind::Explicit).await
+        }
         _ => {}
     }
 }
@@ -176,10 +178,7 @@ async fn handle_project(ctx: &RuntimeCtx<'_>, event: &Event) {
 /// Pop every pending prefix that the freshly-discovered d-tag starts with,
 /// move them into `consumed`, and warn for any already-consumed prefix that
 /// would have also matched this discovery (first-match-wins ambiguity).
-async fn resolve_pending_boots(
-    pending_boots: &Mutex<PendingBoots>,
-    d_tag: &str,
-) -> Vec<String> {
+async fn resolve_pending_boots(pending_boots: &Mutex<PendingBoots>, d_tag: &str) -> Vec<String> {
     let mut pb = pending_boots.lock().await;
     let mut matched: Vec<String> = Vec::new();
     pb.pending.retain(|prefix| {
@@ -263,10 +262,11 @@ async fn update_boot_subscription(
     if let Some(old) = sub.replace(new_id.clone()) {
         client.unsubscribe(&old).await;
     }
-    client
-        .subscribe_with_id(new_id, filter, None)
-        .await?;
-    debug!(addresses = addresses.len(), "boot trigger subscription refreshed");
+    client.subscribe_with_id(new_id, filter, None).await?;
+    debug!(
+        addresses = addresses.len(),
+        "boot trigger subscription refreshed"
+    );
     Ok(())
 }
 

@@ -17,7 +17,11 @@ use lockfile::Lockfile;
 use model::{ScheduledTask, TaskType};
 
 #[derive(Parser)]
-#[command(name = "tenex-scheduler", version, about = "TENEX scheduled-task daemon")]
+#[command(
+    name = "tenex-scheduler",
+    version,
+    about = "TENEX scheduled-task daemon"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Option<Command>,
@@ -163,7 +167,10 @@ fn list_tasks(project: Option<String>) -> Result<()> {
     for (d_tag, task) in tasks {
         let title = task.title.as_deref().unwrap_or("—");
         let schedule = if task.is_oneoff() {
-            task.execute_at.as_deref().unwrap_or(&task.schedule).to_string()
+            task.execute_at
+                .as_deref()
+                .unwrap_or(&task.schedule)
+                .to_string()
         } else {
             task.schedule.clone()
         };

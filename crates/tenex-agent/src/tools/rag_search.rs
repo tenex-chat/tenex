@@ -23,7 +23,11 @@ pub struct RagSearchTool {
 
 impl RagSearchTool {
     pub fn new(store: Option<Arc<RagStore>>, project_id: String, agent_pubkey: String) -> Self {
-        Self { store, project_id, agent_pubkey }
+        Self {
+            store,
+            project_id,
+            agent_pubkey,
+        }
     }
 }
 

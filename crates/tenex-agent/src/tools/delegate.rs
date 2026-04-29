@@ -32,7 +32,11 @@ impl DelegateTool {
         project_agents: Arc<Vec<Agent>>,
         teams: Arc<Vec<Team>>,
     ) -> Self {
-        Self { state, project_agents, teams }
+        Self {
+            state,
+            project_agents,
+            teams,
+        }
     }
 
     /// Resolve a recipient string to (pubkey_hex, resolved_team_name).

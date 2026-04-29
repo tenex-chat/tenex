@@ -240,7 +240,11 @@ impl ProviderEntry<'_> {
     pub fn api_keys(&self) -> Vec<String> {
         match self.obj.get("apiKey") {
             Some(Value::String(s)) => vec![s.clone()],
-            Some(Value::Array(arr)) => arr.iter().filter_map(Value::as_str).map(str::to_owned).collect(),
+            Some(Value::Array(arr)) => arr
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_owned)
+                .collect(),
             _ => Vec::new(),
         }
     }
@@ -318,7 +322,10 @@ mod tests {
         let doc = parse(
             br#"{"providers":{"openrouter":{"apiKey":"a"},"ollama":{"apiKey":"b"},"anthropic":{"apiKey":"c"}}}"#,
         );
-        assert_eq!(doc.provider_ids(), vec!["openrouter", "ollama", "anthropic"]);
+        assert_eq!(
+            doc.provider_ids(),
+            vec!["openrouter", "ollama", "anthropic"]
+        );
     }
 
     #[test]
@@ -357,7 +364,8 @@ mod tests {
 
     #[test]
     fn set_base_url_preserves_position_when_existing() {
-        let mut doc = parse(br#"{"providers":{"o":{"apiKey":"k","baseUrl":"http://a","timeout":1}}}"#);
+        let mut doc =
+            parse(br#"{"providers":{"o":{"apiKey":"k","baseUrl":"http://a","timeout":1}}}"#);
         doc.set_base_url("o", Some("http://b".into())).unwrap();
         let s = String::from_utf8(serialize(doc.raw()).unwrap()).unwrap();
         let api_pos = s.find("apiKey").unwrap();
@@ -421,7 +429,9 @@ mod tests {
             _ => return,
         };
         let path = std::path::PathBuf::from(home).join(".tenex/providers.json");
-        let Ok(original) = std::fs::read(&path) else { return };
+        let Ok(original) = std::fs::read(&path) else {
+            return;
+        };
 
         let raw: IndexMap<String, Value> = serde_json::from_slice(&original)
             .unwrap_or_else(|e| panic!("failed to parse {}: {e}", path.display()));
@@ -455,17 +465,13 @@ mod tests {
 
     #[test]
     fn configured_includes_provider_with_real_bare_string_key() {
-        let doc = build_doc(
-            r#"{"providers":{"anthropic":{"apiKey":"sk-real"}}}"#,
-        );
+        let doc = build_doc(r#"{"providers":{"anthropic":{"apiKey":"sk-real"}}}"#);
         assert_eq!(doc.configured_provider_ids(), vec!["anthropic"]);
     }
 
     #[test]
     fn configured_includes_provider_with_real_array_key() {
-        let doc = build_doc(
-            r#"{"providers":{"openai":{"apiKey":["sk-a","sk-b"]}}}"#,
-        );
+        let doc = build_doc(r#"{"providers":{"openai":{"apiKey":["sk-a","sk-b"]}}}"#);
         assert_eq!(doc.configured_provider_ids(), vec!["openai"]);
     }
 
@@ -473,25 +479,19 @@ mod tests {
     fn configured_includes_provider_with_none_sentinel() {
         // `claude-code` doesn't take a real key — TS uses the literal
         // string "none" as a configured-but-keyless marker.
-        let doc = build_doc(
-            r#"{"providers":{"claude-code":{"apiKey":"none"}}}"#,
-        );
+        let doc = build_doc(r#"{"providers":{"claude-code":{"apiKey":"none"}}}"#);
         assert_eq!(doc.configured_provider_ids(), vec!["claude-code"]);
     }
 
     #[test]
     fn configured_excludes_provider_with_empty_string_key() {
-        let doc = build_doc(
-            r#"{"providers":{"openai":{"apiKey":""}}}"#,
-        );
+        let doc = build_doc(r#"{"providers":{"openai":{"apiKey":""}}}"#);
         assert!(doc.configured_provider_ids().is_empty());
     }
 
     #[test]
     fn configured_excludes_provider_with_empty_array_key() {
-        let doc = build_doc(
-            r#"{"providers":{"openai":{"apiKey":[]}}}"#,
-        );
+        let doc = build_doc(r#"{"providers":{"openai":{"apiKey":[]}}}"#);
         assert!(doc.configured_provider_ids().is_empty());
     }
 
@@ -501,17 +501,13 @@ mod tests {
         // string. `["none"]` is an array — has_api_key drops "none"
         // from the entries, so the array contributes zero usable keys
         // and the provider is excluded.
-        let doc = build_doc(
-            r#"{"providers":{"x":{"apiKey":["none"]}}}"#,
-        );
+        let doc = build_doc(r#"{"providers":{"x":{"apiKey":["none"]}}}"#);
         assert!(doc.configured_provider_ids().is_empty());
     }
 
     #[test]
     fn configured_includes_provider_with_mixed_array_having_one_real_key() {
-        let doc = build_doc(
-            r#"{"providers":{"x":{"apiKey":["","none","sk-real"]}}}"#,
-        );
+        let doc = build_doc(r#"{"providers":{"x":{"apiKey":["","none","sk-real"]}}}"#);
         assert_eq!(doc.configured_provider_ids(), vec!["x"]);
     }
 

@@ -5,9 +5,6 @@
 //! No IPC with the daemon is needed — file-watch reconciliation picks up
 //! changes automatically within seconds.
 
-use std::fs;
-use std::io::{self, Write};
-use std::path::PathBuf;
 use anyhow::{anyhow, Context, Result};
 use chrono::Utc;
 use clap::Args;
@@ -17,6 +14,9 @@ use crossterm::style::{Attribute, Color, Print, ResetColor, SetAttribute, SetFor
 use crossterm::terminal::{Clear, ClearType};
 use crossterm::{queue, QueueableCommand};
 use serde::{Deserialize, Serialize};
+use std::fs;
+use std::io::{self, Write};
+use std::path::PathBuf;
 use uuid::Uuid;
 
 use crate::tui::custom_prompts::RawMode;
@@ -83,7 +83,11 @@ impl ScheduledTask {
     }
 
     fn type_label(&self) -> &str {
-        if self.is_oneoff() { "once" } else { "cron" }
+        if self.is_oneoff() {
+            "once"
+        } else {
+            "cron"
+        }
     }
 }
 
@@ -124,9 +128,7 @@ fn load_all_tasks() -> Result<Vec<TaskEntry>> {
         return Ok(Vec::new());
     }
     let mut result = Vec::new();
-    for entry in fs::read_dir(&dir)
-        .with_context(|| format!("read {}", dir.display()))?
-    {
+    for entry in fs::read_dir(&dir).with_context(|| format!("read {}", dir.display()))? {
         let entry = entry?;
         if !entry.file_type()?.is_dir() {
             continue;
@@ -136,12 +138,14 @@ fn load_all_tasks() -> Result<Vec<TaskEntry>> {
         if !path.exists() {
             continue;
         }
-        let bytes = fs::read(&path)
-            .with_context(|| format!("read {}", path.display()))?;
-        let file: SchedulesFile = serde_json::from_slice(&bytes)
-            .with_context(|| format!("parse {}", path.display()))?;
+        let bytes = fs::read(&path).with_context(|| format!("read {}", path.display()))?;
+        let file: SchedulesFile =
+            serde_json::from_slice(&bytes).with_context(|| format!("parse {}", path.display()))?;
         for task in file.tasks {
-            result.push(TaskEntry { d_tag: d_tag.clone(), task });
+            result.push(TaskEntry {
+                d_tag: d_tag.clone(),
+                task,
+            });
         }
     }
     Ok(result)
@@ -150,10 +154,11 @@ fn load_all_tasks() -> Result<Vec<TaskEntry>> {
 fn save_tasks(d_tag: &str, tasks: &[ScheduledTask]) -> Result<()> {
     let path = schedules_path(d_tag)?;
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("create {}", parent.display()))?;
+        fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
     }
-    let file = SchedulesFile { tasks: tasks.to_vec() };
+    let file = SchedulesFile {
+        tasks: tasks.to_vec(),
+    };
     let tmp = path.with_extension("json.tmp");
     let json = serde_json::to_string_pretty(&file).context("serialize")?;
     fs::write(&tmp, json).with_context(|| format!("write {}", tmp.display()))?;
@@ -166,10 +171,9 @@ fn remove_task_from_project(d_tag: &str, task_id: &str) -> Result<()> {
     if !path.exists() {
         return Ok(());
     }
-    let bytes = fs::read(&path)
-        .with_context(|| format!("read {}", path.display()))?;
-    let mut file: SchedulesFile = serde_json::from_slice(&bytes)
-        .with_context(|| format!("parse {}", path.display()))?;
+    let bytes = fs::read(&path).with_context(|| format!("read {}", path.display()))?;
+    let mut file: SchedulesFile =
+        serde_json::from_slice(&bytes).with_context(|| format!("parse {}", path.display()))?;
     file.tasks.retain(|t| t.id != task_id);
     save_tasks(d_tag, &file.tasks)
 }
@@ -177,8 +181,7 @@ fn remove_task_from_project(d_tag: &str, task_id: &str) -> Result<()> {
 fn add_task_to_project(d_tag: &str, task: ScheduledTask) -> Result<()> {
     let path = schedules_path(d_tag)?;
     let mut file = if path.exists() {
-        let bytes = fs::read(&path)
-            .with_context(|| format!("read {}", path.display()))?;
+        let bytes = fs::read(&path).with_context(|| format!("read {}", path.display()))?;
         serde_json::from_slice::<SchedulesFile>(&bytes)
             .with_context(|| format!("parse {}", path.display()))?
     } else {
@@ -203,9 +206,7 @@ enum TuiInput {
 
 impl TuiInput {
     fn from_key_event(ev: KeyEvent) -> Self {
-        if ev.modifiers.contains(KeyModifiers::CONTROL)
-            && matches!(ev.code, KeyCode::Char('c'))
-        {
+        if ev.modifiers.contains(KeyModifiers::CONTROL) && matches!(ev.code, KeyCode::Char('c')) {
             return TuiInput::Quit;
         }
         match ev.code {
@@ -529,7 +530,11 @@ fn confirm_delete(task: &ScheduledTask) -> Result<bool> {
 fn prompt_add_task() -> Result<Option<TaskEntry>> {
     println!();
     let accent = theme::display_accent();
-    println!("  {}  {}", accent.apply_to("Add scheduled task"), accent.apply_to("─────────────"));
+    println!(
+        "  {}  {}",
+        accent.apply_to("Add scheduled task"),
+        accent.apply_to("─────────────")
+    );
     println!();
 
     // Project dTag.
@@ -545,9 +550,7 @@ fn prompt_add_task() -> Result<Option<TaskEntry>> {
     };
 
     // Type.
-    let type_choice = match inquire::Select::new("Task type:", vec!["cron", "once"])
-        .prompt()
-    {
+    let type_choice = match inquire::Select::new("Task type:", vec!["cron", "once"]).prompt() {
         Ok(s) => s,
         Err(inquire::InquireError::OperationCanceled)
         | Err(inquire::InquireError::OperationInterrupted) => return Ok(None),
@@ -595,9 +598,7 @@ fn prompt_add_task() -> Result<Option<TaskEntry>> {
     };
 
     // Target agent slug.
-    let target = match prompts::input("Target agent slug:")
-        .prompt()
-    {
+    let target = match prompts::input("Target agent slug:").prompt() {
         Ok(s) if !s.trim().is_empty() => s.trim().to_string(),
         Ok(_) => return Ok(None),
         Err(inquire::InquireError::OperationCanceled)
@@ -606,9 +607,7 @@ fn prompt_add_task() -> Result<Option<TaskEntry>> {
     };
 
     // Optional title.
-    let title = match prompts::input("Title (optional):")
-        .prompt()
-    {
+    let title = match prompts::input("Title (optional):").prompt() {
         Ok(s) if !s.trim().is_empty() => Some(s.trim().to_string()),
         Ok(_) => None,
         Err(inquire::InquireError::OperationCanceled)
@@ -630,7 +629,11 @@ fn prompt_add_task() -> Result<Option<TaskEntry>> {
         target_agent_slug: target,
         project_id: d_tag.clone(),
         project_ref: None,
-        task_type: if is_oneoff { Some(TaskType::Oneoff) } else { Some(TaskType::Cron) },
+        task_type: if is_oneoff {
+            Some(TaskType::Oneoff)
+        } else {
+            Some(TaskType::Cron)
+        },
         execute_at,
         target_channel: None,
     };

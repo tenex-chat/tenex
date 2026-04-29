@@ -1,9 +1,7 @@
 //! Per-turn write-back: persist what the agent runner actually sent and
 //! what the provider observed back into `tenex-conversations`.
 
-use tenex_conversations::{
-    AgentContextState, ConversationStore, NewPromptHistoryEntry,
-};
+use tenex_conversations::{AgentContextState, ConversationStore, NewPromptHistoryEntry};
 
 use crate::types::{Message, TurnRecord};
 

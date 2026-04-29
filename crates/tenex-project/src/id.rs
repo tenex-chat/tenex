@@ -69,7 +69,11 @@ fn try_extract_d_tag(value: &str) -> Option<&str> {
     if kind != PROJECT_KIND {
         return None;
     }
-    if pubkey.len() != 64 || !pubkey.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase()) {
+    if pubkey.len() != 64
+        || !pubkey
+            .bytes()
+            .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
+    {
         return None;
     }
     Some(d_tag)

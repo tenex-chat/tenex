@@ -18,16 +18,15 @@ pub fn write(path: &Path, bytes: &[u8]) -> Result<()> {
     }
     let tmp = tmp_sibling(path);
     {
-        let mut file = fs::File::create(&tmp)
-            .with_context(|| format!("create {}", tmp.display()))?;
+        let mut file =
+            fs::File::create(&tmp).with_context(|| format!("create {}", tmp.display()))?;
         file.write_all(bytes)
             .with_context(|| format!("write {}", tmp.display()))?;
         file.sync_all()
             .with_context(|| format!("fsync {}", tmp.display()))?;
     }
-    fs::rename(&tmp, path).with_context(|| {
-        format!("rename {} -> {}", tmp.display(), path.display())
-    })?;
+    fs::rename(&tmp, path)
+        .with_context(|| format!("rename {} -> {}", tmp.display(), path.display()))?;
     Ok(())
 }
 

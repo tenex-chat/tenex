@@ -35,8 +35,7 @@ pub fn run(json_mode: bool, local_relay_url: Option<&str>) -> Result<Option<Stri
     let cfg = RelayPromptConfig::new("Relay", items)
         .with_validator(|url: &str| relay::validate_onboard(url).map_err(str::to_owned));
 
-    let chosen = relay_prompt(cfg)
-        .map_err(|e| anyhow!("relay prompt I/O: {e}"))?;
+    let chosen = relay_prompt(cfg).map_err(|e| anyhow!("relay prompt I/O: {e}"))?;
     Ok(chosen)
 }
 
@@ -97,7 +96,11 @@ mod tests {
     fn local_relay_value_and_description_match_url() {
         let items = build_items(Some("wss://my-local"));
         match &items[0] {
-            RelayItem::Choice { name, value, description } => {
+            RelayItem::Choice {
+                name,
+                value,
+                description,
+            } => {
                 assert_eq!(name, "Local relay");
                 assert_eq!(value, "wss://my-local");
                 assert_eq!(description, "wss://my-local");
@@ -111,7 +114,9 @@ mod tests {
         // Sanity-check the hardcoded community relay value (`:1356`).
         let items = build_items(None);
         match &items[0] {
-            RelayItem::Choice { value, description, .. } => {
+            RelayItem::Choice {
+                value, description, ..
+            } => {
                 assert_eq!(value, "wss://tenex.chat");
                 assert_eq!(description, "wss://tenex.chat");
             }

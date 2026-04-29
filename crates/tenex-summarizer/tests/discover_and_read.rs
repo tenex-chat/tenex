@@ -94,15 +94,24 @@ fn discovers_project_lists_candidate_reads_transcript() {
     let content = source::fetch_content(project, &project_event, conversation_id)
         .unwrap()
         .unwrap();
-    assert!(content.transcript.contains("Pablo: How does the summarizer work?"));
-    assert!(content.transcript.contains("system: It polls every five seconds."));
+    assert!(content
+        .transcript
+        .contains("Pablo: How does the summarizer work?"));
+    assert!(content
+        .transcript
+        .contains("system: It polls every five seconds."));
     assert!(!content.transcript.contains("ignored"));
 
     let state_db_path = base.join("summarizer").join("state.db");
     let store = state::SummaryStateStore::open(&state_db_path).unwrap();
     assert!(store.get(conversation_id).unwrap().is_none());
-    let now_ms = (SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis()) as i64;
-    store.record(conversation_id, last_activity, now_ms).unwrap();
+    let now_ms = (SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_millis()) as i64;
+    store
+        .record(conversation_id, last_activity, now_ms)
+        .unwrap();
     let s = store.get(conversation_id).unwrap().unwrap();
     assert_eq!(s.last_activity_summarized, last_activity);
 

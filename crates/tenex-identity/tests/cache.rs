@@ -119,7 +119,10 @@ fn best_name_priority() {
     assert_eq!(base.best_name(), "abcdef12");
 
     // name only.
-    let with_name = IdentityView { name: Some("bob".to_string()), ..base.clone() };
+    let with_name = IdentityView {
+        name: Some("bob".to_string()),
+        ..base.clone()
+    };
     assert_eq!(with_name.best_name(), "bob");
 
     // display_name wins over name.

@@ -89,7 +89,8 @@ impl EmbedDoc {
     pub fn set_base_url(&mut self, base_url: Option<&str>) {
         match base_url {
             Some(u) if !u.is_empty() => {
-                self.raw.insert("baseUrl".into(), Value::String(u.to_owned()));
+                self.raw
+                    .insert("baseUrl".into(), Value::String(u.to_owned()));
             }
             _ => {
                 self.raw.shift_remove("baseUrl");

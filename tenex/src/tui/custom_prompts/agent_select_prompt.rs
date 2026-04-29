@@ -88,9 +88,7 @@ pub enum AgentInput {
 
 impl AgentInput {
     pub fn from_key_event(ev: KeyEvent) -> Self {
-        if ev.modifiers.contains(KeyModifiers::CONTROL)
-            && matches!(ev.code, KeyCode::Char('c'))
-        {
+        if ev.modifiers.contains(KeyModifiers::CONTROL) && matches!(ev.code, KeyCode::Char('c')) {
             return AgentInput::CtrlC;
         }
         match ev.code {
@@ -299,7 +297,12 @@ fn render_frame<W: Write>(
     // TS `inquirerTheme.prefix.idle = chalk.hex("#FFC107")("?")` —
     // closes with SGR 39 (FG default), not SGR 0 (full reset). Match
     // byte-for-byte by emitting the raw FG_RESET constant.
-    queue!(stdout, SetForegroundColor(AMBER), Print("?"), Print(crate::tui::theme::FG_RESET))?;
+    queue!(
+        stdout,
+        SetForegroundColor(AMBER),
+        Print("?"),
+        Print(crate::tui::theme::FG_RESET)
+    )?;
     queue!(
         stdout,
         Print(" "),
@@ -450,7 +453,12 @@ fn render_frame<W: Write>(
             }
             queue!(stdout, Print(" "))?;
             if is_active {
-                queue!(stdout, SetForegroundColor(AMBER), Print(&item.name), ResetColor)?;
+                queue!(
+                    stdout,
+                    SetForegroundColor(AMBER),
+                    Print(&item.name),
+                    ResetColor
+                )?;
             } else {
                 queue!(stdout, Print(&item.name))?;
             }
@@ -477,11 +485,7 @@ fn render_frame<W: Write>(
     crate::tui::custom_prompts::help_row::render_help_row(
         stdout,
         "  ",
-        &[
-            ("↑↓", "navigate"),
-            ("space", "select"),
-            ("⏎", "select"),
-        ],
+        &[("↑↓", "navigate"), ("space", "select"), ("⏎", "select")],
     )?;
     height += 1;
 
@@ -563,7 +567,13 @@ mod tests {
     #[test]
     fn viewport_clamps_to_end_when_near_bottom() {
         let w = get_visible_window(98, 100, 10);
-        assert_eq!(w, VisibleWindow { start: 90, end: 100 });
+        assert_eq!(
+            w,
+            VisibleWindow {
+                start: 90,
+                end: 100
+            }
+        );
     }
 
     #[test]
@@ -634,7 +644,10 @@ mod tests {
         // Now activate the third item.
         state.active = actions.len() + 3;
         match handle_key(&mut state, &actions, &items, AgentInput::Enter) {
-            AgentOutcome::Selected { action, selected_pubkeys } => {
+            AgentOutcome::Selected {
+                action,
+                selected_pubkeys,
+            } => {
                 assert_eq!(action, "agent_value_2");
                 assert_eq!(selected_pubkeys, vec!["pk0".to_owned(), "pk1".to_owned()]);
             }
@@ -717,13 +730,29 @@ mod tests {
 
     #[test]
     fn from_key_event_maps_arrows_and_special_keys() {
-        fn ke(c: KeyCode) -> KeyEvent { KeyEvent::new(c, KeyModifiers::NONE) }
-        fn ke_ctrl(c: KeyCode) -> KeyEvent { KeyEvent::new(c, KeyModifiers::CONTROL) }
+        fn ke(c: KeyCode) -> KeyEvent {
+            KeyEvent::new(c, KeyModifiers::NONE)
+        }
+        fn ke_ctrl(c: KeyCode) -> KeyEvent {
+            KeyEvent::new(c, KeyModifiers::CONTROL)
+        }
         assert_eq!(AgentInput::from_key_event(ke(KeyCode::Up)), AgentInput::Up);
-        assert_eq!(AgentInput::from_key_event(ke(KeyCode::Down)), AgentInput::Down);
-        assert_eq!(AgentInput::from_key_event(ke(KeyCode::Enter)), AgentInput::Enter);
-        assert_eq!(AgentInput::from_key_event(ke(KeyCode::Char(' '))), AgentInput::Space);
-        assert_eq!(AgentInput::from_key_event(ke(KeyCode::Esc)), AgentInput::Escape);
+        assert_eq!(
+            AgentInput::from_key_event(ke(KeyCode::Down)),
+            AgentInput::Down
+        );
+        assert_eq!(
+            AgentInput::from_key_event(ke(KeyCode::Enter)),
+            AgentInput::Enter
+        );
+        assert_eq!(
+            AgentInput::from_key_event(ke(KeyCode::Char(' '))),
+            AgentInput::Space
+        );
+        assert_eq!(
+            AgentInput::from_key_event(ke(KeyCode::Esc)),
+            AgentInput::Escape
+        );
         assert_eq!(
             AgentInput::from_key_event(ke_ctrl(KeyCode::Char('c'))),
             AgentInput::CtrlC,
@@ -732,7 +761,10 @@ mod tests {
             AgentInput::from_key_event(ke(KeyCode::Char('x'))),
             AgentInput::Char('x'),
         );
-        assert_eq!(AgentInput::from_key_event(ke(KeyCode::Tab)), AgentInput::Other);
+        assert_eq!(
+            AgentInput::from_key_event(ke(KeyCode::Tab)),
+            AgentInput::Other
+        );
     }
 
     /// Pin: the active-row cursor's trailing space lands OUTSIDE the
@@ -791,12 +823,9 @@ mod tests {
         let mut buf: Vec<u8> = Vec::new();
         render_frame(&mut buf, "Manage agents", &state, &actions, &items, 0).unwrap();
         let s = String::from_utf8(buf).expect("render output must be UTF-8");
-        let with_full_reset = s.contains(
-            "\x1b[38;2;255;193;7m❯\x1b[0m \x1b[38;5;214m\x1b[1m  Done",
-        );
-        let with_fg_reset = s.contains(
-            "\x1b[38;2;255;193;7m❯\x1b[39m \x1b[38;5;214m\x1b[1m  Done",
-        );
+        let with_full_reset =
+            s.contains("\x1b[38;2;255;193;7m❯\x1b[0m \x1b[38;5;214m\x1b[1m  Done");
+        let with_fg_reset = s.contains("\x1b[38;2;255;193;7m❯\x1b[39m \x1b[38;5;214m\x1b[1m  Done");
         assert!(
             with_full_reset || with_fg_reset,
             "Done row must emit cursor + close + literal space + ansi256(214)+bold for the label; got {s:?}",
@@ -837,7 +866,9 @@ mod tests {
         let items = items_sample(2);
         let mut state = empty_state();
         // Mark the first agent as selected.
-        state.selected_pubkeys.push(items[0].pubkey.clone().unwrap());
+        state
+            .selected_pubkeys
+            .push(items[0].pubkey.clone().unwrap());
         // Activate the first agent row so it renders.
         state.active = actions.len() + 1;
         let mut buf: Vec<u8> = Vec::new();

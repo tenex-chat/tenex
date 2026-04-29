@@ -28,8 +28,8 @@ impl SummaryStateStore {
             std::fs::create_dir_all(parent)
                 .with_context(|| format!("create {}", parent.display()))?;
         }
-        let conn = Connection::open(path)
-            .with_context(|| format!("open state db {}", path.display()))?;
+        let conn =
+            Connection::open(path).with_context(|| format!("open state db {}", path.display()))?;
         conn.execute_batch(
             "PRAGMA journal_mode=WAL;
              CREATE TABLE IF NOT EXISTS conversation_summary_state (
@@ -60,12 +60,7 @@ impl SummaryStateStore {
         Ok(row)
     }
 
-    pub fn record(
-        &self,
-        conversation_id: &str,
-        last_activity: i64,
-        now_ms: i64,
-    ) -> Result<()> {
+    pub fn record(&self, conversation_id: &str, last_activity: i64, now_ms: i64) -> Result<()> {
         self.conn.execute(
             "INSERT INTO conversation_summary_state
                  (conversation_id, last_activity_summarized, last_summarized_at_ms)

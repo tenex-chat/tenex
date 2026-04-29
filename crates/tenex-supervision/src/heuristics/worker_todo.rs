@@ -1,7 +1,9 @@
 use crate::heuristic::PreToolHeuristic;
 use crate::types::{AgentCategory, PreToolContext};
 
-const PROTECTED_TOOLS: &[&str] = &["shell", "fs_read", "fs_write", "fs_edit", "fs_glob", "fs_grep"];
+const PROTECTED_TOOLS: &[&str] = &[
+    "shell", "fs_read", "fs_write", "fs_edit", "fs_glob", "fs_grep",
+];
 
 pub struct WorkerTodoHeuristic;
 
@@ -10,7 +12,7 @@ impl PreToolHeuristic for WorkerTodoHeuristic {
         "worker-todo-before-file-or-shell"
     }
 
-    fn check<'a>(&self, ctx: &PreToolContext<'a>) -> Option<String> {
+    fn check(&self, ctx: &PreToolContext<'_>) -> Option<String> {
         if *ctx.agent_category != AgentCategory::Worker {
             return None;
         }
@@ -40,14 +42,21 @@ mod tests {
         todos: &'a [TodoEntry],
         category: &'a AgentCategory,
     ) -> PreToolContext<'a> {
-        PreToolContext { tool_name: tool, todos, agent_category: category }
+        PreToolContext {
+            tool_name: tool,
+            todos,
+            agent_category: category,
+        }
     }
 
     #[test]
     fn blocks_worker_with_no_todos_on_shell() {
         let h = WorkerTodoHeuristic;
         let result = h.check(&ctx("shell", &[], &AgentCategory::Worker));
-        assert!(result.is_some(), "should block shell when worker has no todos");
+        assert!(
+            result.is_some(),
+            "should block shell when worker has no todos"
+        );
         assert!(result.unwrap().contains("shell"));
     }
 
@@ -81,7 +90,10 @@ mod tests {
             status: crate::types::TodoStatus::Pending,
         }];
         let result = h.check(&ctx("shell", &todos, &AgentCategory::Worker));
-        assert!(result.is_none(), "should not block worker that already has todos");
+        assert!(
+            result.is_none(),
+            "should not block worker that already has todos"
+        );
     }
 
     #[test]
