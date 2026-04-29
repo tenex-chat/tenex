@@ -205,10 +205,10 @@ class ConversationRegistryImpl {
     }
 
     /**
-     * Resolve a conversation ID that may be a 12-char prefix to a full 64-char ID.
+     * Resolve a conversation ID that may be a short prefix to a full ID.
      * Returns the input as-is if it's already a full ID or if resolution fails.
      *
-     * @param conversationId - Either a full 64-char hex ID or a 12-char hex prefix
+     * @param conversationId - Either a full stored ID or a short prefix
      * @returns The full 64-char ID if resolved, otherwise the original input
      */
     private resolveConversationId(conversationId: string): string {
@@ -217,7 +217,7 @@ class ConversationRegistryImpl {
             return conversationId.toLowerCase();
         }
 
-        // Check if it's a 12-char hex prefix
+        // Check if it's a short hex prefix
         if (isHexPrefix(conversationId)) {
             const resolved = resolvePrefixToId(conversationId);
             if (resolved) {
@@ -258,7 +258,7 @@ class ConversationRegistryImpl {
     /**
      * Get or load a conversation store by ID.
      * Loads from disk if not already in memory.
-     * Supports 12-char hex prefix lookups via PrefixKVStore.
+     * Supports short prefix lookups via PrefixKVStore.
      */
     getOrLoad(conversationId: string): ConversationStore {
         // Resolve prefix to full ID if needed (consistent with get/has)
@@ -281,7 +281,7 @@ class ConversationRegistryImpl {
     /**
      * Get a conversation store if it exists in memory or on disk.
      * Returns undefined if conversation doesn't exist.
-     * Supports 12-char hex prefix lookups via PrefixKVStore.
+     * Supports short prefix lookups via PrefixKVStore.
      */
     get(conversationId: string): ConversationStore | undefined {
         // Resolve prefix to full ID if needed

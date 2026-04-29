@@ -18,8 +18,6 @@ import { shortenConversationId } from "@/utils/conversation-id";
 export interface ConversationDisplayPreview {
     /** Shortened conversation ID (10 chars) for display */
     id: string;
-    /** Full canonical ID for internal use/lookups */
-    fullId: string;
     title?: string;
     summary?: string;
     lastUserMessage?: string;
@@ -37,8 +35,6 @@ export interface ConversationDisplayEntry extends ConversationDisplayPreview {
     participants: ConversationCatalogParticipant[];
     /** Shortened delegation IDs for display */
     delegationIds: string[];
-    /** Full canonical delegation IDs for lookups */
-    fullDelegationIds: string[];
 }
 
 /**
@@ -47,7 +43,6 @@ export interface ConversationDisplayEntry extends ConversationDisplayPreview {
  * Responsibilities:
  * - Shorten conversation IDs for display
  * - Shorten delegation IDs
- * - Keep full IDs available for lookups
  * - Format data for tool consumption
  */
 export class ConversationPresenter {
@@ -57,7 +52,6 @@ export class ConversationPresenter {
     static formatPreview(preview: ConversationCatalogPreview): ConversationDisplayPreview {
         return {
             id: shortenConversationId(preview.id),
-            fullId: preview.id,
             title: preview.title,
             summary: preview.summary,
             lastUserMessage: preview.lastUserMessage,
@@ -77,7 +71,6 @@ export class ConversationPresenter {
             ...ConversationPresenter.formatPreview(entry),
             participants: entry.participants,
             delegationIds: entry.delegationIds.map(id => shortenConversationId(id)),
-            fullDelegationIds: entry.delegationIds,
         };
     }
 

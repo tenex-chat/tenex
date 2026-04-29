@@ -2,7 +2,7 @@
  * Tests for ConversationRegistry prefix resolution
  *
  * Verifies that ConversationRegistry.has() and .get() correctly resolve
- * 12-character hex prefixes to full 64-character conversation IDs via PrefixKVStore.
+ * short hex prefixes to full 64-character conversation IDs via PrefixKVStore.
  */
 
 import { describe, it, expect, beforeEach, afterEach, mock, spyOn } from "bun:test";
@@ -95,7 +95,7 @@ describe("ConversationRegistry Prefix Resolution", () => {
             expect(result).toBeUndefined();
         });
 
-        it("should resolve 12-char prefix when PrefixKVStore has the mapping", async () => {
+        it("should resolve short prefix when PrefixKVStore has the mapping", async () => {
             const testId = generateUniqueTestId();
             const testPrefix = shortenConversationId(testId);
 
@@ -117,7 +117,7 @@ describe("ConversationRegistry Prefix Resolution", () => {
             expect(store?.id).toBe(testId);
         });
 
-        it("should return undefined for unknown 12-char prefix", () => {
+        it("should return undefined for unknown short prefix", () => {
             // Use a prefix that's unlikely to exist
             const unknownPrefix = shortenConversationId(generateUniqueTestId());
             const result = conversationRegistry.get(unknownPrefix);
@@ -214,7 +214,7 @@ describe("ConversationRegistry Prefix Resolution", () => {
             expect(conversationRegistry.has(testId)).toBe(true);
         });
 
-        it("has() with 12-char prefix returns true when conversation exists", async () => {
+        it("has() with short prefix returns true when conversation exists", async () => {
             const testId = generateUniqueTestId();
             const testPrefix = shortenConversationId(testId);
 
@@ -226,7 +226,7 @@ describe("ConversationRegistry Prefix Resolution", () => {
     });
 
     describe("getOrLoad() prefix resolution", () => {
-        it("getOrLoad() should resolve 12-char prefix to full ID", async () => {
+        it("getOrLoad() should resolve short prefix to full ID", async () => {
             const testId = generateUniqueTestId();
             const testPrefix = shortenConversationId(testId);
 
