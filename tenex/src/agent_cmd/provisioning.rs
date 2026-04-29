@@ -18,11 +18,20 @@ use crate::store::agent_storage::AgentStorage;
 
 /// Options for [`delete_stored_agent`]. Mirrors the TS option bag
 /// (`AgentProvisioningService.ts:69-75`).
-#[derive(Debug, Clone, Copy, Default)]
+///
+/// **Do not derive `Default`.** TS's `publishInventory` defaults to
+/// `true` (line :87 — `if (options?.publishInventory !== false)`).
+/// Rust's `bool::default()` is `false`, so a derived `Default::default()`
+/// would silently invert the semantics — callers expecting TS-equivalent
+/// behaviour would skip the inventory publish without any warning.
+/// Construct via [`DeleteOptions::new()`] to get the TS-faithful
+/// starting point.
+#[derive(Debug, Clone, Copy)]
 pub struct DeleteOptions {
     /// When `false`, skip the kind:24011 inventory publish entirely.
-    /// Defaults to `true`. The bulk-merge orchestrator passes `false`
-    /// for all but the last delete to avoid spamming the relay.
+    /// Defaults to `true` via `DeleteOptions::new()`. The bulk-merge
+    /// orchestrator passes `false` for all but the last delete to avoid
+    /// spamming the relay.
     pub publish_inventory: bool,
 }
 
@@ -145,12 +154,13 @@ mod tests {
 
     #[test]
     fn delete_options_new_publishes_by_default() {
-        // `DeleteOptions::new()` matches the TS default (`publishInventory:
-        // true` unless caller passes `false`). `Default::default()` falls
-        // through to bool default which is `false` — callers should use
-        // `new()` for the TS-faithful starting point.
+        // `DeleteOptions::new()` matches the TS default
+        // (`publishInventory: true` unless caller passes `false`, per
+        // `AgentProvisioningService.ts:87`). `Default` is *not* derived
+        // on this type — `bool::default()` is `false`, which would
+        // silently invert TS's semantics for any caller writing
+        // `DeleteOptions::default()`.
         assert!(DeleteOptions::new().publish_inventory);
-        assert!(!DeleteOptions::default().publish_inventory);
     }
 
     #[test]
