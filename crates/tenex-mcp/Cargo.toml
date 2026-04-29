@@ -1,0 +1,21 @@
+[package]
+name = "tenex-mcp"
+version = "0.1.0"
+edition = "2021"
+description = "Project-scoped MCP runtime bridge for TENEX."
+
+[lib]
+name = "tenex_mcp"
+path = "src/lib.rs"
+
+[dependencies]
+anyhow = "1"
+indexmap = { version = "2", features = ["serde"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+thiserror = "2"
+tokio = { version = "1", features = ["fs", "io-util", "macros", "net", "process", "rt", "sync", "time"] }
+tracing = "0.1"
+
+[dev-dependencies]
+tempfile = "3"

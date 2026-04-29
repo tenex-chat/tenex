@@ -1,0 +1,25 @@
+[package]
+name = "tenex-telegram"
+version = "0.1.0"
+edition = "2021"
+description = "Telegram transport for TENEX — daemon + delivery library."
+
+[[bin]]
+name = "tenex-telegram"
+path = "src/bin/main.rs"
+
+[dependencies]
+tenex-protocol = { path = "../tenex-protocol", features = ["relay"] }
+tenex-project = { path = "../tenex-project" }
+tenex-agent-registry = { path = "../tenex-agent-registry" }
+reqwest = { version = "0.12", features = ["json", "multipart"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+dirs-next = "2"
+nostr-sdk = "0.44"
+async-trait = "0.1"
+regex = "1"

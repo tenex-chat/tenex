@@ -8,7 +8,6 @@
 //! | `config.json`    | [`tenex_config`]        | `TenexConfigSchema` (`src/services/config/types.ts:133`) |
 //! | `llms.json`      | (next iteration)        | `TenexLLMsSchema` (`:396`)                      |
 //! | `providers.json` | (next iteration)        | `TenexProvidersSchema` (`:435`)                 |
-//! | `mcp.json`       | (next iteration)        | `TenexMCPSchema` (`:466`)                       |
 //!
 //! All read/write paths preserve insertion order (via `IndexMap`) so files
 //! round-trip byte-identically when only typed fields change. Writes use
@@ -40,8 +39,6 @@ mod embed_models;
 mod event_ids;
 #[cfg(test)]
 mod llm_config_options;
-#[cfg(test)]
-mod mcp;
 #[cfg(test)]
 mod project_ids;
 

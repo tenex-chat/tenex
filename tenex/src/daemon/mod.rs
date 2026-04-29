@@ -104,7 +104,12 @@ pub async fn run(args: DaemonArgs) -> Result<()> {
     // tenex binary (same target/ dir for cargo builds, same bin/ for installs).
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
-            for name in ["tenex-summarizer", "tenex-scheduler", "tenex-intervention"] {
+            for name in [
+                "tenex-summarizer",
+                "tenex-scheduler",
+                "tenex-intervention",
+                "tenex-telegram",
+            ] {
                 let path = dir.join(name);
                 if path.exists() {
                     supervisor.boot_binary(name.to_string(), path).await;

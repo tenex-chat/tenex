@@ -1,0 +1,85 @@
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct TelegramUpdate {
+    pub update_id: i64,
+    pub message: Option<TelegramMessage>,
+    pub edited_message: Option<TelegramMessage>,
+    pub callback_query: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct TelegramMessage {
+    pub message_id: i64,
+    pub from: Option<TelegramUser>,
+    pub chat: TelegramChat,
+    pub text: Option<String>,
+    pub voice: Option<TelegramVoice>,
+    pub audio: Option<TelegramAudio>,
+    pub message_thread_id: Option<i64>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct TelegramUser {
+    pub id: i64,
+    pub is_bot: bool,
+    pub first_name: String,
+    pub username: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct TelegramChat {
+    pub id: i64,
+    #[serde(rename = "type")]
+    pub chat_type: String,
+    pub title: Option<String>,
+    pub username: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct TelegramVoice {
+    pub file_id: String,
+    pub mime_type: Option<String>,
+    pub duration: Option<i64>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct TelegramAudio {
+    pub file_id: String,
+    pub mime_type: Option<String>,
+    pub duration: Option<i64>,
+    pub file_name: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct TelegramBotInfo {
+    pub id: i64,
+    pub username: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct TelegramBotCommand {
+    pub command: String,
+    pub description: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct TelegramApiResponse<T> {
+    ok: bool,
+    description: Option<String>,
+    result: Option<T>,
+}
+
+/// Extract the result from a Telegram API response body, returning an error if
+/// `ok` is false or the response cannot be parsed.
+pub fn parse_response<T: for<'de> Deserialize<'de>>(body: &str) -> anyhow::Result<T> {
+    let resp: TelegramApiResponse<T> = serde_json::from_str(body)?;
+    if !resp.ok {
+        anyhow::bail!(
+            "Telegram API error: {}",
+            resp.description.as_deref().unwrap_or("unknown")
+        );
+    }
+    resp.result
+        .ok_or_else(|| anyhow::anyhow!("Telegram API returned ok=true but no result"))
+}

@@ -2324,6 +2324,7 @@ dependencies = [
  "js-sys",
  "log",
  "mime",
+ "mime_guess",
  "native-tls",
  "percent-encoding",
  "pin-project-lite",
@@ -2969,7 +2970,9 @@ dependencies = [
  "tenex-conversations",
  "tenex-identity",
  "tenex-llm-config",
+ "tenex-mcp",
  "tenex-project",
+ "tenex-protocol",
  "tenex-telemetry",
  "tenex-whitelist",
  "tokio",
@@ -2999,12 +3002,14 @@ dependencies = [
  "tenex-context",
  "tenex-conversations",
  "tenex-llm-config",
+ "tenex-mcp",
  "tenex-project",
  "tenex-protocol",
  "tenex-rag",
  "tenex-scheduler",
  "tenex-supervision",
  "tenex-system-prompt",
+ "tenex-telegram",
  "tenex-telemetry",
  "thiserror 2.0.18",
  "tokio",
@@ -3103,6 +3108,20 @@ dependencies = [
  "indexmap",
  "serde",
  "serde_json",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "tenex-mcp"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "indexmap",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
  "tokio",
  "tracing",
 ]
@@ -3213,6 +3232,26 @@ version = "0.1.0"
 dependencies = [
  "tenex-project",
  "tenex-supervision",
+]
+
+[[package]]
+name = "tenex-telegram"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "dirs-next",
+ "nostr-sdk",
+ "regex",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "tenex-agent-registry",
+ "tenex-project",
+ "tenex-protocol",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
