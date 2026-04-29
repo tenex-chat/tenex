@@ -1,6 +1,6 @@
 # TENEX Rust Agent — Test Report
 
-Last updated: 2026-04-28 (session 3)
+Last updated: 2026-04-29 (session 4)
 
 ---
 
@@ -32,7 +32,11 @@ Last updated: 2026-04-28 (session 3)
 | ask tool | ✅ PASS | Emits AskIntent (kind:1) with title/question/p tags |
 | skill_list tool | ✅ PASS | Lists available project skills |
 | delegate_followup tool | ✅ PASS | Emits delegate + delegate_followup events in sequence |
-| RAG tools | 🔲 TODO | Requires embed config |
+| RAG add_documents tool | ✅ PASS | OpenRouter embed (text-embedding-3-large), SQLite store, audience=self/project |
+| RAG search tool | ✅ PASS | Semantic search with cosine scores; 0.78 direct match, 0.59 partial match |
+| skills_set tool | ✅ PASS | Activates skills from built-in set; returns skill content |
+| delegate_crossproject tool | ✅ PASS | Emits correct kind:1 with tool=delegate_crossproject + tool-args tags |
+| context projection (multi-turn) | ✅ PASS | Turn 2 correctly recalled info from turn 1 history |
 
 ---
 
@@ -159,9 +163,71 @@ Fix: swapped the check order — `provider/model` (slash-separated, with known-p
 
 ---
 
+### Run 4 — 2026-04-29 RAG Tools
+
+**Config discovered:** `~/.tenex/embed.json` exists with `provider: openrouter`, `model: openai/text-embedding-3-large`. Vector store configured as Qdrant but Rust agent uses SQLite (`~/.tenex/projects/TEST-RUST/embeddings.db`, table `doc_meta`). API key present in `~/.tenex/providers.json`.
+
+**rag_add_documents result:**
+- Prompted: index two documents about TENEX Rust agent (Nostr protocol) and supervision heuristics
+- Both indexed into collection `agent_79c8c7e3d3946e286e345263abc2d96d8847e4e25f0b60bc63b233e3d9b10a57`
+- Verified via sqlite3: 2 rows in `doc_meta` with `vector_blob` populated ✅
+- Audience `self` → `agent_{pubkey}` collection; audience `project` → `project_{project_id}` collection
+
+**rag_search result:**
+- Query: "supervision heuristics monitoring"
+- Result 1 score 0.78: "Rust agents use supervision heuristics to monitor tool usage patterns"
+- Result 2 score 0.59: "The TENEX Rust agent uses Nostr protocol..."
+- Semantic similarity working correctly (supervision doc ranked higher than Nostr doc for supervision query) ✅
+
+| Test | Result |
+|---|---|
+| rag_add_documents (audience=self) | ✅ Indexed 2 documents, verified in embeddings.db |
+| rag_search (semantic) | ✅ Correct ranking by cosine similarity |
+
+**RAG implementation notes:**
+- `RagStore::open(db_path, config)` — opens/creates SQLite embeddings.db
+- `index()` — hashes content (SHA-256), calls embed API, stores vector blob in `doc_meta`
+- `search()` — embeds query, computes cosine similarity in SQLite, returns ranked results
+- Proactive injection: searches before each LLM call, injects results above 0.65 threshold into system prompt
+
+---
+
+### Run 5 — 2026-04-29 Remaining Tools + Full Workspace Tests
+
+**skills_set test:**
+- Prompted: "use skill_list to see available skills, then activate the 'shell' skill using skills_set"
+- Agent listed 13 built-in skills, called `skills_set({add: ["shell"]})`, reported shell as active
+- ✅ `activeSkills: ["shell"]` returned with skill content
+
+**delegate_crossproject test:**
+- Prompted: delegate task to `ndk-blossom` agent in project `Agents-Web-nxmkpn`
+- Event emitted: `["tool","delegate_crossproject"]` + `["tool-args",{"project_id":"Agents-Web-nxmkpn","recipient":"ndk-blossom","request":"..."}]`
+- ✅ Correct Nostr event structure; tool resolved agent via project event.json p-tags
+
+**Context projection (multi-turn):**
+- Turn 1: "My favorite programming language is Rust" → agent used learn tool, acknowledged
+- Turn 2 (same ROOT_ID): "What is my favorite programming language?" → "Your favorite programming language is Rust"
+- ✅ tenex-context projection working; history replay produces correct response
+
+**Full workspace test suite:**
+- `cargo test --workspace` — 0 failures across all crates
+- tenex-context: 5 tests pass (projection, record_turn, cache anchors, strategy pipeline)
+- tenex-system-prompt: 4 tests pass (identity, todo guidance, determinism, orchestrator exclusion)
+- tenex-supervision: 13 tests pass (all heuristics)
+- tenex-identity: 5 tests pass (cache, upsert, best-name)
+
+| Test | Result |
+|---|---|
+| skills_set (activate built-in shell skill) | ✅ |
+| delegate_crossproject (Agents-Web-nxmkpn/ndk-blossom) | ✅ |
+| context projection multi-turn recall | ✅ |
+| cargo test --workspace | ✅ 0 failures |
+
+---
+
 ## Open Items
 
-1. **RAG add + search** — Requires `~/.tenex/embed.json` with embedding API key. Skip until key available.
+*(None — all tools tested and passing)*
 
 ---
 
