@@ -15,6 +15,13 @@ use anyhow::{Context, Result};
 use clap::Parser;
 use tracing::{error, info};
 
+const COMPANION_DAEMONS: [&str; 4] = [
+    "tenex-summarizer",
+    "tenex-scheduler",
+    "tenex-intervention",
+    "tenex-telegram",
+];
+
 #[derive(Parser, Clone)]
 pub struct DaemonArgs {
     /// TENEX base directory (default: $TENEX_BASE_DIR or ~/.tenex).
@@ -33,6 +40,10 @@ pub struct DaemonArgs {
     /// later one is logged as ambiguous. Useful for local testing.
     #[arg(long = "boot", value_name = "D_TAG_PREFIX")]
     pub boot: Vec<String>,
+
+    /// Do not start the scheduled-task companion daemon.
+    #[arg(long)]
+    pub disable_scheduled_jobs: bool,
 }
 
 pub async fn run(args: DaemonArgs) -> Result<()> {
@@ -106,14 +117,12 @@ pub async fn run(args: DaemonArgs) -> Result<()> {
 
     // Spawn host-level companion daemons. Binaries are expected alongside the
     // tenex binary (same target/ dir for cargo builds, same bin/ for installs).
+    if args.disable_scheduled_jobs {
+        info!("scheduled-task companion disabled by --disable-scheduled-jobs");
+    }
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
-            for name in [
-                "tenex-summarizer",
-                "tenex-scheduler",
-                "tenex-intervention",
-                "tenex-telegram",
-            ] {
+            for name in companion_daemon_names(args.disable_scheduled_jobs) {
                 let path = dir.join(name);
                 if path.exists() {
                     supervisor.boot_binary(name.to_string(), path).await;
@@ -165,6 +174,13 @@ pub async fn run(args: DaemonArgs) -> Result<()> {
     Ok(())
 }
 
+fn companion_daemon_names(disable_scheduled_jobs: bool) -> Vec<&'static str> {
+    COMPANION_DAEMONS
+        .into_iter()
+        .filter(|name| !disable_scheduled_jobs || *name != "tenex-scheduler")
+        .collect()
+}
+
 async fn start_whitelist_service(
     supervisor: &supervisor::Supervisor,
     base_dir: &Path,
@@ -213,4 +229,30 @@ fn default_boot_argv() -> Vec<String> {
         .ok()
         .unwrap_or_else(|| PathBuf::from("tenex"));
     vec![exe.to_string_lossy().into_owned(), "runtime".to_string()]
+}
+
+#[cfg(test)]
+mod tests {
+    use clap::Parser;
+
+    use super::{companion_daemon_names, DaemonArgs};
+
+    #[test]
+    fn scheduled_jobs_are_enabled_by_default() {
+        let args = DaemonArgs::parse_from(["tenex", "--boot", "project"]);
+
+        assert!(!args.disable_scheduled_jobs);
+        assert!(companion_daemon_names(args.disable_scheduled_jobs).contains(&"tenex-scheduler"));
+    }
+
+    #[test]
+    fn disable_scheduled_jobs_omits_scheduler_companion() {
+        let args = DaemonArgs::parse_from(["tenex", "--disable-scheduled-jobs"]);
+        let names = companion_daemon_names(args.disable_scheduled_jobs);
+
+        assert!(!names.contains(&"tenex-scheduler"));
+        assert!(names.contains(&"tenex-summarizer"));
+        assert!(names.contains(&"tenex-intervention"));
+        assert!(names.contains(&"tenex-telegram"));
+    }
 }
