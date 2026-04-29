@@ -222,13 +222,18 @@ pub fn compose_lines(rows: &[Row<'_>], message: &str, active: usize) -> Vec<Stri
 
     for (i, row) in rows.iter().enumerate() {
         match row {
-            Row::Header(h) => out.push(format!("── {h} ──")),
+            // `@inquirer/select/dist/index.js:159` prepends a single space
+            // before every separator's content (`return \` ${item.separator}\``)
+            // — that's the `separatorCount`'d render path and applies to
+            // BOTH custom-content separators (section headers) and the
+            // default blank separator. Mirror that single-space prefix.
+            Row::Header(h) => out.push(format!(" ── {h} ──")),
             Row::Entry(entry) => {
                 let pfx = if i == active { cursor_active.as_str() } else { "  " };
                 out.push(format!("{pfx}{}", entry.label));
             }
             Row::BlankSeparator => {
-                out.push("─".repeat(BLANK_SEPARATOR_DASHES));
+                out.push(format!(" {}", "─".repeat(BLANK_SEPARATOR_DASHES)));
             }
             Row::Back => {
                 let pfx = if i == active { cursor_active.as_str() } else { "  " };
@@ -305,8 +310,14 @@ fn render_frame<W: Write>(
     for (i, row) in rows.iter().enumerate() {
         match row {
             Row::Header(h) => {
+                // `@inquirer/select/dist/index.js:159` prepends a single
+                // space before the separator content. The space itself is
+                // OUTSIDE the dim wrap (the wrap covers only the
+                // chalk.dim'd separator text, not the leading space the
+                // select prompt prepends). Mirror byte-for-byte.
                 queue!(
                     stdout,
+                    Print(" "),
                     SetAttribute(Attribute::Dim),
                     Print(format!("── {h} ──")),
                     SetAttribute(Attribute::Reset),
@@ -331,10 +342,13 @@ fn render_frame<W: Write>(
             }
             Row::BlankSeparator => {
                 // `@inquirer/core/Separator.js:8` — default content is
-                // 14 `─` chars wrapped in `chalk.dim`. Mirror byte-for-byte.
+                // 14 `─` chars wrapped in `chalk.dim`. Plus the single
+                // leading space the select prompt prepends to every
+                // separator at `@inquirer/select/dist/index.js:159`.
                 let dashes = "─".repeat(BLANK_SEPARATOR_DASHES);
                 queue!(
                     stdout,
+                    Print(" "),
                     SetAttribute(Attribute::Dim),
                     Print(dashes),
                     SetAttribute(Attribute::Reset),
@@ -533,12 +547,14 @@ mod tests {
     }
 
     #[test]
-    fn compose_lines_render_section_dividers_with_em_dash_format() {
+    fn compose_lines_render_section_dividers_with_em_dash_format_and_leading_space() {
+        // `@inquirer/select/dist/index.js:159` prepends one space to every
+        // separator's rendered content — pin that leading space too.
         let sections = sample_sections();
         let rows = flatten(&sections);
         let lines = compose_lines(&rows, "Settings", 1);
-        assert!(lines.iter().any(|l| l == "── AI ──"));
-        assert!(lines.iter().any(|l| l == "── Network ──"));
+        assert!(lines.iter().any(|l| l == " ── AI ──"));
+        assert!(lines.iter().any(|l| l == " ── Network ──"));
     }
 
     #[test]
@@ -561,16 +577,18 @@ mod tests {
 
     /// Pin the BlankSeparator's rendered content to 14 `─` dashes —
     /// matching `@inquirer/core/Separator.js:8`'s default
-    /// `Array.from({ length: 15 }).join(figures.line)`.
+    /// `Array.from({ length: 15 }).join(figures.line)` — plus the
+    /// single leading space `@inquirer/select/dist/index.js:159`
+    /// prepends to every separator.
     #[test]
-    fn compose_lines_blank_separator_renders_14_em_dashes() {
+    fn compose_lines_blank_separator_renders_14_em_dashes_with_leading_space() {
         let sections = sample_sections();
         let rows = flatten(&sections);
         let lines = compose_lines(&rows, "Settings", 1);
-        let expected = "─".repeat(14);
+        let expected = format!(" {}", "─".repeat(14));
         assert!(
             lines.iter().any(|l| l == &expected),
-            "missing 14-dash blank separator; got lines: {lines:?}"
+            "missing leading-space + 14-dash blank separator; got lines: {lines:?}"
         );
     }
 
