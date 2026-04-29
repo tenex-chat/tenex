@@ -151,7 +151,7 @@ fn tag_values(event: &Event, name: &str) -> Vec<String> {
         .iter()
         .filter_map(|tag| {
             let parts = tag.as_slice();
-            if !parts.first().is_some_and(|head| head == name) {
+            if parts.first().is_none_or(|head| head != name) {
                 return None;
             }
             let value = parts.get(1)?.trim();
@@ -166,7 +166,7 @@ mod tests {
     use indexmap::IndexMap;
     use serde_json::Value;
     use std::sync::atomic::{AtomicU64, Ordering};
-    use tenex_agent_registry::{generate_nsec_bech32, AgentDoc};
+    use tenex_agent_registry::{AgentDoc, generate_nsec_bech32};
 
     fn unique_temp() -> std::path::PathBuf {
         static COUNTER: AtomicU64 = AtomicU64::new(0);

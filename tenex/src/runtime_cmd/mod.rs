@@ -22,16 +22,16 @@ use notify::{
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter};
-use tracing::{info, info_span, warn, Instrument};
+use tracing::{Instrument, info, info_span, warn};
 
-use control::{serve_control_socket, RuntimeControlState};
+use control::{RuntimeControlState, serve_control_socket};
 use tenex_conversations::{
     AgentContextState, ConversationStore, MessageQuery, NewMessage, Project as ConversationsProject,
 };
 use tenex_mcp::{ProjectMcpRuntime, SocketServerConfig};
 use tenex_project::{
-    models::{ProjectAgent, ProjectMetadata},
     Agent, Project,
+    models::{ProjectAgent, ProjectMetadata},
 };
 
 use crate::daemon::config;
@@ -262,9 +262,7 @@ impl DispatchCoordinator {
     }
 
     fn finish_run(&mut self, key: &DispatchKey) -> Option<DispatchJob> {
-        let Some(entry) = self.entries.get_mut(key) else {
-            return None;
-        };
+        let entry = self.entries.get_mut(key)?;
 
         entry.active_runs = entry.active_runs.saturating_sub(1);
         if entry.active_runs == 0 {
@@ -1817,10 +1815,10 @@ fn targets_project_address(event: &Event, project_addr: &str) -> bool {
 
 fn event_matches_project_scope(event: &Event, project_addr: &str) -> bool {
     let project_addresses = project_address_tags(event);
-    project_addresses.is_empty() || project_addresses.iter().any(|addr| *addr == project_addr)
+    project_addresses.is_empty() || project_addresses.contains(&project_addr)
 }
 
-fn project_address_tags<'a>(event: &'a Event) -> Vec<&'a str> {
+fn project_address_tags(event: &Event) -> Vec<&str> {
     let a_kind = TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::A));
     event
         .tags
@@ -2367,11 +2365,13 @@ mod tests {
         write_trace_carrier_to_runtime_state(&mut state, &carrier, "event2", "agent2");
 
         assert_eq!(trace_carrier_from_runtime_state(&state), Some(carrier));
-        assert!(state
-            .get("rustRuntime")
-            .and_then(|v| v.get("consumedMessages"))
-            .and_then(|v| v.get("event1"))
-            .is_some());
+        assert!(
+            state
+                .get("rustRuntime")
+                .and_then(|v| v.get("consumedMessages"))
+                .and_then(|v| v.get("event1"))
+                .is_some()
+        );
     }
 
     #[test]
@@ -2661,14 +2661,16 @@ mod tests {
             ],
         );
 
-        assert!(register_delegation_route_if_needed(
-            &store,
-            &followup,
-            &agent_pubkeys,
-            Some(&parent_job)
-        )
-        .unwrap()
-        .is_none());
+        assert!(
+            register_delegation_route_if_needed(
+                &store,
+                &followup,
+                &agent_pubkeys,
+                Some(&parent_job)
+            )
+            .unwrap()
+            .is_none()
+        );
         assert_eq!(
             conversation_id_from_event(&followup),
             delegation.id.to_hex()

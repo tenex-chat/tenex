@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use nostr_sdk::prelude::*;
-use tokio::signal::unix::{signal, SignalKind};
+use tokio::signal::unix::{SignalKind, signal};
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 use tracing::{debug, error, info, warn};
@@ -318,11 +318,8 @@ async fn handle_trigger(
     // completing while a child is still running is expected behaviour, not a
     // user-silence event that warrants intervention.
     match Project::new_with_default_base(project_id)
-        .and_then(|p| {
-            tenex_conversations::ConversationStore::open(&p.conversation_db_path())
-                .map_err(Into::into)
-        })
-        .and_then(|store| store.has_active_delegation(&conv_id).map_err(Into::into))
+        .and_then(|p| tenex_conversations::ConversationStore::open(&p.conversation_db_path()))
+        .and_then(|store| store.has_active_delegation(&conv_id))
     {
         Ok(true) => {
             debug!(

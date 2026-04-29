@@ -17,7 +17,7 @@ pub fn render_message(content: &str) -> RenderedMessage {
 
     let escaped = escape_html(&after_inline);
 
-    let rendered_lines: Vec<String> = escaped.split('\n').map(|line| render_line(line)).collect();
+    let rendered_lines: Vec<String> = escaped.split('\n').map(render_line).collect();
 
     let joined = rendered_lines.join("\n");
     let with_inline = restore_placeholders(&joined, &inline_replacements);
@@ -125,7 +125,7 @@ fn render_line(line: &str) -> String {
     // Heading: # ... ###### (after HTML escaping, so no special chars)
     if let Some(rest) = line.strip_prefix('#') {
         let trimmed = rest.trim_start_matches('#').trim_start_matches(' ');
-        if !trimmed.is_empty() && rest.starts_with(|c: char| c == ' ' || c == '#') {
+        if !trimmed.is_empty() && rest.starts_with([' ', '#']) {
             let inner = strip_outer_bold(trimmed);
             return format!("<b>{}</b>", render_inline(inner));
         }
