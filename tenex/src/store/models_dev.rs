@@ -109,7 +109,6 @@ pub fn map_to_models_dev_provider(tenex_provider: &str) -> Option<&'static str> 
 
 /// `true` iff `tenex_provider` is in the mapping table but maps to
 /// `None` (i.e. local/custom — not in models.dev).
-#[cfg(test)]
 pub fn is_known_local_provider(tenex_provider: &str) -> bool {
     provider_mapping()
         .iter()
@@ -288,7 +287,6 @@ pub fn context_window(cache: &ModelsDevResponse, provider: &str, model: &str) ->
 /// `limit.context` nor `cost` is available. The TS source filters
 /// empty strings before joining, so absence of one collapses the
 /// separator.
-#[cfg(test)]
 pub fn picker_label_segments(model: &ModelsDevModel) -> (String, String, String) {
     let id_segment = format!("({})", model.id);
     let ctx_str = model
@@ -315,7 +313,6 @@ pub fn picker_label_segments(model: &ModelsDevModel) -> (String, String, String)
 /// model picker. Returns `""` for unknown providers and for
 /// `claude-code` (which has no concept of a model in the TS source —
 /// the `defaults` table maps it to the empty string).
-#[cfg(test)]
 pub fn default_model_for_provider(provider: &str) -> &'static str {
     match provider {
         "openrouter" => "openai/gpt-4",
@@ -344,7 +341,6 @@ pub fn default_model_for_provider(provider: &str) -> &'static str {
 /// by treating `None` as `""`. Entries with a real `last_updated` sort
 /// before entries without (since `"2024-..." > ""` lexicographically),
 /// and ties fall back to insertion order via Rust's stable sort.
-#[cfg(test)]
 pub fn get_provider_models(cache: &ModelsDevResponse, provider: &str) -> Vec<ModelsDevModel> {
     let Some(models_dev_provider) = map_to_models_dev_provider(provider) else {
         return Vec::new();

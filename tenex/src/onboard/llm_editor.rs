@@ -23,7 +23,7 @@ use anyhow::{anyhow, Context, Result};
 
 use crate::store::llms::{LlmConfigKind, LlmsDoc};
 use crate::tui::custom_prompts::llm_menu_prompt::{
-    llm_menu_prompt, ActionItem, ConfigItem, LlmMenuResult, TestResult,
+    llm_menu_prompt, ActionItem, ConfigItem, LlmMenuResult,
 };
 use crate::tui::display;
 
@@ -60,19 +60,13 @@ pub fn run(base_dir: &std::path::Path) -> Result<LlmEditorResult> {
         let items = build_items(&doc);
         let actions = action_items();
 
+        let base_dir_ref = base_dir;
         let result = llm_menu_prompt(
             // TS LLMConfigEditor.ts:215 — `message: "Configurations"`.
             "Configurations",
             &actions,
             &items,
-            Some(|_name: &str| TestResult {
-                success: false,
-                error: Some(
-                    "test runner not yet configured (use `tenex config llm` once the test \
-                     runner is ported)"
-                        .to_owned(),
-                ),
-            }),
+            Some(|name: &str| crate::onboard::llm_runner::run_test(base_dir_ref, name)),
         )
         .map_err(|e| anyhow!("llm menu I/O: {e}"))?;
 
@@ -94,13 +88,15 @@ pub fn route(base_dir: &std::path::Path, value: &str) -> Result<bool> {
     match value {
         "done" => Ok(false),
         "add" => {
-            display::hint("Adding a new configuration is pending port (see `tenex config llm`).");
+            super::add_configuration::run(base_dir)?;
             Ok(true)
         }
         "addMultiModal" => {
-            display::hint(
-                "Adding a multi-modal configuration is pending port (see `tenex config llm`).",
-            );
+            super::add_multi_modal::run(base_dir)?;
+            Ok(true)
+        }
+        "addAcp" => {
+            super::acp_config_wizard::run(base_dir)?;
             Ok(true)
         }
         v if v.starts_with("delete:") => {
@@ -207,11 +203,9 @@ fn display_providers(providers: &crate::store::providers::ProvidersDoc) {
 
 /// Detail-string formatter for the row label shown under each config.
 ///
-/// Mirror TS `LLMConfigEditor.ts:192-200` exactly:
-/// - Meta config: `multi-modal, ${variantCount} variants`
-/// - Standard config: just `${model}` (no provider prefix — TS uses
-///   the bare model id; the row gets the provider context from the
-///   detail itself when the user opens the per-config edit screen).
+/// Mirror TS `LLMConfigEditor.ts:192-200` for standard and meta configs.
+/// ACP configs (provider == "acp") are Rust-only and get their own format:
+/// `acp/<backend>` or `acp/<backend> · <model>` when a model is set.
 ///
 /// Returns an empty string when the named config doesn't exist.
 fn detail_string_for(doc: &LlmsDoc, name: &str) -> String {
@@ -221,6 +215,16 @@ fn detail_string_for(doc: &LlmsDoc, name: &str) -> String {
     if entry.kind() == LlmConfigKind::Meta {
         let variants = entry.variant_names().len();
         return format!("multi-modal, {variants} variants");
+    }
+    if entry.provider() == Some("acp") {
+        let backend = entry
+            .field("backend")
+            .and_then(|v| v.as_str())
+            .unwrap_or("custom");
+        return match entry.model() {
+            Some(m) => format!("acp/{backend} · {m}"),
+            None => format!("acp/{backend}"),
+        };
     }
     entry.model().unwrap_or("").to_owned()
 }
@@ -243,13 +247,11 @@ fn compose_display_name(name: &str, detail: &str) -> String {
     format!("{name} {}", crate::tui::theme::chalk_dim(detail))
 }
 
-/// Two action buttons. Source: `LLMConfigEditor.ts:209-212`.
+/// Action buttons shown above the config list.
 ///
-/// TS template: `Add new configuration ${chalk.dim("(a)")}` (and the
-/// multi-modal variant). The `(a)`/`(m)` is rendered with `chalk.dim`
-/// so the keystroke hint is muted relative to the action label.
-/// Embed the dim ANSI codes inline so the picker renders the same
-/// muted suffix without needing a separate styling hook.
+/// The first two mirror `LLMConfigEditor.ts:209-212` verbatim.
+/// The third (ACP) is Rust-only — TS predates ACP support.
+/// The `(a)`/`(m)`/`(p)` keystroke hints are rendered with `chalk.dim`.
 pub fn action_items() -> Vec<ActionItem> {
     use crate::tui::theme::chalk_dim;
     vec![
@@ -263,6 +265,11 @@ pub fn action_items() -> Vec<ActionItem> {
             key: 'm',
             // TS uses the camelCase token `addMultiModal` (LLMConfigEditor.ts:211).
             value: "addMultiModal".to_owned(),
+        },
+        ActionItem {
+            name: format!("Add ACP backend {}", chalk_dim("(p)")),
+            key: 'p',
+            value: "addAcp".to_owned(),
         },
     ]
 }
@@ -289,20 +296,19 @@ mod tests {
     }
 
     #[test]
-    fn action_items_match_ts_verbatim() {
-        // TS source: LLMConfigEditor.ts:209-212 —
-        //   { name: `Add new configuration ${chalk.dim("(a)")}`, value: "add", key: "a" },
-        //   { name: `Add multi-modal configuration ${chalk.dim("(m)")}`, value: "addMultiModal", key: "m" },
+    fn action_items_content() {
+        // First two items mirror TS LLMConfigEditor.ts:209-212 verbatim.
+        // Third item (ACP) is Rust-only.
         let actions = action_items();
-        assert_eq!(actions.len(), 2);
-        // The dim '(a)' / '(m)' suffix is rendered with embedded
-        // ANSI dim codes (\x1b[2m...\x1b[22m). Ensure both the
-        // base label AND the dim suffix are present in the
-        // rendered name.
+        assert_eq!(actions.len(), 3);
+
+        // The dim '(a)' / '(m)' / '(p)' suffixes are rendered with embedded
+        // ANSI dim codes (\x1b[2m...\x1b[22m).
         assert!(actions[0].name.starts_with("Add new configuration "));
         assert!(actions[0].name.ends_with("\x1b[2m(a)\x1b[22m"));
         assert_eq!(actions[0].key, 'a');
         assert_eq!(actions[0].value, "add");
+
         assert!(actions[1]
             .name
             .starts_with("Add multi-modal configuration "));
@@ -310,6 +316,11 @@ mod tests {
         assert_eq!(actions[1].key, 'm');
         // TS uses camelCase 'addMultiModal' (LLMConfigEditor.ts:211).
         assert_eq!(actions[1].value, "addMultiModal");
+
+        assert!(actions[2].name.starts_with("Add ACP backend "));
+        assert!(actions[2].name.ends_with("\x1b[2m(p)\x1b[22m"));
+        assert_eq!(actions[2].key, 'p');
+        assert_eq!(actions[2].value, "addAcp");
     }
 
     #[test]
@@ -351,6 +362,45 @@ mod tests {
             },
         );
         assert_eq!(detail_string_for(&doc, "Auto"), "multi-modal, 2 variants");
+    }
+
+    #[test]
+    fn detail_string_renders_acp_with_backend_and_model() {
+        use crate::store::llms::AcpConfig;
+        let mut doc = LlmsDoc::new();
+        doc.set_acp_config(
+            "claude code acp",
+            AcpConfig {
+                backend: "claude-code".into(),
+                command: "npx".into(),
+                args: vec![],
+                env: std::collections::HashMap::new(),
+                model: Some("claude-haiku-4-5-20251001".into()),
+                permission_policy: Some("allow".into()),
+            },
+        );
+        assert_eq!(
+            detail_string_for(&doc, "claude code acp"),
+            "acp/claude-code · claude-haiku-4-5-20251001"
+        );
+    }
+
+    #[test]
+    fn detail_string_renders_acp_without_model() {
+        use crate::store::llms::AcpConfig;
+        let mut doc = LlmsDoc::new();
+        doc.set_acp_config(
+            "my acp",
+            AcpConfig {
+                backend: "custom".into(),
+                command: "my-bin".into(),
+                args: vec![],
+                env: std::collections::HashMap::new(),
+                model: None,
+                permission_policy: None,
+            },
+        );
+        assert_eq!(detail_string_for(&doc, "my acp"), "acp/custom");
     }
 
     #[test]

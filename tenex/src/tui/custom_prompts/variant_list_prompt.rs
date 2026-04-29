@@ -443,6 +443,41 @@ fn clear_frame<W: Write>(stdout: &mut W, height: u16) -> io::Result<()> {
     stdout.flush()
 }
 
+/// Drive the variant-list prompt interactively until the user selects a
+/// terminal outcome (Add / Edit / Done / Cancel). Enters raw mode for the
+/// duration and drops it before returning.
+///
+/// Caller pattern (mirrors the TS `variantListRawPrompt` + dispatch loop
+/// at `variant-list-prompt.ts:329-361`):
+/// 1. Call `run()` — blocks until a terminal outcome.
+/// 2. Match on the outcome and run the appropriate inquire sub-flow
+///    (add_variant / editVariantDetail) outside raw mode.
+/// 3. Loop back to step 1 with the updated `state`.
+pub fn run(state: &mut VariantListState, message: &str) -> io::Result<VariantOutcome> {
+    use crate::tui::custom_prompts::raw_mode::RawMode;
+    use crossterm::event::{self, Event};
+
+    let _guard = RawMode::enter()?;
+    let mut stdout = io::stdout();
+    let mut prev_height: u16 = 0;
+
+    loop {
+        prev_height = render_frame(&mut stdout, message, state, prev_height)?;
+        let key = match event::read()? {
+            Event::Key(k) => k,
+            _ => continue,
+        };
+        let outcome = handle_key(state, VariantInput::from_key_event(key));
+        match &outcome {
+            VariantOutcome::Continue => {}
+            _ => {
+                clear_frame(&mut stdout, prev_height)?;
+                return Ok(outcome);
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

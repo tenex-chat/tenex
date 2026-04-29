@@ -1,21 +1,35 @@
-//! Pure helpers for the `addConfiguration` and `addMultiModalConfiguration`
-//! flows. The interactive driver (which wires per-provider model
-//! selectors — OpenRouter, Ollama, Codex, models.dev — together with
-//! these helpers and the user-facing prompts) lands in subsequent
-//! iterations as each model-list backend is ported.
+//! Standard LLM configuration wizard + pure helpers.
 //!
-//! Source citations:
+//! Source: `src/llm/utils/ConfigurationManager.ts:21-154`.
 //!
-//! - Provider filter (`configuredProviders`): `ConfigurationManager.ts:22-27`.
-//! - Name validation: `:127-129` (single-config flow) and `:185-187`
-//!   (multi-modal flow). The two prompts use *identical* validators —
-//!   reproduced here in a single helper.
+//! Pure-helper source citations:
+//!
+//! - Provider filter (`configuredProviders`): `:22-27`.
+//! - Name validation: `:127-129` (single-config) and `:185-187`
+//!   (multi-modal). Identical validators — one helper here.
 //! - Default config name format: `:118` `${provider}/${modelDisplayName ?? model}`.
-//! - Multi-modal eligibility: `:160-169`. At least 2 standard (non-meta)
-//!   configurations are required.
+//! - Multi-modal eligibility: `:160-169`. ≥2 standard configs required.
+//!
+//! Interactive driver: `pub fn run(base_dir)`.
+//!
+//! Model selection strategy by provider (TS uses per-provider API calls
+//! that are not yet ported):
+//!
+//! - `claude-code`: static `CLAUDE_CODE_MODELS` list (3 aliases, no HTTP).
+//! - `codex`:       hardcoded model list + effort select (no IPC yet).
+//! - `anthropic`, `openai`: models.dev disk-cache picker; text-input when
+//!   the cache is absent or returns no models for that provider.
+//! - `openrouter`, `ollama`, others: text-input with provider-specific help.
 
-use crate::store::llms::{LlmConfigKind, LlmsDoc};
+use std::path::Path;
+
+use anyhow::{anyhow, Result};
+use inquire::InquireError;
+use serde_json::Value;
+
+use crate::store::llms::{LlmConfigKind, LlmsDoc, StandardConfig};
 use crate::store::providers::ProvidersDoc;
+use crate::tui::{display, prompts};
 
 /// Provider IDs that have a credential entry usable by `addConfiguration`.
 /// Source: `ConfigurationManager.ts:22-27`. A provider qualifies when the
@@ -94,6 +108,294 @@ pub fn standard_config_names(doc: &LlmsDoc) -> Vec<String> {
             None => false,
         })
         .collect()
+}
+
+// ── Interactive wizard ────────────────────────────────────────────────────────
+
+/// A selectable model entry shown in the picker.
+struct ModelChoice {
+    /// The model ID to persist to `llms.json`.
+    id: String,
+    /// Human-readable label shown in the picker list.
+    label: String,
+}
+
+impl std::fmt::Display for ModelChoice {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.label)
+    }
+}
+
+/// Hardcoded Codex model options used when the Codex CLI IPC is not yet
+/// available. Mirrors the shape of `listCodexModels()` output.
+const CODEX_MODELS: &[(&str, bool)] = &[
+    ("gpt-5.4", true),
+    ("gpt-5.4-mini", false),
+    ("gpt-5.1-codex-max", false),
+    ("gpt-5.1-codex", false),
+];
+
+/// Prompt to select a model for the `claude-code` provider.
+/// Returns `(model_id, display_name)`.
+fn select_claude_code_model() -> Result<Option<(String, String)>> {
+    use crate::onboard::claude_code_models::CLAUDE_CODE_MODELS;
+    let choices: Vec<ModelChoice> = CLAUDE_CODE_MODELS
+        .iter()
+        .map(|m| ModelChoice {
+            id: m.id.to_owned(),
+            label: format!(
+                "{} {} {}",
+                m.display_name,
+                crate::tui::theme::chalk_dim(&format!("({})", m.id)),
+                crate::tui::theme::chalk_dim(&format!("— {}", m.description)),
+            ),
+        })
+        .collect();
+
+    match prompts::select("Select model:", choices).prompt() {
+        Ok(c) => Ok(Some((c.id.clone(), c.id))),
+        Err(InquireError::OperationCanceled | InquireError::OperationInterrupted) => Ok(None),
+        Err(e) => Err(anyhow!("model select: {e}")),
+    }
+}
+
+/// Prompt to select a Codex model + effort level.
+/// Returns `(model_id, effort_override)`.
+fn select_codex_model() -> Result<Option<(String, Option<String>)>> {
+    let dim = |s: &str| crate::tui::theme::chalk_dim(s);
+    let choices: Vec<ModelChoice> = CODEX_MODELS
+        .iter()
+        .map(|(id, is_default)| ModelChoice {
+            id: (*id).to_owned(),
+            label: if *is_default {
+                format!("{} {}", id, dim("(default)"))
+            } else {
+                (*id).to_owned()
+            },
+        })
+        .collect();
+
+    let model = match prompts::select("Select Codex model:", choices).prompt() {
+        Ok(c) => c.id,
+        Err(InquireError::OperationCanceled | InquireError::OperationInterrupted) => {
+            return Ok(None)
+        }
+        Err(e) => return Err(anyhow!("model select: {e}")),
+    };
+
+    let effort_choices = vec![
+        "use model default",
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+    ];
+    let effort = match prompts::select("Select effort:", effort_choices).prompt() {
+        Ok("use model default") => None,
+        Ok(e) => Some(e.to_owned()),
+        Err(InquireError::OperationCanceled | InquireError::OperationInterrupted) => {
+            return Ok(None)
+        }
+        Err(e) => return Err(anyhow!("effort select: {e}")),
+    };
+
+    Ok(Some((model, effort)))
+}
+
+/// Prompt to pick from a models.dev cache list for `provider`.
+/// Returns `(model_id, display_name)`.
+/// Falls back to text input when the cache is empty for this provider.
+fn select_models_dev_model(
+    provider: &str,
+    base_dir: &Path,
+) -> Result<Option<(String, String)>> {
+    use crate::store::models_dev;
+    let default_model = models_dev::default_model_for_provider(provider);
+
+    // Try loading the models.dev cache.
+    let cache_opt = models_dev::load_from_disk(base_dir).ok().flatten();
+    if let Some(cache) = cache_opt {
+        let models = models_dev::get_provider_models(&cache.data, provider);
+        if !models.is_empty() {
+            let choices: Vec<ModelChoice> = models
+                .iter()
+                .map(|m| {
+                    let (name, id_seg, meta_seg) = models_dev::picker_label_segments(m);
+                    ModelChoice {
+                        id: m.id.clone(),
+                        label: format!(
+                            "{} {} {}",
+                            name,
+                            crate::tui::theme::chalk_dim(&id_seg),
+                            crate::tui::theme::chalk_dim(&meta_seg),
+                        )
+                        .trim()
+                        .to_owned(),
+                    }
+                })
+                .collect();
+
+            return match prompts::select("Select model:", choices).prompt() {
+                Ok(c) => Ok(Some((c.id.clone(), c.id))),
+                Err(InquireError::OperationCanceled | InquireError::OperationInterrupted) => {
+                    Ok(None)
+                }
+                Err(e) => Err(anyhow!("model select: {e}")),
+            };
+        }
+    }
+
+    // Cache absent or empty for this provider — fall through to text input.
+    let prompt = prompts::input("Model ID:")
+        .with_help_message("e.g. claude-sonnet-4-6, gpt-4o");
+    let result = if default_model.is_empty() {
+        prompt.prompt()
+    } else {
+        prompt.with_default(default_model).prompt()
+    };
+    match result {
+        Ok(m) => Ok(Some((m.clone(), m))),
+        Err(InquireError::OperationCanceled | InquireError::OperationInterrupted) => Ok(None),
+        Err(e) => Err(anyhow!("model input: {e}")),
+    }
+}
+
+/// Prompt for a model ID via free-text input (used for openrouter, ollama,
+/// and any provider that doesn't have a structured picker).
+fn select_model_text_input(provider: &str) -> Result<Option<(String, String)>> {
+    use crate::store::models_dev::default_model_for_provider;
+    let default = default_model_for_provider(provider);
+    let help = match provider {
+        "openrouter" => "e.g. openai/gpt-4o, anthropic/claude-sonnet-4-6",
+        "ollama" => "e.g. llama3.1:8b, mistral:latest",
+        _ => "e.g. provider-model-id",
+    };
+    let prompt = prompts::input("Model ID:").with_help_message(help);
+    let result = if default.is_empty() {
+        prompt.prompt()
+    } else {
+        prompt.with_default(default).prompt()
+    };
+    match result {
+        Ok(m) => Ok(Some((m.clone(), m))),
+        Err(InquireError::OperationCanceled | InquireError::OperationInterrupted) => Ok(None),
+        Err(e) => Err(anyhow!("model input: {e}")),
+    }
+}
+
+/// Run the standard-configuration wizard against `<base_dir>/llms.json`.
+///
+/// Mirrors `addConfiguration` at `ConfigurationManager.ts:21-154`.
+/// Returns `Ok(())` on success or user cancellation.
+pub fn run(base_dir: &Path) -> Result<()> {
+    let doc = LlmsDoc::load(base_dir)?;
+    let providers_doc = ProvidersDoc::load(base_dir)?;
+    let avail = configured_providers(&providers_doc);
+
+    if avail.is_empty() {
+        display::hint("No providers configured. Please configure API keys first.");
+        display::context(
+            "Run `tenex config providers` to add a provider before adding model configs.",
+        );
+        return Ok(());
+    }
+
+    display::blank();
+    display::step(0, 0, "Add Configuration");
+    display::blank();
+
+    // Step 1: Provider selection.
+    let provider_choices: Vec<ModelChoice> = avail
+        .iter()
+        .map(|p| ModelChoice {
+            id: p.clone(),
+            label: crate::store::provider_ids::provider_display_name(p).to_owned(),
+        })
+        .collect();
+
+    let provider = match prompts::select("Select provider:", provider_choices).prompt() {
+        Ok(c) => c.id,
+        Err(InquireError::OperationCanceled | InquireError::OperationInterrupted) => {
+            return Ok(())
+        }
+        Err(e) => return Err(anyhow!("provider select: {e}")),
+    };
+
+    // Step 2: Model selection (provider-dependent).
+    let (model_id, model_display, effort_override) = match provider.as_str() {
+        "claude-code" => match select_claude_code_model()? {
+            Some((id, disp)) => (id, disp, None),
+            None => return Ok(()),
+        },
+        "codex" => match select_codex_model()? {
+            Some((id, effort)) => (id.clone(), id, effort),
+            None => return Ok(()),
+        },
+        "anthropic" | "openai" => match select_models_dev_model(&provider, base_dir)? {
+            Some((id, disp)) => (id, disp, None),
+            None => return Ok(()),
+        },
+        _ => match select_model_text_input(&provider)? {
+            Some((id, disp)) => (id, disp, None),
+            None => return Ok(()),
+        },
+    };
+
+    // Step 3: Configuration name.
+    let default_name = default_config_name(&provider, &model_display);
+    let existing = doc.config_names();
+    let name = match prompts::input("Configuration name:")
+        .with_default(&default_name)
+        .with_validator(move |input: &str| {
+            if input.trim().is_empty() {
+                return Ok(inquire::validator::Validation::Invalid(
+                    "Name is required".into(),
+                ));
+            }
+            if existing.contains(&input.to_owned()) {
+                return Ok(inquire::validator::Validation::Invalid(
+                    "Configuration already exists".into(),
+                ));
+            }
+            Ok(inquire::validator::Validation::Valid)
+        })
+        .prompt()
+    {
+        Ok(n) => n,
+        Err(InquireError::OperationCanceled | InquireError::OperationInterrupted) => {
+            return Ok(())
+        }
+        Err(e) => return Err(anyhow!("name input: {e}")),
+    };
+
+    // Step 4: Persist.
+    let mut overrides: Vec<(String, Option<Value>)> = vec![];
+    if let Some(eff) = effort_override {
+        overrides.push(("effort".to_owned(), Some(Value::String(eff))));
+    }
+    let config = StandardConfig {
+        provider: provider.clone(),
+        model: model_id,
+        overrides,
+    };
+
+    let mut doc = LlmsDoc::load(base_dir)?;
+    let is_first = doc.default_config().is_none();
+    doc.set_standard_config(&name, config);
+    if is_first {
+        doc.set_default_config(Some(name.clone()));
+    }
+    doc.save(base_dir)?;
+
+    if is_first {
+        display::success(&format!(
+            "Configuration \"{name}\" created and set as default"
+        ));
+    } else {
+        display::success(&format!("Configuration \"{name}\" created"));
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]

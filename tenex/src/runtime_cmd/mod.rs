@@ -147,7 +147,6 @@ enum AgentRuntimeKind {
     Acp,
 }
 
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct DelegationRoute {
@@ -545,6 +544,9 @@ pub async fn run(args: RuntimeArgs) -> Result<()> {
                             {
                                 warn!(event_id = %event.id.to_hex()[..8], error = %e, "agent config update failed");
                             }
+                            continue;
+                        }
+                        if !event_matches_project_scope(&event, &shared.project_addr) {
                             continue;
                         }
                         let agent_pubkeys = shared.agent_pubkeys();
@@ -1117,6 +1119,10 @@ fn select_dispatch_target(
         );
     }
 
+    if !event_matches_project_scope(event, &shared.project_addr) {
+        anyhow::bail!("event project a-tag does not match this runtime");
+    }
+
     if has_p_tags(event)
         && !targets_project_agent(event, &snapshot.agent_pubkeys)
         && !targets_project_address(event, &shared.project_addr)
@@ -1134,6 +1140,9 @@ async fn dispatch_project_agent_target(
     parent_job: Option<&DispatchJob>,
 ) -> Result<()> {
     let agent_pubkeys = shared.agent_pubkeys();
+    if !event_matches_project_scope(event, &shared.project_addr) {
+        return Ok(());
+    }
     if !targets_project_agent(event, &agent_pubkeys) {
         return Ok(());
     }
@@ -1718,6 +1727,22 @@ fn targets_project_address(event: &Event, project_addr: &str) -> bool {
         .any(|addr| addr == project_addr)
 }
 
+fn event_matches_project_scope(event: &Event, project_addr: &str) -> bool {
+    let project_addresses = project_address_tags(event);
+    project_addresses.is_empty() || project_addresses.iter().any(|addr| *addr == project_addr)
+}
+
+fn project_address_tags<'a>(event: &'a Event) -> Vec<&'a str> {
+    let a_kind = TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::A));
+    event
+        .tags
+        .iter()
+        .filter(|tag| tag.kind() == a_kind)
+        .filter_map(|tag| tag.content())
+        .filter(|addr| addr.starts_with("31933:"))
+        .collect()
+}
+
 fn select_agent<'a>(
     event: &Event,
     agents: &'a [Agent],
@@ -1923,8 +1948,8 @@ fn agent_runtime_kind(agent: &Agent, base_dir: &std::path::Path) -> Result<Agent
     let Some(model_name) = default.get("model").and_then(Value::as_str) else {
         return Ok(AgentRuntimeKind::Tenex);
     };
-    let llms = tenex_llm_config::resolver::load_llms(base_dir)
-        .with_context(|| "loading llms.json")?;
+    let llms =
+        tenex_llm_config::resolver::load_llms(base_dir).with_context(|| "loading llms.json")?;
     let Some(config) = llms.configurations.get(model_name) else {
         return Ok(AgentRuntimeKind::Tenex);
     };
@@ -2402,6 +2427,50 @@ mod tests {
         let agent_pubkeys = HashSet::from([worker]);
 
         assert!(!targets_project_agent(&event, &agent_pubkeys));
+    }
+
+    #[test]
+    fn foreign_project_a_tag_blocks_routing_even_when_p_tag_matches_agent() {
+        let local_owner = Keys::generate().public_key().to_hex();
+        let foreign_owner = Keys::generate().public_key().to_hex();
+        let agent_pubkey = Keys::generate().public_key().to_hex();
+        let local_project = format!("31933:{local_owner}:local-project");
+        let foreign_project = format!("31933:{foreign_owner}:foreign-project");
+        let event = signed_event(
+            Kind::TextNote,
+            "direct",
+            vec![tag(&["a", &foreign_project]), tag(&["p", &agent_pubkey])],
+        );
+        let agent_pubkeys = HashSet::from([agent_pubkey]);
+
+        assert!(targets_project_agent(&event, &agent_pubkeys));
+        assert!(!event_matches_project_scope(&event, &local_project));
+    }
+
+    #[test]
+    fn local_project_a_tag_allows_routing() {
+        let owner = Keys::generate().public_key().to_hex();
+        let project = format!("31933:{owner}:local-project");
+        let event = signed_event(Kind::TextNote, "direct", vec![tag(&["a", &project])]);
+
+        assert!(event_matches_project_scope(&event, &project));
+    }
+
+    #[test]
+    fn unscoped_and_non_project_a_tags_do_not_block_direct_routing() {
+        let unscoped = signed_event(Kind::TextNote, "direct", Vec::new());
+        let article_ref = signed_event(
+            Kind::TextNote,
+            "direct",
+            vec![tag(&[
+                "a",
+                "30023:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:note",
+            ])],
+        );
+        let project = "31933:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb:demo";
+
+        assert!(event_matches_project_scope(&unscoped, project));
+        assert!(event_matches_project_scope(&article_ref, project));
     }
 
     #[test]

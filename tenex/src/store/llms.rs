@@ -204,6 +204,38 @@ impl LlmsDoc {
         configs.insert(name.to_owned(), Value::Object(out));
     }
 
+    /// Insert or replace an ACP backend configuration.
+    /// ACP support is Rust-only — TS LLMConfigEditor has no ACP concept.
+    pub fn set_acp_config(&mut self, name: &str, config: AcpConfig) {
+        let configs = self.ensure_configurations_obj_mut();
+        let mut out = Map::new();
+        out.insert("provider".into(), Value::String("acp".into()));
+        out.insert("backend".into(), Value::String(config.backend));
+        out.insert("command".into(), Value::String(config.command));
+        if !config.args.is_empty() {
+            out.insert(
+                "args".into(),
+                Value::Array(config.args.into_iter().map(Value::String).collect()),
+            );
+        }
+        if !config.env.is_empty() {
+            let mut env_obj = Map::new();
+            let mut pairs: Vec<_> = config.env.into_iter().collect();
+            pairs.sort_by(|a, b| a.0.cmp(&b.0));
+            for (k, v) in pairs {
+                env_obj.insert(k, Value::String(v));
+            }
+            out.insert("env".into(), Value::Object(env_obj));
+        }
+        if let Some(model) = config.model {
+            out.insert("model".into(), Value::String(model));
+        }
+        if let Some(pp) = config.permission_policy {
+            out.insert("permissionPolicy".into(), Value::String(pp));
+        }
+        configs.insert(name.to_owned(), Value::Object(out));
+    }
+
     /// Insert or replace a meta-model configuration.
     pub fn set_meta_config(&mut self, name: &str, config: MetaConfig) {
         let configs = self.ensure_configurations_obj_mut();
@@ -310,7 +342,6 @@ impl<'a> LlmConfigEntry<'a> {
     }
 
     /// Generic field access for the `.passthrough()` standard-config extras.
-    #[cfg(test)]
     pub fn field(&self, key: &str) -> Option<&'a Value> {
         self.obj.get(key)
     }
@@ -421,6 +452,21 @@ impl StandardConfig {
         self.overrides.push((key.into(), None));
         self
     }
+}
+
+/// Owned construction shape for [`LlmsDoc::set_acp_config`].
+///
+/// ACP support is Rust-only — TS LLMConfigEditor has no ACP concept.
+/// Written as `{"provider":"acp","backend":..., "command":..., "args":[...],
+/// "env":{...}, "model":..., "permissionPolicy":...}`.
+#[derive(Debug, Clone)]
+pub struct AcpConfig {
+    pub backend: String,
+    pub command: String,
+    pub args: Vec<String>,
+    pub env: std::collections::HashMap<String, String>,
+    pub model: Option<String>,
+    pub permission_policy: Option<String>,
 }
 
 /// Owned construction shape for [`LlmsDoc::set_meta_config`].
@@ -612,6 +658,66 @@ mod tests {
         let deep = entry.variant("deep").unwrap();
         assert_eq!(deep.keywords().len(), 0);
         assert_eq!(deep.system_prompt(), Some("Think hard"));
+    }
+
+    #[test]
+    fn set_acp_config_writes_canonical_shape() {
+        let mut doc = LlmsDoc::new();
+        doc.set_acp_config(
+            "claude code acp",
+            AcpConfig {
+                backend: "claude-code".into(),
+                command: "npx".into(),
+                args: vec![
+                    "-y".into(),
+                    "@agentclientprotocol/claude-agent-acp@latest".into(),
+                ],
+                env: std::collections::HashMap::new(),
+                model: Some("claude-haiku-4-5-20251001".into()),
+                permission_policy: Some("allow".into()),
+            },
+        );
+        let entry = doc.get("claude code acp").unwrap();
+        assert_eq!(entry.kind(), LlmConfigKind::Standard);
+        assert_eq!(entry.provider(), Some("acp"));
+        assert_eq!(
+            entry.field("backend").and_then(|v| v.as_str()),
+            Some("claude-code")
+        );
+        assert_eq!(entry.field("command").and_then(|v| v.as_str()), Some("npx"));
+        assert_eq!(entry.model(), Some("claude-haiku-4-5-20251001"));
+        assert_eq!(
+            entry.field("permissionPolicy").and_then(|v| v.as_str()),
+            Some("allow")
+        );
+        assert!(
+            entry.field("env").is_none(),
+            "empty env should not be written"
+        );
+    }
+
+    #[test]
+    fn set_acp_config_omits_optional_fields_when_absent() {
+        let mut doc = LlmsDoc::new();
+        doc.set_acp_config(
+            "minimal acp",
+            AcpConfig {
+                backend: "custom".into(),
+                command: "my-agent".into(),
+                args: vec![],
+                env: std::collections::HashMap::new(),
+                model: None,
+                permission_policy: None,
+            },
+        );
+        let entry = doc.get("minimal acp").unwrap();
+        assert_eq!(entry.provider(), Some("acp"));
+        assert!(entry.model().is_none());
+        assert!(
+            entry.field("args").is_none(),
+            "empty args should not be written"
+        );
+        assert!(entry.field("permissionPolicy").is_none());
     }
 
     #[test]
