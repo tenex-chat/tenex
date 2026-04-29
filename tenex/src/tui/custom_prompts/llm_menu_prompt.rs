@@ -548,11 +548,12 @@ fn render_frame<W: Write>(
         }
     }
 
-    // TS at LLMConfigEditor.ts:164-170 — bold-key / dim-label help row
-    // (see `crate::tui::custom_prompts::help_row` for the chalk-equivalence
-    // rationale).
+    // TS at LLMConfigEditor.ts:164-170 — bold-key / dim-label help row.
+    // 2-space indent matches `chalk.dim(\`  ${helpParts.join(...)}\`)` at
+    // `:170`. See `help_row` for the chalk-equivalence rationale.
     crate::tui::custom_prompts::help_row::render_help_row(
         stdout,
+        "  ",
         &[
             ("↑↓", "navigate"),
             ("⏎", "select"),

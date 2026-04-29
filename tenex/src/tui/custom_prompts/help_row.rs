@@ -26,11 +26,23 @@ use std::io::{self, Write};
 use crossterm::queue;
 use crossterm::style::{Attribute, Print, SetAttribute};
 
-/// Render `  <bold key₀> <dim label₀> • <bold key₁> <dim label₁> • …\r\n`.
+/// Render `<indent><bold key₀> <dim label₀> • <bold key₁> <dim label₁> • …\r\n`.
+///
+/// `indent` is emitted as plain text (no styling) before the first part.
+/// Bespoke-prompt callers ported from `chalk.dim(\`  ${helpParts.join(...)}\`)`
+/// pass `"  "` (two-space indent matching the TS template). Callers
+/// porting `@inquirer/select`'s auto-helpLine — which starts at column 0
+/// per `@inquirer/select/dist/index.js:148-151` — pass `""`.
 ///
 /// Caller is responsible for flushing.
-pub fn render_help_row<W: Write>(stdout: &mut W, parts: &[(&str, &str)]) -> io::Result<()> {
-    queue!(stdout, Print("  "))?;
+pub fn render_help_row<W: Write>(
+    stdout: &mut W,
+    indent: &str,
+    parts: &[(&str, &str)],
+) -> io::Result<()> {
+    if !indent.is_empty() {
+        queue!(stdout, Print(indent.to_owned()))?;
+    }
     for (i, (key, label)) in parts.iter().enumerate() {
         if i > 0 {
             queue!(
@@ -65,6 +77,7 @@ mod tests {
         let mut buf: Vec<u8> = Vec::new();
         render_help_row(
             &mut buf,
+            "  ",
             &[
                 ("↑↓", "navigate"),
                 ("⏎", "select"),
@@ -91,16 +104,26 @@ mod tests {
         // ("neither bold nor faint"); SGR 0 is a strict superset and
         // produces visually identical output for this pure-text row.
         let mut buf: Vec<u8> = Vec::new();
-        render_help_row(&mut buf, &[("↑↓", "navigate")]).unwrap();
+        render_help_row(&mut buf, "  ", &[("↑↓", "navigate")]).unwrap();
         let s = String::from_utf8(buf).unwrap();
         assert!(s.contains("\x1b[1m"), "bold open missing: {s:?}");
         assert!(s.contains("\x1b[2m"), "dim open missing: {s:?}");
     }
 
+    /// `@inquirer/select` auto-helpLine starts at column 0 — no indent.
+    #[test]
+    fn no_indent_variant_starts_at_column_zero() {
+        let mut buf: Vec<u8> = Vec::new();
+        render_help_row(&mut buf, "", &[("↑↓", "navigate"), ("⏎", "select")]).unwrap();
+        let s = String::from_utf8(buf).unwrap();
+        let plain = strip_ansi_codes(&s).into_owned();
+        assert_eq!(plain, "↑↓ navigate • ⏎ select\r\n");
+    }
+
     #[test]
     fn empty_parts_emits_just_indent_and_crlf() {
         let mut buf: Vec<u8> = Vec::new();
-        render_help_row(&mut buf, &[]).unwrap();
+        render_help_row(&mut buf, "  ", &[]).unwrap();
         let s = String::from_utf8(buf).unwrap();
         let plain = strip_ansi_codes(&s).into_owned();
         assert_eq!(plain, "  \r\n");

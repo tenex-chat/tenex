@@ -389,11 +389,14 @@ fn render_frame<W: Write>(
     )?;
     height += 1;
 
-    // TS at onboard.ts:337-341 — bold-key / dim-label help row
-    // (see `crate::tui::custom_prompts::help_row` for the chalk-equivalence
-    // rationale).
+    // TS at onboard.ts:337-341 — bold-key / dim-label help row.
+    // 2-space indent matches the TS template
+    // `chalk.dim(\`  ${helpParts.join(...)}\`)` (`onboard.ts:341`).
+    // See `crate::tui::custom_prompts::help_row` for the
+    // chalk-equivalence rationale.
     crate::tui::custom_prompts::help_row::render_help_row(
         stdout,
+        "  ",
         &[("↑↓", "navigate"), ("⏎", "change")],
     )?;
     height += 1;

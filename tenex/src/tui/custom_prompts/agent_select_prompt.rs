@@ -430,12 +430,14 @@ fn render_frame<W: Write>(
         }
     }
 
-    // TS at AgentManager.ts:170-175 — bold-key / dim-label help row
-    // (see `crate::tui::custom_prompts::help_row` for the chalk-equivalence
-    // rationale). Note: TS line 172 ("space") and line 173 ("⏎") both
-    // map to the dim label "select" — preserve that intentional repetition.
+    // TS at AgentManager.ts:170-175 — bold-key / dim-label help row.
+    // 2-space indent matches the TS template
+    // `chalk.dim(\`  ${helpParts.join(...)}\`)` (`:175`).
+    // Note: TS line 172 ("space") and line 173 ("⏎") both map to the
+    // dim label "select" — preserve that intentional repetition.
     crate::tui::custom_prompts::help_row::render_help_row(
         stdout,
+        "  ",
         &[
             ("↑↓", "navigate"),
             ("space", "select"),

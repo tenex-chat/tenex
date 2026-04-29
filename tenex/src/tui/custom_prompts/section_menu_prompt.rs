@@ -387,6 +387,25 @@ fn render_frame<W: Write>(
         height += 1;
     }
 
+    // `@inquirer/select/dist/index.js:180-189` composes the prompt as
+    //   [prefix+message, page, ' ', description?, errorMsg?, helpLine]
+    //     .filter(Boolean).join('\n').trimEnd()
+    // The literal ` ` (single space) row creates a 1-char-wide blank
+    // separator between the page and the auto-emitted helpLine; the
+    // helpLine itself (`@inquirer/select:148-151`) is
+    //   keysHelpTip([['↑↓','navigate'],['⏎','select']])
+    // and the default `keysHelpTip` (`@inquirer/select:10-12`) renders
+    // each pair as `<bold>key</> <dim>label</>` joined by `<dim> • </>`
+    // — starting at column 0, no leading indent. Mirror byte-for-byte.
+    queue!(stdout, Print(" \r\n"))?;
+    height += 1;
+    crate::tui::custom_prompts::help_row::render_help_row(
+        stdout,
+        "",
+        &[("↑↓", "navigate"), ("⏎", "select")],
+    )?;
+    height += 1;
+
     stdout.flush()?;
     Ok(height)
 }

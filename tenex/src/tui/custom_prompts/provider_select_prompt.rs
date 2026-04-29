@@ -711,10 +711,11 @@ fn render_browse<W: Write>(
     height += 1;
 
     // TS at provider-select-prompt.ts:247-252 — bold-key / dim-label
-    // help row (see `crate::tui::custom_prompts::help_row` for the
-    // chalk-equivalence rationale).
+    // help row. 2-space indent matches `chalk.dim(\`  ${help.join(...)}\`)`
+    // at `:252`. See `help_row` for the chalk-equivalence rationale.
     crate::tui::custom_prompts::help_row::render_help_row(
         stdout,
+        "  ",
         &[
             ("↑↓", "navigate"),
             ("space", "toggle"),
@@ -831,8 +832,10 @@ fn render_keys<W: Write>(stdout: &mut W, state: &ProviderState) -> io::Result<u1
     height += 1;
 
     // TS at provider-select-prompt.ts:279-285 — bold-key / dim-label help row.
+    // 2-space indent matches `chalk.dim(\`  ${help.join(...)}\`)` at `:285`.
     crate::tui::custom_prompts::help_row::render_help_row(
         stdout,
+        "  ",
         &[
             ("↑↓", "navigate"),
             ("d", "delete key"),
