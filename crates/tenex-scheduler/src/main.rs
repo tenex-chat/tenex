@@ -1,4 +1,5 @@
 mod config;
+mod cron;
 mod daemon;
 mod lockfile;
 mod model;

@@ -12,7 +12,6 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use chrono::Utc;
-use croner::Cron;
 use notify::{
     Config as NotifyConfig, Event as NotifyEvent, RecommendedWatcher, RecursiveMode, Watcher,
 };
@@ -22,6 +21,7 @@ use tokio::task::JoinHandle;
 use tracing::{error, info, warn};
 
 use crate::config::Config;
+use crate::cron;
 use crate::model::ScheduledTask;
 use crate::publish::Publisher;
 use crate::resolver;
@@ -203,7 +203,13 @@ async fn catch_up_and_arm(
 
     // Catch-up: fire missed cron occurrences within the last 24h.
     if task.is_cron() {
-        let missed = missed_occurrences(&task);
+        let missed = match cron::missed_occurrences(&task, Utc::now(), CATCHUP_WINDOW_SECS) {
+            Ok(missed) => missed,
+            Err(e) => {
+                error!(task_id = %task.id, schedule = %task.schedule, error = %e, "invalid cron expression");
+                return;
+            }
+        };
         if !missed.is_empty() {
             info!(
                 task_id = %task.id,
@@ -270,7 +276,7 @@ async fn run_cron_loop(
     publisher: Arc<Publisher>,
     shutdown_rx: &mut watch::Receiver<bool>,
 ) {
-    let cron = match task.schedule.parse::<Cron>() {
+    let cron = match cron::parse_schedule(&task.schedule) {
         Ok(c) => c,
         Err(e) => {
             error!(task_id = %task.id, schedule = %task.schedule, error = %e, "invalid cron expression");
@@ -374,37 +380,6 @@ async fn run_oneoff_loop(
         storage::remove_task(&d_tag, &task.id).ok();
         info!(task_id = %task.id, "one-off task fired and removed");
     }
-}
-
-/// Return occurrences of a cron task that were missed (within the last 24h).
-fn missed_occurrences(task: &ScheduledTask) -> Vec<chrono::DateTime<Utc>> {
-    let cron = match task.schedule.parse::<Cron>() {
-        Ok(c) => c,
-        Err(_) => return vec![],
-    };
-
-    let last_run = task
-        .last_run
-        .as_deref()
-        .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
-        .map(|t| t.with_timezone(&Utc));
-
-    let Some(from) = last_run else {
-        return vec![];
-    };
-
-    let cutoff = Utc::now() - chrono::Duration::seconds(CATCHUP_WINDOW_SECS);
-    let start = from.max(cutoff);
-    let now = Utc::now();
-
-    let mut missed = Vec::new();
-    for t in cron.iter_from(start) {
-        if t >= now {
-            break;
-        }
-        missed.push(t);
-    }
-    missed
 }
 
 /// For a one-off task, return the fire time if it's within the catch-up window

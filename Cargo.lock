@@ -3136,6 +3136,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tenex-agent-registry",
+ "tenex-identity",
  "thiserror 2.0.18",
  "tracing",
  "tracing-subscriber",

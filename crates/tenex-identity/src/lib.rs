@@ -34,7 +34,7 @@ use std::os::unix::io::AsRawFd;
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::{Context, Result as AnyResult};
+use anyhow::{anyhow, Context, Result as AnyResult};
 use nostr_sdk::Client;
 use serde::Deserialize;
 
@@ -82,6 +82,16 @@ fn run_daemon_role() -> ! {
 
 /// Synchronous entry point that builds a tokio runtime and runs the async daemon.
 pub fn run_daemon_sync() -> AnyResult<()> {
+    if tokio::runtime::Handle::try_current().is_ok() {
+        return std::thread::spawn(run_daemon_on_new_runtime)
+            .join()
+            .map_err(|_| anyhow!("identity daemon runtime thread panicked"))?;
+    }
+
+    run_daemon_on_new_runtime()
+}
+
+fn run_daemon_on_new_runtime() -> AnyResult<()> {
     let rt = tokio::runtime::Runtime::new().context("build tokio runtime")?;
     rt.block_on(run_daemon_async())
 }

@@ -16,7 +16,7 @@ This file is the canonical architecture reference for TENEX. Update it the momen
 
 ### Rust Workspace Crates (`crates/` + `tenex/`)
 - **`crates/tenex-agent-registry`**: Library crate that owns the global installed-agent registry under `<base_dir>/agents`: `index.json`, `<pubkey>.json`, key generation/derivation, sanitization, category literals, read projections, and write-side mutation APIs. This is the only Rust crate that should mutate installed-agent JSON.
-- **`crates/tenex-project`**: Read-side project view. Reads project metadata and membership from `projects/<dTag>/event.json`, then loads member-agent projections from global JSON via `tenex-agent-registry`. It must not mutate agent JSON, project events, or installed-agent indexes.
+- **`crates/tenex-project`**: Read-side project view. Reads project metadata and membership from `projects/<dTag>/event.json`, then loads member-agent projections from global JSON via `tenex-agent-registry`. Missing member-agent files are skipped, with a read-only best-effort display-name lookup through the host `tenex-identity` socket for cleaner unavailable-agent logs. It must not mutate agent JSON, project events, or installed-agent indexes.
 - **`crates/tenex-mcp`**: Project-scoped MCP runtime bridge. Reads `.mcp.json` from the project working directory, starts configured stdio MCP servers in that cwd, builds per-agent tool manifests from `default.mcp`, and serves tool calls over per-run Unix sockets.
 - **`crates/tenex-agent`**: Rust agent runner and tools. Agent-management tools that write installed-agent files delegate to `tenex-agent-registry` instead of writing JSON directly. Runtime-provided MCP tools are exposed as proxy `ToolDyn` instances from the manifest/socket passed by `tenex`.
 

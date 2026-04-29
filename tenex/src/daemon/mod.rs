@@ -83,13 +83,13 @@ pub async fn run(args: DaemonArgs) -> Result<()> {
     }
     info!("whitelist daemon ready");
 
-    // Bootstrap the identity daemon. Non-fatal: PubkeyService falls back to
-    // NDK if the daemon is absent.
-    if let Err(e) = tenex_identity::ensure_running() {
-        tracing::warn!(error = %e, "identity daemon failed to start; name resolution will use NDK fallback");
-    } else {
-        info!("identity daemon ready");
+    // Bootstrap the identity daemon. Runtime code relies on this service for
+    // pubkey display names; fail startup if the socket cannot be reached.
+    if let Err(e) = tenex_identity::ensure_running().context("starting required identity daemon") {
+        supervisor.shutdown().await;
+        return Err(e);
     }
+    info!("identity daemon ready");
 
     // Start the LLM config IPC server. TypeScript runtimes resolve config
     // names and report key failures through this socket rather than reading

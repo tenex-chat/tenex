@@ -8,6 +8,7 @@
 
 pub mod error;
 pub mod id;
+mod identity;
 pub mod models;
 pub mod paths;
 pub mod project;

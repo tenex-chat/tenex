@@ -1,4 +1,5 @@
 pub mod config;
+pub mod cron;
 pub mod daemon;
 pub mod lockfile;
 pub mod model;

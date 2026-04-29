@@ -10,6 +10,7 @@ use serde::Deserialize;
 
 use crate::error::{Error, Result};
 use crate::id::{normalize_project_id, ProjectDTag};
+use crate::identity::{log_unavailable_agent, IdentityServiceAgentNames};
 use crate::models::{Agent, ProjectAgent, ProjectMetadata};
 use crate::paths;
 use crate::signer::{signer_for, Signer, SignerError};
@@ -54,11 +55,15 @@ impl Project {
 
     pub fn agents(&self) -> Result<Vec<Agent>> {
         let pubkeys = self.member_pubkeys()?;
+        let unavailable_names = IdentityServiceAgentNames::new(&self.base_dir);
         let mut agents = Vec::with_capacity(pubkeys.len());
         for pk in &pubkeys {
             let path = paths::agent_file(&self.base_dir, pk);
-            match read_agent_file(&path, pk) {
+            match try_read_agent_file(&path, pk) {
                 Ok(a) => agents.push(a),
+                Err(AgentFileReadError::Unavailable) => {
+                    log_unavailable_agent(pk, &unavailable_names)
+                }
                 Err(e) => {
                     tracing::warn!(pubkey = %pk, error = %e, "skipping unreadable agent file")
                 }
@@ -175,9 +180,42 @@ fn first_tag_value(tags: &[Vec<String>], name: &str) -> Option<String> {
     })
 }
 
+#[derive(Debug)]
+enum AgentFileReadError {
+    Unavailable,
+    Other(Error),
+}
+
+impl std::fmt::Display for AgentFileReadError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Unavailable => f.write_str("agent file unavailable"),
+            Self::Other(e) => e.fmt(f),
+        }
+    }
+}
+
 fn read_agent_file(path: &Path, pubkey: &str) -> Result<Agent> {
-    let raw = tenex_agent_registry::read_agent_projection_file(path, pubkey)
-        .map_err(|e| Error::Other(format!("read agent file {}: {e}", path.display())))?;
+    try_read_agent_file(path, pubkey).map_err(|e| match e {
+        AgentFileReadError::Unavailable => Error::NotFound(format!("agent {pubkey}")),
+        AgentFileReadError::Other(e) => e,
+    })
+}
+
+fn try_read_agent_file(
+    path: &Path,
+    pubkey: &str,
+) -> std::result::Result<Agent, AgentFileReadError> {
+    if !path.is_file() {
+        return Err(AgentFileReadError::Unavailable);
+    }
+
+    let raw = tenex_agent_registry::read_agent_projection_file(path, pubkey).map_err(|e| {
+        AgentFileReadError::Other(Error::Other(format!(
+            "read agent file {}: {e}",
+            path.display()
+        )))
+    })?;
     Ok(Agent {
         pubkey: raw.pubkey,
         slug: raw.slug,
