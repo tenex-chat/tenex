@@ -25,7 +25,6 @@ use crate::agent_cmd::telegram_config::{
 };
 use crate::store::agent_storage::{AgentStorage, TelegramAgentConfig};
 use crate::store::tenex_config::TenexConfigDoc;
-use crate::tui::display;
 use crate::tui::prompts;
 use crate::types::telegram::is_telegram_identity;
 

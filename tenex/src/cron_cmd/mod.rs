@@ -427,9 +427,9 @@ fn render<W: Write>(
             let agent = truncate(&entry.task.target_agent_slug, 16);
 
             let line = format!(
-                "{cursor} {d_tag:<project$}  {title:<title$}  {schedule:<sched$}  {type_label:<type_$}  {agent}",
+                "{cursor} {d_tag:<project$}  {title:<title_w$}  {schedule:<sched$}  {type_label:<type_$}  {agent}",
                 project = COL_PROJECT,
-                title = COL_TITLE,
+                title_w = COL_TITLE,
                 sched = COL_SCHEDULE,
                 type_ = COL_TYPE,
             );
