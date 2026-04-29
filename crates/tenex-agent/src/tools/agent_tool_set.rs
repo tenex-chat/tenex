@@ -19,6 +19,7 @@ use super::conversation_search::ConversationSearchTool;
 use super::delegate::DelegateTool;
 use super::delegate_crossproject::DelegateCrossProjectTool;
 use super::delegate_followup::DelegateFollowupTool;
+use super::find_skills::FindSkillsTool;
 use super::fs::{
     FsEditTool, FsGlobTool, FsGrepTool, FsReadTool, FsWriteTool, HomeFsEditTool, HomeFsGlobTool,
     HomeFsGrepTool, HomeFsReadTool, HomeFsWriteTool,
@@ -64,6 +65,7 @@ pub(crate) struct ToolSet {
     pub(crate) todos: Arc<Mutex<Vec<TodoItem>>>,
     pub(crate) skill_list: SkillListTool,
     pub(crate) skills_set: SkillsSetTool,
+    pub(crate) find_skills: FindSkillsTool,
     pub(crate) mcp_proxy_tools: Vec<McpProxyTool>,
     pub(crate) delegate: Option<DelegateTool>,
     pub(crate) rag_add_documents: RagAddDocumentsTool,
@@ -175,6 +177,7 @@ impl ToolSet {
         );
         self.push_tool(&mut tools, &recorder, Box::new(self.skill_list.clone()));
         self.push_tool(&mut tools, &recorder, Box::new(self.skills_set.clone()));
+        self.push_tool(&mut tools, &recorder, Box::new(self.find_skills.clone()));
 
         for tool in &self.mcp_proxy_tools {
             self.push_tool(&mut tools, &recorder, Box::new(tool.clone()));
