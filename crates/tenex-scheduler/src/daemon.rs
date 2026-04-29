@@ -46,7 +46,7 @@ pub async fn run(cfg: Config) -> Result<()> {
     let dtags = storage::list_project_dtags().context("list project dtags")?;
     for d_tag in &dtags {
         let tasks = storage::load_tasks(d_tag).context("load tasks")?;
-        for task in tasks.tasks {
+        for task in tasks {
             catch_up_and_arm(
                 d_tag.clone(),
                 task,
@@ -130,7 +130,7 @@ async fn reconcile_from_event(
             continue;
         };
         let tasks = match storage::load_tasks(&d_tag) {
-            Ok(f) => f.tasks,
+            Ok(tasks) => tasks,
             Err(e) => {
                 warn!(d_tag, error = %e, "reload schedules failed");
                 continue;

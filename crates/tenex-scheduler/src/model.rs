@@ -49,10 +49,3 @@ impl ScheduledTask {
         !self.is_oneoff()
     }
 }
-
-/// Top-level shape of a `schedules.json` file.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct SchedulesFile {
-    #[serde(default)]
-    pub tasks: Vec<ScheduledTask>,
-}

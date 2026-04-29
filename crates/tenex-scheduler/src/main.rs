@@ -148,9 +148,8 @@ fn status() -> Result<()> {
 }
 
 fn list_tasks(project: Option<String>) -> Result<()> {
-    let tasks = if let Some(d_tag) = project {
+    let tasks: Vec<(String, _)> = if let Some(d_tag) = project {
         storage::load_tasks(&d_tag)?
-            .tasks
             .into_iter()
             .map(|t| (d_tag.clone(), t))
             .collect()
