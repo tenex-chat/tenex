@@ -27,7 +27,7 @@ Opened via `ConversationStore::open(path)` or `ConversationStore::open_in_memory
 
 `ConversationStore` — the single open handle per project:
 - Read: `list_recent`, `get_conversation`, `get_messages`, `get_tool_messages`, `get_prompt_history`, `get_context_state`, `list_completions`
-- Write: `ensure_conversation`, `upsert_conversation`, `append_message`, `append_tool_message`, `append_prompt_history_entry`, `upsert_context_state`, `record_completion`
+- Write: `ensure_conversation`, `upsert_conversation`, `update_metadata`, `append_message`, `append_tool_message`, `append_prompt_history_entry`, `upsert_context_state`, `record_completion`
 
 Key types re-exported from `lib.rs`: `MessageRecord`, `NewMessage`, `NewToolMessage`, `NewPromptHistoryEntry`, `FrozenPromptMessage`, `AgentContextState`, `Completion`, `NewCompletion`, `ConversationListFilter`, `MessageQuery`.
 

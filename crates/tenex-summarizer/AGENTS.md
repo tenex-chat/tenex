@@ -8,14 +8,14 @@ Canonical spec: `docs/plans/2026-04-28-tenex-summarizer.md`
 
 ## Storage layout
 
-Reads `~/.tenex/projects/` to discover projects. During the bun-runtime interim, it reads per-project JSON transcripts and `conversation-catalog.db`. When `tenex-conversations` lands, `src/source.rs` is replaced wholesale; nothing outside it changes.
+Reads `~/.tenex/projects/` to discover projects and uses each project's canonical `conversation.db` as the only conversation store.
 
 Single-instance lockfile at `~/.tenex/summarizer.pid` (`flock`-based). A second instance exits cleanly.
 
 ## Critical invariants
 
 - **Polling, not push.** Wake every 5 s. Summarize conversations whose `last_activity_at` is ≥ 10 s old and whose stored metadata is stale. Hard cap: re-summarize at most every 5 min per conversation.
-- **`src/source.rs` is the only place that knows the on-disk format.** The `ConversationSource` trait (`list_candidates`, `fetch_content`) keeps JSON-format details out of the polling, LLM, and publish paths. Swap the impl here when `tenex-conversations` lands — nowhere else.
+- **`src/source.rs` is the only place that knows the on-disk format.** It uses `tenex-conversations` to read messages, derive candidate activity, and write generated metadata into `conversation.db`.
 - **Kind:513 only.** No other event kinds, no inbound relay subscriptions.
 - **Prompt and response schema are lifted verbatim from the bun `ConversationSummarizer`.** Do not redesign. The schema is the contract; identical kind:513 events for the same input is the success criterion.
 - **Single instance.** Do not remove or weaken the `flock` lockfile. A second instance must fail the lock and exit.
@@ -25,7 +25,7 @@ Single-instance lockfile at `~/.tenex/summarizer.pid` (`flock`-based). A second 
 
 1. `cargo test -p tenex-summarizer` before and after edits.
 2. Changes to what gets summarized or when: edit `src/scheduler.rs` (candidate selection) and `src/state.rs` (debounce/hard-cap state).
-3. Storage format change: edit `src/source.rs` only. The `ConversationSource` trait surface stays stable.
+3. Storage format change: edit `src/source.rs` only. Keep scheduler, LLM, and publish code isolated from storage details.
 4. LLM prompt or response schema change: edit `src/summarize.rs` and mirror the change in the bun `ConversationSummarizer` in the same PR (or confirm it's already deleted).
 5. Publishing logic: `src/publish.rs`. Signer swap when NIP-46 lands is local to this file.
 

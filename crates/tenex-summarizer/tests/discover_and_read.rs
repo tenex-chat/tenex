@@ -1,17 +1,16 @@
-//! End-to-end happy-path: build a fixture `~/.tenex/projects/<dTag>/` layout
-//! that mirrors a real host, point `TENEX_BASE_DIR` at it, and verify the
-//! daemon's read path picks up the project, lists the candidate, fetches the
-//! transcript, and serializes the metadata writeback. The LLM call is the
-//! next step after `fetch_content` in `process_inner`; this test stops at
+//! End-to-end happy-path: build a fixture `~/.tenex/projects/<dTag>/` layout,
+//! point `TENEX_BASE_DIR` at it, and verify the daemon's read path picks up
+//! the project, lists the candidate from `conversation.db`, fetches the
+//! transcript, and writes metadata back to the same database. The LLM call is
+//! the next step after `fetch_content` in `process_inner`; this test stops at
 //! the LLM boundary, since rig-core's provider clients are out of scope.
 
 use std::fs;
-use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use rusqlite::Connection;
 use serde_json::json;
 use tempfile::tempdir;
+use tenex_conversations::{ConversationStore, NewMessage};
 use tenex_summarizer::{source, state};
 
 #[test]
@@ -24,7 +23,7 @@ fn discovers_project_lists_candidate_reads_transcript() {
 
     let d_tag = "FixtureProject-1234";
     let project_dir = base.join("projects").join(d_tag);
-    fs::create_dir_all(project_dir.join("conversations")).unwrap();
+    fs::create_dir_all(&project_dir).unwrap();
 
     let pubkey = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
     let event_json = json!({
@@ -48,33 +47,52 @@ fn discovers_project_lists_candidate_reads_transcript() {
         .as_secs() as i64;
     let last_activity = now_secs - 60;
 
-    let catalog_path = project_dir.join("conversation-catalog.db");
-    init_catalog(&catalog_path, conversation_id, last_activity);
-
-    let conv_path = project_dir
-        .join("conversations")
-        .join(format!("{conversation_id}.json"));
-    let conv_json = json!({
-        "messages": [
-            {
-                "messageType": "text",
-                "content": "How does the summarizer work?",
-                "senderPubkey": pubkey,
-                "senderPrincipal": { "displayName": "Pablo" },
-            },
-            {
-                "messageType": "text",
-                "role": "system",
-                "content": "It polls every five seconds.",
-            },
-            {
-                "messageType": "tool-call",
-                "content": "ignored",
-            },
-        ],
-        "metadata": { "title": "old title" },
-    });
-    fs::write(&conv_path, serde_json::to_vec_pretty(&conv_json).unwrap()).unwrap();
+    let db_path = project_dir.join("conversation.db");
+    let store = ConversationStore::open(&db_path).unwrap();
+    store.ensure_conversation(conversation_id).unwrap();
+    store
+        .append_message(
+            conversation_id,
+            &message(
+                "record:1",
+                pubkey,
+                Some("user"),
+                "text",
+                "How does the summarizer work?",
+                Some(json!({ "displayName": "Pablo" })),
+                Some(last_activity - 10),
+            ),
+        )
+        .unwrap();
+    store
+        .append_message(
+            conversation_id,
+            &message(
+                "record:2",
+                pubkey,
+                Some("system"),
+                "text",
+                "It polls every five seconds.",
+                None,
+                Some(last_activity),
+            ),
+        )
+        .unwrap();
+    store
+        .append_message(
+            conversation_id,
+            &message(
+                "record:3",
+                pubkey,
+                Some("assistant"),
+                "tool-call",
+                "ignored",
+                None,
+                Some(last_activity),
+            ),
+        )
+        .unwrap();
+    drop(store);
 
     let projects = source::discover_projects().unwrap();
     assert_eq!(projects.len(), 1);
@@ -122,9 +140,12 @@ fn discovers_project_lists_candidate_reads_transcript() {
         status_current_activity: Some("Investigating polling cadence.".into()),
     };
     source::write_metadata(project, conversation_id, &update).unwrap();
-    let rewritten: serde_json::Value =
-        serde_json::from_slice(&fs::read(&conv_path).unwrap()).unwrap();
-    let metadata = rewritten.get("metadata").unwrap();
+    let store = ConversationStore::open(&db_path).unwrap();
+    let conversation = store.get_conversation(conversation_id).unwrap().unwrap();
+    assert_eq!(conversation.title.as_deref(), Some("New title"));
+    assert_eq!(conversation.summary.as_deref(), Some("Concise summary."));
+    assert_eq!(conversation.status_label.as_deref(), Some("In Progress"));
+    let metadata = conversation.metadata;
     assert_eq!(metadata.get("title").unwrap(), "New title");
     assert_eq!(metadata.get("summary").unwrap(), "Concise summary.");
     assert_eq!(metadata.get("statusLabel").unwrap(), "In Progress");
@@ -134,38 +155,31 @@ fn discovers_project_lists_candidate_reads_transcript() {
     );
 }
 
-fn init_catalog(path: &Path, conversation_id: &str, last_activity: i64) {
-    let conn = Connection::open(path).unwrap();
-    conn.execute_batch(
-        "CREATE TABLE conversations (
-             conversation_id TEXT PRIMARY KEY,
-             title TEXT,
-             summary TEXT,
-             last_user_message TEXT,
-             status_label TEXT,
-             status_current_activity TEXT,
-             created_at INTEGER,
-             last_activity INTEGER,
-             message_count INTEGER NOT NULL,
-             updated_at INTEGER NOT NULL,
-             source_mtime_ms INTEGER NOT NULL,
-             source_size_bytes INTEGER NOT NULL
-         );",
-    )
-    .unwrap();
-    conn.execute(
-        "INSERT INTO conversations
-            (conversation_id, title, last_activity, message_count, updated_at, source_mtime_ms, source_size_bytes)
-            VALUES (?, ?, ?, ?, ?, ?, ?)",
-        rusqlite::params![
-            conversation_id,
-            "old title",
-            last_activity,
-            3i64,
-            last_activity * 1000,
-            last_activity * 1000,
-            1024i64,
-        ],
-    )
-    .unwrap();
+fn message(
+    record_id: &str,
+    author_pubkey: &str,
+    role: Option<&str>,
+    message_type: &str,
+    content: &str,
+    sender_principal: Option<serde_json::Value>,
+    timestamp: Option<i64>,
+) -> NewMessage {
+    NewMessage {
+        record_id: record_id.to_string(),
+        nostr_event_id: None,
+        author_pubkey: author_pubkey.to_string(),
+        sender_pubkey: None,
+        ral: None,
+        message_type: message_type.to_string(),
+        role: role.map(str::to_string),
+        content: content.to_string(),
+        timestamp,
+        targeted_pubkeys: None,
+        sender_principal,
+        targeted_principals: None,
+        tool_data: None,
+        delegation_marker: None,
+        human_readable: None,
+        transcript_tool_attributes: None,
+    }
 }

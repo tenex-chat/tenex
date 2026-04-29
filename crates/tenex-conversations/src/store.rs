@@ -210,6 +210,75 @@ impl ConversationStore {
         Ok(())
     }
 
+    /// Merge generated metadata into the conversation header and metadata JSON.
+    pub fn update_metadata(
+        &self,
+        conversation_id: &str,
+        title: Option<&str>,
+        summary: Option<&str>,
+        status_label: Option<&str>,
+        status_current_activity: Option<&str>,
+    ) -> Result<()> {
+        self.ensure_conversation(conversation_id)?;
+        let raw: String = self.conn.query_row(
+            "SELECT metadata_json FROM conversations WHERE id = ?1",
+            [conversation_id],
+            |row| row.get(0),
+        )?;
+        let mut metadata = serde_json::from_str(&raw).unwrap_or_else(|_| serde_json::json!({}));
+        if !metadata.is_object() {
+            metadata = serde_json::json!({});
+        }
+        let metadata_obj = metadata.as_object_mut().expect("object just created");
+
+        if let Some(value) = title {
+            metadata_obj.insert(
+                "title".to_string(),
+                serde_json::Value::String(value.to_string()),
+            );
+        }
+        if let Some(value) = summary {
+            metadata_obj.insert(
+                "summary".to_string(),
+                serde_json::Value::String(value.to_string()),
+            );
+        }
+        if let Some(value) = status_label {
+            metadata_obj.insert(
+                "statusLabel".to_string(),
+                serde_json::Value::String(value.to_string()),
+            );
+        }
+        if let Some(value) = status_current_activity {
+            metadata_obj.insert(
+                "statusCurrentActivity".to_string(),
+                serde_json::Value::String(value.to_string()),
+            );
+        }
+
+        let now = now_ms();
+        self.conn.execute(
+            "UPDATE conversations
+                SET title = COALESCE(?2, title),
+                    summary = COALESCE(?3, summary),
+                    status_label = COALESCE(?4, status_label),
+                    status_current_activity = COALESCE(?5, status_current_activity),
+                    metadata_json = ?6,
+                    updated_at = ?7
+              WHERE id = ?1",
+            params![
+                conversation_id,
+                title,
+                summary,
+                status_label,
+                status_current_activity,
+                metadata.to_string(),
+                now,
+            ],
+        )?;
+        Ok(())
+    }
+
     /// Ensure a row exists for `conversation_id` so foreign keys on
     /// downstream inserts succeed. Used by migration paths and callers
     /// that have a conversation id before any header data.
@@ -284,6 +353,7 @@ impl ConversationStore {
     /// present. On conflict, returns the existing row's id and does not
     /// modify the row.
     pub fn append_message(&self, conversation_id: &str, msg: &NewMessage) -> Result<i64> {
+        self.ensure_conversation(conversation_id)?;
         if let Some(existing) = self.find_message_id_by_record(conversation_id, &msg.record_id)? {
             return Ok(existing);
         }
@@ -338,7 +408,54 @@ impl ConversationStore {
                 now,
             ],
         )?;
-        Ok(self.conn.last_insert_rowid())
+        let row_id = self.conn.last_insert_rowid();
+        self.apply_message_to_header(conversation_id, msg)?;
+        Ok(row_id)
+    }
+
+    fn apply_message_to_header(&self, conversation_id: &str, msg: &NewMessage) -> Result<()> {
+        let last_user_message = if msg.message_type == "text" && msg.role.as_deref() == Some("user")
+        {
+            let trimmed = msg.content.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed)
+            }
+        } else {
+            None
+        };
+        let now = now_ms();
+        self.conn.execute(
+            "UPDATE conversations
+                SET owner_pubkey = COALESCE(owner_pubkey, ?2),
+                    created_at = CASE
+                        WHEN ?3 IS NULL THEN created_at
+                        WHEN created_at IS NULL OR ?3 < created_at THEN ?3
+                        ELSE created_at
+                    END,
+                    last_activity = CASE
+                        WHEN ?3 IS NULL THEN last_activity
+                        WHEN last_activity IS NULL OR ?3 >= last_activity THEN ?3
+                        ELSE last_activity
+                    END,
+                    last_user_message = CASE
+                        WHEN ?4 IS NOT NULL
+                         AND (?3 IS NULL OR last_activity IS NULL OR ?3 >= last_activity)
+                        THEN ?4
+                        ELSE last_user_message
+                    END,
+                    updated_at = ?5
+              WHERE id = ?1",
+            params![
+                conversation_id,
+                msg.author_pubkey,
+                msg.timestamp,
+                last_user_message,
+                now,
+            ],
+        )?;
+        Ok(())
     }
 
     pub fn list_messages(

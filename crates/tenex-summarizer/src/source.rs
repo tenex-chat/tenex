@@ -1,14 +1,11 @@
-//! Conversation storage adapter: reads the canonical on-disk layout used by
-//! the bun runtime today (per-project JSON transcripts plus the per-project
-//! `conversation-catalog.db` SQLite). When `tenex-conversations` lands this
-//! file is replaced wholesale; nothing outside it knows the format.
+//! Conversation storage adapter for the per-project `conversation.db` file.
 
 use std::fs;
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
-use rusqlite::{Connection, OpenFlags};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use tenex_conversations::{ConversationStore, MessageQuery, MessageRecord};
 
 use crate::paths;
 
@@ -16,14 +13,13 @@ use crate::paths;
 pub struct ProjectRef {
     pub d_tag: String,
     pub root: PathBuf,
-    pub catalog_db: PathBuf,
-    pub conversations_dir: PathBuf,
+    pub conversation_db: PathBuf,
 }
 
 #[derive(Debug, Clone)]
 pub struct CandidateRow {
     pub conversation_id: String,
-    /// Last activity in seconds (catalog timestamp).
+    /// Last activity in seconds.
     pub last_activity: i64,
 }
 
@@ -45,10 +41,8 @@ impl ProjectEvent {
     }
 }
 
-/// Enumerate every project under `~/.tenex/projects/` that has both an
-/// `event.json` and a `conversation-catalog.db`. Missing pieces are logged and
-/// skipped — projects appear before the catalog has been written, and that's
-/// fine.
+/// Enumerate projects under `~/.tenex/projects/` that have the project event
+/// and the canonical conversation database.
 pub fn discover_projects() -> Result<Vec<ProjectRef>> {
     let root = paths::projects_dir();
     if !root.exists() {
@@ -65,16 +59,15 @@ pub fn discover_projects() -> Result<Vec<ProjectRef>> {
             Some(s) => s.to_string(),
             None => continue,
         };
-        let catalog = dir.join("conversation-catalog.db");
-        let conversations = dir.join("conversations");
-        if !catalog.exists() {
+        let event = dir.join("event.json");
+        let conversation_db = dir.join(tenex_conversations::paths::CONVERSATION_DB_FILENAME);
+        if !event.exists() || !conversation_db.exists() {
             continue;
         }
         out.push(ProjectRef {
             d_tag,
-            root: dir.clone(),
-            catalog_db: catalog,
-            conversations_dir: conversations,
+            root: dir,
+            conversation_db,
         });
     }
     out.sort_by(|a, b| a.d_tag.cmp(&b.d_tag));
@@ -104,9 +97,8 @@ pub fn load_project_event(project: &ProjectRef) -> Result<ProjectEvent> {
     })
 }
 
-/// Catalog rows whose `last_activity` is between `max_age_seconds` and
-/// `quiet_seconds` ago. Pure read; no joins. The summarizer's polling decides
-/// which of these need work.
+/// Conversations whose latest message activity is between `max_age_seconds`
+/// and `quiet_seconds` ago.
 pub fn list_candidates(
     project: &ProjectRef,
     quiet_seconds: i64,
@@ -119,18 +111,16 @@ pub fn list_candidates(
     let max_activity = now_secs - quiet_seconds;
     let min_activity = now_secs - max_age_seconds;
 
-    let conn = Connection::open_with_flags(
-        &project.catalog_db,
-        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
-    )
-    .with_context(|| format!("open ro {}", project.catalog_db.display()))?;
-
-    let mut stmt = conn.prepare(
-        "SELECT conversation_id, COALESCE(last_activity, 0) AS la
-           FROM conversations
-          WHERE COALESCE(last_activity, 0) >= ?
-            AND COALESCE(last_activity, 0) <= ?
-          ORDER BY la DESC",
+    let store = ConversationStore::open(&project.conversation_db)
+        .with_context(|| format!("open {}", project.conversation_db.display()))?;
+    let mut stmt = store.connection().prepare(
+        "SELECT conversation_id,
+                MAX(COALESCE(timestamp, created_at / 1000)) AS last_activity
+           FROM messages
+          GROUP BY conversation_id
+         HAVING last_activity >= ?1
+            AND last_activity <= ?2
+          ORDER BY last_activity DESC",
     )?;
     let rows = stmt.query_map([min_activity, max_activity], |row| {
         Ok(CandidateRow {
@@ -146,55 +136,22 @@ pub fn list_candidates(
     Ok(out)
 }
 
-#[derive(Debug, Deserialize, Serialize)]
-struct OnDiskMessage {
-    #[serde(rename = "messageType")]
-    message_type: String,
-    #[serde(default)]
-    content: String,
-    #[serde(default)]
-    role: Option<String>,
-    #[serde(rename = "senderPrincipal", default)]
-    sender_principal: Option<SenderPrincipal>,
-    #[serde(rename = "senderPubkey", default)]
-    sender_pubkey: Option<String>,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-struct SenderPrincipal {
-    #[serde(rename = "displayName", default)]
-    display_name: Option<String>,
-    #[serde(default)]
-    username: Option<String>,
-}
-
 pub fn fetch_content(
     project: &ProjectRef,
     project_event: &ProjectEvent,
     conversation_id: &str,
 ) -> Result<Option<ConversationContent>> {
-    let path = project
-        .conversations_dir
-        .join(format!("{conversation_id}.json"));
-    if !path.exists() {
+    let store = ConversationStore::open(&project.conversation_db)
+        .with_context(|| format!("open {}", project.conversation_db.display()))?;
+    if store.get_conversation(conversation_id)?.is_none() {
         return Ok(None);
     }
 
-    let bytes = fs::read(&path).with_context(|| format!("read {}", path.display()))?;
-
-    #[derive(Deserialize)]
-    struct OnDiskConversation {
-        #[serde(default)]
-        messages: Vec<OnDiskMessage>,
-    }
-
-    let parsed: OnDiskConversation =
-        serde_json::from_slice(&bytes).with_context(|| format!("parse {}", path.display()))?;
-
+    let messages = store.list_messages(conversation_id, MessageQuery::default())?;
     let mut lines = Vec::new();
-    for m in parsed.messages.iter().filter(|m| m.message_type == "text") {
-        let speaker = display_name_for(m);
-        lines.push(format!("{speaker}: {}", m.content));
+    for message in messages.iter().filter(|m| m.message_type == "text") {
+        let speaker = display_name_for(message);
+        lines.push(format!("{speaker}: {}", message.content));
     }
     let transcript = lines.join("\n\n");
 
@@ -204,20 +161,32 @@ pub fn fetch_content(
     }))
 }
 
-fn display_name_for(m: &OnDiskMessage) -> String {
-    if let Some(p) = &m.sender_principal {
-        if let Some(name) = p.display_name.as_deref().filter(|s| !s.is_empty()) {
+fn display_name_for(message: &MessageRecord) -> String {
+    if message.role.as_deref() == Some("system") {
+        return "system".to_string();
+    }
+
+    if let Some(principal) = &message.sender_principal {
+        if let Some(name) = principal
+            .get("displayName")
+            .and_then(serde_json::Value::as_str)
+            .filter(|s| !s.is_empty())
+        {
             return name.to_string();
         }
-        if let Some(name) = p.username.as_deref().filter(|s| !s.is_empty()) {
+        if let Some(name) = principal
+            .get("username")
+            .and_then(serde_json::Value::as_str)
+            .filter(|s| !s.is_empty())
+        {
             return name.to_string();
         }
     }
-    if let Some(pk) = m.sender_pubkey.as_deref().filter(|s| !s.is_empty()) {
+    if let Some(pk) = message.sender_pubkey.as_deref().filter(|s| !s.is_empty()) {
         return pk.chars().take(8).collect();
     }
-    if m.role.as_deref() == Some("system") {
-        return "system".to_string();
+    if !message.author_pubkey.is_empty() {
+        return message.author_pubkey.chars().take(8).collect();
     }
     "unknown".to_string()
 }
@@ -230,53 +199,19 @@ pub struct MetadataUpdate {
     pub status_current_activity: Option<String>,
 }
 
-/// Writes title/summary/status into the conversation JSON's `metadata` field,
-/// matching the bun runtime's `ConversationStore.updateMetadata` shape.
-/// Other top-level keys are preserved verbatim.
 pub fn write_metadata(
     project: &ProjectRef,
     conversation_id: &str,
     update: &MetadataUpdate,
 ) -> Result<()> {
-    let path = project
-        .conversations_dir
-        .join(format!("{conversation_id}.json"));
-    if !path.exists() {
-        return Ok(());
-    }
-    let bytes = fs::read(&path).with_context(|| format!("read {}", path.display()))?;
-    let mut value: serde_json::Value =
-        serde_json::from_slice(&bytes).with_context(|| format!("parse {}", path.display()))?;
-
-    let metadata = value
-        .as_object_mut()
-        .ok_or_else(|| anyhow::anyhow!("conversation root is not an object: {}", path.display()))?
-        .entry("metadata")
-        .or_insert_with(|| serde_json::json!({}));
-    let metadata_obj = metadata
-        .as_object_mut()
-        .ok_or_else(|| anyhow::anyhow!("metadata is not an object: {}", path.display()))?;
-
-    if let Some(t) = &update.title {
-        metadata_obj.insert("title".into(), serde_json::Value::String(t.clone()));
-    }
-    if let Some(s) = &update.summary {
-        metadata_obj.insert("summary".into(), serde_json::Value::String(s.clone()));
-    }
-    if let Some(s) = &update.status_label {
-        metadata_obj.insert("statusLabel".into(), serde_json::Value::String(s.clone()));
-    }
-    if let Some(s) = &update.status_current_activity {
-        metadata_obj.insert(
-            "statusCurrentActivity".into(),
-            serde_json::Value::String(s.clone()),
-        );
-    }
-
-    let serialized = serde_json::to_vec_pretty(&value)?;
-    let tmp = path.with_extension("json.tmp");
-    fs::write(&tmp, &serialized).with_context(|| format!("write {}", tmp.display()))?;
-    fs::rename(&tmp, &path)
-        .with_context(|| format!("rename {} -> {}", tmp.display(), path.display()))?;
+    let store = ConversationStore::open(&project.conversation_db)
+        .with_context(|| format!("open {}", project.conversation_db.display()))?;
+    store.update_metadata(
+        conversation_id,
+        update.title.as_deref(),
+        update.summary.as_deref(),
+        update.status_label.as_deref(),
+        update.status_current_activity.as_deref(),
+    )?;
     Ok(())
 }

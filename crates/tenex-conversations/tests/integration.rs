@@ -44,6 +44,106 @@ fn open_creates_db_and_runs_migrations() {
 }
 
 #[test]
+fn append_message_maintains_conversation_header_and_metadata() {
+    let store = ConversationStore::open_in_memory().unwrap();
+
+    store
+        .append_message(
+            "conv-header",
+            &NewMessage {
+                record_id: "record:user-new".into(),
+                nostr_event_id: None,
+                author_pubkey: "alice".into(),
+                sender_pubkey: None,
+                ral: None,
+                message_type: "text".into(),
+                role: Some("user".into()),
+                content: "new request".into(),
+                timestamp: Some(100),
+                targeted_pubkeys: None,
+                sender_principal: None,
+                targeted_principals: None,
+                tool_data: None,
+                delegation_marker: None,
+                human_readable: None,
+                transcript_tool_attributes: None,
+            },
+        )
+        .unwrap();
+    store
+        .append_message(
+            "conv-header",
+            &NewMessage {
+                record_id: "record:assistant".into(),
+                nostr_event_id: None,
+                author_pubkey: "bob".into(),
+                sender_pubkey: None,
+                ral: None,
+                message_type: "text".into(),
+                role: Some("assistant".into()),
+                content: "response".into(),
+                timestamp: Some(120),
+                targeted_pubkeys: None,
+                sender_principal: None,
+                targeted_principals: None,
+                tool_data: None,
+                delegation_marker: None,
+                human_readable: None,
+                transcript_tool_attributes: None,
+            },
+        )
+        .unwrap();
+    store
+        .append_message(
+            "conv-header",
+            &NewMessage {
+                record_id: "record:user-old".into(),
+                nostr_event_id: None,
+                author_pubkey: "alice".into(),
+                sender_pubkey: None,
+                ral: None,
+                message_type: "text".into(),
+                role: Some("user".into()),
+                content: "old request".into(),
+                timestamp: Some(90),
+                targeted_pubkeys: None,
+                sender_principal: None,
+                targeted_principals: None,
+                tool_data: None,
+                delegation_marker: None,
+                human_readable: None,
+                transcript_tool_attributes: None,
+            },
+        )
+        .unwrap();
+
+    store
+        .update_metadata(
+            "conv-header",
+            Some("Generated Title"),
+            Some("Generated summary."),
+            Some("In Progress"),
+            Some("Maintaining headers."),
+        )
+        .unwrap();
+
+    let conversation = store.get_conversation("conv-header").unwrap().unwrap();
+    assert_eq!(conversation.owner_pubkey.as_deref(), Some("alice"));
+    assert_eq!(conversation.created_at, Some(90));
+    assert_eq!(conversation.last_activity, Some(120));
+    assert_eq!(
+        conversation.last_user_message.as_deref(),
+        Some("new request")
+    );
+    assert_eq!(conversation.title.as_deref(), Some("Generated Title"));
+    assert_eq!(conversation.summary.as_deref(), Some("Generated summary."));
+    assert_eq!(
+        conversation.metadata.get("statusCurrentActivity").unwrap(),
+        "Maintaining headers."
+    );
+}
+
+#[test]
 fn round_trip_messages_tool_messages_prompt_history_completion() {
     let store = ConversationStore::open_in_memory().unwrap();
     store.ensure_conversation("conv-1").unwrap();
