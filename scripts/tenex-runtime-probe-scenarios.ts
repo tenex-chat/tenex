@@ -24,14 +24,58 @@ export type MockRequestRecord = {
 const delegationUserRequest =
     "Please delegate to worker and ask them to choose one random color. Tell me what they picked.";
 const delegationWorkerPrompt =
-    "Choose one random color and report it back in one concise sentence.";
-export const delegationWorkerCompletionText = "Worker picked the random color blue.";
+    "Choose one random color. Reply with exactly one lowercase color word and no punctuation.";
+export const delegationWorkerCompletionText = "blue";
 
-const colorChoicePattern =
-    /\b(red|blue|green|yellow|purple|orange|pink|black|white|gray|grey|brown|cyan|magenta|teal|lime|indigo|violet|turquoise|gold|silver|maroon|navy|cerulean|lavender|beige|coral|azure|ochre|chartreuse|crimson|scarlet|amber|emerald|sapphire)\b|#[0-9a-f]{3,6}\b/i;
+const colorWords = [
+    "red",
+    "blue",
+    "green",
+    "yellow",
+    "purple",
+    "orange",
+    "pink",
+    "black",
+    "white",
+    "gray",
+    "grey",
+    "brown",
+    "cyan",
+    "magenta",
+    "teal",
+    "lime",
+    "indigo",
+    "violet",
+    "turquoise",
+    "gold",
+    "silver",
+    "maroon",
+    "navy",
+    "cerulean",
+    "lavender",
+    "beige",
+    "coral",
+    "azure",
+    "ochre",
+    "chartreuse",
+    "crimson",
+    "scarlet",
+    "amber",
+    "emerald",
+    "sapphire",
+] as const;
+
+const colorChoicePattern = new RegExp(
+    `\\b(${colorWords.join("|")})\\b|#[0-9a-f]{3,6}\\b`,
+    "i"
+);
+
+export function extractColorChoice(content: string): string | null {
+    return content.match(colorChoicePattern)?.[0].toLowerCase() ?? null;
+}
 
 export function includesColorChoice(content: string): boolean {
-    return colorChoicePattern.test(content);
+    return extractColorChoice(content) !== null;
 }
 
 type ScenarioContext = {
@@ -75,7 +119,7 @@ export function scenarioProjectDtag(name: ScenarioName): string {
 
 export function pmInstructions(name: ScenarioName): string {
     if (name === "delegation-basic") {
-        return "This is a delegation probe. Do not call todo_write. On the first turn, call only delegate to worker with the random-color task. Do not ask for clarification. When the worker replies with a color, do not call tools and do not delegate again; send one final sentence: The worker picked <color>.";
+        return "This is a delegation probe. Do not call todo_write. On the first turn, call only delegate to worker with the random-color task. Do not ask for clarification. When the worker replies with a color, do not call tools and do not delegate again; repeat the exact color word in one final sentence: The worker picked <exact worker color>.";
     }
     if (name === "same-agent-concurrency") {
         return "Use shell when asked to run sleep commands, and account for active tool reminders.";
@@ -278,6 +322,7 @@ async function runDelegationProbe(context: ScenarioContext): Promise<void> {
         timeoutMs,
         "worker random-color completion"
     );
+    const workerColor = extractColorChoice(workerCompletion.content);
     await context.waitForObservedEvent(
         context.events,
         (event) =>
@@ -285,7 +330,7 @@ async function runDelegationProbe(context: ScenarioContext): Promise<void> {
             event.pubkey === context.pmPubkey &&
             event.created_at >= workerCompletion.created_at &&
             !hasEventTag(event, "tool", "delegate") &&
-            includesColorChoice(event.content),
+            extractColorChoice(event.content) === workerColor,
         timeoutMs,
         "PM random-color follow-up"
     );

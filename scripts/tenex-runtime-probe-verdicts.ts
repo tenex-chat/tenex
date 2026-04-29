@@ -1,6 +1,7 @@
 import type { Event } from "nostr-tools";
 import {
     delegationWorkerCompletionText,
+    extractColorChoice,
     includesColorChoice,
     type MockRequestRecord,
     type ScenarioName,
@@ -73,13 +74,14 @@ function evaluateDelegation(events: Event[], context: EvaluateContext): Verdict[
             (event.content.includes(delegationWorkerCompletionText) ||
                 includesColorChoice(event.content))
     );
+    const workerColor = workerCompletion ? extractColorChoice(workerCompletion.content) : null;
     const pmObservedWorker = events.find(
         (event) =>
             event.kind === 1 &&
             event.pubkey === context.pmPubkey &&
             event.created_at >= (workerCompletion?.created_at ?? Number.MAX_SAFE_INTEGER) &&
             !hasTag(event, "tool", "delegate") &&
-            includesColorChoice(event.content)
+            extractColorChoice(event.content) === workerColor
     );
     const completedStatus = events.find(
         (event) =>
@@ -107,7 +109,7 @@ function evaluateDelegation(events: Event[], context: EvaluateContext): Verdict[
         {
             name: "PM observed worker completion",
             ok: Boolean(pmObservedWorker),
-            detail: "Expected worker completion to trigger a follow-up PM run naming the color.",
+            detail: "Expected worker completion to trigger a follow-up PM run naming the same color.",
         },
         {
             name: "Agent completion contract includes status=completed",
