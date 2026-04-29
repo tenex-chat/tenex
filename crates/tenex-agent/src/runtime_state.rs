@@ -36,6 +36,10 @@ impl RuntimeStateHandle {
     }
 
     pub async fn acquire_driver(&self) {
+        if std::env::var_os("TENEX_RUNTIME_DRIVER_PREEMPT").is_some() {
+            return;
+        }
+
         loop {
             match self.try_acquire_driver_once() {
                 Ok(true) => return,

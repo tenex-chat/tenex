@@ -670,8 +670,11 @@ async fn run() -> Result<()> {
         llms.as_ref(),
         providers.as_ref(),
     );
-    let cassette_recorder =
-        CassetteRecorder::from_env(agent_config.identity_name(), &resolved.provider, &resolved.model);
+    let cassette_recorder = CassetteRecorder::from_env(
+        agent_config.identity_name(),
+        &resolved.provider,
+        &resolved.model,
+    );
 
     eprintln!(
         "[tenex-agent] {} ({}) @ {}",
