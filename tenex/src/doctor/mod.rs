@@ -312,11 +312,12 @@ async fn run_migrate() -> Result<()> {
     );
 
     if current == Some(LATEST_MIGRATION_VERSION) {
+        // TS at `commands/doctor.ts:117-119` prints "No pending migrations."
+        // and `return`s — does NOT emit a "Final migration version: …"
+        // line in this branch (that line is only printed at line 139,
+        // AFTER applied-migration entries, in the with-applied branch).
+        // Mirror byte-for-byte by skipping the final-version line here.
         println!("{}", chalk_green("No pending migrations."));
-        println!(
-            "{}",
-            chalk_blue(&format!("Final migration version: {LATEST_MIGRATION_VERSION}"))
-        );
         return Ok(());
     }
 
