@@ -97,12 +97,6 @@ pub enum LlmMenuInput {
     /// Spinner tick — advance `spinner_frame`. The I/O layer fires this
     /// every 80 ms while a test is in flight.
     SpinnerTick,
-    /// Test completed — record the result and clear the in-flight marker.
-    TestCompleted {
-        // Note: the actual config name and result are passed via a
-        // sibling event (see [`finish_test`]); this variant only signals
-        // arrival. Kept here so the I/O layer's match is exhaustive.
-    },
     Other,
 }
 
@@ -151,11 +145,6 @@ pub fn handle_key(
         if state.testing.is_some() {
             state.spinner_frame = state.spinner_frame.wrapping_add(1);
         }
-        return LlmMenuOutcome::Continue;
-    }
-    if matches!(key, LlmMenuInput::TestCompleted { .. }) {
-        // The actual completion data is delivered via `finish_test`; the
-        // event arrival on its own is just a redraw trigger.
         return LlmMenuOutcome::Continue;
     }
     if matches!(key, LlmMenuInput::CtrlC | LlmMenuInput::Escape) {
@@ -242,10 +231,7 @@ pub fn handle_key(
             }
         }
         LlmMenuInput::Other => LlmMenuOutcome::Continue,
-        LlmMenuInput::SpinnerTick
-        | LlmMenuInput::TestCompleted { .. }
-        | LlmMenuInput::Escape
-        | LlmMenuInput::CtrlC => unreachable!(),
+        LlmMenuInput::SpinnerTick | LlmMenuInput::Escape | LlmMenuInput::CtrlC => unreachable!(),
     }
 }
 
@@ -369,8 +355,7 @@ pub enum LlmMenuResult {
 /// the callback returns. The TS source uses an async promise + spinner.
 /// To get the same spinner-while-testing UX in Rust, callers wrap
 /// `on_test` to run on a worker thread and feed `SpinnerTick` events to
-/// the loop — the state machine already exposes `spinner_frame` and the
-/// `TestCompleted` outcome variant for that exact flow.
+/// the loop — the state machine already exposes `spinner_frame`.
 pub fn llm_menu_prompt<F>(
     message: &str,
     actions: &[ActionItem],

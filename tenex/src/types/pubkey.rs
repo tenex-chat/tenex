@@ -83,10 +83,6 @@ impl Pubkey {
         &self.0
     }
 
-    /// Take ownership of the hex string.
-    pub fn into_hex(self) -> String {
-        self.0
-    }
 }
 
 impl fmt::Display for Pubkey {

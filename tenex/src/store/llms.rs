@@ -311,10 +311,6 @@ impl<'a> LlmConfigEntry<'a> {
         self.obj.get(key)
     }
 
-    pub fn raw(&self) -> &'a Map<String, Value> {
-        self.obj
-    }
-
     // ---- meta-model accessors ---------------------------------------
 
     /// For meta configs: variant names in disk order. Empty for standard.

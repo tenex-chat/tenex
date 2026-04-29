@@ -69,7 +69,7 @@ pub fn auto_pick(configured_providers: &[String]) -> EmbeddingChoice {
 /// render their actual ID instead of a literal `"Unknown"` placeholder.
 /// Known-name branches are `&'static str` literals which coerce to
 /// `&'a` since `'static` outlives every lifetime.
-pub fn provider_label<'a>(provider: &'a str) -> &'a str {
+pub fn provider_label(provider: &str) -> &str {
     match provider {
         PROVIDER_LOCAL => "Local Transformers",
         PROVIDER_OPENAI => "OpenAI",
