@@ -17,6 +17,7 @@ use anyhow::{anyhow, Result};
 use nostr_sdk::prelude::*;
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
+use tokio::time::Duration;
 use tracing::{debug, info, warn};
 
 use super::config::Config;
@@ -37,11 +38,12 @@ struct PendingBoots {
 struct RuntimeCtx<'a> {
     client: &'a Client,
     supervisor: &'a Supervisor,
-    known: &'a Mutex<HashSet<String>>,
-    boot_sub: &'a Mutex<Option<SubscriptionId>>,
+    known: Arc<Mutex<HashSet<String>>>,
+    boot_sub: Arc<Mutex<Option<SubscriptionId>>>,
     pending_boots: &'a Mutex<PendingBoots>,
     authors: &'a [PublicKey],
     startup_ts: Timestamp,
+    debounce_handle: Arc<Mutex<Option<JoinHandle<()>>>>,
 }
 
 pub async fn run(
@@ -103,6 +105,7 @@ pub async fn run(
             .collect(),
         consumed: Vec::new(),
     }));
+    let debounce_handle: Arc<Mutex<Option<JoinHandle<()>>>> = Arc::new(Mutex::new(None));
 
     let task_client = client.clone();
     let handle = tokio::spawn(async move {
@@ -112,11 +115,12 @@ pub async fn run(
                 let ctx = RuntimeCtx {
                     client: &task_client,
                     supervisor: &supervisor,
-                    known: &known,
-                    boot_sub: &boot_sub,
+                    known: Arc::clone(&known),
+                    boot_sub: Arc::clone(&boot_sub),
                     pending_boots: &pending_boots,
                     authors: &authors,
                     startup_ts,
+                    debounce_handle: Arc::clone(&debounce_handle),
                 };
                 handle_event(&ctx, &event).await;
             }
@@ -129,9 +133,9 @@ pub async fn run(
 async fn handle_event(ctx: &RuntimeCtx<'_>, event: &Event) {
     match event.kind.as_u16() {
         PROJECT_KIND => handle_project(ctx, event).await,
-        1 => handle_boot_trigger(ctx.supervisor, ctx.known, event, BootKind::TextNote).await,
+        1 => handle_boot_trigger(ctx.supervisor, &ctx.known, event, BootKind::TextNote).await,
         BOOT_KIND => {
-            handle_boot_trigger(ctx.supervisor, ctx.known, event, BootKind::Explicit).await
+            handle_boot_trigger(ctx.supervisor, &ctx.known, event, BootKind::Explicit).await
         }
         _ => {}
     }
@@ -152,26 +156,39 @@ async fn handle_project(ctx: &RuntimeCtx<'_>, event: &Event) {
         return;
     }
 
+    debug!(d_tag, address, "project discovered");
+
     let matched_prefixes = resolve_pending_boots(ctx.pending_boots, &d_tag).await;
     for prefix in matched_prefixes {
         info!(prefix, d_tag, "matched --boot prefix to discovered project");
         ctx.supervisor.boot(d_tag.clone()).await;
     }
 
-    let addresses: Vec<String> = {
-        let k = ctx.known.lock().await;
-        k.iter().cloned().collect()
-    };
-    if let Err(e) = update_boot_subscription(
-        ctx.client,
-        ctx.boot_sub,
-        ctx.authors,
-        ctx.startup_ts,
-        &addresses,
-    )
-    .await
+    // Debounce: cancel any pending refresh and schedule a new one. During the
+    // initial burst of 31933 events this collapses N refreshes into one.
     {
-        warn!(error = %e, "failed to update boot trigger subscription");
+        let mut dh = ctx.debounce_handle.lock().await;
+        if let Some(h) = dh.take() {
+            h.abort();
+        }
+        let client = ctx.client.clone();
+        let boot_sub = Arc::clone(&ctx.boot_sub);
+        let known = Arc::clone(&ctx.known);
+        let authors: Vec<PublicKey> = ctx.authors.to_vec();
+        let startup_ts = ctx.startup_ts;
+        *dh = Some(tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(200)).await;
+            let addresses: Vec<String> = {
+                let k = known.lock().await;
+                k.iter().cloned().collect()
+            };
+            if let Err(e) =
+                update_boot_subscription(&client, &boot_sub, &authors, startup_ts, &addresses)
+                    .await
+            {
+                warn!(error = %e, "failed to update boot trigger subscription");
+            }
+        }));
     }
 }
 
@@ -217,16 +234,27 @@ async fn handle_boot_trigger(
     event: &Event,
     kind: BootKind,
 ) {
+    info!(?kind, event_id = %event.id, pubkey = %event.pubkey, "boot trigger event received");
+
     let a_tags = a_tag_values(event);
     if a_tags.is_empty() {
+        info!(?kind, event_id = %event.id, "boot trigger rejected: no #a tags");
         return;
     }
 
     let k = known.lock().await;
-    let matched: Option<String> = a_tags.into_iter().find(|a| k.contains(a));
+    let known_snapshot: Vec<String> = k.iter().cloned().collect();
+    let matched: Option<String> = a_tags.iter().find(|a| k.contains(*a)).cloned();
     drop(k);
 
     let Some(address) = matched else {
+        info!(
+            ?kind,
+            event_id = %event.id,
+            a_tags = ?a_tags,
+            known_projects = ?known_snapshot,
+            "boot trigger rejected: no #a tag matches a known project",
+        );
         return;
     };
 
@@ -263,9 +291,11 @@ async fn update_boot_subscription(
         client.unsubscribe(&old).await;
     }
     client.subscribe_with_id(new_id, filter, None).await?;
-    debug!(
+    info!(
         addresses = addresses.len(),
-        "boot trigger subscription refreshed"
+        since = startup_ts.as_secs(),
+        watched = ?addresses,
+        "boot trigger subscription refreshed",
     );
     Ok(())
 }
