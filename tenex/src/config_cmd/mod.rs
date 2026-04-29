@@ -338,10 +338,20 @@ async fn run_providers_submenu(base_dir: &std::path::Path) -> Result<()> {
 fn run_llm_submenu(base_dir: &std::path::Path) -> Result<()> {
     // Mirror the no-providers guard at TS `commands/config/llm.ts:23-29`.
     // Two-line error: red "❌ No providers configured." then an amber `→`
-    // hint pointing at `tenex config providers`. TS calls process.exit(1)
-    // when the providers map is empty; we mirror with an early return + a
-    // non-zero exit via std::process::exit so the surrounding menu loop
-    // doesn't recurse into a broken editor.
+    // hint pointing at `tenex config providers`. TS uses `console.log`
+    // (stdout, NOT stderr) and `process.exitCode = 1; return;` — a
+    // deferred exit code that lets the action handler return cleanly.
+    // The interactive menu can keep navigating; only the direct
+    // invocation path emits a non-zero exit at process termination.
+    //
+    // Rust doesn't have `process.exitCode` without main()-level
+    // plumbing. Return Ok(()) so:
+    //   - the menu re-renders (user can pick "Providers" to fix it)
+    //   - the direct invocation returns 0 (minor UX divergence from TS;
+    //     the user has already seen the messages)
+    // Using `std::process::exit(1)` here would terminate the whole
+    // menu, breaking interactive UX — strictly worse than the exit-code
+    // divergence.
     let providers = ProvidersDoc::load(base_dir)?;
     if providers.provider_ids().is_empty() {
         // TS at commands/config/llm.ts:25-26 emits:
@@ -349,14 +359,15 @@ fn run_llm_submenu(base_dir: &std::path::Path) -> Result<()> {
         //   console.log(amber("→") + chalk.bold(" Run tenex config providers first"));
         // where `amber` is INQUIRER-amber truecolor (chalk.hex("#FFC107")),
         // NOT bold and NOT the display palette's xterm-256 #214.
+        // Both lines go to stdout in TS, not stderr.
         use crate::tui::theme::{chalk_bold, chalk_red, inquirer_amber};
-        eprintln!("{}", chalk_red("❌ No providers configured."));
-        eprintln!(
+        println!("{}", chalk_red("❌ No providers configured."));
+        println!(
             "{}{}",
             inquirer_amber("→"),
             chalk_bold(" Run tenex config providers first"),
         );
-        std::process::exit(1);
+        return Ok(());
     }
     let _ = crate::onboard::llm_editor::run(base_dir)?;
     Ok(())
