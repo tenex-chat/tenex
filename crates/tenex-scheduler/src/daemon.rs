@@ -5,8 +5,8 @@
 //! The file-watcher reconciles the in-memory task map when schedules.json
 //! files change on disk.
 
-use std::collections::HashMap;
-use std::path::Path;
+use std::collections::{BTreeSet, HashMap, HashSet};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -18,7 +18,7 @@ use notify::{
 use tokio::signal::unix::{signal, SignalKind};
 use tokio::sync::{watch, Mutex};
 use tokio::task::JoinHandle;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 use crate::config::Config;
 use crate::cron;
@@ -125,10 +125,10 @@ async fn reconcile_from_event(
     task_handles: Arc<Mutex<HashMap<String, JoinHandle<()>>>>,
     shutdown_rx: watch::Receiver<bool>,
 ) {
-    for path in &event.paths {
-        let Some(d_tag) = project_dtag_from_path(path) else {
-            continue;
-        };
+    let projects_dir = crate::paths::projects_dir();
+    let changed_dtags = project_dtags_from_schedule_paths(&projects_dir, &event.paths);
+
+    for d_tag in changed_dtags {
         let tasks = match storage::load_tasks(&d_tag) {
             Ok(tasks) => tasks,
             Err(e) => {
@@ -137,8 +137,7 @@ async fn reconcile_from_event(
             }
         };
 
-        let task_ids: std::collections::HashSet<String> =
-            tasks.iter().map(|t| t.id.clone()).collect();
+        let task_ids: HashSet<String> = tasks.iter().map(|t| t.id.clone()).collect();
 
         // Abort loops for tasks that were removed.
         {
@@ -171,7 +170,7 @@ async fn reconcile_from_event(
             }
         }
 
-        info!(d_tag, "reconciled schedules");
+        debug!(d_tag, "reconciled schedules");
     }
 }
 
@@ -406,9 +405,79 @@ fn oneoff_catchup_deadline(task: &ScheduledTask) -> Option<chrono::DateTime<Utc>
     Some(t)
 }
 
-fn project_dtag_from_path(path: &Path) -> Option<String> {
-    let projects_dir = crate::paths::projects_dir();
+fn project_dtags_from_schedule_paths(projects_dir: &Path, paths: &[PathBuf]) -> BTreeSet<String> {
+    paths
+        .iter()
+        .filter_map(|path| project_dtag_from_schedule_path_with_projects_dir(projects_dir, path))
+        .collect()
+}
+
+fn project_dtag_from_schedule_path_with_projects_dir(
+    projects_dir: &Path,
+    path: &Path,
+) -> Option<String> {
     let rel = path.strip_prefix(&projects_dir).ok()?;
-    let d_tag = rel.components().next()?.as_os_str().to_str()?.to_string();
+    let mut components = rel.components();
+    let d_tag = components.next()?.as_os_str().to_str()?.to_string();
+    let file_name = components.next()?.as_os_str().to_str()?;
+    if file_name != "schedules.json" || components.next().is_some() {
+        return None;
+    }
     Some(d_tag)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::{Path, PathBuf};
+
+    use super::{
+        project_dtag_from_schedule_path_with_projects_dir, project_dtags_from_schedule_paths,
+    };
+
+    #[test]
+    fn schedule_path_maps_to_project_dtag() {
+        let projects_dir = Path::new("/tenex/projects");
+        let path = Path::new("/tenex/projects/project-a/schedules.json");
+
+        assert_eq!(
+            project_dtag_from_schedule_path_with_projects_dir(projects_dir, path).as_deref(),
+            Some("project-a")
+        );
+    }
+
+    #[test]
+    fn non_schedule_project_paths_are_ignored() {
+        let projects_dir = Path::new("/tenex/projects");
+
+        for path in [
+            Path::new("/tenex/projects/project-a/conversations/thread.json"),
+            Path::new("/tenex/projects/project-a/schedules.json.tmp"),
+            Path::new("/tenex/projects/project-a/nested/schedules.json"),
+            Path::new("/tenex/projects/project-a"),
+            Path::new("/other/projects/project-a/schedules.json"),
+        ] {
+            assert!(
+                project_dtag_from_schedule_path_with_projects_dir(projects_dir, path).is_none(),
+                "{} should not trigger schedule reconciliation",
+                path.display()
+            );
+        }
+    }
+
+    #[test]
+    fn schedule_paths_are_deduplicated_by_project() {
+        let projects_dir = Path::new("/tenex/projects");
+        let paths = vec![
+            PathBuf::from("/tenex/projects/project-a/schedules.json"),
+            PathBuf::from("/tenex/projects/project-a/schedules.json"),
+            PathBuf::from("/tenex/projects/project-a/schedules.json.tmp"),
+            PathBuf::from("/tenex/projects/project-b/schedules.json"),
+        ];
+
+        let dtags: Vec<_> = project_dtags_from_schedule_paths(projects_dir, &paths)
+            .into_iter()
+            .collect();
+
+        assert_eq!(dtags, vec!["project-a", "project-b"]);
+    }
 }
