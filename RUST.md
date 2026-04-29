@@ -74,7 +74,7 @@ Spawned by `tenex runtime` per conversation turn via `tenex-agent <agent.json>` 
 - **RAG tools**: `rag_add_documents` (audience=self→agent collection, audience=project→project collection), `rag_search` (vector search) — all optional if embed not configured; `rag_collection_create`, `rag_collection_list`, and `rag_collection_delete` not ported to Rust (TS-only; agents don't manage collections directly in the Rust model)
 - **Skills tools**: `skill_list` (discover skills by scope) + `skills_set` (apply/remove per-conversation)
 - **Todo tool**: `todo_write` (create/update task list)
-- **Conversation tools**: `conversation_get` (retrieve message transcript by ID from SQLite store), `conversation_list` (list conversations with date range filter)
+- **Conversation tools**: `conversation_get` (retrieve message transcript by ID from SQLite store), `conversation_list` (list conversations with date range filter), `conversation_search` (keyword/full-text search across titles, summaries, and message content via `ConversationStore::search_conversations`)
 - **Scheduling tools**: `schedule_task` (write one-off or recurring tasks to `schedules.json` via `tenex-scheduler` storage API), `kill` (cancel a scheduled task by ID; agent/shell kills require TS runtime in-process state)
 - **Model override**: `change_model` (persist `meta_model_variant` to `AgentContextState`; resolved on next invocation — accepts named preset, `provider:model`, or `provider/model`)
 - **Silent completion**: `no_response` (sets `Arc<AtomicBool>` flag; `swap(true)` makes it idempotent — repeat calls return a "STOP" advisory instead of silently no-op'ing; description warns LLM against multi-calls; main loop skips final `ConversationIntent` emission — no Nostr event published)
@@ -166,13 +166,12 @@ All previously listed gaps have been closed. Remaining TS-only tools not yet por
 
 | TS Tool | Status | Notes |
 |---------|--------|-------|
-| `conversation_search` | TS-only | Semantic search across conversations. No Rust equivalent. |
 | `send_message` | TS-only | Telegram channel message delivery. Depends on TS bot-token + TransportBindingStore infrastructure — not portable. |
 | `mcp_list_resources`, `mcp_resource_read`, `mcp_subscribe`, `mcp_subscription_stop` | TS-only | MCP protocol tools. No Rust equivalent yet. |
 | `rag_subscription_*` | TS-only | RAG subscription management. No Rust equivalent. |
 | `rag_collection_create`, `rag_collection_delete`, `rag_collection_list` | TS-only | RAG collection management. Not ported; Rust agents use audience-scoped collections implicitly. |
 
-Note: `conversation_get`, `conversation_list`, `kill` (scheduled tasks only), `schedule_task`, `change_model`, `no_response`, `report_publish`, and `agents_write` are now implemented in Rust. The Rust `kill` only cancels scheduled tasks — agent/shell kills require TS in-process state (RALRegistry, CooldownRegistry, AgentDispatchService). The Rust `change_model` accepts any model spec (`provider:model`, named preset) rather than the TS restriction to meta-model variant names. The Rust `report_publish` emits kind:30023 NIP-23 articles via `PublishArticleIntent` through the standard NDJSON-stdout channel; it includes path-traversal protection and directory recursion. The Rust `agents_write` is pure file I/O against `~/.tenex/agents/<pubkey>.json` — no SQLite, no AgentProvisioningService dependency; it preserves unknown JSON fields across update so TS-written records (e.g. `category`, `eventId`, `mcpServers`) are not clobbered. The TS `send_message` is Telegram-specific (not generic Nostr) and depends on TS-only infrastructure.
+Note: `conversation_get`, `conversation_list`, `conversation_search`, `kill` (scheduled tasks only), `schedule_task`, `change_model`, `no_response`, `report_publish`, and `agents_write` are now implemented in Rust. The Rust `conversation_search` does keyword/full-text search against the SQLite conversation store (title, summary, message content) via `ConversationStore::search_conversations`; no vector/semantic search yet. The Rust `kill` only cancels scheduled tasks — agent/shell kills require TS in-process state (RALRegistry, CooldownRegistry, AgentDispatchService). The Rust `change_model` accepts any model spec (`provider:model`, named preset) rather than the TS restriction to meta-model variant names. The Rust `report_publish` emits kind:30023 NIP-23 articles via `PublishArticleIntent` through the standard NDJSON-stdout channel; it includes path-traversal protection and directory recursion. The Rust `agents_write` is pure file I/O against `~/.tenex/agents/<pubkey>.json` — no SQLite, no AgentProvisioningService dependency; it preserves unknown JSON fields across update so TS-written records (e.g. `category`, `eventId`, `mcpServers`) are not clobbered. The TS `send_message` is Telegram-specific (not generic Nostr) and depends on TS-only infrastructure.
 
 ---
 
@@ -200,9 +199,11 @@ Note: `conversation_get`, `conversation_list`, `kill` (scheduled tasks only), `s
 - FK bug fixed: ensure_conversation() on store open
 
 Resolved between twenty-sixth and twenty-seventh passes:
-- **RUST_REPORT.md session 10**: Committed session 10 end-to-end test results — `report_publish` single file and directory recursion verified, write-access skill 2-turn flow verified, `no_response` multi-call regression found and fixed (GLM called the tool 22× in one turn; swap-based guard + stronger description resolved it).
-- **Architecture drift**: Clean. `PubkeyService.ts` still delegates to `identityDaemonClient`; `LlmConfigClient.ts` still uses Unix-socket IPC. Per-agent key normalization in `agent-home-env.ts` is correct scope (not identity daemon concern). Zero unused imports in workspace.
-- **Dead code audit (stable)**: `variant_list_prompt` module is a complete port awaiting wiring into calling config commands — AMBER/ANSI214 constants, `VariantListState`, `from_key_event` warnings are all expected in-progress items. `format_time_ago` test-only callers make `plural` appear dead — awaiting production wiring. Warning count stable at 281.
+- **`agents_write` tool ported**: Pure file I/O against `~/.tenex/agents/<pubkey>.json` — no SQLite, no TS AgentProvisioningService dependency. Preserves unknown JSON fields across updates (category, eventId, mcpServers not clobbered). 441-line implementation + wired into `tenex-agent/src/main.rs`.
+- **`conversation_search` tool ported**: Keyword/full-text search across conversation store (title, summary, message content) via new `ConversationStore::search_conversations` method. Removed from "not yet ported" table — only `send_message`, MCP tools, and RAG collection management remain TS-only.
+- **RUST_REPORT.md session 10**: `report_publish` e2e (single + directory), write-access skill 2-turn flow, `no_response` multi-call regression verified and documented.
+- **Architecture drift**: Clean. `PubkeyService.ts` still delegates to `identityDaemonClient`; `LlmConfigClient.ts` still uses Unix-socket IPC. Zero unused imports in workspace.
+- **Dead code audit (stable)**: Warning count stable at 281. `variant_list_prompt` module complete but not yet wired to a calling command. `format_time_ago` test-only → `plural` appears dead — awaiting production wiring.
 - **Test count**: 1349 (up from 1340 — 9 new tests from parallel session work on bespoke prompt byte-fidelity).
 
 Resolved between twenty-fifth and twenty-sixth passes:
