@@ -12,6 +12,7 @@
 //! shape. Conversation file content parsing failures are similarly
 //! treated as "no metadata available" rather than propagated.
 
+#[cfg(test)]
 use serde_json::Value;
 
 const PROJECTS_DIRNAME: &str = "projects";
@@ -27,6 +28,7 @@ fn conversations_dir(base_dir: &std::path::Path, project_dtag: &str) -> std::pat
         .join(CONVERSATIONS_DIRNAME)
 }
 
+#[cfg(test)]
 fn conversation_file(
     base_dir: &std::path::Path,
     project_dtag: &str,
@@ -102,7 +104,8 @@ pub struct LightweightMetadata {
 /// `readLightweightMetadata` (`:15-46`). Returns `None` for missing
 /// file, parse errors, or any I/O failure (matches the TS `catch
 /// { return null }` shape).
-pub fn read_lightweight_metadata(
+#[cfg(test)]
+fn read_lightweight_metadata(
     base_dir: &std::path::Path,
     project_dtag: &str,
     conversation_id: &str,

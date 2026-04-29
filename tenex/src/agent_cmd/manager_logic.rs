@@ -87,7 +87,8 @@ pub fn format_projects(projects: &[String]) -> String {
 /// dim role line and a dim projects line. Currently unused by the live
 /// menu — the shipped main view uses [`format_managed_agent_list_line`] —
 /// but exists for tests and parity. Mirrored verbatim.
-pub fn format_managed_agent_label(entry: &ManagedAgent) -> String {
+#[cfg(test)]
+fn format_managed_agent_label(entry: &ManagedAgent) -> String {
     use crate::tui::theme::chalk_dim;
     let inactive_tag = if entry.is_inactive() {
         chalk_dim(" [inactive]")

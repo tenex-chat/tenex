@@ -22,6 +22,7 @@ use url::Url;
 /// Runtime check used by `getRelayUrls` to filter an env/config list before
 /// handing it to NDK. Returns `false` for malformed URLs and any non-WS
 /// protocol. Source: `src/nostr/relays.ts:18-25`.
+#[cfg(test)]
 pub fn is_valid_websocket_url(url: &str) -> bool {
     match Url::parse(url) {
         Ok(parsed) => matches!(parsed.scheme(), "ws" | "wss"),

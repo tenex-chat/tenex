@@ -21,22 +21,28 @@
 //! yet cause `run` to return early with a status message — never with a
 //! pretend-done state.
 
-pub mod add_configuration;
 pub mod auto_detect;
 pub mod auto_select_roles;
-pub mod claude_code_models;
-pub mod codex_models;
 pub mod commit;
 pub mod embeddings;
 pub mod identity;
 pub mod llm_editor;
-pub mod llm_test_hints;
-pub mod llm_test_request;
 pub mod providers;
 pub mod random;
 pub mod relays;
 pub mod role_assignment;
 pub mod seed_llms;
+
+#[cfg(test)]
+mod add_configuration;
+#[cfg(test)]
+mod claude_code_models;
+#[cfg(test)]
+mod codex_models;
+#[cfg(test)]
+mod llm_test_hints;
+#[cfg(test)]
+mod llm_test_request;
 
 use std::collections::HashMap;
 

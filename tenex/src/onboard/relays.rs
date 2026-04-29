@@ -1,7 +1,7 @@
 //! Onboarding Screen 2: Communication (relay choice).
 //!
 //! Spec: `tenex/docs/tui-port/01-cli-entrypoint-and-onboarding.md` §"Screen 2".
-//! Source: `src/commands/onboard.ts:1336-1421`.
+//! Source: `src/commands/onboard.ts:1011-1054`.
 //!
 //! Builds the [`RelayItem`] list (optional local relay + TENEX Community
 //! Relay + free-text input row), runs the bespoke
@@ -19,10 +19,10 @@ use crate::types::relay;
 
 /// Run Screen 2. `local_relay_url` is the optional `--local-relay-url` CLI
 /// arg; when present, a `Local relay` choice is prepended (so it lands as
-/// the default-active row at index 0, matching `:1346-1353`).
+/// the default-active row at index 0, matching `:1021-1028`).
 ///
 /// Returns the chosen relay URL (always exactly one — `relays = [relay]`
-/// per `:1379`) or `Ok(None)` if the user cancelled.
+/// per `:1054`) or `Ok(None)` if the user cancelled.
 pub fn run(json_mode: bool, local_relay_url: Option<&str>) -> Result<Option<String>> {
     if !json_mode {
         display::step(
@@ -30,9 +30,7 @@ pub fn run(json_mode: bool, local_relay_url: Option<&str>) -> Result<Option<Stri
             crate::onboard::TOTAL_STEPS,
             crate::onboard::STEP_LABELS[1],
         );
-        display::context(
-            crate::onboard::STEP_CONTEXTS[1].expect("step 2 has a TS context line"),
-        );
+        display::context(crate::onboard::STEP_CONTEXTS[1].expect("step 2 has a TS context line"));
         display::blank();
     }
 
@@ -45,7 +43,7 @@ pub fn run(json_mode: bool, local_relay_url: Option<&str>) -> Result<Option<Stri
     Ok(chosen)
 }
 
-/// Construct the relay-prompt item list per `:1343-1358`. Pure function so
+/// Construct the relay-prompt item list per `:1018-1033`. Pure function so
 /// the ordering can be unit-tested without any I/O.
 pub fn build_items(local_relay_url: Option<&str>) -> Vec<RelayItem> {
     let mut items = Vec::with_capacity(3);
@@ -117,7 +115,7 @@ mod tests {
 
     #[test]
     fn community_relay_value_pinned_to_tenex_chat() {
-        // Sanity-check the hardcoded community relay value (`:1356`).
+        // Sanity-check the hardcoded community relay value (`:1031`).
         let items = build_items(None);
         match &items[0] {
             RelayItem::Choice {

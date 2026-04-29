@@ -16,7 +16,8 @@ use sha2::{Digest, Sha256};
 const SHORT_EVENT_ID_LENGTH: usize = 10;
 
 /// Source: `utils/nostr-entity-parser.ts:21` (`PUBKEY_DISPLAY_LENGTH`).
-pub const PUBKEY_DISPLAY_LENGTH: usize = 6;
+#[cfg(test)]
+const PUBKEY_DISPLAY_LENGTH: usize = 6;
 
 const TELEGRAM_PREFIX: &str = "tg_";
 
@@ -38,12 +39,14 @@ fn shorten_event_identifier(value: &str) -> String {
 }
 
 /// Mirror `shortenConversationId` (`conversation-id.ts:49-51`).
-pub fn shorten_conversation_id(conversation_id: &str) -> String {
+#[cfg(test)]
+fn shorten_conversation_id(conversation_id: &str) -> String {
     shorten_event_identifier(conversation_id)
 }
 
 /// Mirror `shortenOptionalConversationId` (`:53-57`).
-pub fn shorten_optional_conversation_id(conversation_id: Option<&str>) -> Option<String> {
+#[cfg(test)]
+fn shorten_optional_conversation_id(conversation_id: Option<&str>) -> Option<String> {
     conversation_id
         .filter(|s| !s.is_empty())
         .map(shorten_conversation_id)
@@ -55,19 +58,22 @@ pub fn shorten_event_id(event_id: &str) -> String {
 }
 
 /// Mirror `shortenOptionalEventId` (`:63-67`).
-pub fn shorten_optional_event_id(event_id: Option<&str>) -> Option<String> {
+#[cfg(test)]
+fn shorten_optional_event_id(event_id: Option<&str>) -> Option<String> {
     event_id.filter(|s| !s.is_empty()).map(shorten_event_id)
 }
 
 /// Mirror `shortenPubkey` (`:69-71`):
 /// first 6 chars lowercased.
-pub fn shorten_pubkey(pubkey: &str) -> String {
+#[cfg(test)]
+fn shorten_pubkey(pubkey: &str) -> String {
     let prefix: String = pubkey.chars().take(PUBKEY_DISPLAY_LENGTH).collect();
     prefix.to_lowercase()
 }
 
 /// Mirror `shortenOptionalPubkey` (`:73-75`).
-pub fn shorten_optional_pubkey(pubkey: Option<&str>) -> Option<String> {
+#[cfg(test)]
+fn shorten_optional_pubkey(pubkey: Option<&str>) -> Option<String> {
     pubkey.filter(|s| !s.is_empty()).map(shorten_pubkey)
 }
 

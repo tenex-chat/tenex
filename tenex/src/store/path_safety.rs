@@ -83,6 +83,7 @@ fn normalize_components(path: &Path) -> PathBuf {
 /// This is what makes `is_path_within_directory` symlink-safe even for
 /// files that don't exist yet (e.g. a future write target inside the
 /// home dir).
+#[cfg(test)]
 fn resolve_real_path(input: &Path) -> PathBuf {
     let normalised = normalize_path(input);
     if let Ok(real) = std::fs::canonicalize(&normalised) {
@@ -121,6 +122,7 @@ fn resolve_real_path(input: &Path) -> PathBuf {
 /// for the containment check (matches Node's `path.relative` semantics
 /// — relative path that doesn't start with `..` and isn't absolute is
 /// "within").
+#[cfg(test)]
 pub fn is_path_within_directory(input: &Path, directory: &Path) -> bool {
     let real_input = resolve_real_path(input);
     let real_dir = resolve_real_path(directory);
@@ -129,12 +131,18 @@ pub fn is_path_within_directory(input: &Path, directory: &Path) -> bool {
 
 /// `isWithinAgentHome` (`agent-home.ts:152-155`).
 ///
-/// `<base>/home/<first-8-of-pubkey>` resolution via the existing helper
-/// in [`crate::agent_cmd::openclaw_home::get_agent_home_directory`].
+/// `<base>/home/<first-8-of-pubkey>` resolution.
+#[cfg(test)]
 pub fn is_within_agent_home(base_dir: &Path, input: &Path, agent_pubkey: &str) -> bool {
-    let home_dir =
-        crate::agent_cmd::openclaw_home::get_agent_home_directory(base_dir, agent_pubkey);
+    let home_dir = agent_home_directory(base_dir, agent_pubkey);
     is_path_within_directory(input, &home_dir)
+}
+
+#[cfg(test)]
+fn agent_home_directory(base_dir: &Path, pubkey: &str) -> PathBuf {
+    base_dir
+        .join("home")
+        .join(pubkey.chars().take(8).collect::<String>())
 }
 
 #[cfg(test)]
@@ -274,7 +282,7 @@ mod tests {
     fn agent_home_within_returns_true_for_descendant() {
         let base = unique_temp();
         let pubkey = "abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890";
-        let home = crate::agent_cmd::openclaw_home::get_agent_home_directory(&base, pubkey);
+        let home = agent_home_directory(&base, pubkey);
         std::fs::create_dir_all(&home).unwrap();
         let inside = home.join("memory").join("notes.md");
         assert!(is_within_agent_home(&base, &inside, pubkey));
@@ -286,8 +294,8 @@ mod tests {
         let base = unique_temp();
         let pubkey_a = "aaaa1234567890aaaa1234567890aaaa1234567890aaaa1234567890aaaa1234";
         let pubkey_b = "bbbb1234567890bbbb1234567890bbbb1234567890bbbb1234567890bbbb1234";
-        let home_a = crate::agent_cmd::openclaw_home::get_agent_home_directory(&base, pubkey_a);
-        let home_b = crate::agent_cmd::openclaw_home::get_agent_home_directory(&base, pubkey_b);
+        let home_a = agent_home_directory(&base, pubkey_a);
+        let home_b = agent_home_directory(&base, pubkey_b);
         std::fs::create_dir_all(&home_a).unwrap();
         std::fs::create_dir_all(&home_b).unwrap();
         let inside_b = home_b.join("file.md");

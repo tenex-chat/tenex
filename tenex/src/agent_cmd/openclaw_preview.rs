@@ -11,16 +11,20 @@
 //! `src/commands/agent/import/openclaw.ts:14-20, 143-147, 188-214,
 //! 156-170`.
 
+#[cfg(test)]
 use serde::Serialize;
 
-use crate::agent_cmd::openclaw_reader::{convert_model_format, OpenClawAgent};
+#[cfg(test)]
+use crate::agent_cmd::openclaw_reader::convert_model_format;
+use crate::agent_cmd::openclaw_reader::OpenClawAgent;
 
 /// Mirror `toSlug` (`openclaw.ts:14-20`):
 /// 1. lowercase
 /// 2. trim whitespace
 /// 3. replace runs of non-alphanumerics with a single `-`
 /// 4. strip leading/trailing `-`
-pub fn to_slug(name: &str) -> String {
+#[cfg(test)]
+fn to_slug(name: &str) -> String {
     let lowered = name.to_lowercase();
     let trimmed = lowered.trim();
 
@@ -73,6 +77,7 @@ pub fn filter_agents<'a>(
 /// Identity returned by the LLM distillation step. Mirrors the zod
 /// schema at `openclaw-distiller.ts:7-14`. Carries owned strings — the
 /// distillation runs once per agent and the result is short-lived.
+#[cfg(test)]
 #[derive(Debug, Clone, Serialize)]
 pub struct DistilledIdentity {
     pub name: String,
@@ -85,6 +90,7 @@ pub struct DistilledIdentity {
 
 /// One row of the dry-run preview list. Mirrors the inline `previews`
 /// shape at `openclaw.ts:193-198`.
+#[cfg(test)]
 #[derive(Debug, Clone, Serialize)]
 pub struct AgentPreview {
     pub id: String,
@@ -102,7 +108,8 @@ pub struct AgentPreview {
 /// `slug` falls back to `agent.id` when the distilled name has no
 /// alphanumerics (i.e. `to_slug` returns ""), matching the TS expression
 /// `toSlug(identity.name) || agent.id` (`openclaw.ts:192`).
-pub fn build_preview(agent: &OpenClawAgent, identity: &DistilledIdentity) -> AgentPreview {
+#[cfg(test)]
+fn build_preview(agent: &OpenClawAgent, identity: &DistilledIdentity) -> AgentPreview {
     let candidate = to_slug(&identity.name);
     let slug = if candidate.is_empty() {
         agent.id.clone()
@@ -124,7 +131,8 @@ pub fn build_preview(agent: &OpenClawAgent, identity: &DistilledIdentity) -> Age
 /// JSON variant of the dry-run output. Matches `JSON.stringify(previews,
 /// null, 2)` (`openclaw.ts:202`): 2-space indent, no trailing newline,
 /// camelCase keys (via `serde(rename = "useCriteria")`).
-pub fn format_preview_json(previews: &[AgentPreview]) -> String {
+#[cfg(test)]
+fn format_preview_json(previews: &[AgentPreview]) -> String {
     serde_json::to_string_pretty(previews).expect("AgentPreview is always serializable")
 }
 
@@ -143,7 +151,8 @@ pub fn format_preview_json(previews: &[AgentPreview]) -> String {
 ///
 /// Wire bytes match TS chalk byte-for-byte via `theme::chalk_*`
 /// helpers (per-attribute SGR closes, no SGR-0 full-reset).
-pub fn format_preview_text(previews: &[AgentPreview]) -> String {
+#[cfg(test)]
+fn format_preview_text(previews: &[AgentPreview]) -> String {
     use crate::tui::theme::{chalk_blue, chalk_gray_str, chalk_green};
 
     // TS at openclaw.ts:204 uses the LITERAL 'agent(s)' string —

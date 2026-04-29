@@ -19,15 +19,19 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 
-pub mod categorize;
 pub mod manager_actions;
 pub mod manager_logic;
-pub mod openclaw_distiller;
-pub mod openclaw_home;
 pub mod openclaw_preview;
 pub mod openclaw_reader;
 pub mod provisioning;
 pub mod telegram_config;
+
+#[cfg(test)]
+mod categorize;
+#[cfg(test)]
+mod openclaw_distiller;
+#[cfg(test)]
+pub mod openclaw_home;
 
 #[derive(Parser, Clone)]
 pub struct AgentArgs {

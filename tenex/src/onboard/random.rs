@@ -1,6 +1,6 @@
 //! Username generator — `<adjective>-<noun>` from two fixed 30-element lists.
 //!
-//! Source: `src/commands/onboard.ts:1516-1532`. The TS uses
+//! Source: `src/commands/onboard.ts:1181-1197`. The TS uses
 //! `Math.floor(Math.random() * arr.length)` over the JS `Math.random()`
 //! engine; we use a small xorshift64 PRNG seeded from `SystemTime` for
 //! uniform-enough output without pulling a runtime dependency. The lists
@@ -10,14 +10,14 @@
 use std::cell::Cell;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-/// Verbatim list from `src/commands/onboard.ts:1516-1520`.
+/// Verbatim list from `src/commands/onboard.ts:1181-1186`.
 pub const ADJECTIVES: &[&str] = &[
     "swift", "bright", "calm", "bold", "keen", "warm", "wild", "cool", "fair", "glad", "brave",
     "clever", "deft", "eager", "fierce", "gentle", "happy", "jolly", "kind", "lively", "mighty",
     "noble", "plucky", "quick", "sharp", "steady", "true", "vivid", "witty", "zesty",
 ];
 
-/// Verbatim list from `src/commands/onboard.ts:1522-1526`.
+/// Verbatim list from `src/commands/onboard.ts:1187-1192`.
 pub const NOUNS: &[&str] = &[
     "fox", "owl", "bear", "wolf", "hawk", "deer", "lynx", "crow", "hare", "wren", "otter", "raven",
     "crane", "finch", "panda", "tiger", "eagle", "cobra", "bison", "whale", "badger", "falcon",
@@ -65,7 +65,7 @@ mod tests {
     #[test]
     fn lists_are_thirty_each() {
         // The spec calls out "30 adjectives" and "30 nouns" verbatim
-        // (`src/commands/onboard.ts:1516, 1522`).
+        // (`src/commands/onboard.ts:1181, 1187`).
         assert_eq!(ADJECTIVES.len(), 30);
         assert_eq!(NOUNS.len(), 30);
     }

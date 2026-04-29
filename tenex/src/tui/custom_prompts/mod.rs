@@ -27,7 +27,9 @@ pub mod raw_mode;
 pub mod relay_prompt;
 pub mod role_menu_prompt;
 pub mod section_menu_prompt;
-pub mod variant_list_prompt;
+
+#[cfg(test)]
+mod variant_list_prompt;
 
 // Re-exports below cover symbols that are imported by external modules
 // via `custom_prompts::Foo` (rather than the deeper

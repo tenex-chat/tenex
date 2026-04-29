@@ -1,11 +1,13 @@
 //! Onboarding Screen 1: Identity.
 //!
 //! Spec: `tenex/docs/tui-port/01-cli-entrypoint-and-onboarding.md` §"Screen 1".
-//! Source: `src/commands/onboard.ts:1220-1314`.
+//! Source: `src/commands/onboard.ts:898-991` (TS file was 1316 lines when
+//! the spec was written; refactors trimmed it to 1216 — line numbers
+//! cited inline below match the live source).
 //!
 //! When the user passes `--pubkey <pubkeys...>` on the CLI, this screen is
-//! skipped entirely (handled in the parent state machine — `runOnboarding`,
-//! `:1220-1222`). When run interactively:
+//! skipped entirely (handled in the parent state machine — `runOnboarding`).
+//! When run interactively:
 //!
 //! 1. **1.A** — choose `Create a new identity` or `I have an existing one (import nsec)`.
 //! 2. **1.B / 1.C** *(create branch)* — username prompt with random default
@@ -35,14 +37,15 @@ pub struct IdentityResult {
     pub whitelisted_pubkeys: Vec<String>,
     /// Hex-encoded private key of the user.
     pub user_private_key_hex: String,
-    /// Set only on the `create` branch (`:1265`); `None` after `import`.
+    /// Set only on the `create` branch (`:937`); `None` after `import`.
     pub generated_nsec: Option<String>,
     /// Username typed during `create`; `None` after `import`.
     pub new_identity_username: Option<String>,
 }
 
 /// Drive the identity screen. `json_mode` suppresses the post-acceptance
-/// summary lines (matches `:1267`, `:1310` — both gated on `!jsonMode`).
+/// summary lines (matches `:941` create, `:984` import — both gated on
+/// `!jsonMode`).
 pub fn run(json_mode: bool) -> Result<IdentityResult> {
     let choice = prompts::select(
         "How do you want to set up your identity?",
@@ -133,8 +136,8 @@ fn run_import(json_mode: bool) -> Result<IdentityResult> {
 }
 
 /// Validate the username field. Errors must match the TS strings byte-for-byte:
-/// - `"Username is required"` (`:1245`)
-/// - `"Username must be at least 2 characters"` (`:1246`)
+/// - `"Username is required"` (`:920`)
+/// - `"Username must be at least 2 characters"` (`:921`)
 pub fn validate_username(input: &str) -> Result<(), &'static str> {
     let trimmed = input.trim();
     if trimmed.is_empty() {
@@ -147,9 +150,9 @@ pub fn validate_username(input: &str) -> Result<(), &'static str> {
 }
 
 /// Validate the nsec field. Errors must match the TS strings byte-for-byte:
-/// - `"nsec is required"` (`:1287`)
-/// - `"Invalid nsec"` when decode succeeds but the type is not `nsec` (`:1290`)
-/// - `"Invalid nsec format"` when decode throws (`:1292`)
+/// - `"nsec is required"` (`:960`)
+/// - `"Invalid nsec"` when decode succeeds but the type is not `nsec` (`:963`)
+/// - `"Invalid nsec format"` when decode throws (`:966`)
 pub fn validate_nsec(input: &str) -> Result<(), &'static str> {
     let trimmed = input.trim();
     if trimmed.is_empty() {

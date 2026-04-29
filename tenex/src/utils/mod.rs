@@ -4,9 +4,14 @@
 //! functions only — no I/O, no Nostr, no LLM. Anything that does I/O
 //! belongs in `crate::store` or its own substrate module.
 
-pub mod error_formatter;
 pub mod identifiers;
-pub mod parse_dotenv;
 pub mod path_expand;
-pub mod telegram_identifiers;
-pub mod time;
+
+#[cfg(test)]
+mod error_formatter;
+#[cfg(test)]
+mod parse_dotenv;
+#[cfg(test)]
+mod telegram_identifiers;
+#[cfg(test)]
+mod time;

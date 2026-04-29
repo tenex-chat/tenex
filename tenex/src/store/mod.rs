@@ -17,27 +17,35 @@
 
 use std::path::PathBuf;
 
-pub mod agent_home_env;
-pub mod agent_home_files;
 pub mod agent_storage;
 pub mod api_keys;
 pub mod atomic;
 pub mod conversation_disk_reader;
 pub mod embed;
-pub mod embed_models;
-pub mod event_ids;
-pub mod llm_config_options;
 pub mod llms;
-pub mod mcp;
 pub mod models_dev;
 pub mod path_safety;
-pub mod project_ids;
 pub mod project_members;
 pub mod project_mutation;
 pub mod provider_ids;
 pub mod providers;
 pub mod role_categories;
 pub mod tenex_config;
+
+#[cfg(test)]
+mod agent_home_env;
+#[cfg(test)]
+mod agent_home_files;
+#[cfg(test)]
+mod embed_models;
+#[cfg(test)]
+mod event_ids;
+#[cfg(test)]
+mod llm_config_options;
+#[cfg(test)]
+mod mcp;
+#[cfg(test)]
+mod project_ids;
 
 /// Resolve the TENEX base directory. Precedence:
 ///

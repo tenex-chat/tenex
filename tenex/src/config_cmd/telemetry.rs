@@ -29,7 +29,6 @@ const DEFAULT_STORE_FULL_MESSAGE_TEXT: bool = true;
 /// at `ConfigService.ts:154-177`.
 #[derive(Debug, Clone)]
 pub struct ResolvedAnalysis {
-    pub enabled: bool,
     pub db_path: PathBuf,
     pub retention_days: u64,
     pub large_message_threshold_tokens: u64,
@@ -42,7 +41,6 @@ impl ResolvedAnalysis {
     /// Compute the resolved defaults given the TENEX base directory.
     pub fn from_base_dir(base_dir: &std::path::Path) -> Self {
         Self {
-            enabled: false,
             db_path: base_dir.join("data").join("trace-analysis.db"),
             retention_days: DEFAULT_RETENTION_DAYS,
             large_message_threshold_tokens: DEFAULT_LARGE_MESSAGE_THRESHOLD_TOKENS,

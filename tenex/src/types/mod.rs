@@ -3,6 +3,8 @@
 //! — including its strictness — so prompts wired to these match the source
 //! byte-for-byte (error messages verbatim per spec docs 07, 08).
 
-pub mod pubkey;
 pub mod relay;
 pub mod telegram;
+
+#[cfg(test)]
+pub mod pubkey;

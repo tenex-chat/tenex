@@ -44,6 +44,7 @@ pub struct OpenClawAgent {
 }
 
 /// Mirror `OpenClawCredential` (`openclaw-reader.ts:133-136`).
+#[cfg(test)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OpenClawCredential {
     pub provider: String,
@@ -199,7 +200,8 @@ pub fn read_openclaw_agents(state_dir: &Path) -> Result<Vec<OpenClawAgent>> {
 /// `(provider, api_key)` pairs from `profiles[*]`. Profiles are sorted
 /// `:default` first, then alphabetically; the first occurrence per
 /// provider wins.
-pub fn read_openclaw_credentials(state_dir: &Path) -> Result<Vec<OpenClawCredential>> {
+#[cfg(test)]
+fn read_openclaw_credentials(state_dir: &Path) -> Result<Vec<OpenClawCredential>> {
     let profile_path = state_dir
         .join("agents")
         .join("main")
@@ -259,6 +261,7 @@ pub fn read_openclaw_credentials(state_dir: &Path) -> Result<Vec<OpenClawCredent
 
 /// Mirror `convertModelFormat` (`openclaw-reader.ts:191-195`):
 /// replace the **first** `/` with `:`. Strings without `/` pass through.
+#[cfg(test)]
 pub fn convert_model_format(model: &str) -> String {
     match model.find('/') {
         Some(i) => format!("{}:{}", &model[..i], &model[i + 1..]),
