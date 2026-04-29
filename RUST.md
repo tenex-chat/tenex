@@ -1,6 +1,6 @@
 # TENEX Rust Adoption Status
 
-_Last updated: 2026-04-29 (thirty-third pass). Auto-maintained by scheduled debt check._
+_Last updated: 2026-04-29 (thirty-fourth pass). Auto-maintained by scheduled debt check._
 
 ---
 
@@ -270,7 +270,7 @@ Note: `conversation_get`, `conversation_list`, `conversation_search`, `kill`, `s
 
 ## Compilation Status
 
-**As of 2026-04-29 (thirty-third debt check pass): workspace compiles clean — zero errors, zero warnings. `cargo test --workspace`: 1374 tests passing across all crates.**
+**As of 2026-04-29 (thirty-fourth debt check pass): workspace compiles clean — zero errors, zero warnings. `cargo test --workspace`: 1377 tests passing across all crates.**
 
 **MILESTONE: Tool call/result history is now fully wired.** `RecordingTool` wrappers capture every tool invocation (call_id, args, result) into a shared `Arc<ToolRecorder>`. After each turn, records are written to `tool_messages` and the assistant `TurnRecord` carries the `tool_calls` slice. `projection.rs` interleaves `ToolResult` messages immediately after their parent assistant row (sorted by timestamp, agent-pubkey-filtered). The `CtxMessage::ToolResult` filter in `main.rs` is removed — providers now receive correctly paired `tool_use`→`tool_result` sequences.
 
@@ -302,6 +302,10 @@ Resolved between thirty-second and thirty-third passes:
 - **`TENEX_CONVERSATION_ID` env override**: `tenex-agent main.rs` honours `TENEX_CONVERSATION_ID` when set, allowing `tenex runtime` to hand an explicit conversation ID to child agent processes.
 - **Warning count**: 0.
 - **Test count**: 1374 (up from 1371).
+
+Resolved between thirty-third and thirty-fourth passes:
+- **RUST-AGENT-SPEC.md**: Added `TENEX_CONVERSATION_ID` and `TENEX_COMPLETION_RECIPIENT_PUBKEY` env vars to the invocation section. Added delegation event tags section documenting the `["delegation", parent_root_id]` tag emitted by fresh delegations. Added delegation events to the stdout protocol list.
+- **Test count**: 1377 (up from 1374).
 
 Resolved between thirty-first and thirty-second passes:
 - **`tenex-mcp` crate added**: Project-scoped MCP runtime bridge — loads `mcp.json`, binds a Unix socket per project, proxies tool calls, exposes `ToolManifest` for agent discovery. Replaces `tenex/src/store/mcp.rs`. `McpProxyTool` in `tenex-agent` routes MCP calls through this bridge.

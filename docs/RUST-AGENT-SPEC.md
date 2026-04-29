@@ -12,6 +12,10 @@ TENEX_PROJECT_ID=<project-id> cargo run -p tenex-agent -- <agent.json> < trigger
 
 `TENEX_MCP_MANIFEST` and `TENEX_MCP_SOCKET` are optional and set only by `tenex-runtime` when the selected agent has `default.mcp` access to project `.mcp.json` servers. The manifest contains tool definitions; the socket is the side channel for MCP tool calls so stdout remains reserved for signed Nostr NDJSON.
 
+`TENEX_CONVERSATION_ID` is optional. When set (and a valid 64-char hex event ID), it overrides the conversation ID derived from the inbound triggering event root. Used by `tenex runtime` when handing an explicit conversation ID to child agent processes (e.g. in probe/replay runs).
+
+`TENEX_COMPLETION_RECIPIENT_PUBKEY` is optional. When set (64-char hex pubkey), it is used as the `completion_recipient` in `EmitState` — the pubkey that should receive the final completion event as a `p`-tag. Used by `tenex runtime` so delegation children route their replies back to the originating parent rather than the triggering event's author.
+
 ## I/O Protocol
 
 **stdin** — one JSON object: a complete Nostr event (id, pubkey, created_at, kind, tags, content, sig).
@@ -20,6 +24,7 @@ TENEX_PROJECT_ID=<project-id> cargo run -p tenex-agent -- <agent.json> < trigger
 - Zero or more `tool-use` events (kind:1, `["tool", name]` tag) emitted before each tool call.
 - Zero or more streaming text delta events (kind:24135) emitted per token chunk during each LLM turn.
 - Zero or more intermediate `conversation` events (kind:1, no p-tag, no status tag) emitted after each LLM turn (multi-turn tool sequences only).
+- Zero or more `delegation` events (kind:1, `["p", recipient_pubkey]` tag) emitted when the agent calls `delegate`, `delegate_crossproject`, or `delegate_followup`.
 - Exactly one `completion` event (kind:1, with p-tag and `status=completed`) as the final line.
 
 **stderr** — human-readable progress/debug output. Never parsed.
@@ -46,6 +51,19 @@ TENEX_PROJECT_ID=<project-id> cargo run -p tenex-agent -- <agent.json> < trigger
 ["e", root_event_id, "", "root"]   ← same threading
 ```
 No p-tag, no status tag.
+
+### Delegation event tags
+
+Fresh delegations (no prior delegation event to follow up on):
+```
+["p", recipient_pubkey]            ← routes to target agent
+["delegation", parent_root_id]     ← signals parent conversation for completion routing
+["a", project_ref]                 ← project context
+["branch", branch_name]            ← optional; forwarded from inbound event if unset
+```
+`["delegation", parent_root_id]` is emitted via `delegation_parent_tag(root_event_id)` in `encoder.rs` only on fresh delegations that have a `conversation_root` (i.e. the delegating agent is already in a known conversation). It allows `tenex runtime` to route child completions back to the parent without any in-process state.
+
+Followup delegations carry `["e", original_delegation_event_id, "", "reply"]` instead of the delegation tag, and no `e` root tag.
 
 ## Agent Configuration (agent.json)
 
