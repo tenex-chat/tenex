@@ -233,8 +233,10 @@ fn format_claude_setup_token_hint() -> String {
 /// The parenthesised hint is the only dim-wrapped portion; everything
 /// else is plain. Mirror byte-for-byte: `<displayName> label \x1b[2m(optional)\x1b[22m:`.
 fn format_label_prompt(display_name: &str) -> String {
-    use crate::tui::theme::{DIM_CLOSE, DIM_OPEN};
-    format!("{display_name} label {DIM_OPEN}(optional){DIM_CLOSE}:")
+    format!(
+        "{display_name} label {}:",
+        crate::tui::theme::chalk_dim("(optional)"),
+    )
 }
 
 /// Open the appropriate input prompt for `provider_id`. Returns

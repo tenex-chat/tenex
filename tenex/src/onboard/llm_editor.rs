@@ -19,7 +19,6 @@
 //! is its own subsystem (provider-aware streaming + 30s timeout +
 //! four-string error-hint mapping).
 
-use std::fmt::Write as _;
 
 use anyhow::{anyhow, Context, Result};
 
