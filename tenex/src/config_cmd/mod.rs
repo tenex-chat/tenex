@@ -712,8 +712,10 @@ mod tests {
     fn menu_entry_values_match_ts_subcommand_names_in_order() {
         let s = build_menu_sections();
         let values: Vec<String> = collect_entries(&s).into_iter().map(|(v, _)| v).collect();
-        // Per spec 02 §2.4 / `index.ts:139-154`, the same 16 commands are
-        // attached as flat subcommands in this exact order.
+        // Per spec 02 §2.4 / `index.ts:137-151`, the same 15 commands are
+        // attached as flat subcommands in this exact order. (Spec
+        // doc 02 was written when there were 16; the NIP-46 entry was
+        // removed in TS commit `a42db124` — see QUESTIONS.md.)
         assert_eq!(
             values,
             vec![

@@ -1,7 +1,7 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
@@ -9,6 +9,7 @@ use clap::Parser;
 use nostr::JsonUtil;
 use nostr_sdk::prelude::*;
 use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter};
 use tracing::{info, info_span, warn, Instrument};
 
@@ -27,6 +28,143 @@ pub struct RuntimeArgs {
     /// TENEX base directory (default: $TENEX_BASE_DIR or ~/.tenex).
     #[arg(long, value_name = "PATH")]
     pub base_dir: Option<PathBuf>,
+}
+
+#[derive(Clone)]
+struct RuntimeShared {
+    client: Client,
+    backend_keys: Option<Keys>,
+    project_addr: String,
+    whitelisted_pubkeys: Vec<String>,
+    project_id: String,
+    base_dir: PathBuf,
+    agent_binary: PathBuf,
+    agents: Arc<Vec<Agent>>,
+    project_agents: Arc<Vec<ProjectAgent>>,
+    agent_pubkeys: Arc<HashSet<String>>,
+    store: Arc<Mutex<ConversationStore>>,
+    coordinator: Arc<Mutex<DispatchCoordinator>>,
+    seen: Arc<Mutex<HashSet<EventId>>>,
+}
+
+#[derive(Clone)]
+struct DispatchJob {
+    event: Event,
+    agent: Agent,
+    conv_id: String,
+    agent_json: PathBuf,
+}
+
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+struct DispatchKey {
+    agent_pubkey: String,
+    conversation_id: String,
+}
+
+impl DispatchKey {
+    fn new(agent_pubkey: impl Into<String>, conversation_id: impl Into<String>) -> Self {
+        Self {
+            agent_pubkey: agent_pubkey.into(),
+            conversation_id: conversation_id.into(),
+        }
+    }
+}
+
+#[derive(Default)]
+struct DispatchCoordinator {
+    entries: HashMap<DispatchKey, DispatchEntry>,
+}
+
+#[derive(Default)]
+struct DispatchEntry {
+    active_runs: usize,
+    driver_busy: bool,
+    queued: VecDeque<DispatchJob>,
+}
+
+impl DispatchCoordinator {
+    fn dispatch_inbound(&mut self, job: DispatchJob) -> Option<DispatchJob> {
+        let key = DispatchKey::new(job.agent.pubkey.clone(), job.conv_id.clone());
+        let entry = self.entries.entry(key).or_default();
+
+        if entry.active_runs == 0 {
+            entry.active_runs = 1;
+            entry.driver_busy = true;
+            return Some(job);
+        }
+
+        if entry.driver_busy {
+            entry.queued.push_back(job);
+            return None;
+        }
+
+        entry.active_runs += 1;
+        entry.driver_busy = true;
+        Some(job)
+    }
+
+    fn mark_driver_busy(&mut self, key: &DispatchKey) {
+        if let Some(entry) = self.entries.get_mut(key) {
+            entry.driver_busy = true;
+        }
+    }
+
+    fn mark_driver_free(&mut self, key: &DispatchKey) {
+        let Some(entry) = self.entries.get_mut(key) else {
+            return;
+        };
+        entry.driver_busy = false;
+    }
+
+    fn drop_queued_matching(
+        &mut self,
+        key: &DispatchKey,
+        mut should_drop: impl FnMut(&DispatchJob) -> bool,
+    ) {
+        if let Some(entry) = self.entries.get_mut(key) {
+            entry.queued.retain(|job| !should_drop(job));
+        }
+    }
+
+    fn finish_run(&mut self, key: &DispatchKey) -> Option<DispatchJob> {
+        let Some(entry) = self.entries.get_mut(key) else {
+            return None;
+        };
+
+        entry.active_runs = entry.active_runs.saturating_sub(1);
+        if entry.active_runs == 0 {
+            entry.driver_busy = false;
+        }
+
+        let next = if !entry.driver_busy {
+            if let Some(job) = entry.queued.pop_back() {
+                entry.queued.clear();
+                entry.active_runs += 1;
+                entry.driver_busy = true;
+                Some(job)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        if entry.active_runs == 0 && entry.queued.is_empty() {
+            self.entries.remove(key);
+        }
+
+        next
+    }
+
+    fn active_agent_pubkeys(&self) -> Vec<String> {
+        let mut out = Vec::new();
+        for (key, entry) in &self.entries {
+            if entry.active_runs > 0 && !out.contains(&key.agent_pubkey) {
+                out.push(key.agent_pubkey.clone());
+            }
+        }
+        out
+    }
 }
 
 pub async fn run(args: RuntimeArgs) -> Result<()> {
@@ -50,10 +188,10 @@ pub async fn run(args: RuntimeArgs) -> Result<()> {
         anyhow::bail!("project '{}' has no agents", meta.d_tag);
     }
 
-    let store = Mutex::new(
+    let store = Arc::new(Mutex::new(
         ConversationsProject::open_conversations(&meta.d_tag, &base_dir)
             .context("opening conversation store")?,
-    );
+    ));
 
     // Loop prevention: ignore events authored by any project agent.
     let agent_pubkeys: HashSet<String> = agents.iter().map(|a| a.pubkey.clone()).collect();
@@ -111,9 +249,11 @@ pub async fn run(args: RuntimeArgs) -> Result<()> {
         .iter()
         .filter_map(|a| PublicKey::from_hex(&a.pubkey).ok())
         .collect();
+    let mut p_authors = authors.clone();
+    p_authors.extend(agent_keys.iter().copied());
     let filter_p = Filter::new()
         .kind(Kind::TextNote)
-        .authors(authors)
+        .authors(p_authors)
         .pubkeys(agent_keys)
         .since(since);
 
@@ -156,8 +296,22 @@ pub async fn run(args: RuntimeArgs) -> Result<()> {
     }
 
     let agent_binary = find_agent_binary();
-    // Deduplicate across the two overlapping subscriptions.
-    let mut seen: HashSet<EventId> = HashSet::new();
+    let coordinator = Arc::new(Mutex::new(DispatchCoordinator::default()));
+    let shared = Arc::new(RuntimeShared {
+        client: client.clone(),
+        backend_keys: backend_keys.clone(),
+        project_addr: project_addr.clone(),
+        whitelisted_pubkeys: cfg.whitelisted_pubkeys.clone(),
+        project_id: meta.d_tag.clone(),
+        base_dir: base_dir.clone(),
+        agent_binary,
+        agents: Arc::new(agents.clone()),
+        project_agents: Arc::new(project_agents.clone()),
+        agent_pubkeys: Arc::new(agent_pubkeys.clone()),
+        store: store.clone(),
+        coordinator,
+        seen: Arc::new(Mutex::new(HashSet::new())),
+    });
 
     let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
     let mut notifications = client.notifications();
@@ -167,10 +321,12 @@ pub async fn run(args: RuntimeArgs) -> Result<()> {
             result = notifications.recv() => {
                 match result {
                     Ok(RelayPoolNotification::Event { event, .. }) => {
-                        if !seen.insert(event.id) {
+                        if !mark_seen(&shared.seen, event.id) {
                             continue;
                         }
-                        if agent_pubkeys.contains(&event.pubkey.to_hex()) {
+                        if shared.agent_pubkeys.contains(&event.pubkey.to_hex())
+                            && !targets_project_agent(&event, shared.agent_pubkeys.as_ref())
+                        {
                             continue;
                         }
                         let short = &event.id.to_hex()[..8];
@@ -182,53 +338,14 @@ pub async fn run(args: RuntimeArgs) -> Result<()> {
                                 let agent_json = base_dir
                                     .join("agents")
                                     .join(format!("{}.json", agent.pubkey));
-
-                                if let Some(ref keys) = backend_keys {
-                                    send_operations_status(
-                                        &client,
-                                        keys,
-                                        &conv_id,
-                                        &project_addr,
-                                        &cfg.whitelisted_pubkeys,
-                                        &[agent.pubkey.as_str()],
-                                    )
-                                    .await;
-                                }
-
-                                let dispatch_span = info_span!(
-                                    "tenex.runtime.dispatch",
-                                    event.id = %event.id.to_hex(),
-                                    event.pubkey = %event.pubkey.to_hex(),
-                                    conversation.id = %conv_id,
-                                    project.id = %meta.d_tag,
-                                    agent.slug = %agent.slug,
-                                    agent.pubkey = %agent.pubkey,
-                                );
-                                if let Err(e) = run_agent(
-                                    &client,
-                                    &event,
-                                    &agent_json,
-                                    &meta.d_tag,
-                                    &base_dir,
-                                    &agent_binary,
-                                    &store,
-                                )
-                                .instrument(dispatch_span)
-                                .await
-                                {
-                                    warn!(event_id = short, agent = %agent.slug, error = %e, "agent run failed");
-                                }
-
-                                if let Some(ref keys) = backend_keys {
-                                    send_operations_status(
-                                        &client,
-                                        keys,
-                                        &conv_id,
-                                        &project_addr,
-                                        &cfg.whitelisted_pubkeys,
-                                        &[],
-                                    )
-                                    .await;
+                                let job = DispatchJob {
+                                    event: *event,
+                                    agent: agent.clone(),
+                                    conv_id,
+                                    agent_json,
+                                };
+                                if let Err(e) = accept_dispatch(shared.clone(), job).await {
+                                    warn!(event_id = short, agent = %agent.slug, error = %e, "dispatch failed");
                                 }
                             }
                             Err(e) => {
@@ -255,6 +372,343 @@ pub async fn run(args: RuntimeArgs) -> Result<()> {
 
     client.disconnect().await;
     Ok(())
+}
+
+async fn accept_dispatch(shared: Arc<RuntimeShared>, job: DispatchJob) -> Result<()> {
+    persist_user_message(&shared.store, &job.event, &job.conv_id)?;
+    let maybe_start = {
+        let mut coordinator = shared.coordinator.lock().unwrap();
+        coordinator.dispatch_inbound(job)
+    };
+
+    if let Some(job) = maybe_start {
+        publish_active_status(&shared, &job.conv_id).await;
+        spawn_dispatch_job(shared, job);
+    }
+    Ok(())
+}
+
+fn spawn_dispatch_job(shared: Arc<RuntimeShared>, job: DispatchJob) {
+    let key = DispatchKey::new(job.agent.pubkey.clone(), job.conv_id.clone());
+    tokio::spawn(async move {
+        let previous_trace = conversation_trace_carrier(&shared.store, &job.conv_id);
+        let dispatch_span = info_span!(
+            "tenex.runtime.dispatch",
+            event.id = %job.event.id.to_hex(),
+            event.pubkey = %job.event.pubkey.to_hex(),
+            conversation.id = %job.conv_id,
+            project.id = %shared.project_id,
+            agent.slug = %job.agent.slug,
+            agent.pubkey = %job.agent.pubkey,
+        );
+        if let Some(carrier) = previous_trace.as_ref() {
+            tenex_telemetry::add_link_to_span(
+                &dispatch_span,
+                carrier,
+                vec![
+                    (
+                        "tenex.link.kind",
+                        "conversation.previous_dispatch".to_string(),
+                    ),
+                    ("conversation.id", job.conv_id.clone()),
+                    ("agent.pubkey", job.agent.pubkey.clone()),
+                ],
+            );
+        }
+
+        let run_result = async {
+            if let Err(e) = remember_current_conversation_trace(&shared.store, &job) {
+                warn!(
+                    conversation_id = %job.conv_id,
+                    error = %e,
+                    "failed to persist conversation trace context"
+                );
+            }
+            run_agent(shared.clone(), job.clone(), key.clone()).await
+        }
+        .instrument(dispatch_span)
+        .await;
+        if let Err(e) = run_result {
+            warn!(
+                event_id = %job.event.id.to_hex()[..8],
+                agent = %job.agent.slug,
+                error = %e,
+                "agent run failed"
+            );
+        }
+
+        let consumed = consumed_message_event_ids(&shared.store, &job.conv_id, &job.agent.pubkey);
+        let maybe_next = {
+            let mut coordinator = shared.coordinator.lock().unwrap();
+            coordinator
+                .drop_queued_matching(&key, |queued| consumed.contains(&queued.event.id.to_hex()));
+            coordinator.finish_run(&key)
+        };
+        publish_active_status(&shared, &job.conv_id).await;
+        if let Some(next) = maybe_next {
+            publish_active_status(&shared, &next.conv_id).await;
+            spawn_dispatch_job(shared, next);
+        }
+    });
+}
+
+async fn dispatch_project_agent_target(shared: Arc<RuntimeShared>, event: &Event) -> Result<()> {
+    if !targets_project_agent(event, shared.agent_pubkeys.as_ref()) {
+        return Ok(());
+    }
+    if !mark_seen(&shared.seen, event.id) {
+        return Ok(());
+    }
+
+    let agent = select_agent(event, &shared.agents, &shared.project_agents)?.clone();
+    let conv_id = conversation_id_from_event(event);
+    let agent_json = shared
+        .base_dir
+        .join("agents")
+        .join(format!("{}.json", agent.pubkey));
+    accept_dispatch(
+        shared,
+        DispatchJob {
+            event: event.clone(),
+            agent,
+            conv_id,
+            agent_json,
+        },
+    )
+    .await
+}
+
+fn mark_seen(seen: &Arc<Mutex<HashSet<EventId>>>, event_id: EventId) -> bool {
+    let mut seen = seen.lock().unwrap();
+    seen.insert(event_id)
+}
+
+fn conversation_trace_carrier(
+    store: &Arc<Mutex<ConversationStore>>,
+    conv_id: &str,
+) -> Option<tenex_telemetry::TraceCarrier> {
+    let Ok(conversation) = store.lock().unwrap().get_conversation(conv_id) else {
+        return None;
+    };
+    trace_carrier_from_runtime_state(&conversation?.runtime_state)
+}
+
+fn remember_current_conversation_trace(
+    store: &Arc<Mutex<ConversationStore>>,
+    job: &DispatchJob,
+) -> Result<()> {
+    let Some(carrier) = tenex_telemetry::current_trace_context() else {
+        return Ok(());
+    };
+    let event_id = job.event.id.to_hex();
+    let mut store = store.lock().unwrap();
+    store.update_runtime_state(&job.conv_id, |state| {
+        write_trace_carrier_to_runtime_state(state, &carrier, &event_id, &job.agent.pubkey);
+    })?;
+    Ok(())
+}
+
+fn trace_carrier_from_runtime_state(state: &Value) -> Option<tenex_telemetry::TraceCarrier> {
+    let trace = state
+        .get("rustRuntime")?
+        .get("telemetry")?
+        .get("lastTrace")?;
+    let traceparent = trace.get("traceparent")?.as_str()?.to_string();
+    let tracestate = trace
+        .get("tracestate")
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    Some(tenex_telemetry::TraceCarrier {
+        traceparent,
+        tracestate,
+    })
+}
+
+fn write_trace_carrier_to_runtime_state(
+    state: &mut Value,
+    carrier: &tenex_telemetry::TraceCarrier,
+    trigger_event_id: &str,
+    agent_pubkey: &str,
+) {
+    let state = ensure_json_object(state);
+    let rust_runtime = ensure_child_object(state, "rustRuntime");
+    let telemetry = ensure_child_object(rust_runtime, "telemetry");
+
+    let mut trace = Map::new();
+    trace.insert(
+        "traceparent".to_string(),
+        Value::String(carrier.traceparent.clone()),
+    );
+    if let Some(tracestate) = carrier.tracestate.clone() {
+        trace.insert("tracestate".to_string(), Value::String(tracestate));
+    }
+    trace.insert(
+        "triggerEventId".to_string(),
+        Value::String(trigger_event_id.to_string()),
+    );
+    trace.insert(
+        "agentPubkey".to_string(),
+        Value::String(agent_pubkey.to_string()),
+    );
+    trace.insert("updatedAt".to_string(), Value::Number(now_ms().into()));
+
+    telemetry.insert("lastTrace".to_string(), Value::Object(trace));
+}
+
+fn ensure_json_object(value: &mut Value) -> &mut Map<String, Value> {
+    if !value.is_object() {
+        *value = Value::Object(Map::new());
+    }
+    value.as_object_mut().expect("value just set to object")
+}
+
+fn ensure_child_object<'a>(
+    object: &'a mut Map<String, Value>,
+    key: &str,
+) -> &'a mut Map<String, Value> {
+    let value = object
+        .entry(key.to_string())
+        .or_insert_with(|| Value::Object(Map::new()));
+    ensure_json_object(value)
+}
+
+async fn publish_active_status(shared: &RuntimeShared, conv_id: &str) {
+    let Some(keys) = shared.backend_keys.as_ref() else {
+        return;
+    };
+    let active = {
+        let coordinator = shared.coordinator.lock().unwrap();
+        coordinator.active_agent_pubkeys()
+    };
+    let refs: Vec<&str> = active.iter().map(String::as_str).collect();
+    send_operations_status(
+        &shared.client,
+        keys,
+        conv_id,
+        &shared.project_addr,
+        &shared.whitelisted_pubkeys,
+        &refs,
+    )
+    .await;
+}
+
+fn persist_user_message(
+    store: &Arc<Mutex<ConversationStore>>,
+    event: &Event,
+    conv_id: &str,
+) -> Result<()> {
+    let ts = event.created_at.as_secs() as i64;
+    let targeted_pubkeys = p_tag_pubkeys(event);
+    let s = store.lock().unwrap();
+    s.ensure_conversation(conv_id)?;
+    s.append_message(
+        conv_id,
+        &NewMessage {
+            record_id: format!("event:{}", event.id.to_hex()),
+            nostr_event_id: Some(event.id.to_hex()),
+            author_pubkey: event.pubkey.to_hex(),
+            sender_pubkey: None,
+            ral: None,
+            message_type: "text".to_string(),
+            role: Some("user".to_string()),
+            content: event.content.clone(),
+            timestamp: Some(ts),
+            targeted_pubkeys: if targeted_pubkeys.is_empty() {
+                None
+            } else {
+                Some(targeted_pubkeys)
+            },
+            sender_principal: None,
+            targeted_principals: None,
+            tool_data: None,
+            delegation_marker: None,
+            human_readable: None,
+            transcript_tool_attributes: None,
+        },
+    )?;
+    Ok(())
+}
+
+fn p_tag_pubkeys(event: &Event) -> Vec<String> {
+    event
+        .tags
+        .iter()
+        .filter_map(|tag| {
+            let parts = tag.as_slice();
+            if parts.first().is_some_and(|head| head == "p") {
+                parts.get(1).cloned()
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+fn consumed_message_event_ids(
+    store: &Arc<Mutex<ConversationStore>>,
+    conv_id: &str,
+    agent_pubkey: &str,
+) -> HashSet<String> {
+    let Ok(conversation) = store.lock().unwrap().get_conversation(conv_id) else {
+        return HashSet::new();
+    };
+    let Some(conversation) = conversation else {
+        return HashSet::new();
+    };
+    conversation
+        .runtime_state
+        .get("rustRuntime")
+        .and_then(|v| v.get("consumedMessages"))
+        .and_then(serde_json::Value::as_object)
+        .map(|messages| {
+            messages
+                .iter()
+                .filter_map(|(event_id, meta)| {
+                    let same_agent = meta.get("agentPubkey").and_then(serde_json::Value::as_str)
+                        == Some(agent_pubkey);
+                    let same_conversation = meta
+                        .get("conversationId")
+                        .and_then(serde_json::Value::as_str)
+                        == Some(conv_id);
+                    if same_agent && same_conversation {
+                        Some(event_id.clone())
+                    } else {
+                        None
+                    }
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+async fn handle_agent_runtime_signal(shared: Arc<RuntimeShared>, key: &DispatchKey, event: &Event) {
+    if event.kind == Kind::Custom(24135) {
+        let mut coordinator = shared.coordinator.lock().unwrap();
+        coordinator.mark_driver_busy(key);
+        return;
+    }
+
+    if event_has_tag(event, "tool") {
+        let mut coordinator = shared.coordinator.lock().unwrap();
+        coordinator.mark_driver_free(key);
+    }
+}
+
+fn event_has_tag(event: &Event, tag_name: &str) -> bool {
+    event
+        .tags
+        .iter()
+        .any(|tag| tag.as_slice().first().is_some_and(|head| head == tag_name))
+}
+
+fn targets_project_agent(event: &Event, agent_pubkeys: &HashSet<String>) -> bool {
+    let p_kind = TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::P));
+    event
+        .tags
+        .iter()
+        .filter(|tag| tag.kind() == p_kind)
+        .filter_map(|tag| tag.content())
+        .any(|pubkey| agent_pubkeys.contains(pubkey))
 }
 
 fn select_agent<'a>(
@@ -294,58 +748,26 @@ fn select_agent<'a>(
     )
 }
 
-async fn run_agent(
-    client: &Client,
-    event: &Event,
-    agent_json: &Path,
-    project_id: &str,
-    base_dir: &Path,
-    agent_binary: &Path,
-    store: &Mutex<ConversationStore>,
-) -> Result<()> {
-    if !agent_json.exists() {
-        anyhow::bail!("agent JSON not found: {}", agent_json.display());
+async fn run_agent(shared: Arc<RuntimeShared>, job: DispatchJob, key: DispatchKey) -> Result<()> {
+    if !job.agent_json.exists() {
+        anyhow::bail!("agent JSON not found: {}", job.agent_json.display());
     }
 
-    let conv_id = conversation_id_from_event(event);
-    let ts = event.created_at.as_secs() as i64;
-
-    {
-        let s = store.lock().unwrap();
-        s.ensure_conversation(&conv_id)?;
-        s.append_message(
-            &conv_id,
-            &NewMessage {
-                record_id: format!("event:{}", event.id.to_hex()),
-                nostr_event_id: Some(event.id.to_hex()),
-                author_pubkey: event.pubkey.to_hex(),
-                sender_pubkey: None,
-                ral: None,
-                message_type: "text".to_string(),
-                role: Some("user".to_string()),
-                content: event.content.clone(),
-                timestamp: Some(ts),
-                targeted_pubkeys: None,
-                sender_principal: None,
-                targeted_principals: None,
-                tool_data: None,
-                delegation_marker: None,
-                human_readable: None,
-                transcript_tool_attributes: None,
-            },
-        )?;
-    }
-
-    let mut command = tokio::process::Command::new(agent_binary);
+    let execution_id = uuid::Uuid::new_v4().to_string();
+    let mut command = tokio::process::Command::new(&shared.agent_binary);
     command
-        .arg(agent_json)
-        .env("TENEX_PROJECT_ID", project_id)
-        .env("TENEX_BASE_DIR", base_dir)
+        .arg(&job.agent_json)
+        .env("TENEX_PROJECT_ID", &shared.project_id)
+        .env("TENEX_BASE_DIR", &shared.base_dir)
+        .env("TENEX_EXECUTION_ID", &execution_id)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit());
-    if let Some(traceparent) = tenex_telemetry::current_traceparent() {
-        command.env("TRACEPARENT", traceparent);
+    if let Some(carrier) = tenex_telemetry::current_trace_context() {
+        command.env("TRACEPARENT", carrier.traceparent);
+        if let Some(tracestate) = carrier.tracestate {
+            command.env("TRACESTATE", tracestate);
+        }
     }
     let mut child = command.spawn().context("failed to spawn tenex-agent")?;
 
@@ -353,7 +775,7 @@ async fn run_agent(
     {
         let stdin = child.stdin.take().context("child has no stdin")?;
         let mut w = BufWriter::new(stdin);
-        w.write_all(event.as_json().as_bytes()).await?;
+        w.write_all(job.event.as_json().as_bytes()).await?;
         w.write_all(b"\n").await?;
         w.flush().await?;
     }
@@ -369,14 +791,22 @@ async fn run_agent(
         }
         match Event::from_json(&line) {
             Ok(ev) => {
-                if !should_persist_agent_message(&ev, &conv_id) {
+                handle_agent_runtime_signal(shared.clone(), &key, &ev).await;
+                if let Err(e) = dispatch_project_agent_target(shared.clone(), &ev).await {
+                    warn!(error = %e, "failed to dispatch agent-targeted event");
+                }
+
+                if !should_persist_agent_message(&ev, &job.conv_id) {
+                    if let Err(e) = shared.client.send_event(&ev).await {
+                        warn!(error = %e, "relay publish failed");
+                    }
                     continue;
                 }
                 {
-                    let s = store.lock().unwrap();
+                    let s = shared.store.lock().unwrap();
                     let agent_ts = ev.created_at.as_secs() as i64;
                     if let Err(e) = s.append_message(
-                        &conv_id,
+                        &job.conv_id,
                         &NewMessage {
                             record_id: format!("event:{}", ev.id.to_hex()),
                             nostr_event_id: Some(ev.id.to_hex()),
@@ -399,7 +829,7 @@ async fn run_agent(
                         warn!(error = %e, "failed to persist agent event");
                     }
                 }
-                if let Err(e) = client.send_event(&ev).await {
+                if let Err(e) = shared.client.send_event(&ev).await {
                     warn!(error = %e, "relay publish failed");
                 }
             }
@@ -575,6 +1005,13 @@ fn process_alive(pid: i32) -> bool {
     errno == libc::EPERM
 }
 
+fn now_ms() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -593,6 +1030,140 @@ mod tests {
 
     fn tag(parts: &[&str]) -> Tag {
         Tag::parse(parts.iter().copied()).unwrap()
+    }
+
+    fn agent(pubkey: &str) -> Agent {
+        Agent {
+            pubkey: pubkey.to_string(),
+            slug: pubkey.to_string(),
+            name: pubkey.to_string(),
+            role: None,
+            description: None,
+            instructions: None,
+            use_criteria: None,
+            category: None,
+            inferred_category: None,
+            signer_ref: None,
+            event_id: None,
+            status: None,
+            default_config_json: None,
+            telegram_config_json: None,
+            mcp_servers_json: None,
+        }
+    }
+
+    fn dispatch_job(agent_pubkey: &str, conv_id: &str, content: &str) -> DispatchJob {
+        DispatchJob {
+            event: signed_event(Kind::TextNote, content, Vec::new()),
+            agent: agent(agent_pubkey),
+            conv_id: conv_id.to_string(),
+            agent_json: PathBuf::from("agent.json"),
+        }
+    }
+
+    #[test]
+    fn runtime_state_trace_carrier_round_trips_without_clobbering_existing_state() {
+        let carrier = tenex_telemetry::TraceCarrier {
+            traceparent: "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01".to_string(),
+            tracestate: Some("vendor=value".to_string()),
+        };
+        let mut state = serde_json::json!({
+            "rustRuntime": {
+                "consumedMessages": {
+                    "event1": {"agentPubkey": "agent1", "conversationId": "conv1"}
+                }
+            }
+        });
+
+        write_trace_carrier_to_runtime_state(&mut state, &carrier, "event2", "agent2");
+
+        assert_eq!(trace_carrier_from_runtime_state(&state), Some(carrier));
+        assert!(state
+            .get("rustRuntime")
+            .and_then(|v| v.get("consumedMessages"))
+            .and_then(|v| v.get("event1"))
+            .is_some());
+    }
+
+    #[test]
+    fn dispatch_queues_while_driver_busy_and_runs_newest_when_run_finishes() {
+        let mut coordinator = DispatchCoordinator::default();
+        let first = dispatch_job("agent1", "conv1", "first");
+        let second = dispatch_job("agent1", "conv1", "second");
+        let third = dispatch_job("agent1", "conv1", "third");
+        let key = DispatchKey::new("agent1", "conv1");
+
+        assert_eq!(
+            coordinator.dispatch_inbound(first).unwrap().event.content,
+            "first"
+        );
+        assert!(coordinator.dispatch_inbound(second).is_none());
+        assert!(coordinator.dispatch_inbound(third).is_none());
+
+        coordinator.mark_driver_free(&key);
+        let resumed = coordinator.finish_run(&key).unwrap();
+
+        assert_eq!(resumed.event.content, "third");
+    }
+
+    #[test]
+    fn dispatch_drops_queued_messages_consumed_by_current_run() {
+        let mut coordinator = DispatchCoordinator::default();
+        let first = dispatch_job("agent1", "conv1", "first");
+        let second = dispatch_job("agent1", "conv1", "second");
+        let key = DispatchKey::new("agent1", "conv1");
+
+        assert!(coordinator.dispatch_inbound(first).is_some());
+        assert!(coordinator.dispatch_inbound(second).is_none());
+        coordinator.drop_queued_matching(&key, |job| job.event.content == "second");
+
+        assert!(coordinator.finish_run(&key).is_none());
+    }
+
+    #[test]
+    fn dispatch_starts_concurrent_run_when_existing_run_is_in_tool() {
+        let mut coordinator = DispatchCoordinator::default();
+        let first = dispatch_job("agent1", "conv1", "first");
+        let second = dispatch_job("agent1", "conv1", "second");
+        let key = DispatchKey::new("agent1", "conv1");
+
+        assert!(coordinator.dispatch_inbound(first).is_some());
+        coordinator.mark_driver_free(&key);
+
+        assert_eq!(
+            coordinator.dispatch_inbound(second).unwrap().event.content,
+            "second"
+        );
+    }
+
+    #[test]
+    fn p_tag_pubkeys_extracts_direct_targets() {
+        let recipient = Keys::generate().public_key().to_hex();
+        let event = signed_event(
+            Kind::TextNote,
+            "direct",
+            vec![tag(&["p", recipient.as_str()])],
+        );
+
+        assert_eq!(p_tag_pubkeys(&event), vec![recipient]);
+    }
+
+    #[test]
+    fn agent_authored_delegation_targets_project_agent() {
+        let worker = Keys::generate().public_key().to_hex();
+        let event = signed_event(Kind::TextNote, "delegated task", vec![tag(&["p", &worker])]);
+        let agent_pubkeys = HashSet::from([worker]);
+
+        assert!(targets_project_agent(&event, &agent_pubkeys));
+    }
+
+    #[test]
+    fn agent_authored_plain_message_does_not_target_project_agent() {
+        let worker = Keys::generate().public_key().to_hex();
+        let event = signed_event(Kind::TextNote, "plain reply", Vec::new());
+        let agent_pubkeys = HashSet::from([worker]);
+
+        assert!(!targets_project_agent(&event, &agent_pubkeys));
     }
 
     #[test]

@@ -1,7 +1,9 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use opentelemetry::propagation::Extractor;
+use std::collections::HashMap;
+
+use opentelemetry::propagation::{Extractor, Injector};
 use opentelemetry::trace::TraceContextExt as _;
 use opentelemetry::trace::TracerProvider as _;
 use opentelemetry::{global, Context, KeyValue};
@@ -18,8 +20,12 @@ use tracing_subscriber::EnvFilter;
 
 const DEFAULT_ENDPOINT: &str = "http://localhost:4318/v1/traces";
 const DEFAULT_FILTER: &str = "info,nostr_sdk=warn,nostr_relay_pool=warn";
-const TRACEPARENT_VERSION: &str = "00";
-const SAMPLED_TRACE_FLAGS: &str = "01";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TraceCarrier {
+    pub traceparent: String,
+    pub tracestate: Option<String>,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TelemetryConfig {
@@ -160,19 +166,61 @@ pub fn init_from_config(config: TelemetryConfig) -> TelemetryGuard {
 }
 
 pub fn current_traceparent() -> Option<String> {
+    current_trace_context().map(|carrier| carrier.traceparent)
+}
+
+pub fn current_trace_context() -> Option<TraceCarrier> {
     let ctx = Span::current().context();
+    trace_carrier_from_context(&ctx)
+}
+
+pub fn trace_carrier_from_context(ctx: &Context) -> Option<TraceCarrier> {
     let span = ctx.span();
     let span_ctx = span.span_context();
     if !span_ctx.is_valid() {
         return None;
     }
-    Some(format!(
-        "{}-{}-{}-{}",
-        TRACEPARENT_VERSION,
-        span_ctx.trace_id(),
-        span_ctx.span_id(),
-        SAMPLED_TRACE_FLAGS
-    ))
+
+    let mut injector = MapInjector::default();
+    global::get_text_map_propagator(|propagator| propagator.inject_context(ctx, &mut injector));
+    let traceparent = injector.values.remove("traceparent")?;
+    let tracestate = injector.values.remove("tracestate");
+    Some(TraceCarrier {
+        traceparent,
+        tracestate,
+    })
+}
+
+pub fn context_from_trace_carrier(carrier: &TraceCarrier) -> Option<Context> {
+    let extractor = MapExtractor::from_carrier(carrier);
+    let ctx = global::get_text_map_propagator(|propagator| propagator.extract(&extractor));
+    if ctx.span().span_context().is_valid() {
+        Some(ctx)
+    } else {
+        None
+    }
+}
+
+pub fn add_link_to_span(
+    span: &Span,
+    carrier: &TraceCarrier,
+    attributes: Vec<(&'static str, String)>,
+) -> bool {
+    let Some(ctx) = context_from_trace_carrier(carrier) else {
+        return false;
+    };
+    let span_context = ctx.span().span_context().clone();
+    if !span_context.is_valid() {
+        return false;
+    }
+    span.add_link_with_attributes(
+        span_context,
+        attributes
+            .into_iter()
+            .map(|(key, value)| KeyValue::new(key, value))
+            .collect(),
+    );
+    true
 }
 
 pub fn trace_correlation_id() -> Option<String> {
@@ -190,36 +238,51 @@ pub fn trace_correlation_id() -> Option<String> {
 }
 
 pub fn parent_context_from_env() -> Option<Context> {
-    let extractor = EnvExtractor {
-        traceparent: std::env::var("TRACEPARENT").ok(),
-    };
-    let ctx = global::get_text_map_propagator(|propagator| propagator.extract(&extractor));
-    if ctx.span().span_context().is_valid() {
-        Some(ctx)
-    } else {
-        None
+    env_trace_carrier().and_then(|carrier| context_from_trace_carrier(&carrier))
+}
+
+pub fn env_trace_carrier() -> Option<TraceCarrier> {
+    Some(TraceCarrier {
+        traceparent: std::env::var("TRACEPARENT").ok()?,
+        tracestate: std::env::var("TRACESTATE").ok(),
+    })
+}
+
+#[derive(Default)]
+struct MapInjector {
+    values: HashMap<String, String>,
+}
+
+impl Injector for MapInjector {
+    fn set(&mut self, key: &str, value: String) {
+        self.values.insert(key.to_ascii_lowercase(), value);
     }
 }
 
-struct EnvExtractor {
-    traceparent: Option<String>,
+struct MapExtractor {
+    values: HashMap<String, String>,
 }
 
-impl Extractor for EnvExtractor {
-    fn get(&self, key: &str) -> Option<&str> {
-        if key.eq_ignore_ascii_case("traceparent") {
-            self.traceparent.as_deref()
-        } else {
-            None
+impl MapExtractor {
+    fn from_carrier(carrier: &TraceCarrier) -> Self {
+        let mut values = HashMap::new();
+        values.insert("traceparent".to_string(), carrier.traceparent.clone());
+        if let Some(tracestate) = carrier.tracestate.clone() {
+            values.insert("tracestate".to_string(), tracestate);
         }
+        Self { values }
+    }
+}
+
+impl Extractor for MapExtractor {
+    fn get(&self, key: &str) -> Option<&str> {
+        self.values
+            .get(&key.to_ascii_lowercase())
+            .map(String::as_str)
     }
 
     fn keys(&self) -> Vec<&str> {
-        if self.traceparent.is_some() {
-            vec!["traceparent"]
-        } else {
-            Vec::new()
-        }
+        self.values.keys().map(String::as_str).collect()
     }
 }
 
