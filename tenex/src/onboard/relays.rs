@@ -25,7 +25,11 @@ use crate::types::relay;
 /// per `:1379`) or `Ok(None)` if the user cancelled.
 pub fn run(json_mode: bool, local_relay_url: Option<&str>) -> Result<Option<String>> {
     if !json_mode {
-        display::step(2, 7, "Communication");
+        display::step(
+            2,
+            crate::onboard::TOTAL_STEPS,
+            crate::onboard::STEP_LABELS[1],
+        );
         display::context("Choose a relay for your agents to communicate through.");
         display::blank();
     }

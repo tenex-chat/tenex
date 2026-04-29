@@ -49,6 +49,26 @@ use crate::store::llms::LlmsDoc;
 use crate::store::providers::ProvidersDoc;
 use crate::tui::display;
 
+/// Total step count used by the per-screen `display::step(N, TOTAL_STEPS, …)`
+/// calls. Source: `src/commands/onboard.ts:879` `const totalSteps = 7`.
+pub const TOTAL_STEPS: usize = 7;
+
+/// TS-verbatim step labels, in flow order. Source: each
+/// `display.step(N, totalSteps, "<label>")` invocation across
+/// `commands/onboard.ts:884-1135`. Step 7 ("Project & Agents") is
+/// substrate-blocked in the Rust port — its label is preserved here so
+/// drift detection works when the NDK port lands and the step gets
+/// wired up.
+pub const STEP_LABELS: [&str; TOTAL_STEPS] = [
+    "Identity",          // step 1 — `:884`
+    "Communication",     // step 2 — `:1013`
+    "AI Providers",      // step 3 — `:1103`
+    "Models",            // step 4 — `:1116`
+    "Model Roles",       // step 5 — `:1124`
+    "Embeddings",        // step 6 — `:1128`
+    "Project & Agents",  // step 7 — `:1135` (substrate-blocked, label preserved)
+];
+
 #[derive(Parser, Clone)]
 pub struct OnboardArgs {
     /// Pubkeys to whitelist (npub, nprofile, or hex)
@@ -111,7 +131,7 @@ async fn run_inner(args: OnboardArgs) -> Result<()> {
 
     if !json_mode {
         display::welcome();
-        display::step(1, 7, "Identity");
+        display::step(1, TOTAL_STEPS, STEP_LABELS[0]);
         display::context(
             "Your identity is how your agents know you, and how others can reach you.",
         );
@@ -170,7 +190,7 @@ async fn run_inner(args: OnboardArgs) -> Result<()> {
         if !detection.detected_sources.is_empty() {
             display::blank();
         }
-        display::step(3, 7, "AI Providers");
+        display::step(3, TOTAL_STEPS, STEP_LABELS[2]);
         display::context("Connect the AI services your agents will use. You need at least one.");
         display::blank();
     }
@@ -217,7 +237,7 @@ async fn run_inner(args: OnboardArgs) -> Result<()> {
     let mut llm_editor_done = false;
     if !configured_provider_ids.is_empty() {
         if !json_mode {
-            display::step(4, 7, "Models");
+            display::step(4, TOTAL_STEPS, STEP_LABELS[3]);
             display::context("Configure which models your agents will use.");
             display::blank();
         }
@@ -242,7 +262,7 @@ async fn run_inner(args: OnboardArgs) -> Result<()> {
     let mut role_assignment_done = false;
     if !configured_provider_ids.is_empty() {
         if !json_mode {
-            display::step(5, 7, "Model Roles");
+            display::step(5, TOTAL_STEPS, STEP_LABELS[4]);
         }
         // Try the on-disk models.dev cache; fall back to the empty
         // source when missing/unparseable. When TS has been run
@@ -266,7 +286,7 @@ async fn run_inner(args: OnboardArgs) -> Result<()> {
     let mut embedding_choice: Option<embeddings::EmbeddingChoice> = None;
     if !configured_provider_ids.is_empty() {
         if !json_mode {
-            display::step(6, 7, "Embeddings");
+            display::step(6, TOTAL_STEPS, STEP_LABELS[5]);
             display::context("Choose an embedding model for semantic search and RAG.");
             display::blank();
         }
@@ -535,5 +555,35 @@ mod tests {
         for (k, v) in &captured {
             assert!(!v.is_empty(), "empty value leaked for {k}");
         }
+    }
+
+    /// Pin the seven onboarding step labels against TS verbatim. Each
+    /// label is what the user sees as the section header on each screen
+    /// of `tenex onboard`. A typo here (e.g. "AI Providers" → "Providers"
+    /// or "Model Roles" → "Roles") would silently change UX.
+    ///
+    /// Sources (one `display.step(N, totalSteps, "<label>")` per step):
+    ///   - 1 Identity         — commands/onboard.ts:884
+    ///   - 2 Communication    — commands/onboard.ts:1013
+    ///   - 3 AI Providers     — commands/onboard.ts:1103
+    ///   - 4 Models           — commands/onboard.ts:1116
+    ///   - 5 Model Roles      — commands/onboard.ts:1124
+    ///   - 6 Embeddings       — commands/onboard.ts:1128
+    ///   - 7 Project & Agents — commands/onboard.ts:1135
+    #[test]
+    fn step_labels_match_ts_verbatim() {
+        assert_eq!(TOTAL_STEPS, 7, "totalSteps drift from `:879`");
+        assert_eq!(
+            STEP_LABELS,
+            [
+                "Identity",
+                "Communication",
+                "AI Providers",
+                "Models",
+                "Model Roles",
+                "Embeddings",
+                "Project & Agents",
+            ],
+        );
     }
 }
