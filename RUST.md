@@ -65,7 +65,7 @@ Wired and supervised. Generates kind:513 metadata events. TS in-process summariz
 
 ### `tenex-agent` binary
 Spawned by `tenex runtime` per conversation turn via `tenex-agent <agent.json>` with the triggering Nostr event on stdin. Currently includes:
-- **Streaming LLM output**: `stream_prompt` via rig-core, accumulating text deltas; final `ConversationIntent` emitted with real token usage from `FinalResponse`
+- **Streaming LLM output**: `stream_chat` via rig-core with full history; final `ConversationIntent` emitted with real token usage from `FinalResponse`
 - **FS tools (permission-gated)**: full-project tools (`fs_read`, `fs_write`, `fs_edit`, `fs_glob`, `fs_grep`) when granted; otherwise home-sandboxed variants (`HomeFsReadTool` etc.) restricted to `~/.tenex/home/<pubkey8>/` with path traversal guard
 - Shell tool (`shell`)
 - **Delegation tools**: `delegate` (emit delegation intent), `delegate_crossproject` (cross-project delegation), `delegate_followup` (follow up on existing delegation), `self_delegate` (re-queue self with different context)
