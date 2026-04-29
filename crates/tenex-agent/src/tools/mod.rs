@@ -22,6 +22,7 @@ pub mod recording;
 pub mod report_publish;
 pub mod schedule_task;
 pub mod self_delegate;
+pub mod send_message;
 pub mod shell;
 pub mod skill_list;
 pub mod skills_set;

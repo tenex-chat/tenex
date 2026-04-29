@@ -37,6 +37,7 @@ use super::schedule_task::ScheduleTaskTool;
 use super::self_delegate::SelfDelegateTool;
 use super::shell::ShellTool;
 use super::skill_list::SkillListTool;
+use super::send_message::SendMessageTool;
 use super::skills_set::SkillsSetTool;
 use super::todo::{TodoItem, TodoWriteTool};
 
@@ -72,6 +73,7 @@ pub(crate) struct ToolSet {
     pub(crate) rag_search: RagSearchTool,
     pub(crate) runtime_state: Option<RuntimeStateHandle>,
     pub(crate) message_injections: Arc<Mutex<MessageInjectionTracker>>,
+    pub(crate) telegram_config: Option<tenex_telegram::config::TelegramAgentConfig>,
 }
 
 impl ToolSet {
@@ -309,6 +311,20 @@ impl ToolSet {
                 self.working_dir.clone(),
             )),
         );
+
+        if let Some(ref tc) = self.telegram_config {
+            self.push_tool(
+                &mut tools,
+                &recorder,
+                Box::new(SendMessageTool::new(
+                    tc.bot_token.clone(),
+                    tc.api_base_url.clone(),
+                    self.base_dir.clone(),
+                    self.agent_pubkey.clone(),
+                    self.project_id.clone(),
+                )),
+            );
+        }
 
         if self.granted_tools.contains("agents_write") {
             self.push_tool(

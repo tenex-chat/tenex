@@ -8,7 +8,7 @@ Organized by functional area. Items marked ✅ are already at parity; items mark
 ## 1. Agent Tools
 
 ### 1.1 Fully Missing Tools (TypeScript-only)
-- [ ] `send_message` — proactive Telegram delivery to bound channels; requires bot token and remembered channel bindings
+- ✅ `send_message` — proactive Telegram delivery to bound channels (note: agent won't know channel IDs until Fragment 08 injects Telegram bindings into the system prompt)
 - [ ] `mcp_list_resources` — discover available MCP resources and resource templates from configured servers
 - [ ] `mcp_resource_read` — fetch content from an MCP resource, with URI template expansion
 - [ ] `mcp_subscribe` — create persistent subscriptions to MCP resource update notifications
@@ -45,7 +45,7 @@ Organized by functional area. Items marked ✅ are already at parity; items mark
 - [ ] **Fragment 00 — Global System Prompt**: user-configured global guidance from `config.json`
 - [ ] **Fragment 05 — Delegation Chain**: multi-agent workflow hierarchy visualization for active turn
 - [ ] **Fragment 18 — No-Response Guidance**: Telegram silent-completion mode instructions
-- [ ] **Fragment 20 — Voice Mode**: TTS-specific formatting guidance (conditional on `isVoiceMode`)
+- 🚫 **Fragment 20 — Voice Mode**: TTS-specific formatting guidance — won't port (voice mode is not implemented in the Rust stack)
 - [ ] **Fragment 22 — Scheduled Tasks**: display agent's own scheduled tasks with human-readable cron expressions
 - [ ] **Fragment 28 — Agent-Directed Monitoring**: guidance on monitoring delegated work and using `delegate_followup` for mid-flight corrections (spec references but is not implemented in Rust code)
 - [ ] **Fragment 33 — Telegram Chat Context**: chat title, topic title, admin list, member count, recently seen participants (requires `TelegramChatContextService`)
@@ -75,7 +75,7 @@ Organized by functional area. Items marked ✅ are already at parity; items mark
 
 ### 4.1 Missing Heuristics
 - [ ] **SilentAgentHeuristic** (post-completion) — detects agents completing with no output, low token counts, or LLM error-fallback messages; requires `messageContent`, `outputTokens`, `usedErrorFallback` context fields
-- [ ] **DelegationClaimHeuristic** (post-completion) — detects agents that claim to delegate in text but never call the `delegate` tool; requires LLM verification pass with known agent slugs
+- 🚫 **DelegationClaimHeuristic** (post-completion) — won't port (requires LLM verification pass; high cost for marginal benefit)
 
 ### 4.2 Missing Context Fields
 Pre-tool and post-completion contexts are missing fields that the two unimplemented heuristics require:
@@ -99,7 +99,7 @@ Pre-tool and post-completion contexts are missing fields that the two unimplemen
 - [ ] `WorkerTodoBeforeFileOrShellHeuristic`: TypeScript protects 11 tools (includes `home_read`, `home_write`, `home_edit`, `home_glob`, `home_grep`); Rust protects 6 tools
 
 ### 4.6 Missing Infrastructure
-- [ ] `HeuristicRegistry` singleton — TypeScript validates heuristic registration at startup (fail-closed); Rust has no equivalent health check
+- 🚫 `HeuristicRegistry` singleton — won't port (Rust's static dispatch of known heuristics makes a runtime registry unnecessary)
 - [ ] OpenTelemetry spans and events for supervision checks
 - [ ] Per-execution state tracking (`SupervisionState` scoped to execution ID)
 
@@ -128,15 +128,15 @@ Pre-tool and post-completion contexts are missing fields that the two unimplemen
 - [ ] `prompt` parameter in `rag_search` — LLM-focused extraction from results (TypeScript only)
 - [ ] Scope-aware search (global / project / personal) via `RAGCollectionRegistry`
 - [ ] Multiple specialized search providers: `ConversationSearchProvider`, `LessonSearchProvider`, `GenericCollectionSearchProvider`
-- [ ] `UnifiedSearchService` — orchestrates parallel search across all providers with graceful degradation per provider failure
+- 🚫 `UnifiedSearchService` — won't port (Rust `rag_search` is the single search surface; provider multiplexing not needed)
 - [ ] `ContextDiscoveryService` — proactive per-turn context discovery with optional LLM query planner and LLM reranker; emits pointer-only reminder hints
 
 ### 6.2 RAG Subscription System (TypeScript-only)
 - [ ] `RagSubscriptionService` — manages persistent subscriptions that pipe MCP resource updates into RAG collections; reconnects automatically on daemon startup; backed by `rag_subscriptions.json`
 
 ### 6.3 Embedding Provider Gaps
-- [ ] Local embedding models via ONNX Runtime (`LocalTransformerEmbeddingProvider` using Xenova models); Rust requires an API endpoint
-- [ ] Backward-compatible embedding config format (TypeScript infers provider from model name string; Rust requires explicit provider field)
+- 🚫 Local embedding models via ONNX Runtime (`LocalTransformerEmbeddingProvider` using Xenova models) — won't port (Rust requires an API endpoint; ONNX/Xenova is Node-specific)
+- 🚫 Backward-compatible embedding config format (TypeScript infers provider from model name string) — won't port (Rust requires explicit provider field; no legacy config to support)
 - [ ] Mock embedding provider for tests
 
 ---
@@ -146,7 +146,7 @@ Pre-tool and post-completion contexts are missing fields that the two unimplemen
 ### 7.1 Missing Features
 - [ ] **`TelegramChatContextService`** — enriches agent context with chat title, topic title, admin list, member count, and recently-seen participant list via Telegram Bot API; cached with ~5-minute TTL. Without this, agents have no visibility into group/topic metadata
 - [ ] **System prompt fragments for Telegram** — Fragment 33 (chat context) and Fragment 34 (delivery rules) are not injected into the Rust agent system prompt (see §2.1)
-- [ ] **`send_message` tool** — proactive messaging to bound channels (see §1.1)
+- ✅ **`send_message` tool** — proactive messaging to bound channels (see §1.1)
 - [ ] **Identity binding validation for DMs** — TypeScript checks `AuthorizedIdentityService` before accepting DMs; Rust accepts all DMs that pass the `allows_dms()` config flag
 - [ ] **Persistent pending project selection** — TypeScript persists pending channel-to-project selection state to disk; Rust stores it in-memory only (lost on daemon restart)
 
@@ -166,7 +166,7 @@ The Rust `tenex` runtime (`tenex/src/runtime_cmd/`) already implements core orch
 
 ### 8.2 Delegation Routing
 - ✅ Delegation completion routing — `delegation_route_for_completion` routes child completions back to parent conversation/agent
-- [ ] Delegation completion debouncing (`DELEGATION_COMPLETION_DEBOUNCE_MS = 2500`)
+- 🚫 Delegation completion debouncing (`DELEGATION_COMPLETION_DEBOUNCE_MS = 2500`) — won't port (process-per-project isolation in Rust makes in-process debouncing unnecessary)
 - [ ] Deferred completions for nested delegation trees
 - [ ] Delegation prefix resolution and canonicalization
 - [ ] Implicit kill-wake path (synthetic envelopes for delegation kills)
@@ -198,7 +198,7 @@ Rust (`tenex-llm-config`) is a credential resolver only; all provider protocol w
 - [ ] **`PromptCompilerService`** — LLM-synthesized agent instructions: compiles base instructions + lessons + lesson comments into compiled instructions; persists scoped disk cache at `~/.tenex/agents/prompts/<project-dTag>/`; publishes updated kind:0 profile after compilation. Rust agents use static instructions only.
 
 ### 9.4 Dynamic Tool Loading
-- [ ] **`DynamicToolService`** — watches `~/.tenex/tools`, compiles TypeScript tool factories at runtime, and surfaces them through the tool registry. Not implemented in TypeScript either; planned feature missing from both stacks.
+- 🚫 **`DynamicToolService`** — won't port (not implemented in TypeScript either; planned feature deferred from both stacks)
 
 ### 9.5 Tool Permission Enforcement
 - [ ] Rust carries `only_tools`, `allow_tools`, `deny_tools` frontmatter fields in `SkillFrontmatter` but does **not enforce** them. TypeScript applies the three-tier hierarchy at runtime (only-tools replaces tool set; allow-tools unions; deny-tools subtracts). Enforcement must be added to Rust agent tool set construction.

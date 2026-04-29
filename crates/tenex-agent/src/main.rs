@@ -807,6 +807,7 @@ async fn run() -> Result<()> {
         rag_search: rag_search.clone(),
         runtime_state: runtime_state.clone(),
         message_injections: injection_tracker.clone(),
+        telegram_config: agent_config.telegram,
     };
 
     // Keep a handle with shared Arc refs so we can read the pending final turn

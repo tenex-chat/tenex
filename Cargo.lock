@@ -3031,6 +3031,7 @@ dependencies = [
  "tenex-scheduler",
  "tenex-supervision",
  "tenex-system-prompt",
+ "tenex-telegram",
  "tenex-telemetry",
  "thiserror 2.0.18",
  "tokio",

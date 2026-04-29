@@ -2,6 +2,7 @@ use anyhow::{Context, Result};
 use serde::Deserialize;
 use std::fs;
 use tenex_llm_config::resolver::{load_providers, ProviderDocs};
+use tenex_telegram::config::TelegramAgentConfig;
 
 pub use tenex_supervision::types::AgentCategory;
 
@@ -21,6 +22,7 @@ pub struct AgentConfig {
     pub instructions: Option<String>,
     pub working_directory: Option<String>,
     pub default: Option<AgentDefault>,
+    pub telegram: Option<TelegramAgentConfig>,
 }
 
 impl AgentConfig {
