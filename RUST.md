@@ -108,7 +108,7 @@ Library built. Provides `RagStore` (SQLite + vector search) + `EmbedConfig` load
 - Pipes the raw Nostr event JSON to `tenex-agent` stdin, relays signed event output back to the relay
 - Has a per-project lockfile to prevent duplicate instances (`projects/<dTag>/runtime.lock`)
 
-**`tenex daemon` now defaults to `tenex runtime` as its boot command** — the TypeScript boot layer is no longer the primary path. The Rust runtime is live. Missing pieces before full TS retirement: context management (see roadmap).
+**`tenex daemon` now defaults to `tenex runtime` as its boot command** — the TypeScript boot layer is no longer the primary path. The Rust runtime is live. Both runtimes coexist as first-class options; the `--ts` / `--boot-command` flag is maintained indefinitely (see roadmap).
 
 ---
 
@@ -151,7 +151,7 @@ The `tenex` binary now includes:
 
 ## Architecture Observations (tenth pass drift check)
 
-- **TS `ProjectRuntime.ts` is dead code in the default path**: `tenex daemon` uses `tenex runtime` (Rust) by default. TS ProjectRuntime is only invoked via `--ts` / `--boot-command`. Safe to remove on full TS retirement.
+- **TS `ProjectRuntime.ts` is non-default but maintained**: `tenex daemon` uses `tenex runtime` (Rust) by default. TS ProjectRuntime is invoked via `--ts` / `--boot-command` and remains a supported fallback path — both runtimes coexist indefinitely per policy.
 - **No dual-publish**: Since TS ProjectRuntime is not the default, status events (24010/24133) are only published by Rust. No conflict.
 - **`PubkeyService.ts`** correctly delegates to `identityDaemonClient` (Rust daemon) — no drift.
 - **`LlmConfigClient.ts`** correctly uses the Rust Unix-socket IPC — no drift.
@@ -378,4 +378,4 @@ tenex daemon (Rust)
 8. ~~**Near-term**: Port OpenClaw, categorize, telegram config, identifier utils~~ ✓ Done 2026-04-28
 9. **Near-term**: Delete TS originals for fully-ported flows (OpenClaw, categorize, telegram-identifiers, conversation-id utils)
 10. ~~**Near-term**: Load conversation history into `tenex-agent` invocations~~ ✓ Done 2026-04-28
-11. **Longer-term**: Retire `bun run src/boot.ts` and all TypeScript orchestration
+11. **Policy**: Both runtimes coexist indefinitely — the `--ts` / `--boot-command` flag stays as a first-class, maintained path. TypeScript orchestration is removed only when the Rust runtime is a verified, feature-complete drop-in replacement. No premature retirement.
