@@ -212,6 +212,7 @@ fn previous_selectable(rows: &[Row<'_>], from: usize) -> Option<usize> {
 /// matches `:86`: `── <header> ──`. Selectable rows are rendered with a
 /// cursor `❯` when active, or 2 spaces otherwise. The `Back` row is
 /// dimmed with `Back` text per `:100`.
+#[cfg(test)]
 pub fn compose_lines(rows: &[Row<'_>], message: &str, active: usize) -> Vec<String> {
     let cursor_active = format!("{} ", glyphs::CURSOR_HEAVY);
 

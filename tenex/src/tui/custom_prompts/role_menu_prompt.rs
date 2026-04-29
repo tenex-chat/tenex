@@ -58,6 +58,7 @@ pub enum RoleKey {
 }
 
 impl RoleKey {
+    #[cfg(test)]
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Default => "default",
@@ -203,6 +204,7 @@ pub fn handle_key(state: &mut RoleMenuState, key: RoleInput) -> RoleOutcome {
 }
 
 /// Compose the rendered lines (unstyled). Lines map to `roles.ts:175-200`.
+#[cfg(test)]
 pub fn compose_lines(state: &RoleMenuState, message: &str) -> Vec<String> {
     let label_width = ROLES.iter().map(|r| r.label().len()).max().unwrap_or(0);
     let cursor_active = format!("{} ", glyphs::CURSOR_THIN);

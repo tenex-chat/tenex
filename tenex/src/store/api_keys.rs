@@ -59,6 +59,7 @@ pub fn parse_api_key_entry(value: &str) -> ParsedApiKeyEntry {
 /// permits a string or an array of strings — represented here as a
 /// borrowed slice + scalar union for ergonomic matching.
 pub enum ApiKeyValue<'a> {
+    #[cfg(test)]
     None,
     One(&'a str),
     Many(&'a [String]),
@@ -72,6 +73,7 @@ pub enum ApiKeyValue<'a> {
 ///   providers that don't take an API key but still appear configured).
 pub fn get_api_key_entries(api_key: ApiKeyValue<'_>) -> Vec<ParsedApiKeyEntry> {
     let values: Vec<&str> = match api_key {
+        #[cfg(test)]
         ApiKeyValue::None => return Vec::new(),
         ApiKeyValue::One(s) => vec![s],
         ApiKeyValue::Many(a) => a.iter().map(String::as_str).collect(),
@@ -100,6 +102,7 @@ pub fn serialize_api_key_entry(key: &str, label: Option<&str>) -> String {
 ///
 /// Used by services that only need a single key (embeddings, image
 /// gen) — returns the first key from the entry list (or `None`).
+#[cfg(test)]
 pub fn resolve_api_key(api_key: ApiKeyValue<'_>) -> Option<String> {
     get_api_key_entries(api_key)
         .into_iter()

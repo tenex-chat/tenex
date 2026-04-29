@@ -776,21 +776,21 @@ mod tests {
         // Source-order: AI(4), Agents(3), Network(1), Conversations(2),
         // Advanced(5).
         let descriptions: Vec<&str> = vec![
-            "API keys and connections",                  // 0.0 Providers
-            "Model configurations",                      // 0.1 LLMs
-            "Which model handles what task",             // 0.2 Roles
-            "Text embedding model",                      // 0.3 Embeddings
-            "Route ask() through an agent first",        // 1.0 Escalation
-            "Auto-review when you're idle",              // 1.1 Intervention
-            "Agent bot transport and global DM access",  // 1.2 Telegram
-            "Nostr relay connections",                   // 2.0 Relays
-            "Auto-summary timing",                       // 3.0 Summarization
-            "Context management settings",               // 3.1 Context
-            "Authorized pubkeys",                        // 4.0 Identity
-            "Global prompt for all projects",            // 4.1 System Prompt
-            "File paths and storage",                    // 4.2 Paths
-            "Log level and file path",                   // 4.3 Logging
-            "OpenTelemetry tracing",                     // 4.4 Telemetry
+            "API keys and connections",                 // 0.0 Providers
+            "Model configurations",                     // 0.1 LLMs
+            "Which model handles what task",            // 0.2 Roles
+            "Text embedding model",                     // 0.3 Embeddings
+            "Route ask() through an agent first",       // 1.0 Escalation
+            "Auto-review when you're idle",             // 1.1 Intervention
+            "Agent bot transport and global DM access", // 1.2 Telegram
+            "Nostr relay connections",                  // 2.0 Relays
+            "Auto-summary timing",                      // 3.0 Summarization
+            "Context management settings",              // 3.1 Context
+            "Authorized pubkeys",                       // 4.0 Identity
+            "Global prompt for all projects",           // 4.1 System Prompt
+            "File paths and storage",                   // 4.2 Paths
+            "Log level and file path",                  // 4.3 Logging
+            "OpenTelemetry tracing",                    // 4.4 Telemetry
         ];
         let actual: Vec<String> = s
             .iter()

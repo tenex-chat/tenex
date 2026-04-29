@@ -19,7 +19,7 @@ use serde_json::Value;
 
 use crate::store::project_members::{is_deleted_project_event, read_persisted_project_event};
 use crate::store::project_mutation::{
-    apply_mutation, AppliedProjectMutation, MetadataKey, PublishProjectMutationParams,
+    apply_mutation, AppliedProjectMutation, PublishProjectMutationParams,
 };
 use crate::store::tenex_config::TenexConfigDoc;
 
@@ -36,64 +36,19 @@ pub enum PublishOutcome {
     NoChanges,
 }
 
-impl PublishOutcome {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            PublishOutcome::Published => "published",
-            PublishOutcome::ProjectNotFound => "project_not_found",
-            PublishOutcome::SigningFailed => "signing_failed",
-            PublishOutcome::PublishFailed => "publish_failed",
-            PublishOutcome::NoChanges => "no_changes",
-        }
-    }
+pub type ProjectEventPublishResult = (PublishOutcome, Option<String>);
+
+fn publish_result(
+    _project_dtag: &str,
+    outcome: PublishOutcome,
+    _applied: Option<&AppliedProjectMutation>,
+    reason: Option<String>,
+) -> ProjectEventPublishResult {
+    (outcome, reason)
 }
 
-/// Mirror of `ProjectEventPublishResult`
-/// (`ProjectEventPublishService.ts:35-44`).
-#[derive(Debug, Clone)]
-pub struct ProjectEventPublishResult {
-    pub project_dtag: String,
-    pub outcome: PublishOutcome,
-    pub event_id: Option<String>,
-    pub reason: Option<String>,
-    pub added_pubkeys: Vec<String>,
-    pub removed_pubkeys: Vec<String>,
-    pub updated_fields: Vec<MetadataKey>,
-    pub skipped: Vec<String>,
-}
-
-impl ProjectEventPublishResult {
-    fn from_applied(
-        project_dtag: &str,
-        outcome: PublishOutcome,
-        applied: &AppliedProjectMutation,
-        reason: Option<String>,
-        event_id: Option<String>,
-    ) -> Self {
-        Self {
-            project_dtag: project_dtag.to_owned(),
-            outcome,
-            event_id,
-            reason,
-            added_pubkeys: applied.added_pubkeys.clone(),
-            removed_pubkeys: applied.removed_pubkeys.clone(),
-            updated_fields: applied.updated_fields.clone(),
-            skipped: applied.skipped.clone(),
-        }
-    }
-
-    fn empty(project_dtag: &str, outcome: PublishOutcome) -> Self {
-        Self {
-            project_dtag: project_dtag.to_owned(),
-            outcome,
-            event_id: None,
-            reason: None,
-            added_pubkeys: Vec::new(),
-            removed_pubkeys: Vec::new(),
-            updated_fields: Vec::new(),
-            skipped: Vec::new(),
-        }
-    }
+fn empty_result(project_dtag: &str, outcome: PublishOutcome) -> ProjectEventPublishResult {
+    publish_result(project_dtag, outcome, None, None)
 }
 
 /// Sign and publish a project mutation. End-to-end orchestration:
@@ -111,14 +66,14 @@ pub async fn publish_project_mutation(
     let parsed = match read_persisted_project_event(base_dir, &params.project_dtag)? {
         Some(p) => p,
         None => {
-            return Ok(ProjectEventPublishResult::empty(
+            return Ok(empty_result(
                 &params.project_dtag,
                 PublishOutcome::ProjectNotFound,
             ));
         }
     };
     if is_deleted_project_event(&parsed) {
-        return Ok(ProjectEventPublishResult::empty(
+        return Ok(empty_result(
             &params.project_dtag,
             PublishOutcome::ProjectNotFound,
         ));
@@ -130,11 +85,10 @@ pub async fn publish_project_mutation(
     // ── 2. Apply mutation ─────────────────────────────────────────────
     let applied = apply_mutation(&base_tags, base_content, params);
     if !applied.has_changes {
-        return Ok(ProjectEventPublishResult::from_applied(
+        return Ok(publish_result(
             &params.project_dtag,
             PublishOutcome::NoChanges,
-            &applied,
-            None,
+            Some(&applied),
             None,
         ));
     }
@@ -142,15 +96,14 @@ pub async fn publish_project_mutation(
     // ── 3. Validate signer pubkey ─────────────────────────────────────
     let signer_pubkey_hex = keys.public_key().to_hex();
     if signer_pubkey_hex != params.owner_pubkey {
-        return Ok(ProjectEventPublishResult::from_applied(
+        return Ok(publish_result(
             &params.project_dtag,
             PublishOutcome::SigningFailed,
-            &applied,
+            Some(&applied),
             Some(format!(
                 "Owner nsec does not match project owner {}",
                 params.owner_pubkey
             )),
-            None,
         ));
     }
 
@@ -160,12 +113,11 @@ pub async fn publish_project_mutation(
         match Tag::parse(tag.iter().map(String::as_str)) {
             Ok(t) => tags.push(t),
             Err(e) => {
-                return Ok(ProjectEventPublishResult::from_applied(
+                return Ok(publish_result(
                     &params.project_dtag,
                     PublishOutcome::SigningFailed,
-                    &applied,
+                    Some(&applied),
                     Some(format!("malformed tag {tag:?}: {e}")),
-                    None,
                 ));
             }
         }
@@ -176,12 +128,11 @@ pub async fn publish_project_mutation(
     {
         Ok(e) => e,
         Err(e) => {
-            return Ok(ProjectEventPublishResult::from_applied(
+            return Ok(publish_result(
                 &params.project_dtag,
                 PublishOutcome::SigningFailed,
-                &applied,
+                Some(&applied),
                 Some(format!("{e}")),
-                None,
             ));
         }
     };
@@ -209,31 +160,19 @@ pub async fn publish_project_mutation(
     let _ = client.disconnect().await;
 
     match result {
-        Ok(_) => Ok(ProjectEventPublishResult::from_applied(
+        Ok(_) => Ok(publish_result(
             &params.project_dtag,
             PublishOutcome::Published,
-            &applied,
+            Some(&applied),
             None,
-            Some(event.id.to_hex()),
         )),
-        Err(e) => Ok(ProjectEventPublishResult::from_applied(
+        Err(e) => Ok(publish_result(
             &params.project_dtag,
             PublishOutcome::PublishFailed,
-            &applied,
+            Some(&applied),
             Some(format!("{e}")),
-            None,
         )),
     }
-}
-
-/// Result of [`sync_project_membership`]: pairs the project dTag with
-/// the publish outcome. Mirrors the TS `ProjectMembershipSyncResult` shape
-/// at `ProjectMembershipPublishService.ts:18-21`.
-#[derive(Debug, Clone)]
-pub struct ProjectMembershipSyncResult {
-    pub project_dtag: String,
-    pub outcome: PublishOutcome,
-    pub reason: Option<String>,
 }
 
 /// Re-publish a project's kind:31933 event with its **current local
@@ -254,35 +193,23 @@ pub async fn sync_project_membership(
     base_dir: &std::path::Path,
     keys: &Keys,
     project_dtag: &str,
-) -> Result<ProjectMembershipSyncResult> {
+) -> Result<()> {
     use crate::store::project_members::read_project_agent_pubkeys;
 
     let parsed = match read_persisted_project_event(base_dir, project_dtag)? {
         Some(p) => p,
         None => {
-            return Ok(ProjectMembershipSyncResult {
-                project_dtag: project_dtag.to_owned(),
-                outcome: PublishOutcome::ProjectNotFound,
-                reason: None,
-            });
+            return Ok(());
         }
     };
     if is_deleted_project_event(&parsed) {
-        return Ok(ProjectMembershipSyncResult {
-            project_dtag: project_dtag.to_owned(),
-            outcome: PublishOutcome::ProjectNotFound,
-            reason: None,
-        });
+        return Ok(());
     }
 
     let owner_pubkey = match parsed.get("pubkey").and_then(Value::as_str) {
         Some(p) => p.to_owned(),
         None => {
-            return Ok(ProjectMembershipSyncResult {
-                project_dtag: project_dtag.to_owned(),
-                outcome: PublishOutcome::ProjectNotFound,
-                reason: Some("event.json missing pubkey".to_owned()),
-            });
+            return Ok(());
         }
     };
 
@@ -290,17 +217,12 @@ pub async fn sync_project_membership(
     let params = PublishProjectMutationParams {
         owner_pubkey,
         project_dtag: project_dtag.to_owned(),
-        trigger: "agent_manager_31933".to_owned(),
         retain_agent_pubkeys: assigned_pubkeys,
         ..Default::default()
     };
 
-    let result = publish_project_mutation(base_dir, keys, &params).await?;
-    Ok(ProjectMembershipSyncResult {
-        project_dtag: project_dtag.to_owned(),
-        outcome: result.outcome,
-        reason: result.reason,
-    })
+    publish_project_mutation(base_dir, keys, &params).await?;
+    Ok(())
 }
 
 /// Re-publish multiple projects' kind:31933 events. Dedupes the input
@@ -310,18 +232,17 @@ pub async fn sync_many_project_memberships(
     base_dir: &std::path::Path,
     keys: &Keys,
     project_dtags: &[String],
-) -> Result<Vec<ProjectMembershipSyncResult>> {
+) -> Result<()> {
     let mut seen: indexmap::IndexSet<String> = indexmap::IndexSet::new();
     for d in project_dtags {
         if !d.is_empty() {
             seen.insert(d.clone());
         }
     }
-    let mut out = Vec::with_capacity(seen.len());
     for dtag in seen {
-        out.push(sync_project_membership(base_dir, keys, &dtag).await?);
+        sync_project_membership(base_dir, keys, &dtag).await?;
     }
-    Ok(out)
+    Ok(())
 }
 
 /// Pull `tags` out of a parsed event JSON value as `Vec<Vec<String>>`.
@@ -402,7 +323,6 @@ mod tests {
         PublishProjectMutationParams {
             owner_pubkey: owner_pubkey.to_owned(),
             project_dtag: project_dtag.to_owned(),
-            trigger: "test".to_owned(),
             ..Default::default()
         }
     }
@@ -413,12 +333,10 @@ mod tests {
         let keys = Keys::generate();
         let pk_hex = keys.public_key().to_hex();
         let params = empty_params(&pk_hex, "ghost");
-        let result = publish_project_mutation(&base, &keys, &params)
+        let (outcome, _) = publish_project_mutation(&base, &keys, &params)
             .await
             .unwrap();
-        assert_eq!(result.outcome, PublishOutcome::ProjectNotFound);
-        assert!(result.event_id.is_none());
-        assert!(result.added_pubkeys.is_empty());
+        assert_eq!(outcome, PublishOutcome::ProjectNotFound);
         std::fs::remove_dir_all(&base).ok();
     }
 
@@ -429,10 +347,10 @@ mod tests {
         let pk_hex = keys.public_key().to_hex();
         write_project_event(&base, "rip", &pk_hex, &[], "", true);
         let params = empty_params(&pk_hex, "rip");
-        let result = publish_project_mutation(&base, &keys, &params)
+        let (outcome, _) = publish_project_mutation(&base, &keys, &params)
             .await
             .unwrap();
-        assert_eq!(result.outcome, PublishOutcome::ProjectNotFound);
+        assert_eq!(outcome, PublishOutcome::ProjectNotFound);
         std::fs::remove_dir_all(&base).ok();
     }
 
@@ -450,10 +368,10 @@ mod tests {
             false,
         );
         let params = empty_params(&pk_hex, "static"); // no add/remove/set
-        let result = publish_project_mutation(&base, &keys, &params)
+        let (outcome, _) = publish_project_mutation(&base, &keys, &params)
             .await
             .unwrap();
-        assert_eq!(result.outcome, PublishOutcome::NoChanges);
+        assert_eq!(outcome, PublishOutcome::NoChanges);
         std::fs::remove_dir_all(&base).ok();
     }
 
@@ -467,26 +385,13 @@ mod tests {
 
         let mut params = empty_params(&owner_pubkey, "p1");
         params.add_agent_pubkeys = vec!["a".repeat(64)];
-        let result = publish_project_mutation(&base, &other_keys, &params)
+        let (outcome, reason) = publish_project_mutation(&base, &other_keys, &params)
             .await
             .unwrap();
-        assert_eq!(result.outcome, PublishOutcome::SigningFailed);
+        assert_eq!(outcome, PublishOutcome::SigningFailed);
         let expected = format!("Owner nsec does not match project owner {}", owner_pubkey);
-        assert_eq!(result.reason.as_deref(), Some(expected.as_str()));
+        assert_eq!(reason.as_deref(), Some(expected.as_str()));
         std::fs::remove_dir_all(&base).ok();
-    }
-
-    #[tokio::test]
-    async fn outcome_as_str_matches_ts_literals() {
-        // The TS literal strings are visible to consumers — preserve verbatim.
-        assert_eq!(PublishOutcome::Published.as_str(), "published");
-        assert_eq!(
-            PublishOutcome::ProjectNotFound.as_str(),
-            "project_not_found"
-        );
-        assert_eq!(PublishOutcome::SigningFailed.as_str(), "signing_failed");
-        assert_eq!(PublishOutcome::PublishFailed.as_str(), "publish_failed");
-        assert_eq!(PublishOutcome::NoChanges.as_str(), "no_changes");
     }
 
     #[test]
@@ -519,11 +424,9 @@ mod tests {
     async fn sync_returns_project_not_found_when_event_missing() {
         let base = unique_temp();
         let keys = Keys::generate();
-        let result = sync_project_membership(&base, &keys, "ghost")
+        sync_project_membership(&base, &keys, "ghost")
             .await
             .unwrap();
-        assert_eq!(result.outcome, PublishOutcome::ProjectNotFound);
-        assert_eq!(result.project_dtag, "ghost");
         std::fs::remove_dir_all(&base).ok();
     }
 
@@ -533,8 +436,7 @@ mod tests {
         let keys = Keys::generate();
         let pk_hex = keys.public_key().to_hex();
         write_project_event(&base, "rip", &pk_hex, &[], "", true);
-        let result = sync_project_membership(&base, &keys, "rip").await.unwrap();
-        assert_eq!(result.outcome, PublishOutcome::ProjectNotFound);
+        sync_project_membership(&base, &keys, "rip").await.unwrap();
         std::fs::remove_dir_all(&base).ok();
     }
 
@@ -547,10 +449,9 @@ mod tests {
         let owner = keys.public_key().to_hex();
         let alice = "a".repeat(64);
         write_project_event(&base, "stable", &owner, &[&alice], "", false);
-        let result = sync_project_membership(&base, &keys, "stable")
+        sync_project_membership(&base, &keys, "stable")
             .await
             .unwrap();
-        assert_eq!(result.outcome, PublishOutcome::NoChanges);
         std::fs::remove_dir_all(&base).ok();
     }
 
@@ -573,14 +474,9 @@ mod tests {
             "m".to_string(),
             "a".to_string(),
         ];
-        let results = sync_many_project_memberships(&base, &keys, &inputs)
+        sync_many_project_memberships(&base, &keys, &inputs)
             .await
             .unwrap();
-        let dtags: Vec<&str> = results.iter().map(|r| r.project_dtag.as_str()).collect();
-        assert_eq!(dtags, vec!["z", "a", "m"]);
-        for r in &results {
-            assert_eq!(r.outcome, PublishOutcome::ProjectNotFound);
-        }
         std::fs::remove_dir_all(&base).ok();
     }
 
@@ -589,11 +485,9 @@ mod tests {
         let base = unique_temp();
         let keys = Keys::generate();
         let inputs = vec!["".to_string(), "real".to_string(), "".to_string()];
-        let results = sync_many_project_memberships(&base, &keys, &inputs)
+        sync_many_project_memberships(&base, &keys, &inputs)
             .await
             .unwrap();
-        assert_eq!(results.len(), 1);
-        assert_eq!(results[0].project_dtag, "real");
         std::fs::remove_dir_all(&base).ok();
     }
 
@@ -601,10 +495,9 @@ mod tests {
     async fn sync_many_empty_input_returns_empty() {
         let base = unique_temp();
         let keys = Keys::generate();
-        let results = sync_many_project_memberships(&base, &keys, &[])
+        sync_many_project_memberships(&base, &keys, &[])
             .await
             .unwrap();
-        assert!(results.is_empty());
         std::fs::remove_dir_all(&base).ok();
     }
 }

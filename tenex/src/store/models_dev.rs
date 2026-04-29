@@ -23,6 +23,7 @@ use serde::{Deserialize, Serialize};
 
 /// `MODELS_DEV_API_URL` — `models-dev-cache.ts:13`. Pinned for parity
 /// when the HTTP fetcher lands.
+#[cfg(test)]
 pub const MODELS_DEV_API_URL: &str = "https://models.dev/api.json";
 
 /// `CACHE_FILE_NAME` — `models-dev-cache.ts:14`. The full path is
@@ -30,6 +31,7 @@ pub const MODELS_DEV_API_URL: &str = "https://models.dev/api.json";
 pub const CACHE_FILE_NAME: &str = "models-dev.json";
 
 /// `STALE_THRESHOLD_MS = 24h` — `models-dev-cache.ts:15`.
+#[cfg(test)]
 pub const STALE_THRESHOLD_MS: u64 = 24 * 60 * 60 * 1000;
 
 /// Mirror of `ModelLimits` (`models-dev-cache.ts:20-25`):
@@ -107,6 +109,7 @@ pub fn map_to_models_dev_provider(tenex_provider: &str) -> Option<&'static str> 
 
 /// `true` iff `tenex_provider` is in the mapping table but maps to
 /// `None` (i.e. local/custom — not in models.dev).
+#[cfg(test)]
 pub fn is_known_local_provider(tenex_provider: &str) -> bool {
     provider_mapping()
         .iter()
@@ -119,6 +122,7 @@ pub fn is_known_local_provider(tenex_provider: &str) -> bool {
 /// timestamp exists, OR when the difference between `now_ms` and the
 /// fetch timestamp exceeds [`STALE_THRESHOLD_MS`]. Pure function — no
 /// I/O.
+#[cfg(test)]
 pub fn is_stale(fetched_at_ms: Option<u64>, now_ms: u64) -> bool {
     let Some(fetched) = fetched_at_ms else {
         return true;
@@ -226,6 +230,7 @@ pub fn resolve_model_data<'a>(
 /// underlying data has empty values (TS uses `data.id ?? modelId` /
 /// `data.name ?? modelId` — `??` matches `None`-or-empty for `String`
 /// here since serde gives us `String::new()` for missing strings).
+#[cfg(test)]
 pub fn get_model_info(
     cache: &ModelsDevResponse,
     provider: &str,
@@ -253,6 +258,7 @@ pub fn get_model_info(
 
 /// Mirror `getContextWindowFromModelsdev` (`models-dev-cache.ts:311-314`).
 /// Convenience getter for the context limit when present.
+#[cfg(test)]
 pub fn context_window(cache: &ModelsDevResponse, provider: &str, model: &str) -> Option<u64> {
     let (_, data) = resolve_model_data(cache, provider, model)?;
     data.limit.as_ref().map(|l| l.context)
@@ -282,6 +288,7 @@ pub fn context_window(cache: &ModelsDevResponse, provider: &str, model: &str) ->
 /// `limit.context` nor `cost` is available. The TS source filters
 /// empty strings before joining, so absence of one collapses the
 /// separator.
+#[cfg(test)]
 pub fn picker_label_segments(model: &ModelsDevModel) -> (String, String, String) {
     let id_segment = format!("({})", model.id);
     let ctx_str = model
@@ -308,6 +315,7 @@ pub fn picker_label_segments(model: &ModelsDevModel) -> (String, String, String)
 /// model picker. Returns `""` for unknown providers and for
 /// `claude-code` (which has no concept of a model in the TS source —
 /// the `defaults` table maps it to the empty string).
+#[cfg(test)]
 pub fn default_model_for_provider(provider: &str) -> &'static str {
     match provider {
         "openrouter" => "openai/gpt-4",
@@ -336,6 +344,7 @@ pub fn default_model_for_provider(provider: &str) -> &'static str {
 /// by treating `None` as `""`. Entries with a real `last_updated` sort
 /// before entries without (since `"2024-..." > ""` lexicographically),
 /// and ties fall back to insertion order via Rust's stable sort.
+#[cfg(test)]
 pub fn get_provider_models(cache: &ModelsDevResponse, provider: &str) -> Vec<ModelsDevModel> {
     let Some(models_dev_provider) = map_to_models_dev_provider(provider) else {
         return Vec::new();
@@ -374,6 +383,7 @@ pub fn get_provider_models(cache: &ModelsDevResponse, provider: &str) -> Vec<Mod
 /// Serialise a `CacheData` for disk writing. Mirrors `writeJsonFile` —
 /// pretty-printed with no trailing newline (matches the TS
 /// `JSON.stringify(data, null, 2)` shape used elsewhere in the port).
+#[cfg(test)]
 pub fn to_cache_bytes(cache: &CacheData) -> serde_json::Result<Vec<u8>> {
     let mut buf = Vec::new();
     let formatter = serde_json::ser::PrettyFormatter::with_indent(b"  ");

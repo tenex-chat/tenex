@@ -96,6 +96,7 @@ pub enum LlmMenuInput {
     Char(char),
     /// Spinner tick — advance `spinner_frame`. The I/O layer fires this
     /// every 80 ms while a test is in flight.
+    #[cfg(test)]
     SpinnerTick,
     Other,
 }
@@ -141,6 +142,7 @@ pub fn handle_key(
     items: &[ConfigItem],
     key: LlmMenuInput,
 ) -> LlmMenuOutcome {
+    #[cfg(test)]
     if matches!(key, LlmMenuInput::SpinnerTick) {
         if state.testing.is_some() {
             state.spinner_frame = state.spinner_frame.wrapping_add(1);
@@ -231,7 +233,10 @@ pub fn handle_key(
             }
         }
         LlmMenuInput::Other => LlmMenuOutcome::Continue,
+        #[cfg(test)]
         LlmMenuInput::SpinnerTick | LlmMenuInput::Escape | LlmMenuInput::CtrlC => unreachable!(),
+        #[cfg(not(test))]
+        LlmMenuInput::Escape | LlmMenuInput::CtrlC => unreachable!(),
     }
 }
 
@@ -247,6 +252,7 @@ pub fn finish_test(state: &mut LlmMenuState, config_name: &str, result: TestResu
 
 /// Render lines for the menu. The I/O layer adds colour and writes via
 /// crossterm; tests inspect the unstyled strings.
+#[cfg(test)]
 pub fn compose_lines(
     state: &LlmMenuState,
     message: &str,
@@ -302,6 +308,7 @@ pub fn compose_lines(
     out
 }
 
+#[cfg(test)]
 fn render_status_glyph(state: &LlmMenuState, item: &ConfigItem) -> &'static str {
     let name = match &item.config_name {
         Some(n) => n,
@@ -320,6 +327,7 @@ fn render_status_glyph(state: &LlmMenuState, item: &ConfigItem) -> &'static str 
     }
 }
 
+#[cfg(test)]
 fn render_error_suffix(state: &LlmMenuState, item: &ConfigItem) -> String {
     let Some(name) = &item.config_name else {
         return String::new();

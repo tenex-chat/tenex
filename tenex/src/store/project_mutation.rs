@@ -56,7 +56,6 @@ impl MetadataKey {
 pub struct PublishProjectMutationParams {
     pub owner_pubkey: String,
     pub project_dtag: String,
-    pub trigger: String,
     pub add_agent_pubkeys: Vec<String>,
     pub remove_agent_pubkeys: Vec<String>,
     /// When non-empty, **set semantics**: any `p` tag whose value is not
@@ -298,7 +297,6 @@ mod tests {
         PublishProjectMutationParams {
             owner_pubkey: "owner".into(),
             project_dtag: "P1".into(),
-            trigger: "test".into(),
             ..Default::default()
         }
     }

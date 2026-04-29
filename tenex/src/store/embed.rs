@@ -27,8 +27,10 @@ use super::atomic;
 
 const FILE_NAME: &str = "embed.json";
 
-pub const DEFAULT_PROVIDER: &str = "local";
-pub const DEFAULT_MODEL: &str = "Xenova/all-MiniLM-L6-v2";
+#[cfg(test)]
+const DEFAULT_PROVIDER: &str = "local";
+#[cfg(test)]
+const DEFAULT_MODEL: &str = "Xenova/all-MiniLM-L6-v2";
 
 /// On-disk representation of `embed.json`. Lossless round-trip.
 #[derive(Debug, Clone, Default)]
@@ -37,6 +39,7 @@ pub struct EmbedDoc {
 }
 
 impl EmbedDoc {
+    #[cfg(test)]
     pub fn new() -> Self {
         Self::default()
     }
@@ -82,11 +85,13 @@ impl EmbedDoc {
             .insert("model".into(), Value::String(model.to_owned()));
     }
 
-    pub fn base_url(&self) -> Option<&str> {
+    #[cfg(test)]
+    fn base_url(&self) -> Option<&str> {
         self.raw.get("baseUrl").and_then(Value::as_str)
     }
 
-    pub fn set_base_url(&mut self, base_url: Option<&str>) {
+    #[cfg(test)]
+    fn set_base_url(&mut self, base_url: Option<&str>) {
         match base_url {
             Some(u) if !u.is_empty() => {
                 self.raw
@@ -100,11 +105,13 @@ impl EmbedDoc {
 
     /// Provider with default fallback (matches `EmbeddingProviderFactory`'s
     /// runtime default at `:85-88`).
-    pub fn provider_or_default(&self) -> &str {
+    #[cfg(test)]
+    fn provider_or_default(&self) -> &str {
         self.provider().unwrap_or(DEFAULT_PROVIDER)
     }
 
-    pub fn model_or_default(&self) -> &str {
+    #[cfg(test)]
+    fn model_or_default(&self) -> &str {
         self.model().unwrap_or(DEFAULT_MODEL)
     }
 }

@@ -194,6 +194,7 @@ impl RelayState {
     /// Compose the rendered lines (without ANSI styling) — used by the I/O
     /// layer for layout calculations and by tests for verification. The
     /// styled render lives in [`relay_prompt`].
+    #[cfg(test)]
     pub fn compose_lines(&self, items: &[RelayItem], cfg: &RelayPromptConfig<'_>) -> Vec<String> {
         self.compose_line_segments(items, cfg)
             .into_iter()

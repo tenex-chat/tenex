@@ -154,35 +154,6 @@ pub fn blank() {
     println!();
 }
 
-/// `display.setupComplete()` — `:90-94`.
-///
-/// ```text
-/// <blank>
-///   <ACCENT bold>▲</> <ACCENT bold>Setup complete!</>
-/// <blank>
-/// ```
-pub fn setup_complete() {
-    println!();
-    println!("{}", format_setup_complete_line());
-    println!();
-}
-
-/// Returns the styled "▲ Setup complete!" line.
-///
-/// TS at `display.ts:92`:
-/// ```ts
-/// console.log(`  ${ACCENT.bold("▲")} ${ACCENT.bold("Setup complete!")}`);
-/// ```
-/// Wire bytes (ACCENT = chalk.ansi256(214)):
-/// `  \x1b[38;5;214m\x1b[1m▲\x1b[22m\x1b[39m \x1b[38;5;214m\x1b[1mSetup complete!\x1b[22m\x1b[39m`.
-fn format_setup_complete_line() -> String {
-    use crate::tui::theme::{BOLD_CLOSE, BOLD_OPEN, FG_RESET};
-    const ACCENT_OPEN: &str = "\x1b[38;5;214m";
-    format!(
-        "  {ACCENT_OPEN}{BOLD_OPEN}▲{BOLD_CLOSE}{FG_RESET} {ACCENT_OPEN}{BOLD_OPEN}Setup complete!{BOLD_CLOSE}{FG_RESET}",
-    )
-}
-
 /// `display.summaryLine(label, value)` — `:99-102`.
 ///
 /// `paddedLabel = (label + ":").padEnd(16)`; output is
@@ -299,14 +270,6 @@ mod tests {
     }
 
     /// Pin setup-complete line wire bytes per `display.ts:92`.
-    #[test]
-    fn setup_complete_line_matches_ts_chalk_byte_sequence() {
-        assert_eq!(
-            format_setup_complete_line(),
-            "  \x1b[38;5;214m\x1b[1m▲\x1b[22m\x1b[39m \x1b[38;5;214m\x1b[1mSetup complete!\x1b[22m\x1b[39m",
-        );
-    }
-
     /// Pin summary-line wire bytes per `display.ts:99-101`.
     #[test]
     fn summary_line_byte_sequence_matches_ts_chalk() {

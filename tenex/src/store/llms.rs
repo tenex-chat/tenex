@@ -46,6 +46,7 @@ pub struct LlmsDoc {
 }
 
 impl LlmsDoc {
+    #[cfg(test)]
     pub fn new() -> Self {
         Self::default()
     }
@@ -69,10 +70,12 @@ impl LlmsDoc {
         atomic::write(&path, &bytes)
     }
 
+    #[cfg(test)]
     pub fn raw(&self) -> &IndexMap<String, Value> {
         &self.raw
     }
 
+    #[cfg(test)]
     pub fn raw_mut(&mut self) -> &mut IndexMap<String, Value> {
         &mut self.raw
     }
@@ -307,6 +310,7 @@ impl<'a> LlmConfigEntry<'a> {
     }
 
     /// Generic field access for the `.passthrough()` standard-config extras.
+    #[cfg(test)]
     pub fn field(&self, key: &str) -> Option<&'a Value> {
         self.obj.get(key)
     }
@@ -326,6 +330,7 @@ impl<'a> LlmConfigEntry<'a> {
     }
 
     /// For meta configs: borrowed view of one variant.
+    #[cfg(test)]
     pub fn variant(&self, name: &str) -> Option<MetaVariantEntry<'a>> {
         if self.kind() != LlmConfigKind::Meta {
             return None;
@@ -340,6 +345,7 @@ impl<'a> LlmConfigEntry<'a> {
     }
 
     /// For meta configs: the `default` variant name (required by schema).
+    #[cfg(test)]
     pub fn meta_default_variant(&self) -> Option<&str> {
         if self.kind() != LlmConfigKind::Meta {
             return None;
@@ -349,10 +355,12 @@ impl<'a> LlmConfigEntry<'a> {
 }
 
 /// Borrowed view of one meta-model variant.
+#[cfg(test)]
 pub struct MetaVariantEntry<'a> {
     obj: &'a Map<String, Value>,
 }
 
+#[cfg(test)]
 impl<'a> MetaVariantEntry<'a> {
     pub fn model(&self) -> Option<&'a str> {
         self.obj.get("model").and_then(Value::as_str)
@@ -402,11 +410,13 @@ impl StandardConfig {
         }
     }
 
+    #[cfg(test)]
     pub fn with<K: Into<String>>(mut self, key: K, value: Value) -> Self {
         self.overrides.push((key.into(), Some(value)));
         self
     }
 
+    #[cfg(test)]
     pub fn clearing<K: Into<String>>(mut self, key: K) -> Self {
         self.overrides.push((key.into(), None));
         self

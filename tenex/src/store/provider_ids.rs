@@ -24,11 +24,13 @@ pub const OPENAI: &str = "openai";
 pub const OLLAMA: &str = "ollama";
 
 /// `mock` — used by tests; never appears in real `providers.json`.
+#[cfg(test)]
 pub const MOCK: &str = "mock";
 
 /// All known provider IDs. Source: `provider-ids.ts:9-15`. Used by
 /// validation paths that reject unknown providers and by enumeration
 /// flows in the LLM editor.
+#[cfg(test)]
 pub const ALL_PROVIDER_IDS: &[&str] = &[
     CLAUDE_CODE,
     CODEX,
@@ -41,6 +43,7 @@ pub const ALL_PROVIDER_IDS: &[&str] = &[
 
 /// `is_known_provider_id(s)` — `true` iff `s` is one of the seven
 /// canonical provider IDs.
+#[cfg(test)]
 pub fn is_known_provider_id(s: &str) -> bool {
     ALL_PROVIDER_IDS.contains(&s)
 }

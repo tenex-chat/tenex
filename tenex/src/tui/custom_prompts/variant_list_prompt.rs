@@ -30,13 +30,12 @@
 use std::io::{self, Write};
 
 use crossterm::cursor::{MoveToColumn, MoveUp};
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use crossterm::style::{Attribute, Color, Print, ResetColor, SetAttribute, SetForegroundColor};
 use crossterm::terminal::{Clear, ClearType};
 use crossterm::{queue, QueueableCommand};
 use indexmap::IndexMap;
 
-use super::raw_mode::RawMode;
 use crate::tui::glyphs;
 
 // Palette aliases sourced from the shared theme module.
@@ -250,73 +249,6 @@ pub fn compose_lines(state: &VariantListState, message: &str) -> Vec<String> {
     out.push("  ↑↓ navigate • ⏎ edit • d set default • ⌫ remove".to_string());
 
     out
-}
-
-// =========================================================================
-// I/O loop
-// =========================================================================
-
-/// Result of running [`variant_list_prompt`]. The screen layer matches the
-/// emitted action and either opens the variant-detail editor (`Edit`),
-/// the add-variant flow (`Add`), persists (`Done`), or aborts (`Cancelled`).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum VariantListResult {
-    Edit {
-        state: VariantListState,
-        variant_name: String,
-    },
-    Add {
-        state: VariantListState,
-    },
-    Done {
-        state: VariantListState,
-    },
-    Cancelled,
-}
-
-/// Run the bespoke variant-list prompt to completion. Blocks until the user
-/// confirms a row or cancels.
-pub fn variant_list_prompt(
-    message: &str,
-    state: VariantListState,
-) -> io::Result<VariantListResult> {
-    let _guard = RawMode::enter()?;
-    let mut state = state;
-    let mut prev_height: u16 = 0;
-    let mut stdout = io::stdout();
-
-    loop {
-        prev_height = render_frame(&mut stdout, message, &state, prev_height)?;
-
-        let key = match event::read()? {
-            Event::Key(k) => k,
-            _ => continue,
-        };
-        let input = VariantInput::from_key_event(key);
-
-        match handle_key(&mut state, input) {
-            VariantOutcome::Continue => continue,
-            VariantOutcome::Cancel => {
-                clear_frame(&mut stdout, prev_height)?;
-                return Ok(VariantListResult::Cancelled);
-            }
-            VariantOutcome::Edit { variant_name } => {
-                clear_frame(&mut stdout, prev_height)?;
-                return Ok(VariantListResult::Edit {
-                    state,
-                    variant_name,
-                });
-            }
-            VariantOutcome::Add => {
-                clear_frame(&mut stdout, prev_height)?;
-                return Ok(VariantListResult::Add { state });
-            }
-            VariantOutcome::Done => {
-                clear_frame(&mut stdout, prev_height)?;
-                return Ok(VariantListResult::Done { state });
-            }
-        }
-    }
 }
 
 fn render_frame<W: Write>(

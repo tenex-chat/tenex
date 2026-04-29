@@ -88,6 +88,7 @@ pub fn list_conversation_ids_from_project(
 
 /// Lightweight metadata pulled from a conversation file. Mirrors the
 /// inline shape returned at `ConversationDiskReader.ts:18-46`.
+#[cfg(test)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LightweightMetadata {
     pub id: String,

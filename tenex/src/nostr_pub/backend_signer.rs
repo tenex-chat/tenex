@@ -9,7 +9,9 @@
 //! - return as `Keys`
 
 use anyhow::{anyhow, Context, Result};
-use nostr_sdk::{Keys, SecretKey};
+use nostr_sdk::Keys;
+#[cfg(test)]
+use nostr_sdk::SecretKey;
 
 use crate::store::tenex_config::TenexConfigDoc;
 
@@ -36,6 +38,7 @@ pub fn ensure_backend_keys(base_dir: &std::path::Path) -> Result<Keys> {
 /// Load `tenex_private_key` from config. Returns `None` if absent. Does
 /// **not** generate or write — callers that must mutate state use
 /// [`ensure_backend_keys`] instead.
+#[cfg(test)]
 pub fn try_load_backend_keys(base_dir: &std::path::Path) -> Result<Option<Keys>> {
     let doc = TenexConfigDoc::load(base_dir)?;
     let Some(s) = doc.tenex_private_key() else {
@@ -62,11 +65,6 @@ fn keys_from_hex(hex: &str) -> Result<Keys> {
     let sk = SecretKey::from_hex(hex).map_err(|e| anyhow!("from_hex: {e}"))?;
     Ok(Keys::new(sk))
 }
-
-// Reference SecretKey to avoid a missing-import warning in non-test builds.
-const _: fn() = || {
-    let _: Option<SecretKey> = None;
-};
 
 #[cfg(test)]
 mod tests {

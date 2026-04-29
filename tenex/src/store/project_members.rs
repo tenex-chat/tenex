@@ -148,6 +148,7 @@ pub enum ProjectVisibility {
 }
 
 impl ProjectVisibility {
+    #[cfg(test)]
     pub fn as_str(self) -> &'static str {
         match self {
             ProjectVisibility::Unknown => "unknown",
@@ -201,6 +202,7 @@ pub fn get_project_visibility(base_dir: &std::path::Path, dtag: &str) -> Result<
 
 /// Collect every agent pubkey across every project on disk. Matches
 /// `collectAllProjectAgentPubkeys` (`ProjectMembersReader.ts:113-123`).
+#[cfg(test)]
 pub fn collect_all_project_agent_pubkeys(
     base_dir: &std::path::Path,
 ) -> Result<std::collections::HashSet<String>> {

@@ -378,6 +378,7 @@ pub fn mask_key(provider_id: &str, key: &str) -> String {
 /// Composition for the Browse view. Returned strings are unstyled — colour
 /// is applied at the I/O layer. Cited line numbers in comments map to the
 /// TS template at `provider-select-prompt.ts:228-253`.
+#[cfg(test)]
 pub fn compose_browse_lines(
     state: &ProviderState,
     provider_ids: &[String],
@@ -424,6 +425,7 @@ pub fn compose_browse_lines(
 }
 
 /// Composition for the Keys view. `provider-select-prompt.ts:255-286`.
+#[cfg(test)]
 pub fn compose_keys_lines(state: &ProviderState) -> Vec<String> {
     let Some(target) = state.keys_target.as_deref() else {
         return Vec::new();
@@ -504,6 +506,7 @@ pub fn provider_display_name(pid: &str) -> &str {
 
 /// Format the key-count suffix shown beside an enabled provider's name.
 /// `provider-select-prompt.ts:60-62`.
+#[cfg(test)]
 fn format_key_info(value: &ApiKeyValue) -> String {
     let count = value.entries().len();
     if count == 0 {

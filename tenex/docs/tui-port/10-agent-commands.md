@@ -478,7 +478,7 @@ Fields (full list, and how they’re populated):
 | `instructions` | `string?` | event `instructions` tag (`agent-installer.ts:106`). |
 | `useCriteria` | `string?` | event `use-criteria` tag (`NDKAgentDefinition.useCriteria`). |
 | `mcpServers` | `Record<string, MCPServerConfig>?` | not set during install; reserved for runtime updates. |
-| `default` | `{ model?, skills?, mcpAccess? }?` | Initialized with `{ model: DEFAULT_AGENT_LLM_CONFIG, tools, skills }` (`agent-installer.ts:231–234`); also tools-tag captured into `default.tools` (`:115–118, :132–135`). |
+| `default` | `{ model?, skills?, mcp? }?` | Initialized with `{ model: DEFAULT_AGENT_LLM_CONFIG, tools, skills }` (`agent-installer.ts:231–234`); also tools-tag captured into `default.tools` (`:115–118, :132–135`). |
 | `telegram` | `{ botToken, allowDMs?, apiBaseUrl?, publishReasoningToTelegram?, publishConversationToTelegram? }?` | Updated only via `updateAgentTelegramConfig`. Sanitized (`AgentStorage.ts:22–34`) — drops legacy `chatBindings` field. |
 | `definitionDTag` | `string?` | event `d` tag (`agent-installer.ts:111`). |
 | `definitionAuthor` | `string?` | event `pubkey` (`agent-installer.ts:112`). |
