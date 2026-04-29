@@ -5,7 +5,7 @@
  */
 
 import { readdir, readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join, normalize } from "node:path";
 
 interface LintError {
 	file: string;
@@ -142,21 +142,26 @@ async function checkServiceNaming(file: string) {
 
 // Rule 5: Check for circular dependencies (basic check)
 const importGraph = new Map<string, Set<string>>();
+let sourceFiles = new Set<string>();
 
 function normalizeImport(imp: string, fromFile: string): string {
 	if (imp.startsWith("@/")) {
-		return imp;
+		return normalize(join("src", imp.slice(2)));
 	}
-	// Handle relative imports
-	const fromDir = fromFile.split("/").slice(0, -1).join("/");
-	let resolved = imp;
-	while (resolved.startsWith("../")) {
-		resolved = resolved.slice(3);
-	}
-	if (resolved.startsWith("./")) {
-		resolved = resolved.slice(2);
-	}
-	return `${fromDir}/${resolved}`;
+	return normalize(join(dirname(fromFile), imp));
+}
+
+function resolveImportPath(imp: string, fromFile: string): string | undefined {
+	const normalized = normalizeImport(imp.replace(/\.(ts|tsx)$/, ""), fromFile);
+	const candidates = [
+		normalized,
+		`${normalized}.ts`,
+		`${normalized}.tsx`,
+		join(normalized, "index.ts"),
+		join(normalized, "index.tsx"),
+	];
+
+	return candidates.find((candidate) => sourceFiles.has(candidate));
 }
 
 async function buildImportGraph(file: string, content: string) {
@@ -164,10 +169,16 @@ async function buildImportGraph(file: string, content: string) {
 	const imports = new Set<string>();
 
 	for (const line of lines) {
+		if (!line.match(/^\s*import\s+/) || line.match(/^\s*import\s+type\b/)) {
+			continue;
+		}
+
 		const match = line.match(/from ['"](@\/[^'"]+|\.\.?\/[^'"]+)['"]/);
 		if (match) {
-			const imp = match[1].replace(/\.(ts|tsx)$/, "");
-			imports.add(normalizeImport(imp, file));
+			const resolved = resolveImportPath(match[1], file);
+			if (resolved && resolved !== file) {
+				imports.add(resolved);
+			}
 		}
 	}
 
@@ -197,12 +208,7 @@ function findCycles() {
 
 		const imports = importGraph.get(node) || new Set();
 		for (const imp of imports) {
-			// Try to find the actual file
-			for (const [file] of importGraph) {
-				if (file.includes(imp.replace("@/", "src/"))) {
-					dfs(file, [...path]);
-				}
-			}
+			dfs(imp, [...path]);
 		}
 
 		stack.delete(node);
@@ -225,6 +231,7 @@ async function lint() {
 	for await (const file of getFiles("src")) {
 		files.push(file);
 	}
+	sourceFiles = new Set(files);
 
 	console.log(`Found ${files.length} TypeScript files to check\n`);
 

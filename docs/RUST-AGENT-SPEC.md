@@ -10,6 +10,8 @@ TENEX_PROJECT_ID=<project-id> cargo run -p tenex-agent -- <agent.json> < trigger
 
 `TENEX_PROJECT_ID` is mandatory — the daemon sets it before spawning the agent. It is used to open the file-backed project view (project event metadata plus global agent JSON records) and the conversation store (todo persistence).
 
+`TENEX_MCP_MANIFEST` and `TENEX_MCP_SOCKET` are optional and set only by `tenex-runtime` when the selected agent has `default.mcp` access to project `.mcp.json` servers. The manifest contains tool definitions; the socket is the side channel for MCP tool calls so stdout remains reserved for signed Nostr NDJSON.
+
 ## I/O Protocol
 
 **stdin** — one JSON object: a complete Nostr event (id, pubkey, created_at, kind, tags, content, sig).
@@ -559,6 +561,7 @@ API keys are resolved from provider-specific env vars (`ANTHROPIC_API_KEY`, `OPE
 | `tenex-agent-registry` | Global installed-agent registry JSON records and indexes |
 | `tenex-conversations` | Conversation SQLite store (todos + self-applied skills via `AgentContextState`) |
 | `tenex-context` | Conversation history projection (compaction/decay/reminders); `record_turn` write-back |
+| `tenex-mcp` | Runtime-provided MCP tool manifest and call frame types |
 | `tenex-system-prompt` | System prompt assembly (`build_system_prompt`); `InjectedFile`, `HomeDirectoryInfo` types |
 | `tenex-rag` | RAG: SQLite vector store + embedding client |
 | `tenex-supervision` | Heuristic pre-tool and post-completion checks; `AgentCategory` enum |
@@ -566,4 +569,4 @@ API keys are resolved from provider-specific env vars (`ANTHROPIC_API_KEY`, `OPE
 
 ## Future Work (not yet implemented)
 
-- **TS-only tools**: `send_message`, MCP tools (`mcp_list_resources`, `mcp_resource_read`, `mcp_subscribe`, `mcp_subscription_stop`), RAG subscription tools (`rag_subscription_create/delete/get/list`), RAG collection management tools (`rag_collection_create/delete/list`).
+- **TS-only tools**: `send_message`, MCP resource/subscription tools (`mcp_list_resources`, `mcp_resource_read`, `mcp_subscribe`, `mcp_subscription_stop`), RAG subscription tools (`rag_subscription_create/delete/get/list`), RAG collection management tools (`rag_collection_create/delete/list`).

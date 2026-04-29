@@ -5,7 +5,7 @@ export default typescript.config(
   js.configs.recommended,
   ...typescript.configs.recommended,
   {
-    ignores: ['dist/**', 'node_modules/**', 'coverage/**', '*.config.js', '*.config.ts', 'scripts/**', '**/*.test.*', '**/*.spec.*', '**/__tests__/**']
+    ignores: ['dist/**', 'node_modules/**', 'coverage/**', '*.config.js', '*.config.ts', 'scripts/**', 'src/skills/**/*.js', '**/*.test.*', '**/*.spec.*', '**/__tests__/**']
   },
   // Architecture enforcement: lib/ must have ZERO TENEX imports
   {

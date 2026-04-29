@@ -1,4 +1,4 @@
-# TENEX Rust Agent — Test Report
+******# TENEX Rust Agent — Test Report
 
 Last updated: 2026-04-29 (session 11)
 

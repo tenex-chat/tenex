@@ -7,6 +7,7 @@ node_modules/
 dist/
 build/
 out/
+target/
 .next/
 .nuxt/
 .cache/
@@ -28,6 +29,10 @@ playwright/.cache/
 # IDE
 .vscode/
 .idea/
+.codex/
+.obsidian/
+.claude/*.lock
+.stignore
 *.swp
 *.swo
 *~
@@ -73,6 +78,9 @@ docs/plans/
 # Test artifacts
 test-*.json
 test-*.txt
+test-*.md
+test-docs/
+rust-write-test.txt
 __snapshots__/.repomix-output.txt
 .repomix-output.txt
 

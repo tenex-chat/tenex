@@ -128,6 +128,7 @@ The bun runtime is gone. Every component is small and single-purpose; durable st
 | `tenex-conversations` | Conversation storage: messages, tool messages, prompt-history, completions, delegations | Spec ✅, building 🔧 |
 | `tenex-agent-registry` | Global installed-agent registry: JSON records, index maintenance, key helpers, and write-side mutation APIs | ✅ shipped |
 | `tenex-project` | Read-side project view: project event metadata, membership, member-agent projections, signer trait | ✅ shipped |
+| `tenex-mcp` | Project-scoped MCP server lifecycle, tool manifests, and runtime↔agent Unix-socket bridge | ✅ shipped |
 | `tenex-context` | LLM-facing projection: history → `messages[]`, context management, cache anchoring | Spec ✅ |
 | `tenex-identity` | `pubkey → IdentityView` via kind:0 + cache | Spec ✅ |
 | `tenex-telemetry` | Shared Rust OpenTelemetry/OTLP bootstrap, trace propagation helpers, and `tracing` subscriber setup | ✅ shipped |
@@ -195,6 +196,7 @@ These are commitments made now that every later piece depends on:
 
 - **NDJSON over Unix sockets** is the canonical local IPC. `tenex-agent` already uses NDJSON over stdio; the same frames generalize to socket. The runtime orchestrator and runner speak this. The whitelist daemon's line protocol migrates to it eventually.
 - **Storage contract by crate.** `tenex-conversations` uses SQLite schema-as-contract. `tenex-agent-registry` owns the global installed-agent registry JSON contract. `tenex-project` is read-side over project events plus those agent JSON projections.
+- **MCP is project-scoped.** Server definitions live in the project working directory's `.mcp.json`; agent JSON grants access with `default.mcp`. There is no host-global MCP server registry.
 - **`Signer` trait.** Agent signing is always behind this trait. One impl today (nsec), one tomorrow (NIP-46). Single-line swap when the bunker lands.
 - **Project-id input flexibility.** Every Rust API that takes a project ID accepts either the full NIP-33 coordinate (`"31933:<pubkey>:<dTag>"`) or the bare dTag.
 - **Three-role separation in the future orchestrator.** Subscribe (relay-mux) ≠ orchestrate (`tenex-runtime`) ≠ execute (`tenex-agent`). The runner never opens a relay connection.

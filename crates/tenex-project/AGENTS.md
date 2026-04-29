@@ -51,5 +51,5 @@ Key types: `Agent`, `ProjectAgent`, `ProjectMetadata`, `Signer`, `NsecSigner`, `
 - No database, migrations, or ORM.
 - No cross-host replication.
 - No skill catalog table (skills are filesystem-discovered at runtime).
-- No separate MCP server registry (MCP server config is read from the agent JSON).
+- No MCP server registry. Project-scoped MCP server config is read by `tenex-mcp` from the project working directory's `.mcp.json`, not by `tenex-project`.
 - No lessons.
