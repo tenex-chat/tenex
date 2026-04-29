@@ -244,11 +244,7 @@ fn compose_display_name(name: &str, detail: &str) -> String {
     if detail.is_empty() {
         return name.to_owned();
     }
-    let mut out = String::with_capacity(name.len() + detail.len() + 8);
-    let dim_open = crate::tui::theme::DIM_OPEN;
-    let dim_close = crate::tui::theme::DIM_CLOSE;
-    let _ = write!(out, "{name} {dim_open}{detail}{dim_close}");
-    out
+    format!("{name} {}", crate::tui::theme::chalk_dim(detail))
 }
 
 /// Two action buttons. Source: `LLMConfigEditor.ts:209-212`.
@@ -259,16 +255,15 @@ fn compose_display_name(name: &str, detail: &str) -> String {
 /// Embed the dim ANSI codes inline so the picker renders the same
 /// muted suffix without needing a separate styling hook.
 pub fn action_items() -> Vec<ActionItem> {
-    let dim_open = crate::tui::theme::DIM_OPEN;
-    let dim_close = crate::tui::theme::DIM_CLOSE;
+    use crate::tui::theme::chalk_dim;
     vec![
         ActionItem {
-            name: format!("Add new configuration {dim_open}(a){dim_close}"),
+            name: format!("Add new configuration {}", chalk_dim("(a)")),
             key: 'a',
             value: "add".to_owned(),
         },
         ActionItem {
-            name: format!("Add multi-modal configuration {dim_open}(m){dim_close}"),
+            name: format!("Add multi-modal configuration {}", chalk_dim("(m)")),
             key: 'm',
             // TS uses the camelCase token `addMultiModal` (LLMConfigEditor.ts:211).
             value: "addMultiModal".to_owned(),
