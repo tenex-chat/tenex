@@ -1,6 +1,6 @@
 # TENEX Rust Adoption Status
 
-_Last updated: 2026-04-29 (sixteenth pass). Auto-maintained by scheduled debt check._
+_Last updated: 2026-04-29 (seventeenth pass). Auto-maintained by scheduled debt check._
 
 ---
 
@@ -177,7 +177,7 @@ Note: `conversation_get`, `conversation_list`, `kill` (scheduled tasks only), `s
 
 ## Compilation Status
 
-**As of 2026-04-29 (sixteenth debt check pass): workspace compiles clean — zero errors, zero unused-import/unused-variable warnings.**
+**As of 2026-04-29 (seventeenth debt check pass): workspace compiles clean — zero errors. ~290 dead-code warnings exist from porting-in-progress code (TUI glyphs, onboard LLM test substrate, Codex config enums, etc.); none are orphaned — all are waiting for caller wiring.**
 
 **MILESTONE: tenex-agent is live-tested end-to-end (see `RUST_REPORT.md`)**:
 - Basic completion ✅, streaming (kind:24135 deltas) ✅, final ConversationIntent ✅
@@ -186,6 +186,9 @@ Note: `conversation_get`, `conversation_list`, `kill` (scheduled tasks only), `s
 - Conversation history persistence (10 convs, 20 history entries) ✅
 - Supervision (worker todo block) ✅
 - FK bug fixed: ensure_conversation() on store open
+
+Resolved between sixteenth and seventeenth passes:
+- **Architecture fix — `tenex daemon` default**: Previously required `--rust` or `--ts` flag (clap `required(true)` ArgGroup with no default). Since Rust is the canonical path, removed the required ArgGroup and made Rust the default; `--ts <CMD>` remains as the escape hatch. Removes the `unreachable!()` fallback.
 
 Resolved between fifteenth and sixteenth passes:
 - **Ollama model ID parsing bug**: `config.rs` now checks `provider/model` slash format before `provider:model` colon format; `ollama/mistral:latest` was previously mis-split at the colon into provider=`ollama/mistral`, model=`latest`
