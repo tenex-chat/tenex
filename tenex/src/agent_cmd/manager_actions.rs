@@ -611,8 +611,7 @@ pub async fn show_agent_detail(
 /// declines the auto-merge suggestion, we stop offering it for the rest
 /// of the session.
 pub async fn show_main_menu(base_dir: &std::path::Path) -> Result<()> {
-    use console::Style;
-    let dim = Style::new().dim();
+    use crate::tui::theme::chalk_dim;
 
     let mut owner_keys: Option<Keys> = None;
     let mut duplicate_merge_dismissed = false;
@@ -654,18 +653,21 @@ pub async fn show_main_menu(base_dir: &std::path::Path) -> Result<()> {
 
         let actions: Vec<ActionItem> = vec![
             ActionItem {
-                name: format!("Delete selected {}", dim.apply_to("(x)")),
+                name: format!("Delete selected {}", chalk_dim("(x)")),
                 value: "delete-selected".to_owned(),
                 key: 'x',
             },
             ActionItem {
-                name: format!("Merge selected {}", dim.apply_to("(m)")),
+                name: format!("Merge selected {}", chalk_dim("(m)")),
                 value: "merge-selected".to_owned(),
                 key: 'm',
             },
         ];
 
-        let message = format!("Agents {}", dim.apply_to(format!("({})", agents.len())));
+        let message = format!(
+            "Agents {}",
+            chalk_dim(&format!("({})", agents.len())),
+        );
         let result = match agent_select_prompt(&message, &actions, &items)? {
             Some(r) => r,
             None => return Ok(()), // Esc / Ctrl-C → done
