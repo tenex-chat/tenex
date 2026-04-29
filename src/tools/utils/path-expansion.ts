@@ -51,6 +51,10 @@ export function expandPathWithEnvironment(rawPath: string, env: NodeJS.ProcessEn
 }
 
 export async function resolveToolEnvironment(context: ExecutionEnvironment): Promise<NodeJS.ProcessEnv> {
+    if (context.resolveToolEnvironment) {
+        return await context.resolveToolEnvironment();
+    }
+
     const conversation = context.getConversation?.();
     const projectId = context.projectId ?? (typeof conversation?.getProjectId === "function"
         ? conversation.getProjectId()

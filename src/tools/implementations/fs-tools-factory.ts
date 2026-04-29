@@ -55,7 +55,10 @@ function wrapToolsWithPathExpansion(
 export function getOrCreateTenexFsTools(context: ToolExecutionContext): ReturnType<typeof createFsTools> {
     let tools = tenexFsToolsCache.get(context);
     if (!tools) {
-        const allowedRoots = [context.projectBasePath, getAgentHomeDirectory(context.agent.pubkey)]
+        const allowedRoots = [
+            context.projectBasePath,
+            getAgentHomeDirectory(context.agent.pubkey, context.tenexBasePath),
+        ]
             .filter((p): p is string => typeof p === "string" && p.trim() !== "");
 
         tools = createFsTools({
@@ -83,8 +86,8 @@ const homeFsToolsCache = new WeakMap<ToolExecutionContext, ReturnType<typeof cre
 export function getOrCreateHomeFsTools(context: ToolExecutionContext): ReturnType<typeof createFsTools> {
     let tools = homeFsToolsCache.get(context);
     if (!tools) {
-        const homeDir = getAgentHomeDirectory(context.agent.pubkey);
-        ensureAgentHomeDirectory(context.agent.pubkey);
+        const homeDir = getAgentHomeDirectory(context.agent.pubkey, context.tenexBasePath);
+        ensureAgentHomeDirectory(context.agent.pubkey, context.tenexBasePath);
         tools = createFsTools({
             workingDirectory: homeDir,
             namePrefix: "home_fs",

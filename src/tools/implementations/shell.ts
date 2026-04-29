@@ -187,9 +187,9 @@ function buildShellErrorResult(command: string, error: string): ShellErrorResult
 async function executeShell(input: ShellInput, context: ToolExecutionContext): Promise<ShellOutput> {
     const { command, description, cwd, timeout = 30, run_in_background } = input;
     const conversation = context.getConversation?.();
-    const projectId = typeof conversation?.getProjectId === "function"
+    const projectId = context.projectId ?? (typeof conversation?.getProjectId === "function"
         ? conversation.getProjectId()
-        : null;
+        : null);
 
     // Add trace span with all context for debugging
     const span = trace.getActiveSpan();

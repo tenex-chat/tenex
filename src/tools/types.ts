@@ -126,6 +126,12 @@ export interface ExecutionEnvironment {
      * avoids cross-test/process global mutations when resolving tool env files.
      */
     tenexBasePath?: string;
+    /**
+     * Optional context-scoped environment resolver.
+     * Tests and specialized runtimes can provide this to avoid process-wide
+     * environment or singleton coupling while tools still share one env shape.
+     */
+    resolveToolEnvironment?: () => NodeJS.ProcessEnv | Promise<NodeJS.ProcessEnv>;
     triggeringEnvelope: InboundEnvelope;
     /**
      * Access to conversation state. May return undefined before full execution setup.
