@@ -2,8 +2,8 @@
 //! defaults, persists `~/.tenex/config.json`, and ensures the projects
 //! directory exists.
 //!
-//! Source: `src/commands/onboard.ts:1318-1421` (Screens 1.E, 1.F, and the
-//! save block at `:1411-1421`).
+//! Source: `src/commands/onboard.ts:993-1090` (Screens 1.E, 1.F, and the
+//! save block at `:1080-1090`).
 //!
 //! This module is pure persistence — no I/O prompts, no NDK setup. The
 //! optional NDK-side work (background agent discovery, kind:0 profile
@@ -19,7 +19,7 @@ use nostr_sdk::Keys;
 use crate::store::tenex_config::TenexConfigDoc;
 
 /// Inputs needed to commit the initial config. Shape follows what
-/// `runOnboarding` has assembled by line `:1411` of the TS source.
+/// `runOnboarding` has assembled by line `:1080` of the TS source.
 #[derive(Debug, Clone)]
 pub struct InitialConfig {
     /// One-element list of the user's hex pubkey (per Screen 1).
@@ -41,13 +41,13 @@ pub struct Committed {
 /// Apply Screens 1.E and 1.F defaults and persist `config.json`.
 ///
 /// Behaviours:
-/// - **Daemon key** (`:1319-1331`): preserved if `existingConfig.tenexPrivateKey`
+/// - **Daemon key** (`:994-1006`): preserved if `existingConfig.tenexPrivateKey`
 ///   is present; otherwise generated via `Keys::generate()`. Errors out if
 ///   generation somehow fails (matches the TS `process.exit(1)` path).
-/// - **Projects base** (`:1334`): preserved from existing config; otherwise
+/// - **Projects base** (`:1009`): preserved from existing config; otherwise
 ///   defaults to `$HOME/tenex`. Resolved to an absolute path before
-///   persisting (TS uses `path.resolve` at `:1416, :1421`).
-/// - **Persist** (`:1412-1421`): writes the merged config to disk via
+///   persisting (TS uses `path.resolve` at `:1084, :1089`).
+/// - **Persist** (`:1080-1090`): writes the merged config to disk via
 ///   [`TenexConfigDoc::save`] and ensures the projects directory exists.
 pub fn commit(base_dir: &Path, input: InitialConfig) -> Result<Committed> {
     let mut doc = TenexConfigDoc::load(base_dir)
@@ -90,7 +90,7 @@ pub fn commit(base_dir: &Path, input: InitialConfig) -> Result<Committed> {
     })
 }
 
-/// `~/tenex` (no leading dot — matches the TS path at `:1334`, where the
+/// `~/tenex` (no leading dot — matches the TS path at `:1009`, where the
 /// projects dir lives alongside `~/.tenex`, not inside it). Reads `$HOME`
 /// from the environment.
 pub fn default_projects_base() -> String {

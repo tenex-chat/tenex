@@ -1,7 +1,7 @@
 //! `tenex onboard` — initial setup wizard.
 //!
 //! Description: "Initial setup wizard for TENEX" (matches TS
-//! `src/commands/onboard.ts:1535`).
+//! `src/commands/onboard.ts:1200`).
 //!
 //! 7-step state machine. Per-screen modules implement the interactive flow;
 //! this module wires them together and produces the final `~/.tenex/config.json`.
@@ -277,7 +277,7 @@ async fn run_inner(args: OnboardArgs) -> Result<()> {
         }
     }
 
-    // Step 5: Roles. The TS path (`:1455-1457`) only renders this when at
+    // Step 5: Roles. The TS path (`:1113-1125`) only renders this when at
     // least one provider was configured; mirror that.
     let mut role_assignment_done = false;
     if !configured_provider_ids.is_empty() {
