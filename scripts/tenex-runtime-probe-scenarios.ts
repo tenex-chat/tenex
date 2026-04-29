@@ -1,9 +1,16 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import type { Event, EventTemplate, SimplePool } from "nostr-tools";
 import {
     messageText,
     waitForStoredMessage,
     type ConversationMonitor,
 } from "./tenex-runtime-probe-conversations";
+import {
+    pmShellKillDuplicateInstructions,
+    runShellKillDuplicateProbe,
+    shellKillDuplicateMockScenario,
+} from "./tenex-runtime-probe-shell-scenario";
 
 export const availableScenarios = [
     "delegation-basic",
@@ -12,7 +19,9 @@ export const availableScenarios = [
     "mcp-tool-basic",
     "acp-worker-basic",
     "agent-config-reload",
+    "agent-config-update",
     "project-membership-reload",
+    "shell-kill-duplicate",
 ] as const;
 
 export type ScenarioName = (typeof availableScenarios)[number];
@@ -34,6 +43,8 @@ export const delegationUserRequest =
 const delegationWorkerPrompt =
     "Choose one random color. Reply with exactly one lowercase color word and no punctuation.";
 export const delegationWorkerCompletionText = "blue";
+export const agentConfigUpdateModelName = "mock-updated";
+export const agentConfigUpdateSkills = ["read-access", "shell", "write-access"] as const;
 
 const colorWords = [
     "red", "blue", "green", "yellow", "purple", "orange", "pink", "black",
@@ -58,13 +69,14 @@ export function includesColorChoice(content: string): boolean {
     return extractColorChoice(content) !== null;
 }
 
-type ScenarioContext = {
+export type ScenarioContext = {
     pool: SimplePool;
     events: Event[];
     relayUrl: string;
     projectDtag: string;
     projectRef: string;
     workspaceDir: string;
+    agentsDir: string;
     conversationDbPath: string;
     pmPubkey: string;
     workerPubkey: string;
@@ -109,8 +121,14 @@ export function scenarioProjectDtag(name: ScenarioName): string {
     if (name === "agent-config-reload") {
         return "probe-agent-config-reload";
     }
+    if (name === "agent-config-update") {
+        return "probe-agent-config-update";
+    }
     if (name === "project-membership-reload") {
         return "probe-project-membership-reload";
+    }
+    if (name === "shell-kill-duplicate") {
+        return "probe-shell-kill-duplicate";
     }
     return "probe-fs-read-adjustment";
 }
@@ -131,8 +149,14 @@ export function pmInstructions(name: ScenarioName): string {
     if (name === "agent-config-reload") {
         return "This scenario verifies runtime agent config reload; remain idle unless directly mentioned.";
     }
+    if (name === "agent-config-update") {
+        return "This scenario verifies kind 24020 runtime agent config updates; remain idle unless directly mentioned.";
+    }
     if (name === "project-membership-reload") {
         return "This scenario verifies project membership reload; answer only the exact requested probe phrase.";
+    }
+    if (name === "shell-kill-duplicate") {
+        return pmShellKillDuplicateInstructions;
     }
     return "Use fs_read one file at a time. If the user corrects the requested total, follow the latest total before finishing.";
 }
@@ -277,6 +301,10 @@ export function mockScenario(name: ScenarioName): unknown {
         };
     }
 
+    if (name === "shell-kill-duplicate") {
+        return shellKillDuplicateMockScenario();
+    }
+
     const mockDelayMs = Number(process.env.TENEX_PROBE_MOCK_DELAY_MS ?? 750);
     return {
         defaultDelayMs: mockDelayMs,
@@ -316,8 +344,12 @@ export async function runScenario(name: ScenarioName, context: ScenarioContext):
         await runAcpWorkerProbe(context);
     } else if (name === "agent-config-reload") {
         await runAgentConfigReloadProbe(context);
+    } else if (name === "agent-config-update") {
+        await runAgentConfigUpdateProbe(context);
     } else if (name === "project-membership-reload") {
         await runProjectMembershipReloadProbe(context);
+    } else if (name === "shell-kill-duplicate") {
+        await runShellKillDuplicateProbe(context);
     } else {
         await runFsReadAdjustmentProbe(context);
     }
@@ -510,6 +542,73 @@ async function runAgentConfigReloadProbe(context: ScenarioContext): Promise<void
     context.configureWorkerForAcp?.();
     await context.delay(Number(process.env.TENEX_PROBE_RELOAD_WAIT_MS ?? 1_000));
     await publishAcpWorkerRequest(context);
+}
+
+async function runAgentConfigUpdateProbe(context: ScenarioContext): Promise<void> {
+    const timeoutMs = Number(process.env.TENEX_PROBE_WAIT_MS ?? 12_000);
+    const statusBefore = new Set(
+        context.events.filter((event) => event.kind === 24010).map((event) => event.id)
+    );
+    const updateEvent = context.sign(
+        {
+            kind: 24020,
+            created_at: context.now(),
+            content: "",
+            tags: [
+                ["a", context.projectRef],
+                ["client", "tenex-runtime-probe"],
+                ["p", context.workerPubkey],
+                ["model", agentConfigUpdateModelName],
+                ["tool"],
+                ...agentConfigUpdateSkills.map((skill) => ["skill", skill]),
+                ["mcp"],
+            ],
+        },
+        context.userSecret
+    );
+
+    await Promise.all(context.pool.publish([context.relayUrl], updateEvent));
+    await context.waitForObservedEvent(
+        context.events,
+        (event) =>
+            event.kind === 24010 &&
+            !statusBefore.has(event.id) &&
+            event.tags.some(
+                (tag) =>
+                    tag[0] === "model" &&
+                    tag[1] === agentConfigUpdateModelName &&
+                    tag.slice(2).includes("worker")
+            ) &&
+            agentConfigUpdateSkills.every((skill) =>
+                event.tags.some(
+                    (tag) =>
+                        tag[0] === "skill" &&
+                        tag[1] === skill &&
+                        tag.slice(2).includes("worker")
+                )
+            ),
+        timeoutMs,
+        "24010 status after agent config update"
+    );
+
+    const workerAgentPath = path.join(context.agentsDir, `${context.workerPubkey}.json`);
+    const workerAgent = JSON.parse(readFileSync(workerAgentPath, "utf8")) as {
+        default?: { model?: string; skills?: string[]; tools?: string[]; mcp?: string[] };
+    };
+    if (workerAgent.default?.model !== agentConfigUpdateModelName) {
+        throw new Error(`worker default model was ${workerAgent.default?.model ?? "<missing>"}`);
+    }
+    for (const skill of agentConfigUpdateSkills) {
+        if (!workerAgent.default?.skills?.includes(skill)) {
+            throw new Error(`worker default skills missing ${skill}`);
+        }
+    }
+    if (workerAgent.default?.tools !== undefined) {
+        throw new Error("worker default tools should have been cleared by empty tool tag");
+    }
+    if (workerAgent.default?.mcp !== undefined) {
+        throw new Error("worker default mcp should have been cleared by empty mcp tag");
+    }
 }
 
 async function runProjectMembershipReloadProbe(context: ScenarioContext): Promise<void> {

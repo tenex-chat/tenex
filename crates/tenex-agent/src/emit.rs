@@ -2,7 +2,10 @@
 //! token-counter accumulator. Both the prompt hook and the delegate tool
 //! consume this through `Arc<EmitState>`.
 
-use std::sync::{Arc, Mutex};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc, Mutex,
+};
 use tenex_protocol::{
     Channel, ConversationRef, EncodingContext, MessageRef, PrincipalRef, ProjectRef,
 };
@@ -32,9 +35,42 @@ pub struct EmitState {
     /// Team scope from the inbound event's `["team", ...]` tag.
     pub team: Option<String>,
     pub meta: Arc<Mutex<AgentMeta>>,
+    pending_external_work: Arc<AtomicBool>,
 }
 
 impl EmitState {
+    pub fn new(
+        channel: Arc<dyn Channel>,
+        project: ProjectRef,
+        triggering_principal: PrincipalRef,
+        triggering_message: Option<MessageRef>,
+        conversation_root: Option<ConversationRef>,
+        completion_recipient: Option<PrincipalRef>,
+        model: String,
+        team: Option<String>,
+    ) -> Self {
+        Self {
+            channel,
+            project,
+            triggering_principal,
+            triggering_message,
+            conversation_root,
+            completion_recipient,
+            model,
+            team,
+            meta: Arc::new(Mutex::new(AgentMeta::new())),
+            pending_external_work: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
+    pub fn mark_pending_external_work(&self) {
+        self.pending_external_work.store(true, Ordering::Release);
+    }
+
+    pub fn has_pending_external_work(&self) -> bool {
+        self.pending_external_work.load(Ordering::Acquire)
+    }
+
     pub fn build_ctx(&self, ral: u32) -> EncodingContext {
         self.build_ctx_with_team(ral, self.team.clone())
     }

@@ -135,6 +135,7 @@ impl Tool for DelegateTool {
             .send(Intent::Delegation(delegation_intent), &ctx)
             .await
             .map_err(|e| DelegateError(format!("Failed to emit delegation: {e}")))?;
+        self.state.mark_pending_external_work();
         let delegation_ref = refs
             .into_iter()
             .next()

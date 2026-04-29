@@ -12,7 +12,8 @@ Canonical spec: `docs/RUST-AGENT-SPEC.md`. Fleet context: `docs/plans/2026-04-28
 
 **stdout (NDJSON):**
 - Zero or more intermediate frames: kind:1, `["e", root_event_id, "", "root"]` tag, no `p` tag, no `status` tag.
-- Exactly one completion frame as the final line: kind:1, with `["p", triggering_event.pubkey]` and `["status", "completed"]`.
+- Final visible text is a completion frame only when the turn has no successfully emitted pending external work: kind:1, with `["p", triggering_event.pubkey]` and `["status", "completed"]`.
+- If the turn successfully emitted `delegate`, `delegate_followup`, `delegate_crossproject`, `self_delegate`, or `ask`, final visible text is a conversation frame instead: no `p` tag and no `status` tag.
 
 **stderr:** human-readable progress. Never parsed.
 
@@ -23,7 +24,7 @@ Canonical spec: `docs/RUST-AGENT-SPEC.md`. Fleet context: `docs/plans/2026-04-28
 ## Critical invariants
 
 - **NDJSON-over-stdio generalizes to NDJSON-over-Unix-socket.** The same frame format must remain valid when the runtime orchestrator wraps this process over a socket. Protect this property in any spec edits.
-- **Exactly one completion event.** The final stdout line is always the signed completion. Intermediate events may be zero or many; never more than one completion.
+- **Completion only when work is actually done.** The final stdout line is a signed completion unless the turn started pending external work; pending-work text is emitted as a non-notifying conversation frame.
 - **Root event ID derivation** (`src/nostr.rs`): first `["e", id, _, "root"]` tag → else first `["e", id, ...]` tag → else the triggering event's own ID.
 - **Project context via `tenex-project`.** Agent definitions, model resolution, and project metadata come from `tenex-project::Project`. Do not parse agent JSON files directly.
 - **Tools in `src/tools/`.** `shell`, `fs_read`, `fs_write`, `fs_edit`, `fs_glob`, `fs_grep`, `todo_write`, `delegate`, and MCP proxy tools. Add new static tools as separate files in that directory; register them in `main.rs` via the `run_agent!` macro.

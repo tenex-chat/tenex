@@ -96,6 +96,87 @@ fn save_agent_persists_event_id_index() {
 }
 
 #[test]
+fn update_default_config_writes_snapshots_and_clears_empty_fields() {
+    let base = unique_temp();
+    let mut storage = AgentStorage::open(&base).unwrap();
+    let (doc, _) = fixture_agent("alpha");
+    let pubkey = storage.save_agent(&doc).unwrap();
+
+    let written = storage
+        .update_default_config(
+            &pubkey,
+            &AgentDefaultConfigUpdate {
+                model: Some("gpt-5.4 mini".into()),
+                tools: Some(Vec::new()),
+                blocked_skills: None,
+                skills: Some(vec![
+                    "read-access".into(),
+                    "shell".into(),
+                    "write-access".into(),
+                ]),
+                mcp: Some(Vec::new()),
+            },
+        )
+        .unwrap();
+
+    assert!(written);
+    let loaded = AgentDoc::load(&base, &pubkey).unwrap().unwrap();
+    let default = loaded.raw().get("default").unwrap().as_object().unwrap();
+    assert_eq!(
+        default.get("model").and_then(Value::as_str),
+        Some("gpt-5.4 mini")
+    );
+    assert!(default.get("tools").is_none());
+    assert_eq!(
+        default
+            .get("skills")
+            .and_then(Value::as_array)
+            .unwrap()
+            .iter()
+            .filter_map(Value::as_str)
+            .collect::<Vec<_>>(),
+        vec!["read-access", "shell", "write-access"]
+    );
+    assert!(default.get("mcp").is_none());
+    std::fs::remove_dir_all(&base).ok();
+}
+
+#[test]
+fn reset_default_config_clears_pm_designation() {
+    let base = unique_temp();
+    let mut storage = AgentStorage::open(&base).unwrap();
+    let (mut doc, _) = fixture_agent("alpha");
+    doc.raw_mut().insert(
+        "default".into(),
+        serde_json::json!({"model": "mock", "skills": ["read-access"]}),
+    );
+    doc.raw_mut().insert("isPM".into(), Value::Bool(true));
+    let pubkey = storage.save_agent(&doc).unwrap();
+
+    assert!(storage.reset_default_config(&pubkey).unwrap());
+    let loaded = AgentDoc::load(&base, &pubkey).unwrap().unwrap();
+    assert!(loaded.raw().get("default").is_none());
+    assert!(loaded.raw().get("isPM").is_none());
+    std::fs::remove_dir_all(&base).ok();
+}
+
+#[test]
+fn update_agent_is_pm_writes_boolean_snapshot() {
+    let base = unique_temp();
+    let mut storage = AgentStorage::open(&base).unwrap();
+    let (doc, _) = fixture_agent("alpha");
+    let pubkey = storage.save_agent(&doc).unwrap();
+
+    assert!(storage.update_agent_is_pm(&pubkey, false).unwrap());
+    let loaded = AgentDoc::load(&base, &pubkey).unwrap().unwrap();
+    assert_eq!(
+        loaded.raw().get("isPM").and_then(Value::as_bool),
+        Some(false)
+    );
+    std::fs::remove_dir_all(&base).ok();
+}
+
+#[test]
 fn save_agent_renames_slug_drops_old_index_entry() {
     let base = unique_temp();
     let mut storage = AgentStorage::open(&base).unwrap();

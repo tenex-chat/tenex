@@ -19,7 +19,7 @@ pub use index::{AgentIndexDoc, SlugEntry};
 pub use keys::{derive_agent_pubkey_from_nsec, generate_nsec_bech32};
 pub use paths::{agent_file_path, agents_dir, index_file_path};
 pub use projection::{read_agent_projection_file, AgentProjection};
-pub use storage::AgentStorage;
+pub use storage::{AgentDefaultConfigUpdate, AgentStorage};
 
 #[cfg(test)]
 mod tests;

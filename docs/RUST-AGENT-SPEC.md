@@ -25,7 +25,8 @@ TENEX_PROJECT_ID=<project-id> cargo run -p tenex-agent -- <agent.json> < trigger
 - Zero or more streaming text delta events (kind:24135) emitted per token chunk during each LLM turn.
 - Zero or more intermediate `conversation` events (kind:1, no p-tag, no status tag) emitted after each LLM turn (multi-turn tool sequences only).
 - Zero or more `delegation` events (kind:1, `["p", recipient_pubkey]` tag) emitted when the agent calls `delegate`, `delegate_crossproject`, or `delegate_followup`.
-- Exactly one `completion` event (kind:1, with p-tag and `status=completed`) as the final line.
+- Final visible text is a `completion` event (kind:1, with p-tag and `status=completed`) only when the turn has not successfully emitted pending external work.
+- If the turn successfully emitted `delegate`, `delegate_followup`, `delegate_crossproject`, `self_delegate`, or `ask`, final visible text is a `conversation` event instead, with no p-tag and no status tag.
 
 **stderr** — human-readable progress/debug output. Never parsed.
 
@@ -44,6 +45,10 @@ TENEX_PROJECT_ID=<project-id> cargo run -p tenex-agent -- <agent.json> < trigger
 ["p", triggering_event.pubkey]     ← routes response / triggers notification
 ["status", "completed"]            ← marks final turn
 ```
+
+Completion events are not used for text produced while the agent is waiting on
+delegated work or a human answer. That waiting text is emitted as a conversation
+event so it does not notify or route as if the agent had completed the task.
 
 ### Conversation event tags (intermediate)
 

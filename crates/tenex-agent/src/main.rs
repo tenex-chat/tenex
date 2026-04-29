@@ -20,7 +20,7 @@ use anyhow::{Context, Result};
 use cassette::CassetteRecorder;
 use cassette_client::RecordingClient;
 use config::{LlmsConfig, ResolvedModel};
-use emit::{AgentMeta, EmitState};
+use emit::EmitState;
 use hook::EmitHook;
 use injections::MessageInjectionTracker;
 use progress_monitor::RIG_AGENT_TURN_FUSE;
@@ -44,8 +44,8 @@ use tenex_project::Project;
 use tenex_protocol::{
     nostr::{read_one_from_stdin, NostrChannel},
     sink::StdoutNdjsonSink,
-    Channel, CompletionIntent, ConversationRef, Intent, ListShellTasksRequest, LlmUsage,
-    MessageRef, PrincipalKind, PrincipalRef, ProjectRef, RuntimeControlRequest,
+    Channel, CompletionIntent, ConversationIntent, ConversationRef, Intent, ListShellTasksRequest,
+    LlmUsage, MessageRef, PrincipalKind, PrincipalRef, ProjectRef, RuntimeControlRequest,
     RuntimeControlResponse,
 };
 use tenex_rag::{EmbedConfig, RagStore};
@@ -624,17 +624,16 @@ async fn run() -> Result<()> {
             display_name: None,
         });
 
-    let emit_state = Arc::new(EmitState {
-        channel: channel.clone(),
-        project: project_ref,
-        triggering_principal: envelope.principal.clone(),
-        triggering_message: Some(envelope.message.clone()),
+    let emit_state = Arc::new(EmitState::new(
+        channel.clone(),
+        project_ref,
+        envelope.principal.clone(),
+        Some(envelope.message.clone()),
         conversation_root,
         completion_recipient,
-        model: model_string.clone(),
-        team: envelope.metadata.team.clone(),
-        meta: Arc::new(Mutex::new(AgentMeta::new())),
-    });
+        model_string.clone(),
+        envelope.metadata.team.clone(),
+    ));
 
     // Parse category as supervision type (used by both hook and delegation check).
     let sup_category: Option<tenex_supervision::types::AgentCategory> = agent_config
@@ -1034,21 +1033,35 @@ async fn run() -> Result<()> {
         if let Some((final_content, final_ral)) = hook_handle.take_pending() {
             if !suppressed {
                 let final_ctx = emit_state.build_ctx(final_ral);
-                let intent = CompletionIntent {
-                    content: final_content,
-                    usage: Some(LlmUsage {
-                        input_tokens: Some(stream_usage.input_tokens),
-                        output_tokens: Some(stream_usage.output_tokens),
-                        total_tokens: Some(stream_usage.total_tokens),
-                        cached_input_tokens: Some(stream_usage.cached_input_tokens),
-                        ..Default::default()
-                    }),
-                    metadata: None,
-                };
-                channel
-                    .send(Intent::Completion(intent), &final_ctx)
-                    .await
-                    .context("Failed to emit final completion event")?;
+                let usage = Some(LlmUsage {
+                    input_tokens: Some(stream_usage.input_tokens),
+                    output_tokens: Some(stream_usage.output_tokens),
+                    total_tokens: Some(stream_usage.total_tokens),
+                    cached_input_tokens: Some(stream_usage.cached_input_tokens),
+                    ..Default::default()
+                });
+                if emit_state.has_pending_external_work() {
+                    let intent = ConversationIntent {
+                        content: final_content,
+                        is_reasoning: false,
+                        usage,
+                        metadata: None,
+                    };
+                    channel
+                        .send(Intent::Conversation(intent), &final_ctx)
+                        .await
+                        .context("Failed to emit pending-work conversation event")?;
+                } else {
+                    let intent = CompletionIntent {
+                        content: final_content,
+                        usage,
+                        metadata: None,
+                    };
+                    channel
+                        .send(Intent::Completion(intent), &final_ctx)
+                        .await
+                        .context("Failed to emit final completion event")?;
+                }
             }
         }
 

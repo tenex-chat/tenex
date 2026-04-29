@@ -196,6 +196,7 @@ impl Tool for DelegateFollowupTool {
             .send(Intent::Delegation(intent), &ctx)
             .await
             .map_err(|e| DelegateFollowupError(format!("failed to emit followup: {e}")))?;
+        self.state.mark_pending_external_work();
         let followup_ref = refs
             .into_iter()
             .next()

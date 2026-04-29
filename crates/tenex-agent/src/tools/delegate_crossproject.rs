@@ -119,6 +119,7 @@ impl Tool for DelegateCrossProjectTool {
             .send(Intent::Delegation(intent), &ctx)
             .await
             .map_err(|e| DelegateCrossProjectError(format!("failed to emit delegation: {e}")))?;
+        self.state.mark_pending_external_work();
 
         Ok(format!(
             "Delegated to @{} in project '{}'. Stop here — do not take further actions this turn.",

@@ -14,6 +14,10 @@ related_files:
   - "crates/tenex-agent/src/injections.rs"
   - "crates/tenex-agent/src/runtime_state.rs"
   - "crates/tenex-agent/src/tools/recording.rs"
+  - "crates/tenex-context/src/projection.rs"
+  - "crates/tenex-context/tests/projection_active_tools.rs"
+  - "scripts/tenex-runtime-probe-shell-scenario.ts"
+  - "scripts/tenex-runtime-probe-shell-verdicts.ts"
 confidence: "high for current Rust source"
 ---
 
@@ -31,6 +35,8 @@ In Rust, "RAL" is currently represented on emitted events as the `llm-ral` tag. 
 
 Mid-run user-message delivery is coordinated through the conversation database and the runtime dispatch queue. The runtime always persists inbound user events before dispatch. If the target agent/conversation is actively driving an LLM call, the runtime queues the new dispatch. If the current execution has released the driver because it is in a tool call, a second `tenex-agent` execution can start for the new message. Inside `tenex-agent`, `MessageInjectionTracker` scans the persisted conversation for newer user messages and injects them as system reminders before the next LLM call or after a tool result. Consumed event ids are recorded under `conversations.runtime_state_json.rustRuntime.consumedMessages` so the runtime can drop queued jobs that the current run already absorbed.
 
+Active tools are represented twice for later executions. `RecordingTool` writes an in-flight tool record to `rustRuntime.activeTools` as soon as a tool starts, using the synthetic TENEX tool call id it minted at dispatch time. `tenex_context::project()` now reads those active records and projects each one as a structured assistant `tool_call` followed by a `ToolResult` whose content is a `<system-reminder type="pending-tool-result">`. This means a fresh execution sees that an earlier user request already caused a tool call even though the final tool result has not arrived. Tool-specific operational reminders, such as `active-shell-tasks`, still exist separately when a later turn needs runtime control ids like `shell-...` for `kill(target=...)`.
+
 ## System Map
 
 `tenex/src/runtime_cmd/mod.rs` is the Rust project runtime. It subscribes to relay events, selects the target project agent, persists inbound user messages, coordinates dispatch for each `(agent_pubkey, conversation_id)`, spawns `tenex-agent`, forwards agent stdout to the relay, and persists eligible assistant events.
@@ -46,6 +52,8 @@ Mid-run user-message delivery is coordinated through the conversation database a
 `MessageInjectionTracker` in `crates/tenex-agent/src/injections.rs` is the Rust mid-run injection mechanism. It snapshots the triggering message sequence, then later reads the conversation DB for newer injectable user messages. It emits an XML-like system reminder and marks any injected event ids consumed.
 
 `RecordingTool` in `crates/tenex-agent/src/tools/recording.rs` wraps every tool. It records tool calls for later prompt-history persistence, updates active-tool runtime state, and appends active-tool or injected-user-message reminders to successful tool results.
+
+`tenex_context::project()` in `crates/tenex-context/src/projection.rs` owns prompt-history projection. It reads persisted messages, completed tool messages, and current `rustRuntime.activeTools`. Completed tool messages become normal assistant `tool_calls` plus `ToolResult`s. Active tools become synthetic pending pairs, using the same tool-call id and args from runtime state, so providers see a valid tool-use/tool-result ordering rather than an orphan reminder.
 
 The runtime control socket in `tenex/src/runtime_cmd/control.rs` is separate from message injection. It lets tools run shells, list active shell tasks, and kill shell or agent process groups.
 
@@ -77,6 +85,20 @@ If a new user event arrives after the current execution has released the persist
 
 If the new event is from a whitelisted user and there are active shell tasks for that agent/conversation, the runtime treats it as a shell intervention. It can start a new execution even when the driver is busy and sets `TENEX_RUNTIME_DRIVER_PREEMPT=1`, causing `RuntimeStateHandle::acquire_driver()` to skip waiting. This is a special intervention path, not general live injection.
 
+## Active Tool Projection
+
+The important concurrency edge case is a foreground tool that is still running when the user sends another message. The first execution has emitted a tool-use Nostr event and has a real OS/process side effect, but it has not yet reached the code path that persists a completed `tool_messages` row or records the finished prompt turn. Without active-tool projection, a fresh execution sees the user request, but not the corresponding tool call, and can incorrectly repeat the work.
+
+The source shows this lifecycle:
+
+1. `RecordingTool::call()` mints a UUID call id before it invokes the inner tool. Rig's `ToolDyn::call` boundary does not surface the provider-assigned tool-use id, so this TENEX id is the canonical id used for prompt projection.
+2. `RuntimeStateHandle::start_tool()` writes `agentPubkey`, `conversationId`, `executionId`, `toolCallId`, `toolName`, `args`, and `startedAt` under `rustRuntime.activeTools`.
+3. Another execution for the same agent/conversation calls `tenex_context::project()` before its next LLM request. Projection filters active tools to the same agent and conversation, ignores any call ids that already have completed tool messages, sorts them by `startedAt`, and inserts each pending pair into the message stream by timestamp.
+4. The projected pair is provider-valid: an empty assistant message with `tool_calls: [{ id, name, arguments }]`, immediately followed by a `ToolResult` with the same `tool_call_id` and a pending-result system reminder.
+5. When the original tool finishes, `RuntimeStateHandle::finish_tool()` removes the active entry. The normal completed tool-message path then owns future replay.
+
+For the shell intervention case, this produces two complementary signals in the fresh turn. The structured pending pair tells the model, "the earlier `run sleep 60` already invoked `shell` and is waiting." The shell-control reminder tells it which `shell-...` runtime task id can be killed. The structured pair prevents duplicate work; the shell reminder enables the operational action.
+
 ## State And Data
 
 `messages.sequence` is the injection cursor. `MessageInjectionTracker::initial_sequence()` finds the trigger's sequence, or falls back to the current max sequence. Later messages must have a larger sequence to be injectable.
@@ -103,7 +125,27 @@ Consumed messages are stored in `runtime_state_json` as:
 
 The persistent driver lives in the same `rustRuntime` object. It records `agentPubkey`, `conversationId`, `executionId`, and `acquiredAt`. A driver older than ten minutes is treated as stale by both the agent-side runtime state handle and runtime-side dispatch check.
 
-Active tool state is also persisted under `rustRuntime.activeTools`, keyed by execution id and tool call id. It lets a later execution render an active-tool reminder so the agent can account for work still running in another execution.
+Active tool state is also persisted under `rustRuntime.activeTools`, keyed by execution id and tool call id:
+
+```json
+{
+  "rustRuntime": {
+    "activeTools": {
+      "<execution-id>:<tool-call-id>": {
+        "agentPubkey": "<agent>",
+        "conversationId": "<conversation>",
+        "executionId": "<execution>",
+        "toolCallId": "<tool-call-id>",
+        "toolName": "shell",
+        "args": { "command": "sleep 60" },
+        "startedAt": 0
+      }
+    }
+  }
+}
+```
+
+`toolCallId` exists from the moment the tool starts. It is not the provider's hidden id; it is the UUID minted by TENEX's recording wrapper and later reused as both `ToolCall.id` and `ToolResult.tool_call_id` during projection. `startedAt` is normalized to milliseconds during projection so second-based Nostr timestamps and millisecond runtime timestamps can be ordered together.
 
 The RAL counter is invocation-local. `AgentMeta.ral` starts at `0`; `EmitHook` increments it after each LLM response finishes. The counter is encoded into Nostr tags through `EncodingContext.ral` and `add_standard_tags()`. It is not the TypeScript concept of a durable RAL number with restart recovery or delegation ownership.
 
@@ -123,6 +165,10 @@ Queued dispatch is lossy by design after a run finishes: `finish_run()` starts t
 
 `no_response` does not stop the process directly. It sets an `Arc<AtomicBool>`. After the LLM loop ends, `main.rs` checks that flag before emitting the final `CompletionIntent`.
 
+Active tool projection must always emit a matched assistant tool call before the pending tool result. A bare `ToolResult` would be rejected by providers that enforce tool-use/result pairing. The pending pair is filtered to the same agent and conversation, and completed tool call ids win over active state so a stale active entry cannot duplicate a finished tool result.
+
+The active-tool pending result is informational, not a successful tool output. Models should account for the in-flight side effect and avoid repeating the same tool call solely because the final result is unavailable. A later tool-specific reminder may still be required to expose external control identifiers, such as shell task ids.
+
 ## Failure And Recovery
 
 If a provider produces a single text-only response and exits before another tool or supervision loop happens, a user message queued during that LLM call is not injected into the current process. The runtime handles it by starting a later queued dispatch unless the process consumed it before exit.
@@ -130,6 +176,10 @@ If a provider produces a single text-only response and exits before another tool
 If the runtime or agent process dies while holding `rustRuntime.driver`, later dispatch treats the driver as busy until the ten-minute stale threshold passes. There is no source-visible reconstruction of an in-flight Rust agent process from the DB.
 
 If two executions overlap, `consumedMessages` is the deduplication layer. The source shows tests for "already consumed messages are not injected", but exact races between a just-started concurrent process and an old process finishing a tool rely on the order in which each process writes consumed markers.
+
+If active-tool projection is missing or filtered incorrectly, a fresh execution can see the user request that caused the running tool without seeing the tool call. The user-visible symptom is duplicate work, such as a second `sleep 60` shell call after the user asks to kill the first one. The `shell-kill-duplicate` runtime probe captures this regression shape.
+
+If an active-tool entry is left behind after a process crash, future turns can see a pending pair for work that is no longer running. The current source removes active tools on normal tool completion. The doc did not prove a separate active-tool stale-expiration policy analogous to the ten-minute driver stale threshold.
 
 If an agent emits malformed NDJSON, the runtime logs and ignores that line. If the child exits non-zero, the runtime logs the failure, publishes status, and can still continue to queued jobs.
 
@@ -147,6 +197,10 @@ The conversation DB is the best local inspection point. Check `messages` for per
 
 Useful focused tests are embedded in `crates/tenex-agent/src/injections.rs`, `crates/tenex-agent/src/runtime_state_tests.rs`, `tenex/src/runtime_cmd/mod.rs`, and `tenex/src/runtime_cmd/control_tests.rs`. They cover targeted injection, PM-only untagged injection, consumed-message suppression, driver staleness, dispatch queuing, concurrent dispatch while the driver is free, shell intervention preemption, and control-socket behavior.
 
+`crates/tenex-context/tests/projection_active_tools.rs` proves the prompt-shape contract for active tools. It builds a conversation with `run sleep 60`, an in-flight `shell` active-tool entry, and a later `kill the shell` user message. The expected projection order is user request, assistant tool call, pending tool result, later user message.
+
+The `shell-kill-duplicate` runtime probe in `scripts/tenex-runtime-probe-shell-scenario.ts` exercises the process boundary. It boots the real runtime and relay, starts a foreground `sleep 60`, sends `kill the shell` while the first shell is running, and asserts the fresh model request contains both `active-shell-tasks` and `pending-tool-result`. `scripts/tenex-runtime-probe-shell-verdicts.ts` fails the run if the kill turn launches a second `sleep 60`.
+
 ## Source Guide
 
 Read `tenex/src/runtime_cmd/mod.rs` for dispatch, inbound persistence, queueing, driver-state synchronization, child-process spawning, stdout handling, delegation redispatch, consumed-message queue dropping, and status publication.
@@ -161,6 +215,12 @@ Read `crates/tenex-agent/src/runtime_state.rs` and `runtime_state_json.rs` for t
 
 Read `crates/tenex-agent/src/tools/recording.rs` for tool-call recording, active-tool state, and after-tool injection/reminder behavior.
 
+Read `crates/tenex-context/src/projection.rs` for how completed tool messages and active tool records become provider-facing message pairs.
+
+Read `crates/tenex-context/tests/projection_active_tools.rs` for the minimal regression fixture for pending active-tool projection.
+
+Read `scripts/tenex-runtime-probe-shell-scenario.ts` and `scripts/tenex-runtime-probe-shell-verdicts.ts` for the end-to-end shell duplicate guard.
+
 Read `crates/tenex-protocol/src/context.rs`, `intent.rs`, and `nostr/encoder.rs` for how `EncodingContext.ral` becomes `llm-ral` tags on emitted Nostr events.
 
 ## Open Questions
@@ -168,3 +228,7 @@ Read `crates/tenex-protocol/src/context.rs`, `intent.rs`, and `nostr/encoder.rs`
 The source proves DB-based injection at outer-loop and tool-result boundaries. It does not show provider-side live insertion into an already-running LLM request in the Rust path. Treat Rust mid-run injection as boundary-based, not token-stream live-editing.
 
 The Rust delegation path emits and redispatches Nostr events, but it does not yet mirror the TypeScript parent-RAL pending/completed delegation registry described in older docs. Future Rust orchestrator work may add a richer durable ownership model.
+
+The active-tool pending projection relies on the TENEX-minted recording id. The source shows this id is stable inside runtime state and persisted tool messages, but the provider's hidden tool-use id remains unavailable at the `ToolDyn::call` boundary.
+
+No TypeScript comparison was added for active-tool projection. This investigation focused on the current Rust path and the reproduced Rust runtime probe.

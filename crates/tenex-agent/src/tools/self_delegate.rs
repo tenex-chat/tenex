@@ -80,6 +80,7 @@ impl Tool for SelfDelegateTool {
             .send(Intent::Delegation(intent), &ctx)
             .await
             .map_err(|e| SelfDelegateError(format!("failed to emit self-delegation: {e}")))?;
+        self.state.mark_pending_external_work();
 
         Ok(
             "Self-delegation queued. Stop here — do not take further actions this turn."

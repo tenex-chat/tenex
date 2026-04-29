@@ -137,6 +137,7 @@ impl Tool for AskTool {
             .send(Intent::Ask(intent), &ctx)
             .await
             .map_err(|e| AskError(format!("failed to emit ask: {e}")))?;
+        self.state.mark_pending_external_work();
 
         Ok(format!(
             "Question '{}' sent to project owner. Stop here — wait for their reply.",

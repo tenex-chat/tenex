@@ -1,3 +1,4 @@
+mod agent_config_update;
 mod control;
 mod control_process;
 mod control_shell;
@@ -105,6 +106,7 @@ struct RuntimeSubscriptionIds {
     project_definition: SubscriptionId,
     directed: SubscriptionId,
     stop: SubscriptionId,
+    config_update: SubscriptionId,
 }
 
 impl RuntimeSubscriptionIds {
@@ -116,6 +118,7 @@ impl RuntimeSubscriptionIds {
             )),
             directed: SubscriptionId::new(format!("tenex-runtime-{project_id}-directed")),
             stop: SubscriptionId::new(format!("tenex-runtime-{project_id}-stop")),
+            config_update: SubscriptionId::new(format!("tenex-runtime-{project_id}-config-update")),
         }
     }
 }
@@ -125,6 +128,7 @@ struct RuntimeFilters {
     project_definition: Filter,
     directed: Filter,
     stop: Filter,
+    config_update: Filter,
 }
 
 #[derive(Clone)]
@@ -534,6 +538,24 @@ pub async fn run(args: RuntimeArgs) -> Result<()> {
                             }
                             continue;
                         }
+                        if event.kind == Kind::Custom(tenex_protocol::nostr::kinds::AGENT_CONFIG_UPDATE) {
+                            if let Err(e) = handle_agent_config_update(
+                                &shared,
+                                &subscription_ids,
+                                &authors,
+                                &project_addr,
+                                owner_key,
+                                &meta.d_tag,
+                                since,
+                                &meta,
+                                &event,
+                            )
+                            .await
+                            {
+                                warn!(event_id = %event.id.to_hex()[..8], error = %e, "agent config update failed");
+                            }
+                            continue;
+                        }
                         let agent_pubkeys = shared.agent_pubkeys();
                         if agent_pubkeys.contains(&event.pubkey.to_hex())
                             && !targets_project_agent(&event, &agent_pubkeys)
@@ -648,7 +670,13 @@ fn build_runtime_filters(
         stop: Filter::new()
             .kind(Kind::Custom(tenex_protocol::nostr::kinds::STOP_COMMAND))
             .authors(authors.to_vec())
-            .pubkeys(agent_keys)
+            .pubkeys(agent_keys.clone())
+            .since(since),
+        config_update: Filter::new()
+            .kind(Kind::Custom(
+                tenex_protocol::nostr::kinds::AGENT_CONFIG_UPDATE,
+            ))
+            .authors(authors.to_vec())
             .since(since),
     }
 }
@@ -663,6 +691,7 @@ async fn subscribe_runtime_filters(
         &ids.project_definition,
         &ids.directed,
         &ids.stop,
+        &ids.config_update,
     ] {
         client.unsubscribe(id).await;
     }
@@ -681,6 +710,9 @@ async fn subscribe_runtime_filters(
         .await?;
     client
         .subscribe_with_id(ids.stop.clone(), filters.stop, None)
+        .await?;
+    client
+        .subscribe_with_id(ids.config_update.clone(), filters.config_update, None)
         .await?;
     Ok(())
 }
@@ -845,6 +877,65 @@ async fn reload_project_membership_snapshot(
         agents = snapshot.agents.len(),
         added, removed, "reloaded project membership"
     );
+    Ok(())
+}
+
+async fn handle_agent_config_update(
+    shared: &RuntimeShared,
+    subscription_ids: &RuntimeSubscriptionIds,
+    authors: &[PublicKey],
+    project_addr: &str,
+    owner: PublicKey,
+    project_dtag: &str,
+    since: Timestamp,
+    meta: &ProjectMetadata,
+    event: &Event,
+) -> Result<()> {
+    let agent_pubkeys = shared.agent_pubkeys();
+    let outcome = agent_config_update::apply_event(
+        &shared.base_dir,
+        event,
+        project_addr,
+        project_dtag,
+        &agent_pubkeys,
+    )?;
+
+    if let Some(reason) = outcome.ignored_reason {
+        info!(
+            event_id = %event.id.to_hex()[..8],
+            agent_pubkey = outcome.agent_pubkey.as_deref().unwrap_or(""),
+            reason,
+            "ignored agent config update"
+        );
+        return Ok(());
+    }
+
+    info!(
+        event_id = %event.id.to_hex()[..8],
+        agent_pubkey = outcome.agent_pubkey.as_deref().unwrap_or(""),
+        updated = outcome.config_updated,
+        reset = outcome.has_reset,
+        has_model = outcome.has_model,
+        tool_count = outcome.tool_count,
+        skill_count = outcome.skill_count,
+        mcp_count = outcome.mcp_count,
+        "processed agent config update"
+    );
+
+    if outcome.config_updated {
+        reload_agent_snapshot(
+            shared,
+            subscription_ids,
+            authors,
+            project_addr,
+            owner,
+            project_dtag,
+            since,
+            meta,
+        )
+        .await?;
+    }
+
     Ok(())
 }
 

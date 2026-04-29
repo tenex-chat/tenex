@@ -28,7 +28,6 @@ use crate::resolver;
 use crate::storage;
 
 const CATCHUP_WINDOW_SECS: i64 = 24 * 60 * 60;
-const CATCHUP_SPACING_MS: u64 = 5_000;
 const ONEOFF_RECHECK_SECS: u64 = 24 * 60 * 60;
 
 pub async fn run(cfg: Config) -> Result<()> {
@@ -212,17 +211,14 @@ async fn catch_up_and_arm(
         if !missed.is_empty() {
             info!(
                 task_id = %task.id,
-                count = missed.len(),
-                "firing catch-up occurrences"
+                missed = missed.len(),
+                "catch-up: firing once for most recent missed occurrence",
             );
-            for _ in missed {
-                if let Err(e) = publisher
-                    .publish_task(&task, target_pubkey.as_deref())
-                    .await
-                {
-                    error!(task_id = %task.id, error = %e, "catch-up publish failed");
-                }
-                tokio::time::sleep(Duration::from_millis(CATCHUP_SPACING_MS)).await;
+            if let Err(e) = publisher
+                .publish_task(&task, target_pubkey.as_deref())
+                .await
+            {
+                error!(task_id = %task.id, error = %e, "catch-up publish failed");
             }
             let now_iso = Utc::now().to_rfc3339();
             storage::update_last_run(&d_tag, &task.id, &now_iso).ok();

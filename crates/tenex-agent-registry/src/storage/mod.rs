@@ -6,8 +6,28 @@ use crate::doc::AgentDoc;
 use crate::index::AgentIndexDoc;
 use crate::paths::agents_dir;
 
+mod config_update;
 mod mutate;
 mod rebuild;
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AgentDefaultConfigUpdate {
+    pub model: Option<String>,
+    pub tools: Option<Vec<String>>,
+    pub blocked_skills: Option<Vec<String>>,
+    pub skills: Option<Vec<String>>,
+    pub mcp: Option<Vec<String>>,
+}
+
+impl AgentDefaultConfigUpdate {
+    pub fn is_empty(&self) -> bool {
+        self.model.is_none()
+            && self.tools.is_none()
+            && self.blocked_skills.is_none()
+            && self.skills.is_none()
+            && self.mcp.is_none()
+    }
+}
 
 /// Mirror of the TS `AgentStorage` class (`src/agents/AgentStorage.ts:266`).
 ///

@@ -18,6 +18,7 @@ import {
 } from "./tenex-runtime-probe-conversations";
 import { setupMcpProbeFixture } from "./tenex-runtime-probe-mcp";
 import {
+    agentConfigUpdateModelName,
     availableScenarios,
     mockScenario,
     pmInstructions,
@@ -141,8 +142,14 @@ writeJson(path.join(baseDir, "config.json"), {
 writeJson(path.join(baseDir, "llms.json"), {
     configurations:
         llm.mode === "ollama"
-            ? { [llmModelName]: { provider: "ollama", model: llm.ollamaModel } }
-            : { mock: { provider: "mock", model: scenarioName } },
+            ? {
+                  [llmModelName]: { provider: "ollama", model: llm.ollamaModel },
+                  [agentConfigUpdateModelName]: { provider: "ollama", model: llm.ollamaModel },
+              }
+            : {
+                  mock: { provider: "mock", model: scenarioName },
+                  [agentConfigUpdateModelName]: { provider: "mock", model: scenarioName },
+              },
     default: llmModelName,
 });
 writeJson(path.join(baseDir, "providers.json"), {
@@ -238,7 +245,7 @@ const pool = new SimplePool();
 await pool.ensureRelay(relayUrl);
 const sub = pool.subscribeMany(
     [relayUrl],
-    { kinds: [1, 24010, 24133, 24135, 31933], since: startTime },
+    { kinds: [1, 24010, 24020, 24133, 24135, 31933], since: startTime },
     { onevent: (event) => events.push(event) }
 );
 
@@ -263,6 +270,7 @@ try {
         projectDtag,
         projectRef,
         workspaceDir,
+        agentsDir,
         conversationDbPath: convDbPath,
         pmPubkey: pm.pubkey,
         workerPubkey: worker.pubkey,
@@ -301,7 +309,7 @@ let mergedEvents = events;
 try {
     const storedEvents = await pool.querySync(
         [relayUrl],
-        { kinds: [1, 24010, 24133, 24135, 31933], since: startTime },
+        { kinds: [1, 24010, 24020, 24133, 24135, 31933], since: startTime },
         { maxWait: 2_000 }
     );
     mergedEvents = mergeEvents(events, storedEvents);

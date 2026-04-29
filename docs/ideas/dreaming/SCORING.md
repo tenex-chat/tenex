@@ -18,7 +18,7 @@ The scorer should be built around a frozen **evaluation contract**.
 
 Before or near the start of a task, TENEX derives a task-specific evaluation plan: what success means, what constraints matter, what evidence should be inspected, and which failure gates are non-negotiable. After a live run or dream replay, TENEX gathers evidence from the same surfaces and evaluates the run against that contract. Dream variants can then be compared to the original run without the evaluator silently changing the rubric after seeing different outcomes.
 
-The scorer should not be just an LLM judge over the final answer. It should combine deterministic checks, trace-derived evidence, repo/test/probe results, supervision signals, user feedback, and LLM judgment for semantic qualities that cannot be checked mechanically.
+The scorer should be **LLM-driven over structured evidence**, not a pile of hand-written metrics. Deterministic checks, traces, tests, probes, supervision signals, and user feedback provide evidence and hard constraints. An LLM evaluator interprets that evidence against the frozen contract and produces the dimensional judgment.
 
 ## Core Principle
 
@@ -108,7 +108,7 @@ RunEvidenceBundle {
   completionEvents: CompletionEventRef[]
   supervisionEvents: SupervisionEventRef[]
   telemetry: TelemetryRef[]
-  userFeedback?: UserFeedbackRef[]
+  userInterventions?: UserInterventionRef[]
   cost: CostSummary
   durationMs: number
 }
@@ -124,9 +124,46 @@ Useful existing surfaces:
 - progress monitor stops
 - shell/test output
 - git diff or copied workspace diff
-- user corrections after completion
+- user interventions after or during completion
 
 The same evidence bundle shape should be used for live and dream runs. The dream runner may have a sandboxed filesystem and relay, but the evaluator should not care as long as the evidence bundle is normalized.
+
+## User Intervention As Live Feedback
+
+For non-dream scenarios, user intervention is the strongest real-world signal. The user usually will not fill out an evaluation form; they will correct, repeat, redirect, express frustration, or restate information the agent should already have used.
+
+TENEX should treat those interventions as labels over the prior run.
+
+```ts
+UserIntervention {
+  id: string
+  conversationId: string
+  targetRunId?: string
+  messageRef: MessageRef
+  kind:
+    | "correction"
+    | "repetition"
+    | "redirection"
+    | "frustration"
+    | "missed_context"
+    | "changed_requirements"
+    | "positive_confirmation"
+  severity: "low" | "medium" | "high"
+  inferredFailureDimensions: string[]
+  rationale: string
+  evidence: SourceRef[]
+}
+```
+
+Examples:
+
+- "No, I meant the Rust runtime" is likely a context-use or instruction-following failure.
+- "I already told you that" is likely a memory or conversation-state failure.
+- "Stop doing X" is likely an instruction-following or safety failure.
+- Repeating the same request after an agent's completion is likely a completeness or correctness failure.
+- Frustrated tone is not itself the bug, but it raises the priority of finding the concrete mismatch.
+
+The evaluator should not overfit to politeness. A terse correction may be more important than an emotional message, and no intervention does not prove success. But repeated intervention, redirection to known context, or frustration about things the agent should have known should strongly lower the live score and make the scenario a dream candidate.
 
 ## Scoring Model
 
@@ -231,17 +268,19 @@ Examples:
 
 The existing runtime probe verdict style is the right shape: named verdicts with `ok` and `detail`.
 
-### 4. Run LLM Judgment Where Needed
+### 4. Run LLM Judgment
 
-An LLM judge is useful for:
+The LLM judge is the primary scorer for qualitative performance. It is responsible for:
 
 - semantic correctness
 - instruction-following nuance
 - context-use quality
 - final-answer usefulness
 - whether a clarification question was warranted
+- interpreting user interventions as feedback labels
+- deciding which failure dimensions best explain the observed intervention
 
-The judge should receive the frozen evaluation plan and a compact evidence bundle. It should return structured scores with citations to evidence ids. It should not be asked to infer from hidden chain-of-thought.
+The judge should receive the frozen evaluation plan and a compact evidence bundle. It should return structured scores with citations to evidence ids. It should not be asked to infer from hidden chain-of-thought. Deterministic checks should be presented as facts and gates, not as a replacement for the judge.
 
 ### 5. Combine Results
 
@@ -302,9 +341,11 @@ Purpose:
 - generate user-visible confidence only when useful
 - trigger supervision or re-engagement for clear failures
 - decide whether to queue the scenario for dreaming
-- capture user corrections as future labels
+- capture user interventions as feedback labels
 
 Live scoring should be conservative about blocking. TENEX already has supervision for immediate gates. The broader scorer can run after completion unless a hard runtime invariant is violated.
+
+Live evaluations should be revisable. A task may look successful at completion time, then become low-scoring after the user corrects or redirects the agent. That later intervention should attach to the prior run rather than being treated only as a new task.
 
 ### Dream Mode
 
@@ -367,7 +408,7 @@ Track:
 - dimension weights that over-optimize cheap qualities
 - score inflation over time
 
-Human corrections are especially valuable. A user saying "this is wrong" should become both scenario evidence and scoring calibration data.
+Human interventions are especially valuable. A user saying "this is wrong," repeating the same request, or redirecting the agent to context it should have used should become scenario evidence, scoring calibration data, and a likely dream trigger.
 
 ## Data To Avoid
 
@@ -388,12 +429,14 @@ Score observable behavior, artifacts, and outcomes.
 1. Define `TaskEvaluationPlan`, `RunEvidenceBundle`, `RunEvaluation`, and `RunComparison` schemas.
 2. Build evidence collection for runtime probe runs first.
 3. Convert existing probe verdicts into hard-gate and deterministic-check results.
-4. Add one LLM judge that scores semantic dimensions from a compact evidence bundle.
-5. Store evaluator version, plan version, and source refs with every score.
-6. Run the scorer on live completed tasks without blocking completion.
-7. Queue low-scoring or high-uncertainty tasks as dream candidates.
-8. Reuse the same evaluation plan for dream variants.
-9. Add pairwise comparison and promotion proposal generation.
+4. Add one LLM judge that scores all dimensions from a compact evidence bundle.
+5. Add user-intervention extraction for corrections, repetition, redirection, frustration, and missed context.
+6. Store evaluator version, plan version, and source refs with every score.
+7. Run the scorer on live completed tasks without blocking completion.
+8. Revise live scores when later user intervention labels the prior run.
+9. Queue low-scoring or high-uncertainty tasks as dream candidates.
+10. Reuse the same evaluation plan for dream variants.
+11. Add pairwise comparison and promotion proposal generation.
 
 This path makes the scorer useful before the full dream system exists.
 

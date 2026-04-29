@@ -5,6 +5,8 @@ import {
     type ConversationTranscript,
 } from "./tenex-runtime-probe-conversations";
 import {
+    agentConfigUpdateModelName,
+    agentConfigUpdateSkills,
     delegationUserRequest,
     delegationWorkerCompletionText,
     extractColorChoice,
@@ -12,6 +14,7 @@ import {
     type MockRequestRecord,
     type ScenarioName,
 } from "./tenex-runtime-probe-scenarios";
+import { evaluateShellKillDuplicate } from "./tenex-runtime-probe-shell-verdicts";
 
 type Verdict = { name: string; ok: boolean; detail: string };
 
@@ -44,8 +47,14 @@ export function evaluate(
     if (name === "acp-worker-basic" || name === "agent-config-reload") {
         return [...commonVerdicts, ...evaluateAcpWorker(events, context)];
     }
+    if (name === "agent-config-update") {
+        return [...commonVerdicts, ...evaluateAgentConfigUpdate(events, context)];
+    }
     if (name === "project-membership-reload") {
         return [...commonVerdicts, ...evaluateProjectMembershipReload(events, requestRecords, context)];
+    }
+    if (name === "shell-kill-duplicate") {
+        return [...commonVerdicts, ...evaluateShellKillDuplicate(events, requestRecords, context)];
     }
     return [...commonVerdicts, ...evaluateFsReadAdjustment(events, requestRecords, context)];
 }
@@ -119,6 +128,48 @@ function evaluateProjectMembershipReload(
             name: "Removed agent2 direct request was not dispatched",
             ok: Boolean(removedWorkerRequest) && removedWorkerReplies.length === 0,
             detail: `Expected no agent replies to removed agent2 request; saw ${removedWorkerReplies.length}.`,
+        },
+    ];
+}
+
+function evaluateAgentConfigUpdate(events: Event[], context: EvaluateContext): Verdict[] {
+    const updateEvent = events.find(
+        (event) =>
+            event.kind === 24020 &&
+            event.pubkey !== context.workerPubkey &&
+            event.tags.some((tag) => tag[0] === "p" && tag[1] === context.workerPubkey)
+    );
+    const statusEvents = events.filter((event) => event.kind === 24010);
+    const updatedStatus = statusEvents.find((event) =>
+        event.tags.some(
+            (tag) =>
+                tag[0] === "model" &&
+                tag[1] === agentConfigUpdateModelName &&
+                tag.slice(2).includes("worker")
+        )
+    );
+    const missingSkill = agentConfigUpdateSkills.find(
+        (skill) =>
+            !updatedStatus?.tags.some(
+                (tag) => tag[0] === "skill" && tag[1] === skill && tag.slice(2).includes("worker")
+            )
+    );
+
+    return [
+        {
+            name: "Published kind 24020 config update",
+            ok: Boolean(updateEvent),
+            detail: "Expected a 24020 event p-tagged to worker.",
+        },
+        {
+            name: "Project status reflected updated model",
+            ok: Boolean(updatedStatus),
+            detail: `Expected a 24010 model tag for ${agentConfigUpdateModelName} containing worker.`,
+        },
+        {
+            name: "Project status reflected updated skills",
+            ok: Boolean(updatedStatus) && missingSkill === undefined,
+            detail: `Expected 24010 skill tags for ${agentConfigUpdateSkills.join(", ")} containing worker; missing ${missingSkill ?? "<none>"}.`,
         },
     ];
 }
@@ -228,6 +279,27 @@ function evaluateDelegation(events: Event[], context: EvaluateContext): Verdict[
             (event.pubkey === context.pmPubkey || event.pubkey === context.workerPubkey) &&
             hasTag(event, "status", "completed")
     );
+    const delegateToolIndex = delegateTool ? events.indexOf(delegateTool) : -1;
+    const workerCompletionIndex = workerCompletion
+        ? events.indexOf(workerCompletion)
+        : Number.MAX_SAFE_INTEGER;
+    const pendingDelegationCompletion =
+        delegateToolIndex >= 0
+            ? events.find(
+                  (event, index) =>
+                      index > delegateToolIndex &&
+                      index < workerCompletionIndex &&
+                      event.kind === 1 &&
+                      event.pubkey === context.pmPubkey &&
+                      !hasTag(event, "tool") &&
+                      hasTag(event, "status", "completed") &&
+                      (initialUserEvent
+                          ? hasMarkedTag(event, "e", initialUserEvent.id, "root")
+                          : true)
+              )
+            : undefined;
+    const pendingDelegationCompletionPTags =
+        pendingDelegationCompletion?.tags.filter((tag) => tag[0] === "p") ?? [];
 
     return [
         {
@@ -269,6 +341,13 @@ function evaluateDelegation(events: Event[], context: EvaluateContext): Verdict[
             name: "Relay PM color report uses parent conversation root",
             ok: pmObservedInParentConversation,
             detail: "Expected PM follow-up to keep the original user event as the root e-tag.",
+        },
+        {
+            name: "Pending delegation completion omits p-tags",
+            ok: pendingDelegationCompletionPTags.length === 0,
+            detail: pendingDelegationCompletion
+                ? `Expected same-turn pending delegation completion to have no p-tags; saw ${pendingDelegationCompletionPTags.map((tag) => tag[1]).join(", ")}.`
+                : "No same-turn pending delegation completion was published before worker completion.",
         },
         {
             name: "Agent completion contract includes status=completed",
