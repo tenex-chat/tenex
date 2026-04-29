@@ -33,6 +33,13 @@ describe("TENEX fs tools path expansion", () => {
             projectBasePath: projectDir,
             projectId,
             tenexBasePath: tempDir,
+            resolveToolEnvironment: () => ({
+                ...process.env,
+                DOC_SUBDIR: "docs",
+                PROJECT_BASE: projectDir,
+                PROJECT_ID: projectId,
+                TENEX_BASE_DIR: tempDir,
+            }),
             getConversation: () => ({ getProjectId: () => projectId } as any),
         });
     }
@@ -41,12 +48,6 @@ describe("TENEX fs tools path expansion", () => {
         const context = createContext();
         const tools = getOrCreateTenexFsTools(context);
 
-        await fs.mkdir(path.join(tempDir, "projects", "proj-1"), { recursive: true });
-        await fs.writeFile(
-            path.join(tempDir, "projects", "proj-1", ".env"),
-            "DOC_SUBDIR=docs\n",
-            "utf-8"
-        );
         await fs.mkdir(path.join(projectDir, "docs"), { recursive: true });
         await fs.writeFile(path.join(projectDir, "docs", "note.txt"), "env-expanded", "utf-8");
 

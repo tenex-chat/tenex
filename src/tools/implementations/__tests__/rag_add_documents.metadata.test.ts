@@ -275,12 +275,6 @@ describe("rag_add_documents metadata handling", () => {
             const projectDir = path.join(tempDir, "project");
             const docsDir = path.join(projectDir, "docs");
             await fs.mkdir(docsDir, { recursive: true });
-            await fs.mkdir(path.join(tempDir, "projects", "proj-1"), { recursive: true });
-            await fs.writeFile(
-                path.join(tempDir, "projects", "proj-1", ".env"),
-                "DOC_PATH=docs/input.txt\n",
-                "utf-8"
-            );
             await fs.writeFile(path.join(docsDir, "input.txt"), "expanded rag document", "utf-8");
 
             const signer = NDKPrivateKeySigner.generate();
@@ -294,6 +288,13 @@ describe("rag_add_documents metadata handling", () => {
                     projectBasePath: projectDir,
                     projectId: "proj-1",
                     tenexBasePath: tempDir,
+                    resolveToolEnvironment: () => ({
+                        ...process.env,
+                        DOC_PATH: "docs/input.txt",
+                        PROJECT_BASE: projectDir,
+                        PROJECT_ID: "proj-1",
+                        TENEX_BASE_DIR: tempDir,
+                    }),
                     getConversation: () => ({ getProjectId: () => "proj-1" } as any),
                 }) as unknown as ToolExecutionContext,
                 { ragService: mockRagService }
