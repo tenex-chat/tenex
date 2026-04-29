@@ -129,3 +129,179 @@ impl Strategy for RemindersStrategy {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::{ModelProfile, ProjectionTelemetry};
+    use serde_json::json;
+
+    fn profile() -> ModelProfile {
+        ModelProfile {
+            provider: "test".into(),
+            model_id: "model".into(),
+            prompt_cache: false,
+            ephemeral_reminders: false,
+            image_support: false,
+            max_context_tokens: 200_000,
+        }
+    }
+
+    fn ctx_with_todos<'a>(
+        messages: Vec<Message>,
+        todos: Option<serde_json::Value>,
+        p: &'a ModelProfile,
+    ) -> ProjectionContext<'a> {
+        ProjectionContext {
+            messages,
+            telemetry: ProjectionTelemetry::default(),
+            model_profile: p,
+            tool_defs: &[],
+            agent_todos: todos,
+        }
+    }
+
+    fn pending_todo(id: &str, title: &str) -> serde_json::Value {
+        json!({"id": id, "title": title, "status": "pending"})
+    }
+
+    fn done_todo(id: &str, title: &str) -> serde_json::Value {
+        json!({"id": id, "title": title, "status": "done"})
+    }
+
+    #[test]
+    fn no_reminder_when_todos_absent() {
+        let p = profile();
+        let mut ctx = ctx_with_todos(
+            vec![
+                Message::System { content: "sys".into() },
+                Message::User { content: "hello".into() },
+            ],
+            None,
+            &p,
+        );
+        RemindersStrategy.apply(&mut ctx).unwrap();
+        assert_eq!(ctx.telemetry.reminders_overlayed, 0);
+        assert_eq!(ctx.messages[1], Message::User { content: "hello".into() });
+    }
+
+    #[test]
+    fn reminder_injected_for_done_todos_but_no_attention_block() {
+        // When todos exist but all are done, the reminder block is still injected
+        // (it shows the todo state) but the ATTENTION header is omitted because
+        // there are no pending items.
+        let p = profile();
+        let todos = json!([done_todo("t1", "Task 1"), done_todo("t2", "Task 2")]);
+        let mut ctx = ctx_with_todos(
+            vec![
+                Message::System { content: "sys".into() },
+                Message::User { content: "hello".into() },
+            ],
+            Some(todos),
+            &p,
+        );
+        RemindersStrategy.apply(&mut ctx).unwrap();
+        assert_eq!(ctx.telemetry.reminders_overlayed, 1);
+        let last = match &ctx.messages[1] {
+            Message::User { content } => content.clone(),
+            _ => panic!(),
+        };
+        assert!(last.contains("<system-reminder>"), "reminder block present");
+        assert!(!last.contains("ATTENTION"), "no ATTENTION block when no pending todos");
+    }
+
+    #[test]
+    fn reminder_appended_to_last_user_message() {
+        let p = profile();
+        let todos = json!([pending_todo("t1", "Write tests")]);
+        let mut ctx = ctx_with_todos(
+            vec![
+                Message::System { content: "sys".into() },
+                Message::User { content: "first".into() },
+                Message::User { content: "last".into() },
+            ],
+            Some(todos),
+            &p,
+        );
+        RemindersStrategy.apply(&mut ctx).unwrap();
+        assert_eq!(ctx.telemetry.reminders_overlayed, 1);
+        // Reminder was appended to the LAST message (index 2), not index 1
+        let last = match &ctx.messages[2] {
+            Message::User { content } => content.clone(),
+            _ => panic!("expected user message"),
+        };
+        assert!(last.contains("<system-reminder>"), "reminder block must be present");
+        assert!(last.contains("Write tests"), "todo title must appear in reminder");
+        assert!(last.starts_with("last\n\n"), "original content must be preserved");
+    }
+
+    #[test]
+    fn reminder_not_appended_to_system_only_context() {
+        let p = profile();
+        let todos = json!([pending_todo("t1", "Do something")]);
+        let mut ctx = ctx_with_todos(
+            vec![Message::System { content: "sys only".into() }],
+            Some(todos),
+            &p,
+        );
+        RemindersStrategy.apply(&mut ctx).unwrap();
+        // No non-system target: reminders_overlayed stays 0
+        assert_eq!(ctx.telemetry.reminders_overlayed, 0);
+    }
+
+    #[test]
+    fn reminder_counts_status_breakdown_correctly() {
+        let p = profile();
+        let todos = json!([
+            pending_todo("t1", "pending one"),
+            pending_todo("t2", "pending two"),
+            json!({"id": "t3", "title": "in progress", "status": "in_progress"}),
+            done_todo("t4", "done one"),
+        ]);
+        let mut ctx = ctx_with_todos(
+            vec![
+                Message::System { content: "sys".into() },
+                Message::User { content: "msg".into() },
+            ],
+            Some(todos),
+            &p,
+        );
+        RemindersStrategy.apply(&mut ctx).unwrap();
+        assert_eq!(ctx.telemetry.reminders_overlayed, 1);
+        let last = match &ctx.messages[1] {
+            Message::User { content } => content.clone(),
+            _ => panic!(),
+        };
+        assert!(last.contains("2 pending"), "should show 2 pending");
+        assert!(last.contains("1 in progress"), "should show 1 in_progress");
+        assert!(last.contains("1 done"), "should show 1 done");
+        assert!(last.contains("ATTENTION"), "ATTENTION block appears when pending > 0");
+    }
+
+    #[test]
+    fn reminder_appended_to_tool_result_when_last() {
+        let p = profile();
+        let todos = json!([pending_todo("t1", "task")]);
+        let mut ctx = ctx_with_todos(
+            vec![
+                Message::System { content: "sys".into() },
+                Message::User { content: "user".into() },
+                Message::ToolResult {
+                    tool_call_id: "call-1".into(),
+                    tool_name: "shell".into(),
+                    content: "output".into(),
+                    is_error: false,
+                },
+            ],
+            Some(todos),
+            &p,
+        );
+        RemindersStrategy.apply(&mut ctx).unwrap();
+        assert_eq!(ctx.telemetry.reminders_overlayed, 1);
+        let last_content = match &ctx.messages[2] {
+            Message::ToolResult { content, .. } => content.clone(),
+            _ => panic!(),
+        };
+        assert!(last_content.contains("<system-reminder>"));
+    }
+}
