@@ -350,13 +350,13 @@ fn render_frame<W: Write>(
     )?;
     height += 1;
 
-    // Rule.
+    // Rule. TS at AgentManager.ts:143 emits the rule WITHOUT any
+    // styling: `lines.push(\`  ${"─".repeat(52)}\`)`. Don't wrap in
+    // dim — match TS's plain-foreground render.
     queue!(
         stdout,
         Print("  "),
-        SetAttribute(Attribute::Dim),
         Print("─".repeat(RULE_WIDTH)),
-        SetAttribute(Attribute::Reset),
         Print("\r\n"),
     )?;
     height += 1;
