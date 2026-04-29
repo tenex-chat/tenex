@@ -266,6 +266,17 @@ pub fn chalk_bold(text: &str) -> String {
     format!("{BOLD_OPEN}{text}{BOLD_CLOSE}")
 }
 
+/// Wrap `text` in chalk.gray wire bytes: `\x1b[90m<text>\x1b[39m`.
+///
+/// **Distinct from** the [`chalk_gray`] [`Style`] helper — that one
+/// emits `\x1b[38;5;8m` (xterm-256 form) via console-rs's `.bright()`
+/// modifier, which is visually identical but byte-different from
+/// chalk's basic `\x1b[90m`. Use this `String`-returning helper for
+/// byte-perfect TS chalk match.
+pub fn chalk_gray_str(text: &str) -> String {
+    format!("{CHALK_GRAY_OPEN}{text}{CHALK_GRAY_CLOSE}")
+}
+
 /// Dim modifier (no color, just dimmed). Background instructions, `Back`
 /// labels, separators (`──`), hints, `[ ]`, `(default)`.
 pub fn dim() -> Style {

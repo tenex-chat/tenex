@@ -118,8 +118,12 @@ async fn run_agents(args: AgentsArgs) -> Result<()> {
             match preview_categorize(dry_run) {
                 Ok(()) => Ok(()),
                 Err(e) => {
-                    let red = console::Style::new().red();
-                    eprintln!("{}", red.apply_to(format!("Failed to categorize agents: {e}")));
+                    eprintln!(
+                        "{}",
+                        crate::tui::theme::chalk_red(&format!(
+                            "Failed to categorize agents: {e}"
+                        )),
+                    );
                     Err(e)
                 }
             }
@@ -160,19 +164,19 @@ fn preview_categorize(dry_run: bool) -> Result<()> {
         .count();
     let uncategorised = total - already;
 
-    let blue = console::Style::new().blue();
     let mode = if dry_run { " (dry run)" } else { "" };
     println!(
         "{}",
-        blue.apply_to(format!(
+        crate::tui::theme::chalk_blue(&format!(
             "Total: {total}, Already categorised: {already}, Uncategorised: {uncategorised}{mode}"
-        ))
+        )),
     );
     if uncategorised == 0 {
-        let green = console::Style::new().green();
         println!(
             "{}",
-            green.apply_to("Nothing to categorise — all canonical agents already have a category.")
+            crate::tui::theme::chalk_green(
+                "Nothing to categorise — all canonical agents already have a category.",
+            ),
         );
         return Ok(());
     }
@@ -223,19 +227,16 @@ fn find_orphaned_agents(purge: bool) -> Result<()> {
         orphans.push((slug, pubkey, event_id, agent.name().map(str::to_owned)));
     }
 
-    let green = console::Style::new().green();
-    let yellow = console::Style::new().yellow();
-    let gray = crate::tui::theme::chalk_gray();
-    let blue = console::Style::new().blue();
+    use crate::tui::theme::{chalk_blue, chalk_gray_str, chalk_green, chalk_yellow};
 
     if orphans.is_empty() {
-        println!("{}", green.apply_to("No orphaned agents found."));
+        println!("{}", chalk_green("No orphaned agents found."));
         return Ok(());
     }
 
     println!(
         "{}",
-        yellow.apply_to(format!("Found {} orphaned agent(s):", orphans.len()))
+        chalk_yellow(&format!("Found {} orphaned agent(s):", orphans.len())),
     );
     for (slug, pubkey, event_id, _name) in &orphans {
         let prefix8 = pubkey.get(..8).unwrap_or(pubkey.as_str());
@@ -245,7 +246,7 @@ fn find_orphaned_agents(purge: bool) -> Result<()> {
         };
         println!(
             "{}",
-            gray.apply_to(format!("  {slug} ({prefix8}...)  [{source}]"))
+            chalk_gray_str(&format!("  {slug} ({prefix8}...)  [{source}]")),
         );
     }
 
@@ -258,7 +259,7 @@ fn find_orphaned_agents(purge: bool) -> Result<()> {
     // a separate empty println.
     println!(
         "{}",
-        blue.apply_to(format!("\nPurging {} orphaned agent(s)...", orphans.len()))
+        chalk_blue(&format!("\nPurging {} orphaned agent(s)...", orphans.len())),
     );
     // TS source (`doctor.ts:101-105`) prints "  ✓ deleted <slug>" inside
     // the loop unconditionally and reports `orphans.length` on the final
@@ -269,11 +270,11 @@ fn find_orphaned_agents(purge: bool) -> Result<()> {
     // `Ok(true)` in practice; the `?` propagates real I/O errors.)
     for (slug, pubkey, _, _) in &orphans {
         storage.delete_agent(pubkey)?;
-        println!("{}", green.apply_to(format!("  ✓ deleted {slug}")));
+        println!("{}", chalk_green(&format!("  ✓ deleted {slug}")));
     }
     println!(
         "{}",
-        blue.apply_to(format!("Done: {} deleted", orphans.len()))
+        chalk_blue(&format!("Done: {} deleted", orphans.len())),
     );
     Ok(())
 }
@@ -299,23 +300,22 @@ async fn run_migrate() -> Result<()> {
     let doc = TenexConfigDoc::load(&base_dir)?;
     let current = doc.version();
 
-    let blue = console::Style::new().blue();
+    use crate::tui::theme::{chalk_blue, chalk_green};
     let current_str = current
         .map(|v| v.to_string())
         .unwrap_or_else(|| "unknown".to_owned());
     println!(
         "{}",
-        blue.apply_to(format!(
+        chalk_blue(&format!(
             "Current migration version: {current_str} (latest: {LATEST_MIGRATION_VERSION})"
-        ))
+        )),
     );
 
     if current == Some(LATEST_MIGRATION_VERSION) {
-        let green = console::Style::new().green();
-        println!("{}", green.apply_to("No pending migrations."));
+        println!("{}", chalk_green("No pending migrations."));
         println!(
             "{}",
-            blue.apply_to(format!("Final migration version: {LATEST_MIGRATION_VERSION}"))
+            chalk_blue(&format!("Final migration version: {LATEST_MIGRATION_VERSION}"))
         );
         return Ok(());
     }
@@ -356,11 +356,12 @@ fn preview_conversations_status() -> Result<()> {
         list_conversation_ids_from_project, list_project_ids_from_disk,
     };
 
-    let blue = console::Style::new().blue();
-    let gray = crate::tui::theme::chalk_gray();
-    let bold = console::Style::new().bold();
+    use crate::tui::theme::{chalk_blue, chalk_bold, chalk_gray_str};
 
-    println!("{}", blue.apply_to("Checking conversation indexing status...\n"));
+    println!(
+        "{}",
+        chalk_blue("Checking conversation indexing status...\n"),
+    );
 
     let base_dir = crate::store::resolve_base_dir(None);
     let project_ids = list_project_ids_from_disk(&base_dir);
@@ -372,20 +373,25 @@ fn preview_conversations_status() -> Result<()> {
         per_project.push((project_id.clone(), convs.len()));
     }
 
-    println!("{}", bold.apply_to("On-disk conversation tree:"));
+    println!("{}", chalk_bold("On-disk conversation tree:"));
     println!(
         "{}",
-        gray.apply_to(format!("  Projects: {}", project_ids.len()))
+        chalk_gray_str(&format!("  Projects: {}", project_ids.len())),
     );
     println!(
         "{}",
-        gray.apply_to(format!("  Total conversation files: {total_conversations}"))
+        chalk_gray_str(&format!(
+            "  Total conversation files: {total_conversations}"
+        )),
     );
     if !per_project.is_empty() {
         per_project.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
-        println!("{}", gray.apply_to("  Top projects by conversation count:"));
+        println!(
+            "{}",
+            chalk_gray_str("  Top projects by conversation count:"),
+        );
         for (project, n) in per_project.iter().take(5) {
-            println!("{}", gray.apply_to(format!("    {project}: {n}")));
+            println!("{}", chalk_gray_str(&format!("    {project}: {n}")));
         }
     }
 
@@ -407,34 +413,34 @@ fn preview_conversations_status() -> Result<()> {
 /// substrate hint.
 fn reindex_conversations(confirm: bool) -> Result<()> {
     use crate::tui::prompts;
-
-    let yellow = console::Style::new().yellow();
-    let gray = crate::tui::theme::chalk_gray();
+    use crate::tui::theme::{chalk_gray_str, chalk_yellow};
 
     if !confirm {
         println!(
             "{}",
-            yellow.apply_to(
+            chalk_yellow(
                 "This will clear all conversation indexing state and re-index all conversations.",
-            )
+            ),
         );
         println!(
             "{}",
-            yellow.apply_to("This may take several minutes depending on the number of conversations.\n")
+            chalk_yellow(
+                "This may take several minutes depending on the number of conversations.\n",
+            ),
         );
-        println!("{}", gray.apply_to("Run with --confirm to skip this prompt.\n"));
+        println!("{}", chalk_gray_str("Run with --confirm to skip this prompt.\n"));
 
         let answer = match prompts::input("Continue? (yes/no):").prompt() {
             Ok(s) => s.trim().to_lowercase(),
             Err(inquire::InquireError::OperationCanceled)
             | Err(inquire::InquireError::OperationInterrupted) => {
-                println!("{}", gray.apply_to("Cancelled."));
+                println!("{}", chalk_gray_str("Cancelled."));
                 return Ok(());
             }
             Err(e) => return Err(anyhow::anyhow!("reindex confirm prompt: {e}")),
         };
         if answer != "yes" && answer != "y" {
-            println!("{}", gray.apply_to("Cancelled."));
+            println!("{}", chalk_gray_str("Cancelled."));
             return Ok(());
         }
     }
