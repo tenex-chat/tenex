@@ -1,6 +1,6 @@
 # TENEX Rust Adoption Status
 
-_Last updated: 2026-04-29 (twenty-eighth pass). Auto-maintained by scheduled debt check._
+_Last updated: 2026-04-29 (twenty-ninth pass). Auto-maintained by scheduled debt check._
 
 ---
 
@@ -88,7 +88,7 @@ Spawned by `tenex runtime` per conversation turn via `tenex-agent <agent.json>` 
 - Supervision heuristics: `tenex-supervision` drives post-completion re-engagement, todo nudging, delegation gating by category
 - **Skills persistence**: loads `self_applied_skills` + todos from conversation store on startup; saves both atomically via `save_context_state` on completion
 - **Preloaded skills block**: agent config `default.skills` + conversation-scoped self-applied skills injected into system prompt
-- **Conversation history**: `tenex-context::project()` is called before each LLM invocation to project prior turns from the conversation store. History (User + Assistant messages) is passed to `stream_chat`; ToolResult messages excluded until projection captures tool_calls inline. `record_turn()` persists each turn (user + assistant) for future projection.
+- **Conversation history**: `tenex-context::project()` is called before each LLM invocation to project prior turns from the conversation store. Full history — User, Assistant (with `tool_calls`), and ToolResult — is passed to `stream_chat`. Tool calls are captured per-turn by `RecordingTool` wrappers, persisted to `tool_messages` via `store.record_tool_message()`, and attached to the assistant `TurnRecord` so projection can reconstruct paired `tool_use`→`tool_result` sequences on the next invocation. `record_turn()` persists each turn for future projection.
 - **System prompt via `tenex-system-prompt`**: `prompt.rs` replaced by `tenex_system_prompt::build_system_prompt()`. `InjectedFile` type moved to the crate; `home.rs` re-imports it.
 
 ### `tenex-protocol`
@@ -156,7 +156,7 @@ The `tenex` binary now includes:
 - **No dual-publish**: Since TS ProjectRuntime is not the default, status events (24010/24133) are only published by Rust. No conflict.
 - **`PubkeyService.ts`** correctly delegates to `identityDaemonClient` (Rust daemon) — no drift.
 - **`LlmConfigClient.ts`** correctly uses the Rust Unix-socket IPC — no drift.
-- **`tenex-context` is now wired**: `project()` is called before each `stream_chat` call. History is text-only (User + Assistant) until projection.rs records tool_calls inline on assistant records — ToolResult messages are filtered to prevent provider 400s.
+- **`tenex-context` is now wired**: `project()` is called before each `stream_chat` call. Full history (User + Assistant + ToolResult) is passed to providers. Tool calls are captured by `RecordingTool` wrappers, persisted to `tool_messages`, and linked to assistant records so projection interleaves `tool_use`→`tool_result` pairs correctly.
 
 ---
 
@@ -177,9 +177,9 @@ Note: `conversation_get`, `conversation_list`, `conversation_search`, `kill` (sc
 
 ## Compilation Status
 
-**As of 2026-04-29 (twenty-eighth debt check pass): workspace compiles clean — zero errors, 281 warnings (tenex-agent: 0). `cargo test --workspace`: 1351 tests passing across all crates.**
+**As of 2026-04-29 (twenty-ninth debt check pass): workspace compiles clean — zero errors, 281 warnings (tenex-agent: 0). `cargo test --workspace`: 1351 tests passing across all crates.**
 
-**MILESTONE: Every tool in `tenex-agent` is now verified end-to-end, including supervision re-engagement (see `RUST_REPORT.md`).** The `ConsecutiveToolsWithoutTodo` heuristic was silent (re_engage: false) — fixed. Multi-turn history projection verified with both user and assistant messages persisted.
+**MILESTONE: Tool call/result history is now fully wired.** `RecordingTool` wrappers capture every tool invocation (call_id, args, result) into a shared `Arc<ToolRecorder>`. After each turn, records are written to `tool_messages` and the assistant `TurnRecord` carries the `tool_calls` slice. `projection.rs` interleaves `ToolResult` messages immediately after their parent assistant row (sorted by timestamp, agent-pubkey-filtered). The `CtxMessage::ToolResult` filter in `main.rs` is removed — providers now receive correctly paired `tool_use`→`tool_result` sequences.
 
 ### Architectural note — `record_turn` and compaction strategies
 
@@ -197,6 +197,11 @@ Note: `conversation_get`, `conversation_list`, `conversation_search`, `kill` (sc
 - Conversation history persistence (10 convs, 20 history entries) ✅
 - Supervision (worker todo block) ✅
 - FK bug fixed: ensure_conversation() on store open
+
+Resolved between twenty-eighth and twenty-ninth passes:
+- **Tool call/result history fixed**: `RecordingTool` (`tools/recording.rs`) wraps all tools at the `ToolDyn` layer so every invocation captures `(call_id, tool_name, args_json, result_json, is_error, timestamp_ms)` into `Arc<ToolRecorder>`. After the inner loop, `main.rs` drains the recorder: writes each record to `tool_messages` via `store.record_tool_message()`, attaches the `tool_calls` slice to the assistant `TurnRecord`. `projection.rs` reworked to sort tool messages by timestamp, filter to the projecting agent's pubkey, and interleave each `ToolResult` immediately after its parent assistant message. `CtxMessage::ToolResult` filter removed from `main.rs`. Providers now receive valid `tool_use`→`tool_result` pairs in multi-turn history.
+- **uuid crate added**: `tenex-agent/Cargo.toml` — `uuid = { version = "1", features = ["v4"] }` for minting call IDs inside `RecordingTool`.
+- **RUST-AGENT-SPEC.md updated**: Outer loop step numbering corrected (step 6 = drain recorder + write tool_messages; step 8 = record_turn with tool_calls); inner loop bullet added for `RecordingTool`; Future Work "ToolResult in history" removed; `conversation_search` removed from TS-only list.
 
 Resolved between twenty-seventh and twenty-eighth passes:
 - **`conversation_search` dead field removed**: `current_project_id` was stored in `ConversationSearchTool` but never read (single-project path uses `self.store`; multi-project iterates `projects/`). Field removed; constructor accepts the arg as `_current_project_id` for API stability. `tenex-agent` warning count: 1 → 0.

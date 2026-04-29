@@ -518,13 +518,15 @@ Uses `rig-core`'s `Agent::stream_chat()` with projected history and an `EmitHook
 5. After the inner loop completes, call `Supervisor::check_post_completion` with the current todo state.
    - `Accept` → break the outer loop normally.
    - `ReEngage { message }` → append the current user+assistant exchange to `re_engage_history`, set `current_message = message`, and repeat from step 4. Guards: `MAX_RETRIES = 3` in `tenex-supervision`.
-6. Save todos and self-applied skills atomically via `save_context_state`.
-7. Call `tenex_context::record_turn()` to persist the user message + assistant response.
-8. Sign and emit the final `CompletionIntent` event with token usage from `FinalResponse`.
+6. Drain `recorder.take_records()` — write each captured `ToolCallRecord` to `tool_messages` via `store.record_tool_message()`. Build the matching `Vec<CtxToolCall>` slice for the assistant `TurnRecord`.
+7. Save todos and self-applied skills atomically via `save_context_state`.
+8. Call `tenex_context::record_turn()` to persist the user message + assistant response (assistant entry includes the captured `tool_calls` slice so projection can reconstruct paired `tool_use`→`tool_result` sequences).
+9. Sign and emit the final `CompletionIntent` event with token usage from `FinalResponse`.
 
 **Inner loop (inside `rig`)** — tool call iteration:
 - `rig` sends messages to the provider, receives tool calls, executes them, feeds results back — looping until the provider returns a final text response.
 - `rig` enforces `default_max_turns(25)`.
+- All tools are wrapped in `RecordingTool` (via `RecordingTool::wrap_dyn`) before being handed to the agent. Every call to a wrapped tool captures `(call_id, tool_name, args_json, result_json, is_error, timestamp_ms)` into a shared `Arc<ToolRecorder>` before returning the result to `rig`. The `call_id` is a minted UUID; `rig`'s internal provider-assigned tool-use ID is not surfaced at the `ToolDyn::call` boundary.
 - **Per token chunk**: `EmitHook::on_text_delta` accumulates text and emits a `StreamTextDeltaIntent` (kind:24135) per chunk with a monotonic `sequence` counter.
 - **Before each tool call**: `EmitHook::on_tool_call` runs pre-tool supervision checks. If blocked, returns `skip(reason)`. Otherwise emits a `ToolUseIntent` event (except `delegate`, which emits its own).
 - **After each LLM turn**: `EmitHook::on_stream_completion_response_finish` resets the delta counter and swaps the pending `ConversationIntent` — intermediate turns are emitted immediately; the final turn is held and emitted by `main.rs` after the stream ends (with `FinalResponse` usage attached).
@@ -565,5 +567,4 @@ API keys are resolved from provider-specific env vars (`ANTHROPIC_API_KEY`, `OPE
 
 ## Future Work (not yet implemented)
 
-- **ToolResult in history**: Projection filters out `ToolResult` messages because assistant records currently have empty `tool_calls`. Once `record_turn` captures tool calls inline, paired tool-call/result sequences can flow to providers.
-- **TS-only tools**: `conversation_search`, `send_message`, MCP tools (`mcp_list_resources`, `mcp_resource_read`, `mcp_subscribe`, `mcp_subscription_stop`), RAG subscription tools (`rag_subscription_create/delete/get/list`), RAG collection management tools (`rag_collection_create/delete/list`).
+- **TS-only tools**: `send_message`, MCP tools (`mcp_list_resources`, `mcp_resource_read`, `mcp_subscribe`, `mcp_subscription_stop`), RAG subscription tools (`rag_subscription_create/delete/get/list`), RAG collection management tools (`rag_collection_create/delete/list`).
