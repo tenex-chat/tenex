@@ -75,14 +75,16 @@ function evaluateDelegation(events: Event[], context: EvaluateContext): Verdict[
                 includesColorChoice(event.content))
     );
     const workerColor = workerCompletion ? extractColorChoice(workerCompletion.content) : null;
-    const pmObservedWorker = events.find(
+    const pmColorReports = events.filter(
         (event) =>
             event.kind === 1 &&
             event.pubkey === context.pmPubkey &&
             event.created_at >= (workerCompletion?.created_at ?? Number.MAX_SAFE_INTEGER) &&
             !hasTag(event, "tool", "delegate") &&
-            extractColorChoice(event.content) === workerColor
+            extractColorChoice(event.content) !== null
     );
+    const pmObservedWorker = pmColorReports[0];
+    const pmReportedColor = pmObservedWorker ? extractColorChoice(pmObservedWorker.content) : null;
     const completedStatus = events.find(
         (event) =>
             event.kind === 1 &&
@@ -108,8 +110,8 @@ function evaluateDelegation(events: Event[], context: EvaluateContext): Verdict[
         },
         {
             name: "PM observed worker completion",
-            ok: Boolean(pmObservedWorker),
-            detail: "Expected worker completion to trigger a follow-up PM run naming the same color.",
+            ok: Boolean(pmObservedWorker) && pmReportedColor === workerColor,
+            detail: `Expected first PM color report to repeat ${workerColor ?? "<worker color>"}; saw ${pmReportedColor ?? "<none>"}.`,
         },
         {
             name: "Agent completion contract includes status=completed",

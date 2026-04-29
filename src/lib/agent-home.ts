@@ -159,8 +159,11 @@ export function isWithinAgentHome(inputPath: string, agentPubkey: string): boole
  * Creates it if it doesn't exist.
  * @returns true if directory exists or was created, false if creation failed
  */
-export function ensureAgentHomeDirectory(agentPubkey: string): boolean {
-    const homeDir = getAgentHomeDirectory(agentPubkey);
+export function ensureAgentHomeDirectory(
+    agentPubkey: string,
+    tenexBasePath = getTenexBasePath()
+): boolean {
+    const homeDir = getAgentHomeDirectory(agentPubkey, tenexBasePath);
     try {
         mkdirSync(homeDir, { recursive: true });
         return true;

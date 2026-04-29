@@ -21,7 +21,26 @@ describe("shellTool env resolution", () => {
         await fs.rm(tempDir, { recursive: true, force: true });
     });
 
-    function createShellContext(projectId?: string) {
+    function createToolEnv(
+        signer: NDKPrivateKeySigner,
+        projectId: string | undefined,
+        projectBasePath: string,
+        overrides: NodeJS.ProcessEnv = {}
+    ): NodeJS.ProcessEnv {
+        return {
+            ...process.env,
+            HOME: process.env.HOME ?? os.homedir(),
+            AGENT_HOME: getAgentHomeDirectory(signer.pubkey, tempDir),
+            NSEC: (signer as unknown as { nsec: string }).nsec,
+            PUBKEY: signer.pubkey,
+            PROJECT_BASE: projectBasePath,
+            PROJECT_ID: projectId,
+            TENEX_BASE_DIR: tempDir,
+            ...overrides,
+        };
+    }
+
+    function createShellContext(projectId?: string, envOverrides: NodeJS.ProcessEnv = {}) {
         const signer = NDKPrivateKeySigner.generate();
         const agent = createMockAgent({
             pubkey: signer.pubkey,
@@ -37,6 +56,8 @@ describe("shellTool env resolution", () => {
                 projectBasePath: projectDir,
                 projectId: projectId ?? undefined,
                 tenexBasePath: tempDir,
+                resolveToolEnvironment: () =>
+                    createToolEnv(signer, projectId, projectDir, envOverrides),
                 getConversation: projectId
                     ? () => ({ getProjectId: () => projectId } as any)
                     : () => undefined,
@@ -44,7 +65,7 @@ describe("shellTool env resolution", () => {
         };
     }
 
-    it("bootstraps NSEC and provides AGENT_HOME without overwriting HOME", async () => {
+    it("provides NSEC and AGENT_HOME without overwriting HOME", async () => {
         const { signer, context } = createShellContext();
         const shellTool = createShellTool(context);
 
@@ -63,29 +84,11 @@ describe("shellTool env resolution", () => {
         // AGENT_HOME provides access to agent home for scripts that need it
         expect(output[1]).toBe(agentHome);
         expect(output[2].startsWith("nsec1")).toBe(true);
-
-        const bootstrappedEnv = await fs.readFile(path.join(agentHome, ".env"), "utf-8");
-        expect(bootstrappedEnv).toContain("NSEC=nsec1");
     });
 
-    it("applies env precedence as global < project < agent", async () => {
-        const { signer, context } = createShellContext("proj-1");
+    it("passes the resolved env to the spawned process", async () => {
+        const { context } = createShellContext("proj-1", { VALUE: "agent" });
         const shellTool = createShellTool(context);
-
-        await fs.mkdir(path.join(tempDir, "projects", "proj-1"), { recursive: true });
-        const agentHome = getAgentHomeDirectory(signer.pubkey, tempDir);
-        await fs.mkdir(agentHome, { recursive: true });
-        await fs.writeFile(path.join(tempDir, ".env"), "VALUE=global\n", "utf-8");
-        await fs.writeFile(
-            path.join(tempDir, "projects", "proj-1", ".env"),
-            "VALUE=project\n",
-            "utf-8"
-        );
-        await fs.writeFile(
-            path.join(agentHome, ".env"),
-            "VALUE=agent\n",
-            "utf-8"
-        );
 
         const result = await shellTool.execute({
             command: "printf '%s' \"$VALUE\"",
@@ -113,6 +116,8 @@ describe("shellTool env resolution", () => {
                 projectBasePath,
                 projectId: "proj-1",
                 tenexBasePath: tempDir,
+                resolveToolEnvironment: () =>
+                    createToolEnv(signer, "proj-1", projectBasePath),
                 getConversation: () => ({ getProjectId: () => "proj-1" } as any),
             })
         );
@@ -128,17 +133,11 @@ describe("shellTool env resolution", () => {
     });
 
     it("expands arbitrary env vars from project env files in cwd", async () => {
-        const { context } = createShellContext("proj-1");
+        const { context } = createShellContext("proj-1", { CUSTOM_CWD: "env-dir" });
         const shellTool = createShellTool(context);
         const envDir = path.join(projectDir, "env-dir");
 
-        await fs.mkdir(path.join(tempDir, "projects", "proj-1"), { recursive: true });
         await fs.mkdir(envDir, { recursive: true });
-        await fs.writeFile(
-            path.join(tempDir, "projects", "proj-1", ".env"),
-            "CUSTOM_CWD=env-dir\n",
-            "utf-8"
-        );
 
         const result = await shellTool.execute({
             command: "pwd",
@@ -150,16 +149,12 @@ describe("shellTool env resolution", () => {
         expect((result as string).trim()).toBe(await fs.realpath(envDir));
     });
 
-    it("returns a shell error before execution when an env file has invalid syntax", async () => {
+    it("returns a shell error before execution when env resolution fails", async () => {
         const { context } = createShellContext("proj-1");
+        context.resolveToolEnvironment = () => {
+            throw new Error(`Invalid .env file at ${path.join(tempDir, "projects", "proj-1", ".env")}:1: Invalid line`);
+        };
         const shellTool = createShellTool(context);
-
-        await fs.mkdir(path.join(tempDir, "projects", "proj-1"), { recursive: true });
-        await fs.writeFile(
-            path.join(tempDir, "projects", "proj-1", ".env"),
-            "NOT VALID\n",
-            "utf-8"
-        );
 
         const result = await shellTool.execute({
             command: "printf 'should-not-run'",
@@ -179,10 +174,8 @@ describe("shellTool env resolution", () => {
     });
 
     it("uses the resolved env for background tasks too", async () => {
-        const { context } = createShellContext("proj-1");
+        const { context } = createShellContext("proj-1", { VALUE: "background" });
         const shellTool = createShellTool(context);
-
-        await fs.writeFile(path.join(tempDir, ".env"), "VALUE=background\n", "utf-8");
 
         const result = await shellTool.execute({
             command: "printf '%s' \"$VALUE\"",

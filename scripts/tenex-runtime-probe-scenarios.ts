@@ -119,7 +119,7 @@ export function scenarioProjectDtag(name: ScenarioName): string {
 
 export function pmInstructions(name: ScenarioName): string {
     if (name === "delegation-basic") {
-        return "This is a delegation probe. Do not call todo_write. On the first turn, call only delegate to worker with the random-color task. Do not ask for clarification. When the worker replies with a color, do not call tools and do not delegate again; repeat the exact color word in one final sentence: The worker picked <exact worker color>.";
+        return "This is a delegation probe. Do not call todo_write. On the first turn, call only delegate to worker with the random-color task. Do not ask for clarification. The delegate tool result is not the worker's answer; never invent or choose a color yourself. When the worker replies with a color, do not call tools and do not delegate again; repeat the exact color word in one final sentence: The worker picked <exact worker color>.";
     }
     if (name === "same-agent-concurrency") {
         return "Use shell when asked to run sleep commands, and account for active tool reminders.";
@@ -323,21 +323,46 @@ async function runDelegationProbe(context: ScenarioContext): Promise<void> {
         "worker random-color completion"
     );
     const workerColor = extractColorChoice(workerCompletion.content);
-    await context.waitForObservedEvent(
-        context.events,
-        (event) =>
-            event.kind === 1 &&
-            event.pubkey === context.pmPubkey &&
-            event.created_at >= workerCompletion.created_at &&
-            !hasEventTag(event, "tool", "delegate") &&
-            extractColorChoice(event.content) === workerColor,
-        timeoutMs,
-        "PM random-color follow-up"
+    await waitForPmColorReport(
+        context,
+        workerCompletion.created_at,
+        workerColor,
+        timeoutMs
     );
 }
 
 function hasEventTag(event: Event, name: string, value: string): boolean {
     return event.tags.some((tag) => tag[0] === name && tag[1] === value);
+}
+
+async function waitForPmColorReport(
+    context: ScenarioContext,
+    sinceCreatedAt: number,
+    expectedColor: string | null,
+    timeoutMs: number
+): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+        const report = context.events.find(
+            (event) =>
+                event.kind === 1 &&
+                event.pubkey === context.pmPubkey &&
+                event.created_at >= sinceCreatedAt &&
+                !hasEventTag(event, "tool", "delegate") &&
+                extractColorChoice(event.content) !== null
+        );
+        if (report) {
+            const actualColor = extractColorChoice(report.content);
+            if (actualColor === expectedColor) {
+                return;
+            }
+            throw new Error(
+                `PM reported ${actualColor ?? "<none>"} instead of ${expectedColor ?? "<none>"}: ${report.content}`
+            );
+        }
+        await context.delay(100);
+    }
+    throw new Error(`did not observe PM random-color follow-up within ${timeoutMs}ms`);
 }
 
 async function runSameAgentConcurrencyProbe(context: ScenarioContext): Promise<void> {
