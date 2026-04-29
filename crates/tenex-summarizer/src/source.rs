@@ -104,14 +104,20 @@ pub fn load_project_event(project: &ProjectRef) -> Result<ProjectEvent> {
     })
 }
 
-/// Catalog rows whose `last_activity` is at least `quiet_seconds` ago. Pure
-/// read; no joins. The summarizer's polling decides which of these need work.
-pub fn list_candidates(project: &ProjectRef, quiet_seconds: i64) -> Result<Vec<CandidateRow>> {
+/// Catalog rows whose `last_activity` is between `max_age_seconds` and
+/// `quiet_seconds` ago. Pure read; no joins. The summarizer's polling decides
+/// which of these need work.
+pub fn list_candidates(
+    project: &ProjectRef,
+    quiet_seconds: i64,
+    max_age_seconds: i64,
+) -> Result<Vec<CandidateRow>> {
     let now_secs = (std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0)) as i64;
     let max_activity = now_secs - quiet_seconds;
+    let min_activity = now_secs - max_age_seconds;
 
     let conn = Connection::open_with_flags(
         &project.catalog_db,
@@ -122,11 +128,11 @@ pub fn list_candidates(project: &ProjectRef, quiet_seconds: i64) -> Result<Vec<C
     let mut stmt = conn.prepare(
         "SELECT conversation_id, COALESCE(last_activity, 0) AS la
            FROM conversations
-          WHERE COALESCE(last_activity, 0) > 0
+          WHERE COALESCE(last_activity, 0) >= ?
             AND COALESCE(last_activity, 0) <= ?
           ORDER BY la DESC",
     )?;
-    let rows = stmt.query_map([max_activity], |row| {
+    let rows = stmt.query_map([min_activity, max_activity], |row| {
         Ok(CandidateRow {
             conversation_id: row.get(0)?,
             last_activity: row.get(1)?,

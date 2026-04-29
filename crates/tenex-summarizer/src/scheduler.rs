@@ -1,7 +1,7 @@
 //! Polling loop. Every `SCAN_INTERVAL`, walks every project and processes
 //! conversations that meet the policy:
 //!
-//!   - last_activity is at least DEBOUNCE_SECS old (10s after-quiet)
+//!   - last_activity is between DEBOUNCE_SECS (10s) and MAX_AGE_SECS (7d) old
 //!   - last_activity has advanced since our last summarize
 //!   - at least MIN_INTERVAL_MS has passed since our last summarize (rate limit)
 //!
@@ -24,6 +24,7 @@ use crate::summarize::{self, Summary};
 const SCAN_INTERVAL: Duration = Duration::from_secs(5);
 const DEBOUNCE_SECS: i64 = 10;
 const MIN_INTERVAL_MS: i64 = 5 * 60 * 1000;
+const MAX_AGE_SECS: i64 = 7 * 24 * 60 * 60;
 
 pub async fn run(cfg: Config, state: SummaryStateStore) -> Result<()> {
     let publisher = Publisher::new(&cfg.backend_secret_key, &cfg.relays).await?;
@@ -74,7 +75,7 @@ async fn scan_once(cfg: &Config, state: &SummaryStateStore, publisher: &Publishe
             }
         };
 
-        let candidates = match source::list_candidates(project, DEBOUNCE_SECS) {
+        let candidates = match source::list_candidates(project, DEBOUNCE_SECS, MAX_AGE_SECS) {
             Ok(c) => c,
             Err(e) => {
                 warn!(d_tag = %project.d_tag, error = %e, "list_candidates failed");
