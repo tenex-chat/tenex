@@ -41,7 +41,7 @@ export function evaluate(
     if (name === "mcp-tool-basic") {
         return [...commonVerdicts, ...evaluateMcpTool(events, requestRecords, context)];
     }
-    if (name === "acp-worker-basic") {
+    if (name === "acp-worker-basic" || name === "agent-config-reload") {
         return [...commonVerdicts, ...evaluateAcpWorker(events, context)];
     }
     return [...commonVerdicts, ...evaluateFsReadAdjustment(events, requestRecords, context)];

@@ -7,13 +7,16 @@ mod control_tests;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
 use clap::Parser;
 use nostr::JsonUtil;
 use nostr_sdk::prelude::*;
+use notify::{
+    Config as NotifyConfig, Event as NotifyEvent, RecommendedWatcher, RecursiveMode, Watcher,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter};
@@ -24,7 +27,10 @@ use tenex_conversations::{
     AgentContextState, ConversationStore, MessageQuery, NewMessage, Project as ConversationsProject,
 };
 use tenex_mcp::{ProjectMcpRuntime, SocketServerConfig};
-use tenex_project::{models::ProjectAgent, Agent, Project};
+use tenex_project::{
+    models::{ProjectAgent, ProjectMetadata},
+    Agent, Project,
+};
 
 use crate::daemon::config;
 use crate::nostr_pub::{backend_signer, operations_status, project_status};
@@ -52,14 +58,65 @@ struct RuntimeShared {
     base_dir: PathBuf,
     agent_binary: PathBuf,
     agent_acp_binary: PathBuf,
-    agents: Arc<Vec<Agent>>,
-    project_agents: Arc<Vec<ProjectAgent>>,
-    agent_pubkeys: Arc<HashSet<String>>,
+    agent_snapshot: Arc<RwLock<RuntimeAgentSnapshot>>,
     mcp_runtime: Arc<ProjectMcpRuntime>,
     store: Arc<Mutex<ConversationStore>>,
     coordinator: Arc<Mutex<DispatchCoordinator>>,
     control: Arc<RuntimeControlState>,
     seen: Arc<Mutex<HashSet<EventId>>>,
+}
+
+impl RuntimeShared {
+    fn agent_snapshot(&self) -> RuntimeAgentSnapshot {
+        self.agent_snapshot.read().unwrap().clone()
+    }
+
+    fn agent_pubkeys(&self) -> HashSet<String> {
+        self.agent_snapshot.read().unwrap().agent_pubkeys.clone()
+    }
+}
+
+#[derive(Clone)]
+struct RuntimeAgentSnapshot {
+    agents: Vec<Agent>,
+    project_agents: Vec<ProjectAgent>,
+    agent_pubkeys: HashSet<String>,
+}
+
+impl RuntimeAgentSnapshot {
+    fn load(project: &Project) -> Result<Self> {
+        let agents = project.agents()?;
+        let project_agents = project.project_agents()?;
+        let agent_pubkeys = agents.iter().map(|a| a.pubkey.clone()).collect();
+        Ok(Self {
+            agents,
+            project_agents,
+            agent_pubkeys,
+        })
+    }
+}
+
+#[derive(Clone)]
+struct RuntimeSubscriptionIds {
+    project: SubscriptionId,
+    directed: SubscriptionId,
+    stop: SubscriptionId,
+}
+
+impl RuntimeSubscriptionIds {
+    fn new(project_id: &str) -> Self {
+        Self {
+            project: SubscriptionId::new(format!("tenex-runtime-{project_id}-project")),
+            directed: SubscriptionId::new(format!("tenex-runtime-{project_id}-directed")),
+            stop: SubscriptionId::new(format!("tenex-runtime-{project_id}-stop")),
+        }
+    }
+}
+
+struct RuntimeFilters {
+    project: Filter,
+    directed: Filter,
+    stop: Filter,
 }
 
 #[derive(Clone)]
@@ -252,10 +309,9 @@ pub async fn run(args: RuntimeArgs) -> Result<()> {
             args.project_id
         )
     })?;
-    let agents = project.agents()?;
-    let project_agents = project.project_agents()?;
+    let agent_snapshot = RuntimeAgentSnapshot::load(&project)?;
 
-    if agents.is_empty() {
+    if agent_snapshot.agents.is_empty() {
         anyhow::bail!("project '{}' has no agents", meta.d_tag);
     }
 
@@ -263,9 +319,6 @@ pub async fn run(args: RuntimeArgs) -> Result<()> {
         ConversationsProject::open_conversations(&meta.d_tag, &base_dir)
             .context("opening conversation store")?,
     ));
-
-    // Loop prevention: ignore events authored by any project agent.
-    let agent_pubkeys: HashSet<String> = agents.iter().map(|a| a.pubkey.clone()).collect();
 
     let lock_dir = base_dir.join("projects").join(meta.d_tag.as_str());
     std::fs::create_dir_all(&lock_dir)?;
@@ -305,64 +358,32 @@ pub async fn run(args: RuntimeArgs) -> Result<()> {
         }
     };
 
-    // kind:1 events #a-tagging this project (initial messages to the project)
-    let filter_a = Filter::new()
-        .kind(Kind::TextNote)
-        .authors(authors.clone())
-        .custom_tags(
-            SingleLetterTag::lowercase(Alphabet::A),
-            [project_addr.as_str()],
-        )
-        .since(since);
-
-    // kind:1 events #p-tagging any agent in this project (replies, directed messages)
-    let agent_keys: Vec<PublicKey> = agents
-        .iter()
-        .filter_map(|a| PublicKey::from_hex(&a.pubkey).ok())
-        .collect();
-    let mut p_authors = authors.clone();
-    p_authors.extend(agent_keys.iter().copied());
-    let filter_p = Filter::new()
-        .kind(Kind::TextNote)
-        .authors(p_authors)
-        .pubkeys(agent_keys)
-        .since(since);
-    let stop_agent_keys: Vec<PublicKey> = agents
-        .iter()
-        .filter_map(|a| PublicKey::from_hex(&a.pubkey).ok())
-        .collect();
-    let filter_stop = Filter::new()
-        .kind(Kind::Custom(tenex_protocol::nostr::kinds::STOP_COMMAND))
-        .authors(authors.clone())
-        .pubkeys(stop_agent_keys)
-        .since(since);
-
-    client
-        .subscribe_with_id(SubscriptionId::generate(), filter_a, None)
-        .await?;
-    client
-        .subscribe_with_id(SubscriptionId::generate(), filter_p, None)
-        .await?;
-    client
-        .subscribe_with_id(SubscriptionId::generate(), filter_stop, None)
-        .await?;
+    let subscription_ids = RuntimeSubscriptionIds::new(&meta.d_tag);
+    subscribe_runtime_filters(
+        &client,
+        &subscription_ids,
+        build_runtime_filters(&authors, &project_addr, since, &agent_snapshot),
+    )
+    .await?;
     info!("subscriptions active");
+
+    let agent_snapshot_state = Arc::new(RwLock::new(agent_snapshot.clone()));
 
     // Publish project status (kind:24010) immediately and every 30 seconds.
     if let Some(ref keys) = backend_keys {
         let client_status = client.clone();
         let keys_status = keys.clone();
         let meta_status = meta.clone();
-        let agents_status = agents.clone();
-        let pa_status = project_agents.clone();
+        let agent_snapshot_status = agent_snapshot_state.clone();
         let base_dir_status = base_dir.clone();
         let whitelist_status = cfg.whitelisted_pubkeys.clone();
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(Duration::from_secs(30));
             loop {
                 interval.tick().await;
+                let snapshot = agent_snapshot_status.read().unwrap().clone();
                 let models_status = match crate::store::llms::LlmsDoc::load(&base_dir_status) {
-                    Ok(llms) => project_status::collect_model_access(&llms, &agents_status),
+                    Ok(llms) => project_status::collect_model_access(&llms, &snapshot.agents),
                     Err(e) => {
                         warn!(error = %e, "24010 model tag collection failed");
                         Vec::new()
@@ -371,8 +392,8 @@ pub async fn run(args: RuntimeArgs) -> Result<()> {
                 match project_status::build_project_status_event(
                     &keys_status,
                     &meta_status,
-                    &agents_status,
-                    &pa_status,
+                    &snapshot.agents,
+                    &snapshot.project_agents,
                     &models_status,
                     &whitelist_status,
                 ) {
@@ -410,9 +431,7 @@ pub async fn run(args: RuntimeArgs) -> Result<()> {
         base_dir: base_dir.clone(),
         agent_binary,
         agent_acp_binary,
-        agents: Arc::new(agents.clone()),
-        project_agents: Arc::new(project_agents.clone()),
-        agent_pubkeys: Arc::new(agent_pubkeys.clone()),
+        agent_snapshot: agent_snapshot_state,
         mcp_runtime,
         store: store.clone(),
         coordinator,
@@ -422,11 +441,47 @@ pub async fn run(args: RuntimeArgs) -> Result<()> {
     let control_socket_path = control.socket_path();
     let control_task = tokio::spawn(serve_control_socket(control, control_socket_path.clone()));
 
+    let agents_dir = base_dir.join("agents");
+    let (agent_fs_tx, mut agent_fs_rx) =
+        tokio::sync::mpsc::channel::<Result<NotifyEvent, notify::Error>>(64);
+    let mut agent_config_watcher = RecommendedWatcher::new(
+        move |res| {
+            agent_fs_tx.blocking_send(res).ok();
+        },
+        NotifyConfig::default(),
+    )
+    .context("create agent config watcher")?;
+    agent_config_watcher
+        .watch(&agents_dir, RecursiveMode::NonRecursive)
+        .with_context(|| format!("watch agents dir {}", agents_dir.display()))?;
+    info!(path = %agents_dir.display(), "watching for agent config changes");
+
     let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
     let mut notifications = client.notifications();
 
     loop {
         tokio::select! {
+            Some(event) = agent_fs_rx.recv() => {
+                match event {
+                    Ok(event) if agent_config_event_is_relevant(&event) => {
+                        tokio::time::sleep(Duration::from_millis(100)).await;
+                        if let Err(error) = reload_agent_snapshot(
+                            &shared,
+                            &subscription_ids,
+                            &authors,
+                            &project_addr,
+                            since,
+                            &meta,
+                        )
+                        .await
+                        {
+                            warn!(error = %error, "agent config reload failed");
+                        }
+                    }
+                    Ok(_) => {}
+                    Err(error) => warn!(error = %error, "agent config watcher error"),
+                }
+            }
             result = notifications.recv() => {
                 match result {
                     Ok(RelayPoolNotification::Event { event, .. }) => {
@@ -439,8 +494,9 @@ pub async fn run(args: RuntimeArgs) -> Result<()> {
                             }
                             continue;
                         }
-                        if shared.agent_pubkeys.contains(&event.pubkey.to_hex())
-                            && !targets_project_agent(&event, shared.agent_pubkeys.as_ref())
+                        let agent_pubkeys = shared.agent_pubkeys();
+                        if agent_pubkeys.contains(&event.pubkey.to_hex())
+                            && !targets_project_agent(&event, &agent_pubkeys)
                         {
                             continue;
                         }
@@ -449,7 +505,7 @@ pub async fn run(args: RuntimeArgs) -> Result<()> {
                         if let Err(e) = register_delegation_route_if_needed(
                             &shared.store,
                             &event,
-                            shared.agent_pubkeys.as_ref(),
+                            &agent_pubkeys,
                             None,
                         ) {
                             warn!(event_id = short, error = %e, "failed to register delegation route");
@@ -508,6 +564,165 @@ pub async fn run(args: RuntimeArgs) -> Result<()> {
     let _ = tokio::fs::remove_file(control_socket_path).await;
     client.disconnect().await;
     Ok(())
+}
+
+fn build_runtime_filters(
+    authors: &[PublicKey],
+    project_addr: &str,
+    since: Timestamp,
+    snapshot: &RuntimeAgentSnapshot,
+) -> RuntimeFilters {
+    let agent_keys: Vec<PublicKey> = snapshot
+        .agents
+        .iter()
+        .filter_map(|a| PublicKey::from_hex(&a.pubkey).ok())
+        .collect();
+    let mut p_authors = authors.to_vec();
+    p_authors.extend(agent_keys.iter().copied());
+
+    RuntimeFilters {
+        project: Filter::new()
+            .kind(Kind::TextNote)
+            .authors(authors.to_vec())
+            .custom_tags(SingleLetterTag::lowercase(Alphabet::A), [project_addr])
+            .since(since),
+        directed: Filter::new()
+            .kind(Kind::TextNote)
+            .authors(p_authors)
+            .pubkeys(agent_keys.clone())
+            .since(since),
+        stop: Filter::new()
+            .kind(Kind::Custom(tenex_protocol::nostr::kinds::STOP_COMMAND))
+            .authors(authors.to_vec())
+            .pubkeys(agent_keys)
+            .since(since),
+    }
+}
+
+async fn subscribe_runtime_filters(
+    client: &Client,
+    ids: &RuntimeSubscriptionIds,
+    filters: RuntimeFilters,
+) -> Result<()> {
+    client
+        .subscribe_with_id(ids.project.clone(), filters.project, None)
+        .await?;
+    client
+        .subscribe_with_id(ids.directed.clone(), filters.directed, None)
+        .await?;
+    client
+        .subscribe_with_id(ids.stop.clone(), filters.stop, None)
+        .await?;
+    Ok(())
+}
+
+fn agent_config_event_is_relevant(event: &NotifyEvent) -> bool {
+    event.paths.iter().any(|path| {
+        path.extension()
+            .and_then(|extension| extension.to_str())
+            .is_some_and(|extension| extension == "json")
+    })
+}
+
+async fn reload_agent_snapshot(
+    shared: &RuntimeShared,
+    subscription_ids: &RuntimeSubscriptionIds,
+    authors: &[PublicKey],
+    project_addr: &str,
+    since: Timestamp,
+    meta: &ProjectMetadata,
+) -> Result<()> {
+    let old_pubkeys = shared.agent_pubkeys();
+    let snapshot = load_agent_snapshot_after_change(shared, &old_pubkeys).await?;
+    let new_pubkeys = snapshot.agent_pubkeys.clone();
+    {
+        let mut current = shared.agent_snapshot.write().unwrap();
+        *current = snapshot.clone();
+    }
+
+    subscribe_runtime_filters(
+        &shared.client,
+        subscription_ids,
+        build_runtime_filters(authors, project_addr, since, &snapshot),
+    )
+    .await?;
+    publish_project_status_now(shared, meta).await;
+
+    let added = new_pubkeys.difference(&old_pubkeys).count();
+    let removed = old_pubkeys.difference(&new_pubkeys).count();
+    info!(
+        agents = snapshot.agents.len(),
+        added, removed, "reloaded agent configuration"
+    );
+    Ok(())
+}
+
+async fn load_agent_snapshot_after_change(
+    shared: &RuntimeShared,
+    old_pubkeys: &HashSet<String>,
+) -> Result<RuntimeAgentSnapshot> {
+    let mut missing_existing = Vec::new();
+    for attempt in 0..5 {
+        let project = Project::open(&shared.project_id, &shared.base_dir)
+            .with_context(|| format!("opening project '{}'", shared.project_id))?;
+        let snapshot = RuntimeAgentSnapshot::load(&project)?;
+        if snapshot.agents.is_empty() {
+            anyhow::bail!(
+                "project '{}' has no readable agents after reload",
+                shared.project_id
+            );
+        }
+        missing_existing = old_pubkeys
+            .difference(&snapshot.agent_pubkeys)
+            .filter(|pubkey| {
+                shared
+                    .base_dir
+                    .join("agents")
+                    .join(format!("{pubkey}.json"))
+                    .exists()
+            })
+            .cloned()
+            .collect();
+        if missing_existing.is_empty() {
+            return Ok(snapshot);
+        }
+        if attempt < 4 {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    }
+    anyhow::bail!(
+        "agent config reload left existing agent files unreadable: {}",
+        missing_existing.join(", ")
+    )
+}
+
+async fn publish_project_status_now(shared: &RuntimeShared, meta: &ProjectMetadata) {
+    let Some(keys) = shared.backend_keys.as_ref() else {
+        return;
+    };
+    let snapshot = shared.agent_snapshot();
+    let models_status = match crate::store::llms::LlmsDoc::load(&shared.base_dir) {
+        Ok(llms) => project_status::collect_model_access(&llms, &snapshot.agents),
+        Err(error) => {
+            warn!(error = %error, "24010 model tag collection failed");
+            Vec::new()
+        }
+    };
+    match project_status::build_project_status_event(
+        keys,
+        meta,
+        &snapshot.agents,
+        &snapshot.project_agents,
+        &models_status,
+        &shared.whitelisted_pubkeys,
+    ) {
+        Ok(event) => {
+            if let Err(error) = shared.client.send_event(&event).await {
+                warn!(error = %error, "24010 publish failed");
+            }
+        }
+        Err(error) => warn!(error = %error, "24010 build failed"),
+    }
 }
 
 async fn accept_dispatch(shared: Arc<RuntimeShared>, mut job: DispatchJob) -> Result<()> {
@@ -610,8 +825,9 @@ fn select_dispatch_target(
     shared: &RuntimeShared,
     event: &Event,
 ) -> Result<(Agent, String, Option<String>)> {
+    let snapshot = shared.agent_snapshot();
     if let Some(route) = delegation_route_for_completion(&shared.store, event)? {
-        if let Some(agent) = shared
+        if let Some(agent) = snapshot
             .agents
             .iter()
             .find(|agent| agent.pubkey == route.parent_agent_pubkey)
@@ -629,7 +845,7 @@ fn select_dispatch_target(
         );
     }
 
-    let agent = select_agent(event, &shared.agents, &shared.project_agents)?.clone();
+    let agent = select_agent(event, &snapshot.agents, &snapshot.project_agents)?.clone();
     Ok((agent, conversation_id_from_event(event), None))
 }
 
@@ -638,19 +854,15 @@ async fn dispatch_project_agent_target(
     event: &Event,
     parent_job: Option<&DispatchJob>,
 ) -> Result<()> {
-    if !targets_project_agent(event, shared.agent_pubkeys.as_ref()) {
+    let agent_pubkeys = shared.agent_pubkeys();
+    if !targets_project_agent(event, &agent_pubkeys) {
         return Ok(());
     }
     if !mark_seen(&shared.seen, event.id) {
         return Ok(());
     }
 
-    register_delegation_route_if_needed(
-        &shared.store,
-        event,
-        shared.agent_pubkeys.as_ref(),
-        parent_job,
-    )?;
+    register_delegation_route_if_needed(&shared.store, event, &agent_pubkeys, parent_job)?;
 
     let (agent, conv_id, completion_recipient_pubkey) = select_dispatch_target(&shared, event)?;
     let agent_json = shared
@@ -1250,6 +1462,7 @@ fn select_agent<'a>(
 }
 
 async fn run_agent(shared: Arc<RuntimeShared>, job: DispatchJob, key: DispatchKey) -> Result<()> {
+    let job = refresh_job_agent(&shared, job)?;
     if !job.agent_json.exists() {
         anyhow::bail!("agent JSON not found: {}", job.agent_json.display());
     }
@@ -1387,6 +1600,23 @@ async fn run_agent(shared: Arc<RuntimeShared>, job: DispatchJob, key: DispatchKe
     }
 
     agent_result
+}
+
+fn refresh_job_agent(shared: &RuntimeShared, mut job: DispatchJob) -> Result<DispatchJob> {
+    let snapshot = shared.agent_snapshot();
+    let Some(agent) = snapshot
+        .agents
+        .iter()
+        .find(|agent| agent.pubkey == job.agent.pubkey)
+    else {
+        anyhow::bail!(
+            "agent '{}' is no longer available in project '{}'",
+            job.agent.slug,
+            shared.project_id
+        );
+    };
+    job.agent = agent.clone();
+    Ok(job)
 }
 
 fn agent_runtime_kind(agent: &Agent) -> Result<AgentRuntimeKind> {

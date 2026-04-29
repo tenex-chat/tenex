@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 import { spawn, type ChildProcessByStdio } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import type { Readable } from "node:stream";
 import path from "node:path";
@@ -278,6 +278,12 @@ try {
         delay,
         waitForObservedEvent,
         waitForRequestRecord,
+        configureWorkerForAcp: () => {
+            const workerAgentPath = path.join(agentsDir, `${worker.pubkey}.json`);
+            const agent = JSON.parse(readFileSync(workerAgentPath, "utf8")) as Record<string, unknown>;
+            agent.runtime = buildAcpProbeRuntime();
+            writeJson(workerAgentPath, agent);
+        },
         monitorConversation: (conversationId, onEvent) =>
             monitorConversation(pool, relayUrl, conversationId, {
                 since: startTime,

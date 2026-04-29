@@ -11,6 +11,7 @@ export const availableScenarios = [
     "fs-read-adjustment",
     "mcp-tool-basic",
     "acp-worker-basic",
+    "agent-config-reload",
 ] as const;
 
 export type ScenarioName = (typeof availableScenarios)[number];
@@ -85,6 +86,7 @@ type ScenarioContext = {
         conversationId: string,
         onEvent?: (event: Event) => void
     ) => ConversationMonitor;
+    configureWorkerForAcp?: () => void;
 };
 
 export function scenarioProjectDtag(name: ScenarioName): string {
@@ -99,6 +101,9 @@ export function scenarioProjectDtag(name: ScenarioName): string {
     }
     if (name === "acp-worker-basic") {
         return "probe-acp-worker";
+    }
+    if (name === "agent-config-reload") {
+        return "probe-agent-config-reload";
     }
     return "probe-fs-read-adjustment";
 }
@@ -115,6 +120,9 @@ export function pmInstructions(name: ScenarioName): string {
     }
     if (name === "acp-worker-basic") {
         return "This scenario targets the ACP worker directly; remain idle unless directly mentioned.";
+    }
+    if (name === "agent-config-reload") {
+        return "This scenario verifies runtime agent config reload; remain idle unless directly mentioned.";
     }
     return "Use fs_read one file at a time. If the user corrects the requested total, follow the latest total before finishing.";
 }
@@ -234,6 +242,13 @@ export function mockScenario(name: ScenarioName): unknown {
         return { responses: [], defaultContent: "ACP worker scenario uses an ACP backend." };
     }
 
+    if (name === "agent-config-reload") {
+        return {
+            responses: [],
+            defaultContent: "Agent config reload probe should not use native mock LLM.",
+        };
+    }
+
     const mockDelayMs = Number(process.env.TENEX_PROBE_MOCK_DELAY_MS ?? 750);
     return {
         defaultDelayMs: mockDelayMs,
@@ -271,6 +286,8 @@ export async function runScenario(name: ScenarioName, context: ScenarioContext):
         await runMcpToolProbe(context);
     } else if (name === "acp-worker-basic") {
         await runAcpWorkerProbe(context);
+    } else if (name === "agent-config-reload") {
+        await runAgentConfigReloadProbe(context);
     } else {
         await runFsReadAdjustmentProbe(context);
     }
@@ -456,6 +473,16 @@ async function runMcpToolProbe(context: ScenarioContext): Promise<void> {
 }
 
 async function runAcpWorkerProbe(context: ScenarioContext): Promise<void> {
+    await publishAcpWorkerRequest(context);
+}
+
+async function runAgentConfigReloadProbe(context: ScenarioContext): Promise<void> {
+    context.configureWorkerForAcp?.();
+    await context.delay(Number(process.env.TENEX_PROBE_RELOAD_WAIT_MS ?? 1_000));
+    await publishAcpWorkerRequest(context);
+}
+
+async function publishAcpWorkerRequest(context: ScenarioContext): Promise<void> {
     const userEvent = context.sign(
         {
             kind: 1,

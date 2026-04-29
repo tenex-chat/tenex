@@ -2961,6 +2961,7 @@ dependencies = [
  "libc",
  "nostr",
  "nostr-sdk",
+ "notify",
  "regex",
  "serde",
  "serde_json",
