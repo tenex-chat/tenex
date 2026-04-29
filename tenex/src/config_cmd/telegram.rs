@@ -121,8 +121,7 @@ fn render_listing(telegram: &[String]) {
     if telegram.is_empty() {
         // TS at telegram.ts:330 emits `console.log(chalk.dim("    none"))`
         // — 4 leading spaces are INSIDE the dim wrap. Mirror byte-for-byte.
-        let dim = console::Style::new().dim();
-        println!("{}", dim.apply_to("    none"));
+        println!("{}", crate::tui::theme::chalk_dim("    none"));
     } else {
         for id in telegram {
             println!("    {id}");
@@ -280,16 +279,20 @@ fn run_agent_actions(base_dir: &std::path::Path, pubkey: &str) -> Result<()> {
         let Some(agent) = storage.load_agent(pubkey)? else {
             // Mirror TS: red "❌ Agent disappeared while editing."
             // (`telegram.ts:248`).
-            let red = console::Style::new().red();
-            println!("{}", red.apply_to("❌ Agent disappeared while editing."));
+            println!(
+                "{}",
+                crate::tui::theme::chalk_red("❌ Agent disappeared while editing."),
+            );
             return Ok(());
         };
         let current = agent.telegram_config();
         let slug = agent.slug().unwrap_or("?").to_owned();
 
         println!();
-        let bold = console::Style::new().bold();
-        println!("{}", bold.apply_to(format!("{slug} — Telegram transport")));
+        println!(
+            "{}",
+            crate::tui::theme::chalk_bold(&format!("{slug} — Telegram transport")),
+        );
         for line in summarise_telegram_lines(current.as_ref()) {
             println!("{line}");
         }
@@ -330,8 +333,10 @@ fn run_agent_actions(base_dir: &std::path::Path, pubkey: &str) -> Result<()> {
                 if next.bot_token.is_none()
                     || next.bot_token.as_deref().map(str::trim).unwrap_or("").is_empty()
                 {
-                    let yellow = console::Style::new().yellow();
-                    println!("{}", yellow.apply_to("  Set a bot token first."));
+                    println!(
+                        "{}",
+                        crate::tui::theme::chalk_yellow("  Set a bot token first."),
+                    );
                     continue;
                 }
                 let updated = match prompt_for_api_base_url(next.api_base_url.as_deref())? {
@@ -348,8 +353,10 @@ fn run_agent_actions(base_dir: &std::path::Path, pubkey: &str) -> Result<()> {
                 if next.bot_token.is_none()
                     || next.bot_token.as_deref().map(str::trim).unwrap_or("").is_empty()
                 {
-                    let yellow = console::Style::new().yellow();
-                    println!("{}", yellow.apply_to("  Set a bot token first."));
+                    println!(
+                        "{}",
+                        crate::tui::theme::chalk_yellow("  Set a bot token first."),
+                    );
                     continue;
                 }
                 // TS at `telegram.ts:300`:
@@ -421,8 +428,10 @@ fn choose_agent(base_dir: &std::path::Path) -> Result<Option<String>> {
     let storage = AgentStorage::open(base_dir)?;
     let mut agents = storage.get_canonical_active_agents()?;
     if agents.is_empty() {
-        let dim = console::Style::new().dim();
-        println!("{}", dim.apply_to("  No active agents found."));
+        println!(
+            "{}",
+            crate::tui::theme::chalk_dim("  No active agents found."),
+        );
         return Ok(None);
     }
     agents.sort_by(|a, b| {
@@ -447,9 +456,8 @@ fn choose_agent(base_dir: &std::path::Path) -> Result<Option<String>> {
             pubkey: Some(pubkey),
         });
     }
-    let dim = console::Style::new().dim();
     items.push(AgentChoice {
-        label: dim.apply_to("Back").to_string(),
+        label: crate::tui::theme::chalk_dim("Back"),
         pubkey: None,
     });
 
@@ -479,19 +487,19 @@ impl std::fmt::Display for AgentChoice {
 /// (those depend on the TransportBindingStore + IdentityBindingStore +
 /// TelegramChatContextStore — daemon-owned, not yet ported).
 fn summarise_telegram_lines(config: Option<&TelegramAgentConfig>) -> Vec<String> {
-    let dim = console::Style::new().dim();
+    use crate::tui::theme::chalk_dim;
     let bot_token = match config {
         Some(c) => mask_token(&c.bot_token),
-        None => dim.apply_to("not configured").to_string(),
+        None => chalk_dim("not configured"),
     };
     let dms = match config {
-        None => dim.apply_to("no bot configured").to_string(),
+        None => chalk_dim("no bot configured"),
         Some(c) if c.allow_dms == Some(false) => "no".to_string(),
         Some(_) => "yes".to_string(),
     };
     let api = match config.and_then(|c| c.api_base_url.as_deref()) {
         Some(u) => u.to_string(),
-        None => dim.apply_to("default").to_string(),
+        None => chalk_dim("default"),
     };
     vec![
         format!("  Bot token: {bot_token}"),
