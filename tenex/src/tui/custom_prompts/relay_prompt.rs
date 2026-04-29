@@ -16,7 +16,7 @@
 
 use std::io::{self, Write};
 
-use crossterm::cursor::{MoveTo, MoveToColumn, MoveUp};
+use crossterm::cursor::{MoveToColumn, MoveUp};
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
 use crossterm::style::{Attribute, Color, Print, ResetColor, SetAttribute, SetForegroundColor};
 use crossterm::terminal::{Clear, ClearType};
@@ -413,11 +413,6 @@ fn style_amber<W: Write>(stdout: &mut W, s: &str) -> io::Result<()> {
     queue!(stdout, ResetColor)?;
     Ok(())
 }
-
-// `MoveTo` is currently unused but reserved for future absolute-positioning
-// frames; suppress the dead-code warning while keeping it imported.
-#[allow(dead_code)]
-fn _force_used_imports(_: MoveTo) {}
 
 #[cfg(test)]
 mod tests {

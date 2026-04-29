@@ -16,8 +16,7 @@
 use anyhow::{anyhow, Result};
 
 use crate::store::tenex_config::TenexConfigDoc;
-use crate::tui::display;
-use crate::tui::prompts;
+use crate::tui::{display, prompts};
 
 pub fn run(base_dir: &std::path::Path) -> Result<()> {
     let mut doc = TenexConfigDoc::load(base_dir)?;
@@ -86,7 +85,7 @@ fn add_pubkey(
     updated.push(trimmed);
     doc.set_whitelisted_pubkeys(updated);
     doc.save(base_dir)?;
-    crate::tui::display::config_success("Pubkey added.");
+    display::config_success("Pubkey added.");
     Ok(())
 }
 
@@ -110,7 +109,7 @@ fn remove_pubkey(
     let updated: Vec<String> = existing.into_iter().filter(|pk| pk != &chosen).collect();
     doc.set_whitelisted_pubkeys(updated);
     doc.save(base_dir)?;
-    crate::tui::display::config_success("Pubkey removed.");
+    display::config_success("Pubkey removed.");
     Ok(())
 }
 
@@ -148,13 +147,6 @@ fn actions() -> Vec<ActionItem> {
             value: ActionValue::Back,
         },
     ]
-}
-
-// Suppress unused-warning bookkeeping: `display` is imported for future use
-// when error rendering is migrated through `display::context`.
-#[allow(dead_code)]
-fn _ensure_display_imported() {
-    let _ = display::blank;
 }
 
 #[cfg(test)]

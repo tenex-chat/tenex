@@ -20,9 +20,7 @@
 
 use anyhow::{anyhow, Result};
 
-use crate::agent_cmd::telegram_config::{
-    mask_token, normalize_telegram_draft, to_draft, TelegramDraft,
-};
+use crate::agent_cmd::telegram_config::{mask_token, normalize_telegram_draft, to_draft};
 use crate::store::agent_storage::{AgentStorage, TelegramAgentConfig};
 use crate::store::tenex_config::TenexConfigDoc;
 use crate::tui::prompts;
@@ -566,13 +564,6 @@ fn prompt_for_api_base_url(current: Option<&str>) -> Result<Option<Option<String
 /// bold-text wire bytes as every other config-submenu success banner.
 fn print_agent_transport_updated() {
     crate::tui::display::config_success("Telegram transport updated.");
-}
-
-// Suppress the unused warning until the new types are referenced from
-// the test module too.
-#[allow(dead_code)]
-fn _telegram_draft_witness() -> TelegramDraft {
-    TelegramDraft::default()
 }
 
 #[cfg(test)]
