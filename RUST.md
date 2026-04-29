@@ -1,6 +1,6 @@
 # TENEX Rust Adoption Status
 
-_Last updated: 2026-04-29 (twenty-fifth pass). Auto-maintained by scheduled debt check._
+_Last updated: 2026-04-29 (twenty-sixth pass). Auto-maintained by scheduled debt check._
 
 ---
 
@@ -77,7 +77,7 @@ Spawned by `tenex runtime` per conversation turn via `tenex-agent <agent.json>` 
 - **Conversation tools**: `conversation_get` (retrieve message transcript by ID from SQLite store), `conversation_list` (list conversations with date range filter)
 - **Scheduling tools**: `schedule_task` (write one-off or recurring tasks to `schedules.json` via `tenex-scheduler` storage API), `kill` (cancel a scheduled task by ID; agent/shell kills require TS runtime in-process state)
 - **Model override**: `change_model` (persist `meta_model_variant` to `AgentContextState`; resolved on next invocation — accepts named preset, `provider:model`, or `provider/model`)
-- **Silent completion**: `no_response` (sets `Arc<AtomicBool>` flag; main loop skips final `ConversationIntent` emission — no Nostr event published)
+- **Silent completion**: `no_response` (sets `Arc<AtomicBool>` flag; `swap(true)` makes it idempotent — repeat calls return a "STOP" advisory instead of silently no-op'ing; description warns LLM against multi-calls; main loop skips final `ConversationIntent` emission — no Nostr event published)
 - **Report publishing**: `report_publish` (publish markdown files as NIP-23 long-form articles — kind:30023 — via `PublishArticleIntent`; accepts file or recursive directory; path-traversal-safe)
 - Provider dispatch: Anthropic, OpenAI, OpenRouter, Ollama (via `rig-core`)
 - LLM config resolution from `~/.tenex/llms.json` + `~/.tenex/providers.json`
@@ -178,7 +178,7 @@ Note: `conversation_get`, `conversation_list`, `kill` (scheduled tasks only), `s
 
 ## Compilation Status
 
-**As of 2026-04-29 (twenty-fifth debt check pass): workspace compiles clean — zero errors, 281 warnings. `cargo test --workspace`: 1325 tests passing across all crates.**
+**As of 2026-04-29 (twenty-sixth debt check pass): workspace compiles clean — zero errors, 281 warnings. `cargo test --workspace`: 1340 tests passing across all crates.**
 
 **MILESTONE: Every tool in `tenex-agent` is now verified end-to-end, including supervision re-engagement (see `RUST_REPORT.md`).** The `ConsecutiveToolsWithoutTodo` heuristic was silent (re_engage: false) — fixed. Multi-turn history projection verified with both user and assistant messages persisted.
 
@@ -198,6 +198,13 @@ Note: `conversation_get`, `conversation_list`, `kill` (scheduled tasks only), `s
 - Conversation history persistence (10 convs, 20 history entries) ✅
 - Supervision (worker todo block) ✅
 - FK bug fixed: ensure_conversation() on store open
+
+Resolved between twenty-fifth and twenty-sixth passes:
+- **`no_response` idempotency**: Changed `store(true)` to `swap(true)` so double-calls return a "STOP" advisory rather than silently overwriting. Tool description updated to warn the LLM against multi-calls.
+- **`provider_select_prompt` cursor byte-fidelity**: The amber cursor glyph was emitting its trailing space inside the `SetForegroundColor` span, so `ResetColor` (SGR 0) landed before the space — diverging from TS chalk's `${cursor} ` which puts the space after the close. Fixed in browse pane, done row, and keys pane. Mirrors the same fix already applied to `role_menu_prompt`, `variant_list_prompt`, and `agent_select_prompt`.
+- **Architecture drift check**: Clean. `PubkeyService.ts` still delegates to `identityDaemonClient`; `LlmConfigClient.ts` still uses Unix-socket IPC. No new TS bypasses of Rust services. `ConfigService.ts` / `EmbeddingProviderFactory.ts` direct `providers.json` reads are known, intentional (TS boot path), not new drift.
+- **Dead code review**: `compose_lines` pub functions have test-only callers — expected for in-progress prompt modules. `as_str` methods are pub API not yet externally called — not orphaned. `format_time_ago` has no production callers (only tests) so `plural` fires as dead — awaiting wiring into cron TUI or agent manager.
+- **Test count**: 1340 (up from 1325 — 15 new tests from provider_select_prompt wire-byte coverage added in parallel session work).
 
 Resolved between twenty-fourth and twenty-fifth passes:
 - **Dead display.rs helpers removed**: `provider_check`, `provider_uncheck`, `done_label` functions and their 6 tests deleted. Bespoke crossterm prompts render `[✓]`/`[ ]` and "Done" inline with raw ANSI constants; these helpers had no production callers. Stale module-doc reference also updated.
