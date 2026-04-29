@@ -186,8 +186,8 @@ Rust (`tenex-llm-config`) is a credential resolver only; all provider protocol w
 - [ ] Anthropic provider with OAuth token support (`sk-ant-oat*` tokens)
 - [ ] OpenRouter provider with usage tracking and metadata extraction
 - [ ] Ollama provider with vision model pattern detection
-- [ ] Codex agent provider with MCP server adapter (`CodexToolsAdapter`)
-- [ ] Claude Code agent provider with built-in tool routing
+- 🚫 Codex agent provider with MCP server adapter (`CodexToolsAdapter`) — won't port (covered by ACP integration)
+- 🚫 Claude Code agent provider with built-in tool routing — won't port (covered by ACP integration)
 
 ### 9.2 Request Pipeline
 - [ ] **Message sanitizer middleware** — strips trailing assistant messages and empty-content messages before every API call to prevent provider rejections; Rust context projection has no equivalent validation
@@ -212,7 +212,7 @@ Rust (`tenex-llm-config`) is a credential resolver only; all provider protocol w
 - [ ] `AuthorizedIdentityService` — merges whitelisted principals, legacy whitelisted pubkeys, and per-agent DM allowlists; required by Rust daemons that need to gate on authorization (intervention, scheduler)
 
 ### 10.2 Cache TTL Mismatch
-- [ ] TypeScript `PubkeyService` uses 10-minute in-process TTL; `tenex-identity` daemon uses 24-hour SQLite TTL with background refresh on stale hits. Freshness expectations differ between callers.
+- 🚫 TypeScript `PubkeyService` uses 10-minute in-process TTL vs. `tenex-identity` daemon 24-hour SQLite TTL — won't port (24-hour TTL with background refresh is the intentional Rust design)
 
 ---
 
@@ -231,7 +231,7 @@ Rust (`tenex-llm-config`) is a credential resolver only; all provider protocol w
 ---
 
 ## 13. APNs Push Notifications
-- [ ] `APNsService` — subscribes to kind:25000 config-update events (NIP-44 encrypted), maintains device token store, pushes alerts via HTTP/2 to Apple's APNs API when the user is offline (called by the `ask` tool). Not implemented in either stack; listed in MODULE_INVENTORY.md but not found in the searched source.
+- 🚫 `APNsService` — won't port (not implemented in either stack; out of scope for the Rust migration)
 
 ---
 
