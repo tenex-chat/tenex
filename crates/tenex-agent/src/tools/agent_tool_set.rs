@@ -222,12 +222,12 @@ impl ToolSet {
         self.push_tool(
             &mut tools,
             &recorder,
-            Box::new(ConversationGetTool::new(self.conv_db_path.clone())),
+            Box::new(ConversationGetTool::new(self.conv_db_path.clone(), self.resolved_model.clone())),
         );
         self.push_tool(
             &mut tools,
             &recorder,
-            Box::new(ConversationListTool::new(self.conv_db_path.clone())),
+            Box::new(ConversationListTool::new(self.conv_db_path.clone(), self.base_dir.clone(), self.project_d_tag.clone())),
         );
 
         self.push_tool(

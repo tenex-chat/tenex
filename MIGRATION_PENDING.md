@@ -13,29 +13,29 @@ Organized by functional area. Items marked ✅ are already at parity; items mark
 - [ ] `mcp_resource_read` — fetch content from an MCP resource, with URI template expansion
 - [ ] `mcp_subscribe` — create persistent subscriptions to MCP resource update notifications
 - [ ] `mcp_subscription_stop` — cancel an active MCP resource subscription
-- [ ] `rag_subscription_create` — create a persistent subscription that streams MCP resource data into a RAG collection
-- [ ] `rag_subscription_delete` — delete a RAG subscription and stop streaming
-- [ ] `rag_subscription_get` — get status and metrics for a RAG subscription
-- [ ] `rag_subscription_list` — list all active RAG subscriptions for the agent
-- [ ] `rag_collection_create` — create a new RAG collection with custom schema and scope
-- [ ] `rag_collection_delete` — delete a RAG collection and all its documents
-- [ ] `rag_collection_list` — list all available RAG collections with optional statistics
-- [ ] `rag_collection_get` — get metadata for a specific RAG collection
+- 🚫 `rag_subscription_create` — won't port (RAG subscriptions are a TypeScript-only abstraction)
+- 🚫 `rag_subscription_delete` — won't port
+- 🚫 `rag_subscription_get` — won't port
+- 🚫 `rag_subscription_list` — won't port
+- 🚫 `rag_collection_create` — won't port (collection management scoped to TypeScript RAG layer)
+- 🚫 `rag_collection_delete` — won't port
+- 🚫 `rag_collection_list` — won't port
+- 🚫 `rag_collection_get` — won't port
 
 ### 1.2 Partially Implemented Tools (parameter/behavior gaps)
 
 #### `conversation_get`
-- [ ] `untilId` parameter — slice conversation transcript to a specific message ID
-- [ ] `prompt` parameter — LLM-driven conversation analysis with structured output
+- ✅ `untilId` parameter — slice conversation transcript to a specific message ID
+- ✅ `prompt` parameter — LLM-driven conversation analysis with structured output
 - [ ] `includeToolCalls` parameter — include tool-call/result pairs in transcript
 - [ ] XML-formatted transcript output (Rust returns plain text `[role] author8: content`)
 - [ ] Relative timestamp formatting in output
 
 #### `conversation_list`
-- [ ] `projectId` parameter — cross-project listing (TS supports `"ALL"` to query all projects)
-- [ ] `with` parameter — filter conversations by participant pubkey/slug
-- [ ] Hierarchical delegation chain tree output (Rust returns flat list only)
-- [ ] Delegation chain nesting (`children` sub-conversations in output)
+- ✅ `projectId` parameter — cross-project listing (`"ALL"` queries all projects under `~/.tenex/projects/`)
+- ✅ `with` parameter — filter conversations by participant pubkey
+- ✅ Hierarchical delegation chain tree output (depth-indented with `└─` connectors)
+- ✅ Delegation chain nesting (child conversations nested under parent by `rustRuntime.delegation.parent_conversation_id`)
 
 ---
 
@@ -154,24 +154,25 @@ Pre-tool and post-completion contexts are missing fields that the two unimplemen
 
 ## 8. Runtime Orchestration / Dispatch
 
-These are planned for **Rust v3** (per `docs/plans/2026-04-28-tenex-runtime-orchestrator.md`). Currently owned entirely by the TypeScript runtime.
+The Rust `tenex` runtime (`tenex/src/runtime_cmd/`) already implements core orchestration. Gaps below are TypeScript-specific in-process abstractions that have no direct Rust equivalent.
 
 ### 8.1 RAL State Management
-- [ ] Multi-RAL concurrency per conversation (driver/resumption claim mechanics)
-- [ ] `MessageInjectionQueue` — bounded in-process message buffer (max 100 msgs) with role-aware queuing and event-ID-based deduplication
+- ✅ Multi-RAL concurrency per conversation — `DispatchCoordinator` with `driver_busy`/`queued: VecDeque` and `persisted_driver_busy` via SQLite
+- ✅ `KillSwitchRegistry` — `kill_agent_conversation()` sends SIGTERM/SIGKILL to agent process groups
+- ✅ `DelegationRegistry` — delegation routes tracked in SQLite (`register_delegation_route_if_needed`, `delegation_route_for_completion`)
+- [ ] `MessageInjectionQueue` — bounded in-process message buffer (max 100 msgs) with role-aware queuing and event-ID-based deduplication; Rust uses VecDeque without the same bounds/deduplication
 - [ ] `ExecutionTimingTracker` — LLM stream duration per RAL, accumulated runtime, unreported runtime
 - [ ] `HeuristicViolationManager` — post-completion supervision violation tracking per RAL
-- [ ] `DelegationRegistry` — pending/completed delegation trees per conversation, deferred completions
-- [ ] `KillSwitchRegistry` — per-conversation and per-delegation kill markers with cascade abort across dependency graphs
 
 ### 8.2 Delegation Routing
-- [ ] Delegation completion routing with debouncing (`DELEGATION_COMPLETION_DEBOUNCE_MS = 2500`)
+- ✅ Delegation completion routing — `delegation_route_for_completion` routes child completions back to parent conversation/agent
+- [ ] Delegation completion debouncing (`DELEGATION_COMPLETION_DEBOUNCE_MS = 2500`)
 - [ ] Deferred completions for nested delegation trees
 - [ ] Delegation prefix resolution and canonicalization
 - [ ] Implicit kill-wake path (synthetic envelopes for delegation kills)
 
 ### 8.3 Agent Config Update (kind:24020)
-- [ ] `AgentConfigUpdateService` — partial-update semantics for kind:24020 events: applies only tags that are present (model, tool, skill, blocked-skill, mcp), full reset via `reset` tag. Not found in Rust supervisor.
+- 🚫 Won't port — already implemented as `tenex/src/runtime_cmd/agent_config_update.rs` with partial-update semantics (model, tool, skill, blocked-skill, mcp tags; full reset via `reset` tag)
 
 ### 8.4 Escalation (ask tool target)
 - [ ] `EscalationService` — resolves the escalation agent slug from `config.escalation.agent`, auto-adds to current project if not already a member, notifies `ProjectContext`. Not found in Rust.
