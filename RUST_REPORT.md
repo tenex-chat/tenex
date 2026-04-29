@@ -1,6 +1,6 @@
 # TENEX Rust Agent — Test Report
 
-Last updated: 2026-04-29 (session 7)
+Last updated: 2026-04-29 (session 8)
 
 ---
 
@@ -42,6 +42,10 @@ Last updated: 2026-04-29 (session 7)
 | Proactive RAG injection (agent collection) | ✅ PASS | Agent answered from injected context with tools=0; query matches indexed doc above 0.65 threshold |
 | Proactive RAG injection (project collection) | ✅ PASS | audience=project → project_TEST-RUST collection; proactively injected and answered correctly |
 | tenex-identity daemon | ✅ PASS | Starts, binds to socket, resolves kind:0 from relay, STATUS returns cache count |
+| FS full-project access (read-access skill) | ✅ PASS | Activated read-access skill, re-invoked, agent read Cargo.toml from project dir (not home-sandboxed) |
+| no_response tool | ✅ PASS | conv=0 tools=1 — tool fires, final conversation event suppressed; ported from TS |
+| Compaction strategy unit tests (4 new) | ✅ PASS | below-threshold, zero-max-tokens, collapses-middle, keep-tail sentinel |
+| Reminders strategy unit tests (6 new) | ✅ PASS | absent/done todos, appends to last message, counts breakdown, system-only noop, tool-result tail |
 
 ---
 
@@ -311,6 +315,50 @@ All 14 pass. Workspace total: 1193 passed, 0 failed (up from 1191).
 | tenex-identity daemon: RESOLVE (kind:0 fetch from relay) | ✅ Returns name + nip05 |
 | tenex-rag unit tests (14 new) | ✅ All pass |
 | cargo test --workspace | ✅ 1193 passed, 0 failed |
+
+---
+
+### Run 8 — 2026-04-29 Strategy Tests + FS Permission Gating + no_response port
+
+**Compaction and reminders strategy unit tests added**
+
+`tenex-context` had 5 integration tests but no unit tests for the individual strategies. Added tests inside each strategy module:
+
+`strategies/compaction.rs` — 4 tests:
+- `no_compaction_below_threshold`: 4-message context at 1000-token budget → no compaction
+- `no_compaction_when_zero_max_tokens`: zero budget → early return, no panic
+- `compaction_collapses_middle_and_preserves_head_and_tail`: 10 messages at 100-token budget → compaction fires, system prompt at index 0 preserved, summary marker present
+- `compaction_respects_keep_tail`: sentinel placed at last message → survives compaction
+
+`strategies/reminders.rs` — 6 tests:
+- `no_reminder_when_todos_absent`: None agent_todos → no overlay
+- `reminder_injected_for_done_todos_but_no_attention_block`: all-done todos still inject reminder, but no ATTENTION block (matches actual behavior)
+- `reminder_appended_to_last_user_message`: reminder appended to last of two user messages, not first
+- `reminder_not_appended_to_system_only_context`: system-only messages → reminders_overlayed stays 0
+- `reminder_counts_status_breakdown_correctly`: 2 pending + 1 in_progress + 1 done → correct counts + ATTENTION block
+- `reminder_appended_to_tool_result_when_last`: reminder appends to ToolResult when that's the last non-system message
+
+**Full-project FS access verified end-to-end**
+
+FS tools are skill-gated: `granted_tools` is built from skill frontmatter `tools:` fields. The `read-access` built-in skill grants `fs_read`, `fs_glob`, `fs_grep`. Without that skill, only home-sandboxed `HomeFsReadTool` etc. are provided.
+
+Test: Turn 1 activated `read-access` via `skills_set`. Turn 2 (same root_id, 5 messages of history) used `fs_read` to read `crates/tenex-agent/Cargo.toml` from the project directory, reporting version `0.1.0`. `conv=2 tools=2` confirms cross-turn skill persistence and full project access.
+
+**`no_response` tool ported from TypeScript**
+
+Added `crates/tenex-agent/src/tools/no_response.rs`. The tool sets an `Arc<AtomicBool>` flag (`suppress_response`) that's checked before emitting the final `ConversationIntent`. When set, the emission is skipped entirely.
+
+Architecture: `suppress_response: Arc<AtomicBool>` added to `ExtraToolsInput`. `NoResponseTool::new(arc)` takes a clone. Main loop reads `suppress_response.load(Ordering::Acquire)` before emitting.
+
+Test: `conv=0 tools=1` — tool fired, zero conversation events emitted.
+
+| Test | Result |
+|---|---|
+| Compaction strategy: 4 unit tests | ✅ All pass |
+| Reminders strategy: 6 unit tests | ✅ All pass |
+| FS full-project read via read-access skill | ✅ Agent read Cargo.toml from project dir |
+| no_response tool: conv=0, tool=1 | ✅ Suppressed correctly |
+| cargo test --workspace | ✅ 1304 passed, 0 failed |
 
 ---
 

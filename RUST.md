@@ -164,7 +164,7 @@ All previously listed gaps have been closed. Remaining TS-only tools not yet por
 | TS Tool | Status | Notes |
 |---------|--------|-------|
 | `conversation_search` | TS-only | Semantic search across conversations. No Rust equivalent. |
-| `no_response` | TS-only | Suppress the completion event. Not yet ported. |
+| `no_response` | ✅ Ported | Suppresses final ConversationIntent via `Arc<AtomicBool>` checked in main loop. |
 | `send_message` | TS-only | Send arbitrary Nostr message. Not yet ported. |
 | `mcp_list_resources`, `mcp_resource_read`, `mcp_subscribe`, `mcp_subscription_stop` | TS-only | MCP protocol tools. No Rust equivalent yet. |
 | `report_publish` | TS-only | Publish a formatted report event. Not yet ported. |
