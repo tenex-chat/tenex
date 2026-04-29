@@ -435,15 +435,28 @@ fn render_frame<W: Write>(
     let mut height: u16 = 1;
 
     let done_index = actions.len();
-    let cursor_active = format!("{} ", glyphs::CURSOR_HEAVY);
 
     for (i, action) in actions.iter().enumerate() {
         let is_active = state.active == i;
-        let pfx = if is_active { cursor_active.as_str() } else { "  " };
+        // TS at `LLMConfigEditor.ts:122,129`:
+        //   const cursor = theme.icon.cursor;  // chalk.hex("#FFC107")("❯")
+        //   const pfx = isActive ? `${cursor} ` : "  ";
+        // The trailing space is OUTSIDE the chalk wrap. Print the cursor
+        // glyph inside the amber span, the literal space after
+        // `ResetColor`. (See `role_menu_prompt`, `variant_list_prompt`,
+        // `agent_select_prompt`, `provider_select_prompt` for identical
+        // fixes; `docs/tui-port/QUESTIONS.md` notes the systemic
+        // crossterm-vs-chalk reset-code divergence.)
         if is_active {
-            queue!(stdout, SetForegroundColor(AMBER), Print(pfx), ResetColor)?;
+            queue!(
+                stdout,
+                SetForegroundColor(AMBER),
+                Print(glyphs::CURSOR_HEAVY),
+                ResetColor,
+                Print(" "),
+            )?;
         } else {
-            queue!(stdout, Print(pfx))?;
+            queue!(stdout, Print("  "))?;
         }
         queue!(
             stdout,
@@ -456,11 +469,16 @@ fn render_frame<W: Write>(
     }
 
     let done_active = state.active == done_index;
-    let pfx = if done_active { cursor_active.as_str() } else { "  " };
     if done_active {
-        queue!(stdout, SetForegroundColor(AMBER), Print(pfx), ResetColor)?;
+        queue!(
+            stdout,
+            SetForegroundColor(AMBER),
+            Print(glyphs::CURSOR_HEAVY),
+            ResetColor,
+            Print(" "),
+        )?;
     } else {
-        queue!(stdout, Print(pfx))?;
+        queue!(stdout, Print("  "))?;
     }
     queue!(
         stdout,
@@ -497,11 +515,16 @@ fn render_frame<W: Write>(
         for (i, item) in items.iter().enumerate() {
             let row_index = done_index + 1 + i;
             let is_active = row_index == state.active;
-            let pfx = if is_active { cursor_active.as_str() } else { "  " };
             if is_active {
-                queue!(stdout, SetForegroundColor(AMBER), Print(pfx), ResetColor)?;
+                queue!(
+                    stdout,
+                    SetForegroundColor(AMBER),
+                    Print(glyphs::CURSOR_HEAVY),
+                    ResetColor,
+                    Print(" "),
+                )?;
             } else {
-                queue!(stdout, Print(pfx))?;
+                queue!(stdout, Print("  "))?;
             }
             // Status glyph: spinner / ✓ / ✗ / blank.
             let name = item.config_name.as_deref();
@@ -958,5 +981,83 @@ mod tests {
             LlmMenuInput::CtrlC
         );
         assert_eq!(LlmMenuInput::from_key_event(ke(KeyCode::Tab)), LlmMenuInput::Other);
+    }
+
+    /// Pin: the active-row cursor's trailing space lands OUTSIDE the
+    /// amber colour span. TS at `LLMConfigEditor.ts:122,129`:
+    ///   const cursor = theme.icon.cursor;  // chalk.hex("#FFC107")("❯")
+    ///   const pfx = isActive ? `${cursor} ` : "  ";
+    /// Wire bytes: `\x1b[38;2;255;193;7m❯\x1b[<reset>m ` — literal space
+    /// AFTER the foreground reset. See `role_menu_prompt`,
+    /// `variant_list_prompt`, `agent_select_prompt`,
+    /// `provider_select_prompt` for identical fixes; the systemic
+    /// crossterm-vs-chalk reset-code divergence is documented in
+    /// `docs/tui-port/QUESTIONS.md`. Tolerates either FG closer.
+    #[test]
+    fn render_frame_active_action_cursor_has_space_outside_amber_wrap() {
+        let actions = actions();
+        let items = config_items(0);
+        let mut s = state();
+        s.active = 0; // first action row
+        let mut buf: Vec<u8> = Vec::new();
+        render_frame(&mut buf, "Configure LLM models", &s, &actions, &items, 0).unwrap();
+        let bytes = String::from_utf8(buf).expect("render output must be UTF-8");
+        let space_outside_full_reset = bytes.contains("\x1b[38;2;255;193;7m❯\x1b[0m ");
+        let space_outside_fg_reset = bytes.contains("\x1b[38;2;255;193;7m❯\x1b[39m ");
+        assert!(
+            space_outside_full_reset || space_outside_fg_reset,
+            "active action cursor must emit `❯` + colour-closer + literal space; got {bytes:?}",
+        );
+        assert!(
+            !bytes.contains("\x1b[38;2;255;193;7m❯ \x1b[0m")
+                && !bytes.contains("\x1b[38;2;255;193;7m❯ \x1b[39m"),
+            "must not wrap the cursor's trailing space inside the amber span; got {bytes:?}",
+        );
+    }
+
+    /// Pin same `${cursor} ` rule for the active Done row.
+    #[test]
+    fn render_frame_active_done_cursor_has_space_outside_amber_wrap() {
+        let actions = actions();
+        let items = config_items(0);
+        let mut s = state();
+        s.active = actions.len(); // Done row
+        let mut buf: Vec<u8> = Vec::new();
+        render_frame(&mut buf, "Configure LLM models", &s, &actions, &items, 0).unwrap();
+        let bytes = String::from_utf8(buf).expect("render output must be UTF-8");
+        let with_full_reset = bytes.contains(
+            "\x1b[38;2;255;193;7m❯\x1b[0m \x1b[38;5;214m\x1b[1m  Done",
+        );
+        let with_fg_reset = bytes.contains(
+            "\x1b[38;2;255;193;7m❯\x1b[39m \x1b[38;5;214m\x1b[1m  Done",
+        );
+        assert!(
+            with_full_reset || with_fg_reset,
+            "Done row must emit cursor + close + literal space + ansi256(214)+bold for the label; got {bytes:?}",
+        );
+    }
+
+    /// Pin same `${cursor} ` rule for the active config-item row.
+    #[test]
+    fn render_frame_active_item_cursor_has_space_outside_amber_wrap() {
+        let actions = actions();
+        let items = config_items(3);
+        let mut s = state();
+        // Item rows sit at indices `actions.len() + 1 + offset`.
+        s.active = actions.len() + 1; // first config row
+        let mut buf: Vec<u8> = Vec::new();
+        render_frame(&mut buf, "Configure LLM models", &s, &actions, &items, 0).unwrap();
+        let bytes = String::from_utf8(buf).expect("render output must be UTF-8");
+        let space_outside_full_reset = bytes.contains("\x1b[38;2;255;193;7m❯\x1b[0m ");
+        let space_outside_fg_reset = bytes.contains("\x1b[38;2;255;193;7m❯\x1b[39m ");
+        assert!(
+            space_outside_full_reset || space_outside_fg_reset,
+            "active config-row cursor must emit `❯` + colour-closer + literal space; got {bytes:?}",
+        );
+        assert!(
+            !bytes.contains("\x1b[38;2;255;193;7m❯ \x1b[0m")
+                && !bytes.contains("\x1b[38;2;255;193;7m❯ \x1b[39m"),
+            "must not wrap the cursor's trailing space inside the amber span; got {bytes:?}",
+        );
     }
 }
