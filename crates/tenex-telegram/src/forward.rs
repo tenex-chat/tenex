@@ -70,7 +70,7 @@ pub fn telegram_text_for_event(event: &Event, publish_conversation: bool) -> Opt
         });
     }
 
-    if let Some(_) = first_tag_value(event, "error") {
+    if first_tag_value(event, "error").is_some() {
         return Some(event.content.clone());
     }
 
@@ -106,17 +106,15 @@ fn render_tool_event(tool_name: &str, event: &Event) -> Option<String> {
 }
 
 fn has_tag_named(event: &Event, name: &str) -> bool {
-    event.tags.iter().any(|t| {
-        t.clone()
-            .to_vec()
-            .first()
-            .is_some_and(|head| head == name)
-    })
+    event
+        .tags
+        .iter()
+        .any(|t| t.as_slice().first().is_some_and(|head| head == name))
 }
 
 fn first_tag_value(event: &Event, name: &str) -> Option<String> {
     for tag in event.tags.iter() {
-        let parts = tag.clone().to_vec();
+        let parts = tag.as_slice();
         if parts.first().map(String::as_str) == Some(name) {
             return parts.get(1).cloned();
         }

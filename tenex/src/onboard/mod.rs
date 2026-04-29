@@ -39,9 +39,9 @@ pub mod add_multi_modal;
 pub mod claude_code_models;
 #[cfg(test)]
 mod codex_models;
+pub mod llm_runner;
 pub mod llm_test_hints;
 pub mod llm_test_request;
-pub mod llm_runner;
 
 use std::collections::HashMap;
 

@@ -32,7 +32,9 @@ pub struct SynthesizedTelegramEvent {
     pub new_root: bool,
 }
 
-pub fn synthesize_telegram_event(input: TelegramEventInput<'_>) -> Result<SynthesizedTelegramEvent> {
+pub fn synthesize_telegram_event(
+    input: TelegramEventInput<'_>,
+) -> Result<SynthesizedTelegramEvent> {
     let agent_pubkey = PublicKey::from_hex(input.agent_pubkey).context("parse agent pubkey")?;
     let mut tags = vec![
         Tag::public_key(agent_pubkey),

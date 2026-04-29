@@ -49,9 +49,7 @@ pub fn run_test(base_dir: &Path, config_name: &str) -> TestResult {
     let Some(entry) = doc.get(config_name) else {
         return TestResult {
             success: false,
-            error: Some(
-                crate::onboard::llm_test_hints::ERR_CONFIGURATION_NOT_FOUND.to_owned(),
-            ),
+            error: Some(crate::onboard::llm_test_hints::ERR_CONFIGURATION_NOT_FOUND.to_owned()),
         };
     };
 
@@ -99,12 +97,10 @@ pub fn run_test(base_dir: &Path, config_name: &str) -> TestResult {
     let api_key = providers
         .get(&provider)
         .and_then(|e| {
-            e.api_keys()
-                .into_iter()
-                .find(|k| {
-                    let head = k.split_whitespace().next().unwrap_or("");
-                    !head.is_empty() && head != "none"
-                })
+            e.api_keys().into_iter().find(|k| {
+                let head = k.split_whitespace().next().unwrap_or("");
+                !head.is_empty() && head != "none"
+            })
         })
         .unwrap_or_default();
 
@@ -191,7 +187,10 @@ fn make_http_request(provider: &str, model: &str, api_key: &str) -> TestResult {
     };
 
     match do_request(&client, provider, model, api_key) {
-        Ok(()) => TestResult { success: true, error: None },
+        Ok(()) => TestResult {
+            success: true,
+            error: None,
+        },
         Err(msg) => TestResult {
             success: false,
             error: Some(map_error_to_hint(&msg).to_owned()),

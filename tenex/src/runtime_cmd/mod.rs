@@ -1038,8 +1038,7 @@ async fn handle_transport_dispatch(
     }
 
     let agent_pubkeys = shared.agent_pubkeys();
-    if let Err(e) =
-        register_delegation_route_if_needed(&shared.store, &event, &agent_pubkeys, None)
+    if let Err(e) = register_delegation_route_if_needed(&shared.store, &event, &agent_pubkeys, None)
     {
         warn!(error = %e, "failed to register delegation route for transport dispatch");
     }

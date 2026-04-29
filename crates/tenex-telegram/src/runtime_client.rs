@@ -16,9 +16,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use nostr_sdk::{Event, JsonUtil};
-use tenex_protocol::{
-    DispatchTransportFrame, DispatchTransportRequest, RuntimeControlRequest,
-};
+use tenex_protocol::{DispatchTransportFrame, DispatchTransportRequest, RuntimeControlRequest};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixStream;
 use tracing::{debug, info, warn};
@@ -41,12 +39,7 @@ pub async fn connect_runtime(base_dir: &Path, project_id: &str) -> Result<UnixSt
     let socket = runtime_socket_path(base_dir, project_id);
     match UnixStream::connect(&socket).await {
         Ok(stream) => return Ok(stream),
-        Err(e)
-            if matches!(
-                e.kind(),
-                ErrorKind::NotFound | ErrorKind::ConnectionRefused
-            ) =>
-        {
+        Err(e) if matches!(e.kind(), ErrorKind::NotFound | ErrorKind::ConnectionRefused) => {
             info!(
                 project = project_id,
                 socket = %socket.display(),
@@ -64,12 +57,7 @@ pub async fn connect_runtime(base_dir: &Path, project_id: &str) -> Result<UnixSt
     loop {
         match UnixStream::connect(&socket).await {
             Ok(stream) => return Ok(stream),
-            Err(e)
-                if matches!(
-                    e.kind(),
-                    ErrorKind::NotFound | ErrorKind::ConnectionRefused
-                ) =>
-            {
+            Err(e) if matches!(e.kind(), ErrorKind::NotFound | ErrorKind::ConnectionRefused) => {
                 if Instant::now() >= deadline {
                     anyhow::bail!(
                         "runtime control socket {} did not appear within {:?} after BOOT",
@@ -147,9 +135,7 @@ where
             },
             DispatchTransportFrame::Done => return Ok(DispatchOutcome::Completed),
             DispatchTransportFrame::Superseded => return Ok(DispatchOutcome::Superseded),
-            DispatchTransportFrame::Error(err) => {
-                return Ok(DispatchOutcome::Failed(err.message))
-            }
+            DispatchTransportFrame::Error(err) => return Ok(DispatchOutcome::Failed(err.message)),
         }
     }
 }

@@ -106,10 +106,7 @@ async fn boot_project(supervisor: &Supervisor, base_dir: &Path, d_tag: &str) -> 
     // Reject d_tags that don't correspond to a discovered project, otherwise a
     // typo from a transport bridge would spawn a runtime that can't open
     // `event.json` and immediately fails.
-    let project_event = base_dir
-        .join("projects")
-        .join(d_tag)
-        .join("event.json");
+    let project_event = base_dir.join("projects").join(d_tag).join("event.json");
     if !project_event.exists() {
         anyhow::bail!("unknown project '{d_tag}'");
     }

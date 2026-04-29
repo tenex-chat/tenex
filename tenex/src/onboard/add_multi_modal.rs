@@ -19,10 +19,10 @@ use inquire::InquireError;
 
 use crate::onboard::add_configuration::standard_config_names;
 use crate::store::llms::{LlmsDoc, MetaConfig, MetaVariant};
-use crate::tui::{display, prompts};
 use crate::tui::custom_prompts::variant_list_prompt::{
     run as variant_list_run, MetaVariantData, VariantListState, VariantOutcome,
 };
+use crate::tui::{display, prompts};
 
 /// Add a new variant to `state` via inquire prompts.
 ///
@@ -177,14 +177,13 @@ fn edit_variant_detail(
         }
 
         if field == model_label {
-            let model =
-                match prompts::select("Select model:", standard_configs.to_vec()).prompt() {
-                    Ok(m) => m,
-                    Err(InquireError::OperationCanceled | InquireError::OperationInterrupted) => {
-                        continue
-                    }
-                    Err(e) => return Err(anyhow!("model select: {e}")),
-                };
+            let model = match prompts::select("Select model:", standard_configs.to_vec()).prompt() {
+                Ok(m) => m,
+                Err(InquireError::OperationCanceled | InquireError::OperationInterrupted) => {
+                    continue
+                }
+                Err(e) => return Err(anyhow!("model select: {e}")),
+            };
             if let Some(v) = state.variants.get_mut(variant_name) {
                 v.model = model;
             }
@@ -279,9 +278,7 @@ pub fn run(base_dir: &Path) -> Result<()> {
             "You need at least 2 standard LLM configurations to create a multi-modal \
              configuration.",
         );
-        display::context(
-            "Create more configurations first with 'Add new configuration'.",
-        );
+        display::context("Create more configurations first with 'Add new configuration'.");
         return Ok(());
     }
 
@@ -312,9 +309,7 @@ pub fn run(base_dir: &Path) -> Result<()> {
         .prompt()
     {
         Ok(n) => n,
-        Err(InquireError::OperationCanceled | InquireError::OperationInterrupted) => {
-            return Ok(())
-        }
+        Err(InquireError::OperationCanceled | InquireError::OperationInterrupted) => return Ok(()),
         Err(e) => return Err(anyhow!("name prompt: {e}")),
     };
 

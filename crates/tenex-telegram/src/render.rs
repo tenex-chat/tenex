@@ -186,18 +186,20 @@ fn render_inline(input: &str) -> String {
         format!("<u>{}</u>", caps[1])
     });
 
-    // Italic: _text_ (word-boundary guarded)
+    // Italic: _text_ (word-boundary guarded). The Rust `regex` crate does not
+    // support look-around, so guards are encoded as captured leading/trailing
+    // context that is re-emitted alongside the italic span.
     text = replace_with(
         &text,
-        r"(?:^|[^\w])_([^_\n][^\n]*?)_(?!\w)",
-        |caps: &[&str]| format!("<i>{}</i>", caps[1]),
+        r"(^|[^\w])_([^_\n][^\n]*?)_($|[^\w])",
+        |caps: &[&str]| format!("{}<i>{}</i>{}", caps[1], caps[2], caps[3]),
     );
 
     // Italic: *text* (word-boundary guarded)
     text = replace_with(
         &text,
-        r"(?:^|[^\w*])\*([^*\n][^\n]*?)\*(?!\w)",
-        |caps: &[&str]| format!("<i>{}</i>", caps[1]),
+        r"(^|[^\w*])\*([^*\n][^\n]*?)\*($|[^\w])",
+        |caps: &[&str]| format!("{}<i>{}</i>{}", caps[1], caps[2], caps[3]),
     );
 
     text

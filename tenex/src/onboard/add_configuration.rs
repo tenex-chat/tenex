@@ -183,13 +183,7 @@ fn select_codex_model() -> Result<Option<(String, Option<String>)>> {
         Err(e) => return Err(anyhow!("model select: {e}")),
     };
 
-    let effort_choices = vec![
-        "use model default",
-        "low",
-        "medium",
-        "high",
-        "xhigh",
-    ];
+    let effort_choices = vec!["use model default", "low", "medium", "high", "xhigh"];
     let effort = match prompts::select("Select effort:", effort_choices).prompt() {
         Ok("use model default") => None,
         Ok(e) => Some(e.to_owned()),
@@ -205,10 +199,7 @@ fn select_codex_model() -> Result<Option<(String, Option<String>)>> {
 /// Prompt to pick from a models.dev cache list for `provider`.
 /// Returns `(model_id, display_name)`.
 /// Falls back to text input when the cache is empty for this provider.
-fn select_models_dev_model(
-    provider: &str,
-    base_dir: &Path,
-) -> Result<Option<(String, String)>> {
+fn select_models_dev_model(provider: &str, base_dir: &Path) -> Result<Option<(String, String)>> {
     use crate::store::models_dev;
     let default_model = models_dev::default_model_for_provider(provider);
 
@@ -246,8 +237,7 @@ fn select_models_dev_model(
     }
 
     // Cache absent or empty for this provider — fall through to text input.
-    let prompt = prompts::input("Model ID:")
-        .with_help_message("e.g. claude-sonnet-4-6, gpt-4o");
+    let prompt = prompts::input("Model ID:").with_help_message("e.g. claude-sonnet-4-6, gpt-4o");
     let result = if default_model.is_empty() {
         prompt.prompt()
     } else {
@@ -315,9 +305,7 @@ pub fn run(base_dir: &Path) -> Result<()> {
 
     let provider = match prompts::select("Select provider:", provider_choices).prompt() {
         Ok(c) => c.id,
-        Err(InquireError::OperationCanceled | InquireError::OperationInterrupted) => {
-            return Ok(())
-        }
+        Err(InquireError::OperationCanceled | InquireError::OperationInterrupted) => return Ok(()),
         Err(e) => return Err(anyhow!("provider select: {e}")),
     };
 
@@ -362,9 +350,7 @@ pub fn run(base_dir: &Path) -> Result<()> {
         .prompt()
     {
         Ok(n) => n,
-        Err(InquireError::OperationCanceled | InquireError::OperationInterrupted) => {
-            return Ok(())
-        }
+        Err(InquireError::OperationCanceled | InquireError::OperationInterrupted) => return Ok(()),
         Err(e) => return Err(anyhow!("name input: {e}")),
     };
 
