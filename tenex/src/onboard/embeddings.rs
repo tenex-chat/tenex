@@ -60,13 +60,21 @@ pub fn auto_pick(configured_providers: &[String]) -> EmbeddingChoice {
     }
 }
 
-/// Display label for an embedding provider. Source: `:409-412`.
-pub fn provider_label(provider: &str) -> &'static str {
+/// Display label for an embedding provider. Source: `:406-409`.
+///
+/// TS uses a ternary chain that falls through to the raw `provider`
+/// identifier when none of the known IDs match (`provider === "local"
+/// ? "Local Transformers" : provider === ... : provider`). The Rust
+/// port parameterises over the input lifetime so unknown providers
+/// render their actual ID instead of a literal `"Unknown"` placeholder.
+/// Known-name branches are `&'static str` literals which coerce to
+/// `&'a` since `'static` outlives every lifetime.
+pub fn provider_label<'a>(provider: &'a str) -> &'a str {
     match provider {
         PROVIDER_LOCAL => "Local Transformers",
         PROVIDER_OPENAI => "OpenAI",
         PROVIDER_OPENROUTER => "OpenRouter",
-        _ => "Unknown",
+        _ => provider,
     }
 }
 
@@ -349,6 +357,20 @@ mod tests {
         assert_eq!(provider_label("local"), "Local Transformers");
         assert_eq!(provider_label("openai"), "OpenAI");
         assert_eq!(provider_label("openrouter"), "OpenRouter");
+    }
+
+    /// TS at `commands/onboard.ts:406-409` falls through to the raw
+    /// `provider` identifier in the ternary chain when no known match
+    /// fires (`: provider`). The Rust port previously returned a literal
+    /// "Unknown" placeholder, losing the actual ID in the rendered
+    /// "Recommended: <provider> / <model>" line.
+    #[test]
+    fn provider_label_unknown_id_falls_back_to_pid_verbatim() {
+        assert_eq!(provider_label("foobar"), "foobar");
+        assert_eq!(provider_label("custom-embed"), "custom-embed");
+        assert_eq!(provider_label(""), "");
+        // Forbid the legacy "Unknown" placeholder slipping back in.
+        assert_ne!(provider_label("anything-goes"), "Unknown");
     }
 
     #[test]
