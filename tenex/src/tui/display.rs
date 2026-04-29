@@ -38,14 +38,17 @@ pub use crate::tui::banner::welcome;
 pub fn step(number: usize, total: usize, title: &str) {
     println!();
     let header = format!("{number}/{total}");
+    // TS at display.ts:23 uses `ACCENT.bold(...)` for header + title.
     let accent_bold = theme::display_accent();
     println!(
         "  {}  {}",
         accent_bold.apply_to(&header),
         accent_bold.apply_to(title)
     );
+    // TS at display.ts:24 uses `ACCENT(chalk.dim(rule))` — plain ACCENT
+    // (no .bold), then dim INSIDE. Don't compose bold on the rule.
     let rule = "─".repeat(RULE_WIDTH);
-    let rule_style = theme::display_accent().force_styling(true);
+    let rule_style = theme::display_accent_plain().force_styling(true);
     let dim = Style::new().dim();
     println!("  {}", rule_style.apply_to(dim.apply_to(&rule)));
     println!();
@@ -67,8 +70,9 @@ pub fn success(text: &str) {
 }
 
 /// `display.hint(text)` — `:47-49`. `  <ACCENT →> <ACCENT text>`.
+/// TS uses plain `ACCENT(...)` (no `.bold`). Use the plain variant.
 pub fn hint(text: &str) {
-    let accent = theme::display_accent();
+    let accent = theme::display_accent_plain();
     let arrow = accent.apply_to("→");
     let body = accent.apply_to(text);
     println!("  {arrow} {body}");

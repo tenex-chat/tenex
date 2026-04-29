@@ -84,10 +84,27 @@ pub fn banner_bright() -> Style {
     Style::new().color256(220).bold()
 }
 
-/// Banner row 2 / brand accent — xterm-256 #214 (`#ffaf00`).
-/// Section headers, hint `→`, banner letter `T E N E X`, summary `▲`.
+/// Banner row 2 / brand accent — xterm-256 #214 (`#ffaf00`) **bold**.
+/// Used by TS sites that emit `ACCENT.bold(...)`:
+/// - `display.step()` header / title (`display.ts:23`)
+/// - banner letter `T E N E X` (`display.ts:79`)
+/// - banner setup-complete `▲ Setup complete!` (`display.ts:92`)
+///
+/// **Distinct from** [`display_accent_plain`] which omits the bold —
+/// some TS sites use just `ACCENT(...)` (rule, hint arrow). Don't unify.
 pub fn display_accent() -> Style {
     Style::new().color256(214).bold()
+}
+
+/// Brand accent — xterm-256 #214 — **without** bold. Mirrors TS sites
+/// that emit `ACCENT(...)` (no `.bold` modifier):
+/// - `display.step()` rule (`display.ts:24` — `ACCENT(chalk.dim(rule))`)
+/// - `display.hint()` arrow + text (`display.ts:48` — `ACCENT("→") + ACCENT(text)`)
+///
+/// Pairing this with [`dim`] gives the exact `\x1b[2m\x1b[38;5;214m...`
+/// sequence chalk emits — matches `chalk.ansi256(214)(chalk.dim(rule))`.
+pub fn display_accent_plain() -> Style {
+    Style::new().color256(214)
 }
 
 /// Banner row 3 — xterm-256 #172 (`#d78700`).
