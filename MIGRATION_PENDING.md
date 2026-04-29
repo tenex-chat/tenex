@@ -189,7 +189,7 @@ The Rust `tenex` runtime (`tenex/src/runtime_cmd/`) already implements core orch
 ### 9.1 Provider SDK Implementations
 Rust (`tenex-llm-config`) is a credential resolver only; all provider protocol work is TypeScript:
 - [ ] Anthropic provider with OAuth token support (`sk-ant-oat*` tokens)
-- [ ] OpenRouter provider with usage tracking and metadata extraction
+- [ ] OpenRouter provider with usage tracking and metadata extraction — rig's streaming `FinalResponse` collapses all provider responses into `rig::completion::Usage` (input/output/total/cached/cache-creation tokens only); OpenRouter-specific fields (generation ID, cost, model name) are not accessible through the streaming path. The non-streaming `CompletionResponse` does carry `model` and `usage.cost`, but the agent uses streaming exclusively. Cost and model metadata require either a rig upstream change or a non-streaming fallback
 - [ ] Ollama provider with vision model pattern detection
 - 🚫 Codex agent provider with MCP server adapter (`CodexToolsAdapter`) — won't port (covered by ACP integration)
 - 🚫 Claude Code agent provider with built-in tool routing — won't port (covered by ACP integration)
@@ -197,7 +197,7 @@ Rust (`tenex-llm-config`) is a credential resolver only; all provider protocol w
 ### 9.2 Request Pipeline
 - [ ] **Message sanitizer middleware** — strips trailing assistant messages and empty-content messages before every API call to prevent provider rejections; Rust context projection has no equivalent validation
 - [ ] **Multimodal preparation** — URL-fetch + base64 encoding of images, Ollama vision model detection, provider-aware image format normalization; Rust has no image handling
-- [ ] **Prompt cache breakpoint emission** — TypeScript detects `cachedInputTokens` / `cacheReadTokens` to anchor durable reminder overlays; Rust context types carry `BreakpointHint` structs but nothing emits them
+- ✅ **Prompt cache breakpoint emission** — `tenex-agent` now emits a `BreakpointHint { position: 1, kind: MessageStream }` into `TurnRecord` when `cached_input_tokens > 0`, persisted via `write_turn`; `CacheObservation.written_tokens` is populated from `cache_creation_input_tokens`
 
 ### 9.3 Instruction Synthesis
 - [ ] **`PromptCompilerService`** — LLM-synthesized agent instructions: compiles base instructions + lessons + lesson comments into compiled instructions; persists scoped disk cache at `~/.tenex/agents/prompts/<project-dTag>/`; publishes updated kind:0 profile after compilation. Rust agents use static instructions only.
