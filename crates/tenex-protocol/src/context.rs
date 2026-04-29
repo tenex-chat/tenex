@@ -10,8 +10,9 @@ use crate::refs::{ConversationRef, MessageRef, PrincipalRef, ProjectRef};
 pub struct EncodingContext {
     /// Project the message belongs to. Always tagged via `["a", "31933:…"]`.
     pub project: ProjectRef,
-    /// Root of the conversation thread. `None` for delegation/ask/intervention
-    /// (those events start fresh threads).
+    /// Root of the current parent conversation. Fresh delegations still start
+    /// a new thread without an `e` root, but carry this id in a `delegation`
+    /// tag so runtimes can route child completions back to the parent context.
     pub conversation_root: Option<ConversationRef>,
     /// The event our reply should thread directly to. Emitted as an
     /// `["e", id, "", "reply"]` tag whenever `conversation_root` is present.

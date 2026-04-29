@@ -7,21 +7,13 @@ import { getAgentHomeDirectory } from "@/lib/agent-home";
 import { AgentEnvironmentService } from "../AgentEnvironmentService";
 
 describe("AgentEnvironmentService", () => {
-    const originalTenexBaseDir = process.env.TENEX_BASE_DIR;
     let tempDir: string;
 
     beforeEach(async () => {
         tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "tenex-agent-env-"));
-        process.env.TENEX_BASE_DIR = tempDir;
     });
 
     afterEach(async () => {
-        if (originalTenexBaseDir === undefined) {
-            process.env.TENEX_BASE_DIR = undefined;
-        } else {
-            process.env.TENEX_BASE_DIR = originalTenexBaseDir;
-        }
-
         await fs.rm(tempDir, { recursive: true, force: true });
     });
 
@@ -32,7 +24,8 @@ describe("AgentEnvironmentService", () => {
         } as any);
 
         await fs.mkdir(path.join(tempDir, "projects", "proj-1"), { recursive: true });
-        await fs.mkdir(getAgentHomeDirectory(signer.pubkey), { recursive: true });
+        const agentHome = getAgentHomeDirectory(signer.pubkey, tempDir);
+        await fs.mkdir(agentHome, { recursive: true });
         await fs.writeFile(path.join(tempDir, ".env"), "LEVEL=global\nGLOBAL_ONLY=yes\n", "utf-8");
         await fs.writeFile(
             path.join(tempDir, "projects", "proj-1", ".env"),
@@ -40,7 +33,7 @@ describe("AgentEnvironmentService", () => {
             "utf-8"
         );
         await fs.writeFile(
-            path.join(getAgentHomeDirectory(signer.pubkey), ".env"),
+            path.join(agentHome, ".env"),
             "LEVEL=agent\nAGENT_ONLY=yes\n",
             "utf-8"
         );
@@ -49,6 +42,7 @@ describe("AgentEnvironmentService", () => {
             agentPubkey: signer.pubkey,
             agentNsec: signer.nsec,
             projectDTag: "proj-1",
+            tenexBasePath: tempDir,
             baseEnv: {
                 LEVEL: "base",
                 BASE_ONLY: "yes",
@@ -64,7 +58,7 @@ describe("AgentEnvironmentService", () => {
         // HOME should NOT be overwritten - tools like gh rely on user's home for credentials
         expect(env.HOME).toBe("/host/home");
         // Agent home is available via AGENT_HOME for scripts that need it
-        expect(env.AGENT_HOME).toBe(getAgentHomeDirectory(signer.pubkey));
+        expect(env.AGENT_HOME).toBe(agentHome);
     });
 
     it("bootstraps the agent home env with a normalized bech32 NSEC and preserves existing files", async () => {
@@ -73,7 +67,10 @@ describe("AgentEnvironmentService", () => {
             loadAgent: async () => ({ nsec: signer.privateKey } as any),
         } as any);
 
-        const firstResult = await service.ensureAgentHomeEnv({ agentPubkey: signer.pubkey });
+        const firstResult = await service.ensureAgentHomeEnv({
+            agentPubkey: signer.pubkey,
+            tenexBasePath: tempDir,
+        });
         const firstContent = await fs.readFile(firstResult.path, "utf-8");
         const stat = await fs.stat(firstResult.path);
 
@@ -83,7 +80,10 @@ describe("AgentEnvironmentService", () => {
         expect(stat.mode & 0o777).toBe(0o600);
 
         await fs.writeFile(firstResult.path, "CUSTOM=1\n", "utf-8");
-        const secondResult = await service.ensureAgentHomeEnv({ agentPubkey: signer.pubkey });
+        const secondResult = await service.ensureAgentHomeEnv({
+            agentPubkey: signer.pubkey,
+            tenexBasePath: tempDir,
+        });
         const secondContent = await fs.readFile(firstResult.path, "utf-8");
 
         expect(secondResult.created).toBe(false);
@@ -101,6 +101,7 @@ describe("AgentEnvironmentService", () => {
         const firstEnv = await service.resolveShellEnvironment({
             agentPubkey: signer.pubkey,
             agentNsec: signer.nsec,
+            tenexBasePath: tempDir,
             baseEnv: { HOME: "/host/home" },
         });
         expect(firstEnv.VALUE).toBe("one");
@@ -110,6 +111,7 @@ describe("AgentEnvironmentService", () => {
         const secondEnv = await service.resolveShellEnvironment({
             agentPubkey: signer.pubkey,
             agentNsec: signer.nsec,
+            tenexBasePath: tempDir,
             baseEnv: { HOME: "/host/home" },
         });
         expect(secondEnv.VALUE).toBe("two");
@@ -125,7 +127,8 @@ describe("AgentEnvironmentService", () => {
 
         // Write HOME overrides in ALL .env files (global, project, agent)
         await fs.mkdir(path.join(tempDir, "projects", "proj-1"), { recursive: true });
-        await fs.mkdir(getAgentHomeDirectory(signer.pubkey), { recursive: true });
+        const agentHome = getAgentHomeDirectory(signer.pubkey, tempDir);
+        await fs.mkdir(agentHome, { recursive: true });
         await fs.writeFile(path.join(tempDir, ".env"), "HOME=/fake/global/home\n", "utf-8");
         await fs.writeFile(
             path.join(tempDir, "projects", "proj-1", ".env"),
@@ -133,7 +136,7 @@ describe("AgentEnvironmentService", () => {
             "utf-8"
         );
         await fs.writeFile(
-            path.join(getAgentHomeDirectory(signer.pubkey), ".env"),
+            path.join(agentHome, ".env"),
             "HOME=/fake/agent/home\n",
             "utf-8"
         );
@@ -142,6 +145,7 @@ describe("AgentEnvironmentService", () => {
             agentPubkey: signer.pubkey,
             agentNsec: signer.nsec,
             projectDTag: "proj-1",
+            tenexBasePath: tempDir,
             baseEnv: { HOME: originalHome },
         });
 
@@ -149,7 +153,7 @@ describe("AgentEnvironmentService", () => {
         // This is critical for tools like `gh auth` that rely on ~/.config/gh/
         expect(env.HOME).toBe(originalHome);
         // Agent home should still be available via AGENT_HOME
-        expect(env.AGENT_HOME).toBe(getAgentHomeDirectory(signer.pubkey));
+        expect(env.AGENT_HOME).toBe(agentHome);
     });
 
     it("loads .env from the project repo directory between global and project-metadata", async () => {
@@ -177,6 +181,7 @@ describe("AgentEnvironmentService", () => {
             agentNsec: signer.nsec,
             projectDTag: "proj-1",
             projectPath: projectRepoDir,
+            tenexBasePath: tempDir,
             baseEnv: { HOME: "/host/home" },
         });
 
@@ -202,6 +207,7 @@ describe("AgentEnvironmentService", () => {
             agentPubkey: signer.pubkey,
             agentNsec: signer.nsec,
             projectPath: projectRepoDir,
+            tenexBasePath: tempDir,
             baseEnv: { HOME: "/host/home" },
         });
 
@@ -227,6 +233,7 @@ describe("AgentEnvironmentService", () => {
         const env = await service.resolveShellEnvironment({
             agentPubkey: signer.pubkey,
             agentNsec: signer.nsec,
+            tenexBasePath: tempDir,
             baseEnv: { HOME: "/host/home" },
         });
 

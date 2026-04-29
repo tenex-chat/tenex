@@ -63,6 +63,15 @@ const colorWords = [
     "amber",
     "emerald",
     "sapphire",
+    "mauve",
+    "aquamarine",
+    "fuchsia",
+    "olive",
+    "plum",
+    "salmon",
+    "peach",
+    "mint",
+    "rose",
 ] as const;
 
 const colorChoicePattern = new RegExp(
@@ -119,7 +128,7 @@ export function scenarioProjectDtag(name: ScenarioName): string {
 
 export function pmInstructions(name: ScenarioName): string {
     if (name === "delegation-basic") {
-        return "This is a delegation probe. Do not call todo_write. On the first turn, call only delegate to worker with the random-color task. Do not ask for clarification. The delegate tool result is not the worker's answer; never invent or choose a color yourself. When the worker replies with a color, do not call tools and do not delegate again; repeat the exact color word in one final sentence: The worker picked <exact worker color>.";
+        return "This is a delegation probe. Do not call todo_write. On the first turn, call only delegate to worker with the random-color task. Do not ask for clarification. The delegate tool result is not the worker's answer; never invent or choose a color yourself. If you get a same-turn response after calling delegate, say only: Delegation started. When the worker replies with a color, do not call tools and do not delegate again; repeat the exact color word in one final sentence: The worker picked <exact worker color>.";
     }
     if (name === "same-agent-concurrency") {
         return "Use shell when asked to run sleep commands, and account for active tool reminders.";
