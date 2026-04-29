@@ -180,6 +180,21 @@ pub fn chalk_bold(text: &str) -> String {
     format!("{BOLD_OPEN}{text}{BOLD_CLOSE}")
 }
 
+/// Wrap `text` in inquirer-amber truecolor wire bytes:
+/// `\x1b[38;2;255;193;7m<text>\x1b[39m` — matches TS
+/// `chalk.hex("#FFC107")(text)` byte-for-byte (`utils/cli-theme.ts:3`).
+pub fn inquirer_amber(text: &str) -> String {
+    format!("{INQUIRER_AMBER_FG}{text}{FG_RESET}")
+}
+
+/// Wrap `text` in inquirer-amber-bold truecolor wire bytes:
+/// `\x1b[38;2;255;193;7m\x1b[1m<text>\x1b[22m\x1b[39m` — matches TS
+/// `chalk.hex("#FFC107").bold(text)` byte-for-byte (the `amberBold`
+/// alias at `utils/cli-theme.ts:4`).
+pub fn inquirer_amber_bold(text: &str) -> String {
+    format!("{INQUIRER_AMBER_FG}{BOLD_OPEN}{text}{BOLD_CLOSE}{FG_RESET}")
+}
+
 /// Wrap `text` in chalk.gray wire bytes: `\x1b[90m<text>\x1b[39m`
 /// (basic ANSI 90, not the xterm-256 #8 form `console::Style`'s
 /// `.black().bright()` would emit).
@@ -229,11 +244,24 @@ mod tests {
             chalk_cyan("x"),
             chalk_dim("x"),
             chalk_bold("x"),
+            inquirer_amber("x"),
+            inquirer_amber_bold("x"),
         ] {
             assert!(
                 !s.contains("\x1b[0m"),
                 "chalk-helper output must use per-attribute close, not SGR 0; got {s:?}",
             );
         }
+    }
+
+    /// Pin the inquirer-amber truecolor helpers to TS chalk.hex("#FFC107")
+    /// wire bytes — open `\x1b[38;2;255;193;7m`, close `\x1b[39m`.
+    #[test]
+    fn inquirer_amber_helpers_emit_truecolor_ffc107() {
+        assert_eq!(inquirer_amber("x"), "\x1b[38;2;255;193;7mx\x1b[39m");
+        assert_eq!(
+            inquirer_amber_bold("x"),
+            "\x1b[38;2;255;193;7m\x1b[1mx\x1b[22m\x1b[39m",
+        );
     }
 }
