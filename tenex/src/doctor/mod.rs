@@ -176,20 +176,21 @@ fn preview_categorize(dry_run: bool) -> Result<()> {
     println!(
         "{}",
         crate::tui::theme::chalk_blue(&format!(
-            "Total: {total}, Already categorised: {already}, Uncategorised: {uncategorised}{mode}"
+            "Total: {total}, Already categorized: {already}, Uncategorized: {uncategorized}{mode}",
+            uncategorized = uncategorised,
         )),
     );
     if uncategorised == 0 {
         println!(
             "{}",
             crate::tui::theme::chalk_green(
-                "Nothing to categorise — all canonical agents already have a category.",
+                "Nothing to categorize — all canonical agents already have a category.",
             ),
         );
         return Ok(());
     }
     display::hint(
-        "Agent categorisation requires the LLM service \
+        "Agent categorization requires the LLM service \
          (spec doc 04 / categorizeAgent.ts) — pending port. The \
          AgentStorage scan, the Categoriser trait, the backfill \
          orchestrator, and the kebab-literal persistence are all wired; \
