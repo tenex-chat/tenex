@@ -183,8 +183,7 @@ async fn handle_project(ctx: &RuntimeCtx<'_>, event: &Event) {
                 k.iter().cloned().collect()
             };
             if let Err(e) =
-                update_boot_subscription(&client, &boot_sub, &authors, startup_ts, &addresses)
-                    .await
+                update_boot_subscription(&client, &boot_sub, &authors, startup_ts, &addresses).await
             {
                 warn!(error = %e, "failed to update boot trigger subscription");
             }
@@ -291,12 +290,6 @@ async fn update_boot_subscription(
         client.unsubscribe(&old).await;
     }
     client.subscribe_with_id(new_id, filter, None).await?;
-    info!(
-        addresses = addresses.len(),
-        since = startup_ts.as_secs(),
-        watched = ?addresses,
-        "boot trigger subscription refreshed",
-    );
     Ok(())
 }
 
