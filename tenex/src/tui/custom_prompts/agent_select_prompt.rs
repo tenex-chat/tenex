@@ -341,11 +341,17 @@ fn render_frame<W: Write>(
         } else {
             queue!(stdout, Print("  "))?;
         }
+        // TS at `AgentManager.ts:138` wraps action.name in
+        // `chalk.cyan(...)` — basic 16-colour SGR-36 foreground.
+        // crossterm's `Color::DarkCyan` would emit `\x1b[38;5;6m`
+        // (256-colour palette index 6) — a *different* shade.
+        // Emit the raw `\x1b[36m...\x1b[39m` constants for byte-perfect
+        // chalk.cyan match.
         queue!(
             stdout,
-            SetForegroundColor(Color::DarkCyan),
+            Print(crate::tui::theme::CHALK_CYAN_OPEN),
             Print(&action.name),
-            ResetColor,
+            Print(crate::tui::theme::FG_RESET),
             Print("\r\n"),
         )?;
         height += 1;
@@ -731,14 +737,16 @@ mod tests {
     }
 
     /// Pin: the active-row cursor's trailing space lands OUTSIDE the
-    /// amber colour span. TS at `AgentManager.ts:130,137`:
+    /// amber colour span, AND that the action-row label is wrapped in
+    /// chalk.cyan wire bytes (`\x1b[36m...\x1b[39m`).
+    ///
+    /// TS at `AgentManager.ts:130,137,138`:
     ///   const cursor = theme.icon.cursor;  // chalk.hex("#FFC107")("❯")
     ///   const pfx = isActive ? `${cursor} ` : "  ";
-    /// Wire bytes: `\x1b[38;2;255;193;7m❯\x1b[<reset>m ` — literal space
-    /// AFTER the foreground reset. See `role_menu_prompt` and
-    /// `variant_list_prompt` for identical fixes; the systemic
-    /// crossterm-vs-chalk reset-code divergence is documented in
-    /// `docs/tui-port/QUESTIONS.md`. Tolerates either FG closer.
+    ///   lines.push(`${pfx}${chalk.cyan(action.name)}`);
+    /// Wire bytes: `\x1b[38;2;255;193;7m❯\x1b[<reset>m \x1b[36m<name>\x1b[39m`.
+    /// Tolerates either FG closer for the cursor wrap (systemic
+    /// crossterm-vs-chalk divergence in `docs/tui-port/QUESTIONS.md`).
     #[test]
     fn render_frame_active_action_cursor_has_space_outside_amber_wrap() {
         let actions = actions_sample();
@@ -758,6 +766,16 @@ mod tests {
             !s.contains("\x1b[38;2;255;193;7m❯ \x1b[0m")
                 && !s.contains("\x1b[38;2;255;193;7m❯ \x1b[39m"),
             "must not wrap the cursor's trailing space inside the amber span; got {s:?}",
+        );
+        // The action label must use chalk.cyan SGR-36, not crossterm
+        // DarkCyan's 256-colour `\x1b[38;5;6m`.
+        assert!(
+            s.contains("\x1b[36mInstall agent\x1b[39m"),
+            "action label must be wrapped in chalk.cyan SGR-36; got {s:?}",
+        );
+        assert!(
+            !s.contains("\x1b[38;5;6m"),
+            "must not emit 256-colour DarkCyan; got {s:?}",
         );
     }
 

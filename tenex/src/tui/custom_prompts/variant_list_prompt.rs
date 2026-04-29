@@ -430,11 +430,16 @@ fn render_frame<W: Write>(
     } else {
         queue!(stdout, Print("  "))?;
     }
+    // TS at `variant-list-prompt.ts:137` wraps "Add variant" in
+    // `chalk.cyan(...)` — basic 16-colour SGR-36 foreground.
+    // crossterm's `Color::DarkCyan` would emit `\x1b[38;5;6m` (256-
+    // colour palette index 6) — a *different* shade. Emit the raw
+    // `\x1b[36m...\x1b[39m` constants for byte-perfect chalk.cyan.
     queue!(
         stdout,
-        SetForegroundColor(Color::DarkCyan),
+        Print(crate::tui::theme::CHALK_CYAN_OPEN),
         Print("Add variant"),
-        ResetColor,
+        Print(crate::tui::theme::FG_RESET),
         Print("\r\n"),
     )?;
     height += 1;
@@ -760,11 +765,11 @@ mod tests {
         );
     }
 
-    /// Pin same `${cursor} ` rule for the active Add-variant row.
-    /// Asserts only the cursor-prefix byte sequence, not the
-    /// "Add variant" colour (crossterm's `Color::DarkCyan` emits
-    /// `\x1b[38;5;6m` while TS chalk.cyan emits `\x1b[36m` — a separate
-    /// systemic divergence not yet swept).
+    /// Pin same `${cursor} ` rule for the active Add-variant row, plus
+    /// pin that the "Add variant" label is wrapped in chalk.cyan
+    /// wire bytes (`\x1b[36m...\x1b[39m`) — TS at
+    /// `variant-list-prompt.ts:137` uses `chalk.cyan("Add variant")`,
+    /// the basic 16-colour SGR-36 foreground.
     #[test]
     fn render_frame_active_add_variant_cursor_has_space_outside_amber_wrap() {
         let mut state = state_with(three_variants(), "fast");
@@ -773,9 +778,6 @@ mod tests {
         let mut buf: Vec<u8> = Vec::new();
         render_frame(&mut buf, "Edit variants", &state, 0).unwrap();
         let s = String::from_utf8(buf).expect("render output must be UTF-8");
-        // Find the second occurrence of the active cursor (the first is
-        // the `?` prefix amber wrap from the message header). The
-        // post-rule active prefix is the Add row.
         let needle_full_reset = "\x1b[38;2;255;193;7m›\x1b[0m ";
         let needle_fg_reset = "\x1b[38;2;255;193;7m›\x1b[39m ";
         assert!(
@@ -786,6 +788,16 @@ mod tests {
             !s.contains("\x1b[38;2;255;193;7m› \x1b[0m")
                 && !s.contains("\x1b[38;2;255;193;7m› \x1b[39m"),
             "must not wrap the cursor's trailing space inside the amber span; got {s:?}",
+        );
+        // The "Add variant" label must use chalk.cyan SGR-36, not
+        // crossterm DarkCyan's 256-colour `\x1b[38;5;6m`.
+        assert!(
+            s.contains("\x1b[36mAdd variant\x1b[39m"),
+            "Add variant label must be wrapped in chalk.cyan SGR-36; got {s:?}",
+        );
+        assert!(
+            !s.contains("\x1b[38;5;6mAdd variant"),
+            "must not emit 256-colour DarkCyan for the Add variant label; got {s:?}",
         );
     }
 

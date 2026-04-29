@@ -458,11 +458,18 @@ fn render_frame<W: Write>(
         } else {
             queue!(stdout, Print("  "))?;
         }
+        // TS at `LLMConfigEditor.ts:130` wraps action.name in
+        // `chalk.cyan(...)` — the basic 16-colour SGR-36 foreground.
+        // crossterm's `Color::DarkCyan` would emit
+        // `\x1b[38;5;6m` (256-colour palette index 6) which is a
+        // *different* shade in most terminals. Use the theme's raw
+        // `\x1b[36m...\x1b[39m` constants for byte-perfect chalk.cyan
+        // wrap (and SGR-39 close instead of SGR-0 full reset).
         queue!(
             stdout,
-            SetForegroundColor(Color::DarkCyan),
+            Print(crate::tui::theme::CHALK_CYAN_OPEN),
             Print(&action.name),
-            ResetColor,
+            Print(crate::tui::theme::FG_RESET),
             Print("\r\n"),
         )?;
         height += 1;
