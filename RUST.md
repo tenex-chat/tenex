@@ -1,6 +1,6 @@
 # TENEX Rust Adoption Status
 
-_Last updated: 2026-04-29 (twenty-first pass). Auto-maintained by scheduled debt check._
+_Last updated: 2026-04-29 (twenty-second pass). Auto-maintained by scheduled debt check._
 
 ---
 
@@ -178,20 +178,18 @@ Note: `conversation_get`, `conversation_list`, `kill` (scheduled tasks only), `s
 
 ## Compilation Status
 
-**As of 2026-04-29 (twentieth debt check pass): workspace compiles clean — zero errors. `cargo test --workspace`: 1266 tests passing across all crates.**
+**As of 2026-04-29 (twenty-second debt check pass): workspace compiles clean — zero errors. `cargo test --workspace`: 1290 tests passing across all crates.**
 
 **MILESTONE: Every tool in `tenex-agent` is now verified end-to-end, including supervision re-engagement (see `RUST_REPORT.md`).** The `ConsecutiveToolsWithoutTodo` heuristic was silent (re_engage: false) — fixed. Multi-turn history projection verified with both user and assistant messages persisted.
 
-### Architectural gap — `record_turn` infrastructure not yet consumed
+### Architectural note — `record_turn` and compaction strategies
 
 `record_turn` in `tenex-context` writes to three stores:
 - `agent_prompt_history` table — the "frozen prompt" record of exactly what the LLM saw per turn
 - `agent_context_state.cache_anchored` — whether the provider hit the prompt cache
 - `agent_context_state.compaction_state` + `reminder_state` — per-turn compaction metadata
 
-**None of these are currently read by `project()` or the compaction strategies.** The projection reads only `agent_context_state.todos` and the raw `messages` table. The strategies (compaction, decay, reminders) run without consulting prior-turn cache or compaction state.
-
-This is intentional per the design doc ("write now, consume later") — the infrastructure is pre-built for future strategies that need per-turn context history. But it means current compaction/caching decisions are stateless. **Next step when compaction strategies need history: wire `list_prompt_history()` into a strategy that consults prior turns.**
+`project()` currently uses `default_stack()` which runs CompactionToolStrategy, ToolResultDecayStrategy, and RemindersStrategy — all three strategies ARE live and run inline on the projected messages. Compaction triggers at 80% of the model context window. The `agent_prompt_history` data is pre-built for future strategies that need per-turn frozen context (e.g., LLM-summarized summaries instead of inline collapse). **Next step when richer compaction is needed: a strategy that reads from `agent_prompt_history` to replay-and-summarize instead of inline-collapse.**
 
 **MILESTONE: tenex-agent is live-tested end-to-end (see `RUST_REPORT.md`)**:
 - Basic completion ✅, streaming (kind:24135 deltas) ✅, final ConversationIntent ✅
@@ -200,6 +198,11 @@ This is intentional per the design doc ("write now, consume later") — the infr
 - Conversation history persistence (10 convs, 20 history entries) ✅
 - Supervision (worker todo block) ✅
 - FK bug fixed: ensure_conversation() on store open
+
+Resolved between twenty-first and twenty-second passes:
+- **`display_accent_plain()` added**: `display.step()` rule and `display.hint()` use plain `ACCENT(...)` in TS; `display.step()` header/title uses `ACCENT.bold(...)`. Split into two helpers; test pins the bold/no-bold distinction against regression.
+- **Architecture audit — compaction strategies ARE live**: CompactionToolStrategy, ToolResultDecayStrategy, RemindersStrategy all run via `default_stack()` on every `project()` call. Compaction triggers inline at 80% context window. `agent_prompt_history` is pre-built storage for future LLM-summarized compaction, not dead code.
+- **Test count**: 1290 (up from 1284 — 6 new tests from this and prior session work).
 
 Resolved between twentieth and twenty-first passes:
 - **`tenex-rag` SQLite store tests**: 14 unit tests covering `cosine_similarity` (identical/opposite/orthogonal/mismatched/empty/zero-magnitude) and `SqliteStore` (schema, upsert+search, collection filter, limit, upsert-overwrite, list_collections, delete_collection, score ordering). Added `tempfile` + `tokio` dev-deps.
