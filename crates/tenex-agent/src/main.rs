@@ -1,3 +1,4 @@
+mod cassette;
 mod config;
 mod emit;
 mod home;
@@ -11,6 +12,7 @@ mod skills;
 mod tools;
 
 use anyhow::{Context, Result};
+use cassette::{CassetteRecorder, CassetteToolCall};
 use config::{LlmsConfig, ResolvedModel};
 use emit::{AgentMeta, EmitState};
 use hook::EmitHook;
@@ -26,7 +28,7 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc, Mutex,
 };
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use tenex_context::{
     CacheObservation, Message as CtxMessage, ModelProfile, ToolCall as CtxToolCall, ToolDef,
     TurnRecord,
@@ -668,6 +670,8 @@ async fn run() -> Result<()> {
         llms.as_ref(),
         providers.as_ref(),
     );
+    let cassette_recorder =
+        CassetteRecorder::from_env(agent_config.identity_name(), &resolved.provider, &resolved.model);
 
     eprintln!(
         "[tenex-agent] {} ({}) @ {}",
@@ -1042,8 +1046,10 @@ async fn run() -> Result<()> {
     let mut current_message = user_message;
     // extra history accumulated from re-engagement turns (user + assistant pairs).
     let mut re_engage_history: Vec<RigMessage> = Vec::new();
+    let mut cassette_turn = 0usize;
 
     'agent_loop: loop {
+        cassette_turn += 1;
         let current_history: Vec<RigMessage> = {
             let mut h = initial_history.clone();
             h.extend(re_engage_history.iter().cloned());
@@ -1060,6 +1066,7 @@ async fn run() -> Result<()> {
         } else {
             current_message.clone()
         };
+        let request_debug = turn_message.clone();
 
         let turn_span = info_span!(
             "tenex.agent.turn",
@@ -1071,6 +1078,7 @@ async fn run() -> Result<()> {
             llm.model = %resolved.model,
             history.messages = initial_history.len(),
         );
+        let llm_started = Instant::now();
         let final_response = async {
             let response = match resolved.provider.as_str() {
                 "openrouter" => {
@@ -1157,12 +1165,29 @@ async fn run() -> Result<()> {
         }
         .instrument(turn_span)
         .await?;
+        let llm_duration_ms = llm_started.elapsed().as_millis() as u64;
 
         if let Some(state) = &runtime_state {
             state.release_driver();
         }
 
         let recorded_calls = recorder.take_records();
+        if let Some(recorder) = &cassette_recorder {
+            let tool_calls: Vec<CassetteToolCall> = recorded_calls
+                .iter()
+                .map(|record| CassetteToolCall {
+                    name: record.tool_name.clone(),
+                    args: record.args.clone(),
+                })
+                .collect();
+            recorder.record_turn(
+                cassette_turn,
+                llm_duration_ms,
+                &request_debug,
+                final_response.response(),
+                &tool_calls,
+            );
+        }
 
         // Persist final todos and self-applied skills back to the conversation store.
         if let Some(ref store) = conv_store {

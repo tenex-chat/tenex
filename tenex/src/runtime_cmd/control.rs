@@ -101,6 +101,19 @@ impl RuntimeControlState {
         tasks
     }
 
+    pub fn has_shell_tasks(
+        &self,
+        project_id: &str,
+        conversation_id: &str,
+        agent_pubkey: &str,
+    ) -> bool {
+        self.shell_tasks.lock().unwrap().values().any(|task| {
+            task.project_id == project_id
+                && task.conversation_id == conversation_id
+                && task.agent_pubkey == agent_pubkey
+        })
+    }
+
     pub async fn handle_request(
         self: Arc<Self>,
         request: RuntimeControlRequest,

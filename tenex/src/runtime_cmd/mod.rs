@@ -67,6 +67,7 @@ struct DispatchJob {
     agent: Agent,
     conv_id: String,
     agent_json: PathBuf,
+    allow_driver_preempt: bool,
 }
 
 struct ActiveMcpBridge {
@@ -113,7 +114,11 @@ struct DispatchEntry {
 }
 
 impl DispatchCoordinator {
-    fn dispatch_inbound(&mut self, job: DispatchJob) -> Option<DispatchJob> {
+    fn dispatch_inbound(
+        &mut self,
+        job: DispatchJob,
+        allow_parallel_when_busy: bool,
+    ) -> Option<DispatchJob> {
         let key = DispatchKey::new(job.agent.pubkey.clone(), job.conv_id.clone());
         let entry = self.entries.entry(key).or_default();
 
@@ -123,7 +128,7 @@ impl DispatchCoordinator {
             return Some(job);
         }
 
-        if entry.driver_busy {
+        if entry.driver_busy && !allow_parallel_when_busy {
             entry.queued.push_back(job);
             return None;
         }
@@ -421,6 +426,7 @@ pub async fn run(args: RuntimeArgs) -> Result<()> {
                                     agent: agent.clone(),
                                     conv_id,
                                     agent_json,
+                                    allow_driver_preempt: false,
                                 };
                                 if let Err(e) = accept_dispatch(shared.clone(), job).await {
                                     warn!(event_id = short, agent = %agent.slug, error = %e, "dispatch failed");
@@ -455,7 +461,7 @@ pub async fn run(args: RuntimeArgs) -> Result<()> {
     Ok(())
 }
 
-async fn accept_dispatch(shared: Arc<RuntimeShared>, job: DispatchJob) -> Result<()> {
+async fn accept_dispatch(shared: Arc<RuntimeShared>, mut job: DispatchJob) -> Result<()> {
     persist_user_message(&shared.store, &job.event, &job.conv_id)?;
     if is_agent_blocked(&shared.store, &job.conv_id, &job.agent.pubkey) {
         warn!(
@@ -470,7 +476,14 @@ async fn accept_dispatch(shared: Arc<RuntimeShared>, job: DispatchJob) -> Result
     let maybe_start = {
         let mut coordinator = shared.coordinator.lock().unwrap();
         coordinator.sync_driver_busy(&key, driver_busy);
-        coordinator.dispatch_inbound(job)
+        let allow_shell_intervention = shared
+            .whitelisted_pubkeys
+            .contains(&job.event.pubkey.to_hex())
+            && shared
+                .control
+                .has_shell_tasks(&shared.project_id, &job.conv_id, &job.agent.pubkey);
+        job.allow_driver_preempt = allow_shell_intervention;
+        coordinator.dispatch_inbound(job, allow_shell_intervention)
     };
 
     if let Some(job) = maybe_start {
@@ -565,6 +578,7 @@ async fn dispatch_project_agent_target(shared: Arc<RuntimeShared>, event: &Event
             agent,
             conv_id,
             agent_json,
+            allow_driver_preempt: false,
         },
     )
     .await
@@ -988,6 +1002,9 @@ async fn run_agent(shared: Arc<RuntimeShared>, job: DispatchJob, key: DispatchKe
         .stderr(Stdio::inherit())
         .process_group(0)
         .kill_on_drop(false);
+    if job.allow_driver_preempt {
+        command.env("TENEX_RUNTIME_DRIVER_PREEMPT", "1");
+    }
     if let Some(carrier) = tenex_telemetry::current_trace_context() {
         command.env("TRACEPARENT", carrier.traceparent);
         if let Some(tracestate) = carrier.tracestate {
@@ -1363,6 +1380,7 @@ mod tests {
             agent: agent(agent_pubkey),
             conv_id: conv_id.to_string(),
             agent_json: PathBuf::from("agent.json"),
+            allow_driver_preempt: false,
         }
     }
 
@@ -1399,11 +1417,15 @@ mod tests {
         let key = DispatchKey::new("agent1", "conv1");
 
         assert_eq!(
-            coordinator.dispatch_inbound(first).unwrap().event.content,
+            coordinator
+                .dispatch_inbound(first, false)
+                .unwrap()
+                .event
+                .content,
             "first"
         );
-        assert!(coordinator.dispatch_inbound(second).is_none());
-        assert!(coordinator.dispatch_inbound(third).is_none());
+        assert!(coordinator.dispatch_inbound(second, false).is_none());
+        assert!(coordinator.dispatch_inbound(third, false).is_none());
 
         coordinator.mark_driver_free(&key);
         let resumed = coordinator.finish_run(&key).unwrap();
@@ -1418,8 +1440,8 @@ mod tests {
         let second = dispatch_job("agent1", "conv1", "second");
         let key = DispatchKey::new("agent1", "conv1");
 
-        assert!(coordinator.dispatch_inbound(first).is_some());
-        assert!(coordinator.dispatch_inbound(second).is_none());
+        assert!(coordinator.dispatch_inbound(first, false).is_some());
+        assert!(coordinator.dispatch_inbound(second, false).is_none());
         coordinator.drop_queued_matching(&key, |job| job.event.content == "second");
 
         assert!(coordinator.finish_run(&key).is_none());
@@ -1432,11 +1454,32 @@ mod tests {
         let second = dispatch_job("agent1", "conv1", "second");
         let key = DispatchKey::new("agent1", "conv1");
 
-        assert!(coordinator.dispatch_inbound(first).is_some());
+        assert!(coordinator.dispatch_inbound(first, false).is_some());
         coordinator.mark_driver_free(&key);
 
         assert_eq!(
-            coordinator.dispatch_inbound(second).unwrap().event.content,
+            coordinator
+                .dispatch_inbound(second, false)
+                .unwrap()
+                .event
+                .content,
+            "second"
+        );
+    }
+
+    #[test]
+    fn dispatch_can_preempt_busy_driver_for_shell_intervention() {
+        let mut coordinator = DispatchCoordinator::default();
+        let first = dispatch_job("agent1", "conv1", "first");
+        let second = dispatch_job("agent1", "conv1", "second");
+
+        assert!(coordinator.dispatch_inbound(first, false).is_some());
+        assert_eq!(
+            coordinator
+                .dispatch_inbound(second, true)
+                .unwrap()
+                .event
+                .content,
             "second"
         );
     }
@@ -1448,11 +1491,11 @@ mod tests {
         let second = dispatch_job("agent1", "conv1", "second");
         let key = DispatchKey::new("agent1", "conv1");
 
-        assert!(coordinator.dispatch_inbound(first).is_some());
+        assert!(coordinator.dispatch_inbound(first, false).is_some());
         coordinator.mark_driver_free(&key);
         coordinator.sync_driver_busy(&key, true);
 
-        assert!(coordinator.dispatch_inbound(second).is_none());
+        assert!(coordinator.dispatch_inbound(second, false).is_none());
     }
 
     #[test]

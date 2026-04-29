@@ -1,0 +1,109 @@
+use std::io::Write;
+use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use anyhow::{Context, Result};
+use serde::Serialize;
+
+#[derive(Clone)]
+pub struct CassetteRecorder {
+    path: PathBuf,
+    agent: String,
+    provider: String,
+    model: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CassetteToolCall {
+    pub name: String,
+    pub args: serde_json::Value,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CassetteTurnRecord<'a> {
+    version: u32,
+    agent: &'a str,
+    provider: &'a str,
+    model: &'a str,
+    turn: usize,
+    duration_ms: u64,
+    timestamp_ms: u64,
+    request_debug: &'a str,
+    content: &'a str,
+    tool_calls: &'a [CassetteToolCall],
+}
+
+impl CassetteRecorder {
+    pub fn from_env(agent: &str, provider: &str, model: &str) -> Option<Self> {
+        let path = std::env::var("TENEX_LLM_CASSETTE_RECORD_PATH")
+            .ok()
+            .filter(|value| !value.trim().is_empty())?;
+        Some(Self {
+            path: PathBuf::from(path),
+            agent: agent.to_string(),
+            provider: provider.to_string(),
+            model: model.to_string(),
+        })
+    }
+
+    pub fn record_turn(
+        &self,
+        turn: usize,
+        duration_ms: u64,
+        request_debug: &str,
+        content: &str,
+        tool_calls: &[CassetteToolCall],
+    ) {
+        if let Err(err) =
+            self.try_record_turn(turn, duration_ms, request_debug, content, tool_calls)
+        {
+            eprintln!(
+                "[tenex-agent cassette] failed to append LLM cassette {}: {err}",
+                self.path.display()
+            );
+        }
+    }
+
+    fn try_record_turn(
+        &self,
+        turn: usize,
+        duration_ms: u64,
+        request_debug: &str,
+        content: &str,
+        tool_calls: &[CassetteToolCall],
+    ) -> Result<()> {
+        let timestamp_ms = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+        let record = CassetteTurnRecord {
+            version: 1,
+            agent: &self.agent,
+            provider: &self.provider,
+            model: &self.model,
+            turn,
+            duration_ms,
+            timestamp_ms,
+            request_debug,
+            content,
+            tool_calls,
+        };
+        let line = serde_json::to_string(&record).context("serialize cassette turn")?;
+        append_jsonl(&self.path, &line).context("append cassette turn")
+    }
+}
+
+fn append_jsonl(path: &Path, line: &str) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("create cassette directory {}", parent.display()))?;
+    }
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .with_context(|| format!("open cassette {}", path.display()))?;
+    writeln!(file, "{line}").context("write cassette line")
+}
