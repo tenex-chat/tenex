@@ -30,7 +30,7 @@ import type { AgentRegistry } from "@/agents/AgentRegistry";
 import { agentStorage, deriveAgentPubkeyFromNsec } from "@/agents/AgentStorage";
 import { createAgentInstance } from "@/agents/agent-loader";
 import type { AgentInstance } from "@/agents/types";
-import { resolveRecipientToPubkey } from "@/services/agents/AgentResolution";
+import { resolveAgentId } from "@/services/agents/AgentResolution";
 import { config as configService } from "@/services/ConfigService";
 import { getProjectContext } from "@/services/projects";
 import { logger } from "@/utils/logger";
@@ -63,7 +63,7 @@ export async function resolveEscalationTarget(): Promise<EscalationResolutionRes
         }
 
         // Fast path: check if agent is already in the current project
-        const existingPubkey = resolveRecipientToPubkey(escalationAgentSlug);
+        const existingPubkey = resolveAgentId(escalationAgentSlug).pubkey;
         if (existingPubkey) {
             return {
                 slug: escalationAgentSlug,

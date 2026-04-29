@@ -19,14 +19,28 @@ import {
  * These tests verify the complete escalation agent resolution and auto-add flow,
  * including:
  * - Config reading
- * - Project membership checks via resolveRecipientToPubkey
+ * - Project membership checks via resolveAgentId
  * - Auto-adding from global storage
  * - Registry and daemon notification integration
  */
 
 // Create mock functions for all dependencies
 const mockGetConfig = mock(() => ({ escalation: { agent: "test-escalation-agent" } }));
-const mockResolveRecipientToPubkey = mock((_slug: string) => null as string | null);
+const mockResolveAgentId = mock((_id: string) => ({
+    pubkey: null as string | null,
+    slug: null as string | null,
+    availableIds: [] as string[],
+    availableSlugs: [] as string[],
+}));
+
+function agentResolution(pubkey: string | null) {
+    return {
+        pubkey,
+        slug: pubkey ? "test-escalation-agent" : null,
+        availableIds: ["test-escalation-agent"],
+        availableSlugs: ["test-escalation-agent"],
+    };
+}
 
 // Mock registry and project context
 const mockRegistryGetAgent = mock(
@@ -68,10 +82,10 @@ const mockCreateAgentInstance = mock((storedAgent: StoredAgent, _registry: unkno
 function installDependencySpies() {
     return {
         getConfigSpy: spyOn(configService, "getConfig").mockImplementation(mockGetConfig as never),
-        resolveRecipientToPubkeySpy: spyOn(
+        resolveAgentIdSpy: spyOn(
             agentResolutionModule,
-            "resolveRecipientToPubkey"
-        ).mockImplementation(mockResolveRecipientToPubkey as never),
+            "resolveAgentId"
+        ).mockImplementation(mockResolveAgentId as never),
         getProjectContextSpy: spyOn(projectsModule, "getProjectContext").mockImplementation(
             mockGetProjectContext as never
         ),
@@ -97,7 +111,7 @@ describe("EscalationService", () => {
     let testSigner: NDKPrivateKeySigner;
     let testStoredAgent: StoredAgent;
     let getConfigSpy: ReturnType<typeof spyOn>;
-    let resolveRecipientToPubkeySpy: ReturnType<typeof spyOn>;
+    let resolveAgentIdSpy: ReturnType<typeof spyOn>;
     let getProjectContextSpy: ReturnType<typeof spyOn>;
     let getAgentBySlugSpy: ReturnType<typeof spyOn>;
     let addAgentToProjectSpy: ReturnType<typeof spyOn>;
@@ -122,7 +136,7 @@ describe("EscalationService", () => {
 
         // Reset all mocks
         mockGetConfig.mockClear();
-        mockResolveRecipientToPubkey.mockClear();
+        mockResolveAgentId.mockClear();
         mockRegistryGetAgent.mockClear();
         mockAddAgent.mockClear();
         mockNotifyAgentAdded.mockClear();
@@ -135,7 +149,7 @@ describe("EscalationService", () => {
 
         // Set up default mock returns
         mockGetConfig.mockReturnValue({ escalation: { agent: "test-escalation-agent" } });
-        mockResolveRecipientToPubkey.mockReturnValue(null);
+        mockResolveAgentId.mockReturnValue(agentResolution(null));
         mockRegistryGetAgent.mockReturnValue(undefined);
         mockGetProjectDTag.mockReturnValue("test-project-dtag");
         mockGetProjectContext.mockImplementation(() => mockProjectContext);
@@ -144,7 +158,7 @@ describe("EscalationService", () => {
 
         ({
             getConfigSpy,
-            resolveRecipientToPubkeySpy,
+            resolveAgentIdSpy,
             getProjectContextSpy,
             getAgentBySlugSpy,
             addAgentToProjectSpy,
@@ -159,7 +173,7 @@ describe("EscalationService", () => {
 
     afterEach(() => {
         getConfigSpy?.mockRestore();
-        resolveRecipientToPubkeySpy?.mockRestore();
+        resolveAgentIdSpy?.mockRestore();
         getProjectContextSpy?.mockRestore();
         getAgentBySlugSpy?.mockRestore();
         addAgentToProjectSpy?.mockRestore();
@@ -231,7 +245,7 @@ describe("EscalationService", () => {
             it("should return slug without auto-add when agent exists in project", async () => {
                 const existingPubkey = "existing-agent-pubkey";
                 mockGetConfig.mockReturnValue({ escalation: { agent: "existing-escalation-agent" } });
-                mockResolveRecipientToPubkey.mockReturnValue(existingPubkey);
+                mockResolveAgentId.mockReturnValue(agentResolution(existingPubkey));
 
                 const result = await resolveEscalationTarget();
 
@@ -245,7 +259,7 @@ describe("EscalationService", () => {
             });
 
             it("should not query storage when agent is already in project", async () => {
-                mockResolveRecipientToPubkey.mockReturnValue("existing-pubkey");
+                mockResolveAgentId.mockReturnValue(agentResolution("existing-pubkey"));
 
                 await resolveEscalationTarget();
 
@@ -257,7 +271,7 @@ describe("EscalationService", () => {
         describe("when escalation agent needs auto-add", () => {
             beforeEach(() => {
                 // Set up: agent exists in global storage but NOT in current project
-                mockResolveRecipientToPubkey.mockReturnValue(null); // Not in project
+                mockResolveAgentId.mockReturnValue(agentResolution(null));
                 mockGetAgentBySlug.mockReturnValue(testStoredAgent);
                 mockLoadAgent.mockReturnValue({
                     ...testStoredAgent,
@@ -326,7 +340,7 @@ describe("EscalationService", () => {
         describe("when escalation agent does not exist anywhere", () => {
             it("should return null when agent not found in storage", async () => {
                 mockGetConfig.mockReturnValue({ escalation: { agent: "nonexistent-agent" } });
-                mockResolveRecipientToPubkey.mockReturnValue(null);
+                mockResolveAgentId.mockReturnValue(agentResolution(null));
                 mockGetAgentBySlug.mockReturnValue(null);
 
                 const result = await resolveEscalationTarget();
@@ -338,7 +352,7 @@ describe("EscalationService", () => {
 
         describe("edge cases", () => {
             it("should return null when project context is not initialized", async () => {
-                mockResolveRecipientToPubkey.mockReturnValue(null);
+                mockResolveAgentId.mockReturnValue(agentResolution(null));
                 mockGetAgentBySlug.mockReturnValue(testStoredAgent);
                 mockGetProjectContext.mockImplementation(() => {
                     throw new Error("ProjectContext not available");
@@ -351,7 +365,7 @@ describe("EscalationService", () => {
             });
 
             it("should return null when no project dTag available", async () => {
-                mockResolveRecipientToPubkey.mockReturnValue(null);
+                mockResolveAgentId.mockReturnValue(agentResolution(null));
                 mockGetProjectDTag.mockReturnValue(undefined);
                 mockGetAgentBySlug.mockReturnValue(testStoredAgent);
 
@@ -362,7 +376,7 @@ describe("EscalationService", () => {
             });
 
             it("should return null when agent reload fails after adding to project", async () => {
-                mockResolveRecipientToPubkey.mockReturnValue(null);
+                mockResolveAgentId.mockReturnValue(agentResolution(null));
                 mockGetAgentBySlug.mockReturnValue(testStoredAgent);
                 mockLoadAgent.mockReturnValue(null); // Reload fails
 
@@ -399,7 +413,7 @@ describe("EscalationService", () => {
 
     describe("multi-project scenarios", () => {
         it("should add escalation agent only to the current project", async () => {
-            mockResolveRecipientToPubkey.mockReturnValue(null);
+            mockResolveAgentId.mockReturnValue(agentResolution(null));
             mockGetProjectDTag.mockReturnValue("project-b");
             mockGetAgentBySlug.mockReturnValue({
                 ...testStoredAgent,
@@ -419,7 +433,7 @@ describe("EscalationService", () => {
 
         it("should be idempotent - second call should not duplicate work when agent already in project", async () => {
             // First call - agent not in project
-            mockResolveRecipientToPubkey.mockReturnValue(null);
+            mockResolveAgentId.mockReturnValue(agentResolution(null));
             mockGetAgentBySlug.mockReturnValue(testStoredAgent);
             mockLoadAgent.mockReturnValue({
                 ...testStoredAgent,
@@ -437,7 +451,7 @@ describe("EscalationService", () => {
             mockNotifyAgentAdded.mockClear();
 
             // Now simulate agent being in project (after first auto-add)
-            mockResolveRecipientToPubkey.mockReturnValue(testSigner.pubkey);
+            mockResolveAgentId.mockReturnValue(agentResolution(testSigner.pubkey));
 
             // Second call - should find agent already in project
             const result = await resolveEscalationTarget();
@@ -457,7 +471,7 @@ describe("loadEscalationAgentIntoRegistry", () => {
     let testSigner: NDKPrivateKeySigner;
     let testStoredAgent: StoredAgent;
     let getConfigSpy: ReturnType<typeof spyOn>;
-    let resolveRecipientToPubkeySpy: ReturnType<typeof spyOn>;
+    let resolveAgentIdSpy: ReturnType<typeof spyOn>;
     let getProjectContextSpy: ReturnType<typeof spyOn>;
     let getAgentBySlugSpy: ReturnType<typeof spyOn>;
     let addAgentToProjectSpy: ReturnType<typeof spyOn>;
@@ -505,6 +519,7 @@ describe("loadEscalationAgentIntoRegistry", () => {
 
         // Reset all mocks
         mockGetConfig.mockClear();
+        mockResolveAgentId.mockClear();
         mockGetAgentBySlug.mockClear();
         mockAddAgentToProject.mockClear();
         mockLoadAgent.mockClear();
@@ -512,12 +527,13 @@ describe("loadEscalationAgentIntoRegistry", () => {
 
         // Set up default mock returns
         mockGetConfig.mockReturnValue({ escalation: { agent: "test-escalation-agent" } });
+        mockResolveAgentId.mockReturnValue(agentResolution(null));
         mockGetAgentBySlug.mockReturnValue(null);
         mockLoadAgent.mockReturnValue(null);
 
         ({
             getConfigSpy,
-            resolveRecipientToPubkeySpy,
+            resolveAgentIdSpy,
             getProjectContextSpy,
             getAgentBySlugSpy,
             addAgentToProjectSpy,
@@ -532,7 +548,7 @@ describe("loadEscalationAgentIntoRegistry", () => {
 
     afterEach(() => {
         getConfigSpy?.mockRestore();
-        resolveRecipientToPubkeySpy?.mockRestore();
+        resolveAgentIdSpy?.mockRestore();
         getProjectContextSpy?.mockRestore();
         getAgentBySlugSpy?.mockRestore();
         addAgentToProjectSpy?.mockRestore();

@@ -1,5 +1,5 @@
-export { resolveAgentSlug, resolveRecipientToPubkey } from "./AgentResolution";
-export type { AgentResolutionResult } from "./AgentResolution";
+export { resolveAgentId, resolveAgentIdFromCandidates } from "./AgentResolution";
+export type { AgentIdCandidate, AgentResolutionResult } from "./AgentResolution";
 export { AgentMetadataStore } from "./AgentMetadataStore";
 export { AgentConfigUpdateService } from "./AgentConfigUpdateService";
 export type { ApplyAgentConfigUpdateResult } from "./AgentConfigUpdateService";
