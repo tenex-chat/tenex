@@ -2896,6 +2896,7 @@ dependencies = [
  "tenex-system-prompt",
  "thiserror 2.0.18",
  "tokio",
+ "uuid",
  "walkdir",
 ]
 

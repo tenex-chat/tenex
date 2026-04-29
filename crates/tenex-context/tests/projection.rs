@@ -62,6 +62,31 @@ fn append_user(store: &ConversationStore, record_id: &str, content: &str) {
     store.append_message(CONVO_ID, &msg).expect("append");
 }
 
+/// Append an assistant message owned by `AGENT_PUBKEY`. Tool messages
+/// only project when paired with an assistant message in `messages` —
+/// this helper is what tests use to anchor a turn.
+fn append_assistant(store: &ConversationStore, record_id: &str, content: &str) {
+    let msg = NewMessage {
+        record_id: record_id.into(),
+        nostr_event_id: None,
+        author_pubkey: AGENT_PUBKEY.into(),
+        sender_pubkey: None,
+        ral: None,
+        message_type: "message".into(),
+        role: Some("assistant".into()),
+        content: content.into(),
+        timestamp: None,
+        targeted_pubkeys: None,
+        sender_principal: None,
+        targeted_principals: None,
+        tool_data: None,
+        delegation_marker: None,
+        human_readable: None,
+        transcript_tool_attributes: None,
+    };
+    store.append_message(CONVO_ID, &msg).expect("append");
+}
+
 fn append_tool_result(store: &ConversationStore, call_id: &str, tool_name: &str, body: &str) {
     let tool = NewToolMessage {
         tool_call_id: call_id.into(),
@@ -107,6 +132,10 @@ fn basic_projection_emits_system_prompt_and_anchor() {
 fn no_decay_tagging_preserves_load_skill_and_delegate_results() {
     let store = open_store();
     let profile = cacheable_profile();
+
+    // Anchor the tool messages on an assistant turn — projection only
+    // emits tool results that pair with an assistant in `messages`.
+    append_assistant(&store, "asst-1", "I will gather context");
 
     // Build a fixture: 21 tool results — alternating load_skill, delegate,
     // and fs_read. fs_read is decay-eligible; load_skill and delegate are
@@ -191,6 +220,9 @@ fn no_decay_tagging_preserves_load_skill_and_delegate_results() {
 fn unknown_tool_results_are_decay_eligible() {
     let store = open_store();
     let profile = cacheable_profile();
+
+    // Anchor on an assistant message so the tool results project.
+    append_assistant(&store, "asst-1", "calling deactivated_tool");
 
     // 6 results from a tool not present in tool_defs at all.
     for i in 0..6 {

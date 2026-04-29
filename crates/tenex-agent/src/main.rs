@@ -17,8 +17,11 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc, Mutex,
 };
-use tenex_context::{CacheObservation, Message as CtxMessage, ModelProfile, ToolDef, TurnRecord};
-use tenex_conversations::{AgentContextState, ConversationStore};
+use tenex_context::{
+    CacheObservation, Message as CtxMessage, ModelProfile, ToolCall as CtxToolCall, ToolDef,
+    TurnRecord,
+};
+use tenex_conversations::{AgentContextState, ConversationStore, NewToolMessage};
 use tenex_project::Project;
 use tenex_rag::{EmbedConfig, RagStore};
 use tenex_supervision::heuristics::default_supervisor;
@@ -39,17 +42,13 @@ use tools::{
     FsEditTool, FsGlobTool, FsGrepTool, FsReadTool, FsWriteTool,
     HomeFsEditTool, HomeFsGlobTool, HomeFsGrepTool, HomeFsReadTool, HomeFsWriteTool,
     KillTool, LearnTool, NoResponseTool, ProjectListTool, RagAddDocumentsTool,
-    RagSearchTool, ReportPublishTool, ScheduleTaskTool, SelfDelegateTool, ShellTool,
-    SkillListTool, SkillsSetTool, TodoItem, TodoStatus, TodoWriteTool,
+    RagSearchTool, RecordingTool, ReportPublishTool, ScheduleTaskTool, SelfDelegateTool,
+    ShellTool, SkillListTool, SkillsSetTool, TodoItem, TodoStatus, TodoWriteTool, ToolRecorder,
 };
 
 /// Convert a `tenex_context::Message` to `rig::completion::Message` for passing
-/// as history to `stream_chat`.
-///
-/// System messages are excluded at the call site (preamble handles them).
-/// ToolResult messages are excluded until `tenex-context` projection captures
-/// tool_calls on assistant records — without paired tool_calls, providers reject
-/// the sequence with a 400.
+/// as history to `stream_chat`. System messages are excluded at the call site
+/// (preamble handles them).
 fn ctx_msg_to_rig(msg: CtxMessage) -> RigMessage {
     use rig::completion::message::{Text, ToolCall as RigToolCall, ToolFunction};
 
@@ -95,35 +94,20 @@ fn ctx_msg_to_rig(msg: CtxMessage) -> RigMessage {
 }
 
 /// Build and run the agent with all tools attached, streaming the response.
-/// Returns a `rig::agent::FinalResponse` containing the final turn text and
-/// aggregated token usage across all turns.
-/// $delegate is Option<DelegateTool> — None for categories that cannot delegate.
+/// Tools are passed as a single `Vec<Box<dyn ToolDyn>>` already wrapped by
+/// [`RecordingTool`] so every call rig dispatches lands in the shared
+/// [`ToolRecorder`] for post-turn persistence.
 macro_rules! run_agent {
-    ($client:expr, $model:expr, $system:expr, $message:expr, $history:expr, $wd:expr, $env:expr, $todos:expr, $hook:expr, $delegate:expr, $rag_add_docs:expr, $rag_search:expr, $skill_list:expr, $skills_set:expr, $fs_tools:expr, $extra_tools:expr) => {{
+    ($client:expr, $model:expr, $system:expr, $message:expr, $history:expr, $hook:expr, $tools:expr) => {{
         use ::futures::StreamExt as _;
         use ::rig::streaming::StreamingChat as _;
 
-        let __base = $client
+        let mut __stream = $client
             .agent($model)
             .preamble($system)
             .max_tokens(16384)
             .default_max_turns(25)
-            .tool(ShellTool::new($wd.clone(), $env.clone()))
-            .tools($fs_tools)
-            .tool(TodoWriteTool::new($todos.clone()))
-            .tool($skill_list)
-            .tool($skills_set);
-
-        let __base = if let Some(__d) = $delegate {
-            __base.tool(__d)
-        } else {
-            __base
-        };
-
-        let mut __stream = __base
-            .tool($rag_add_docs)
-            .tool($rag_search)
-            .tools($extra_tools)
+            .tools($tools)
             .build()
             .stream_chat($message, $history)
             .with_hook($hook)
@@ -144,112 +128,137 @@ macro_rules! run_agent {
     }};
 }
 
-fn build_fs_tools(
-    granted_tools: &std::collections::HashSet<String>,
-    working_dir: &str,
-    home_dir: &str,
+/// Build the full set of tools for one agent turn, each wrapped in
+/// [`RecordingTool`] so the shared [`ToolRecorder`] captures every call.
+fn build_recorded_tools(
+    input: &AgentToolsInput<'_>,
+    recorder: Arc<ToolRecorder>,
 ) -> Vec<Box<dyn ToolDyn>> {
     let mut tools: Vec<Box<dyn ToolDyn>> = Vec::new();
 
-    if granted_tools.contains("fs_read") {
-        tools.push(Box::new(FsReadTool::new(working_dir.to_string())));
+    let push = |tools: &mut Vec<Box<dyn ToolDyn>>, t: Box<dyn ToolDyn>| {
+        tools.push(RecordingTool::wrap_dyn(t, recorder.clone()));
+    };
+
+    push(&mut tools, Box::new(ShellTool::new(input.working_dir.to_string(), input.shell_env.clone())));
+
+    // fs tools — granted vs home-sandboxed.
+    if input.granted_tools.contains("fs_read") {
+        push(&mut tools, Box::new(FsReadTool::new(input.working_dir.to_string())));
     } else {
-        tools.push(Box::new(HomeFsReadTool::new(home_dir.to_string())));
+        push(&mut tools, Box::new(HomeFsReadTool::new(input.agent_home_str.to_string())));
+    }
+    if input.granted_tools.contains("fs_write") {
+        push(&mut tools, Box::new(FsWriteTool::new(input.working_dir.to_string())));
+        push(&mut tools, Box::new(FsEditTool::new(input.working_dir.to_string())));
+    } else {
+        push(&mut tools, Box::new(HomeFsWriteTool::new(input.agent_home_str.to_string())));
+        push(&mut tools, Box::new(HomeFsEditTool::new(input.agent_home_str.to_string())));
+    }
+    if input.granted_tools.contains("fs_glob") {
+        push(&mut tools, Box::new(FsGlobTool::new(input.working_dir.to_string())));
+    } else {
+        push(&mut tools, Box::new(HomeFsGlobTool::new(input.agent_home_str.to_string())));
+    }
+    if input.granted_tools.contains("fs_grep") {
+        push(&mut tools, Box::new(FsGrepTool::new(input.working_dir.to_string())));
+    } else {
+        push(&mut tools, Box::new(HomeFsGrepTool::new(input.agent_home_str.to_string())));
     }
 
-    if granted_tools.contains("fs_write") {
-        tools.push(Box::new(FsWriteTool::new(working_dir.to_string())));
-        tools.push(Box::new(FsEditTool::new(working_dir.to_string())));
-    } else {
-        tools.push(Box::new(HomeFsWriteTool::new(home_dir.to_string())));
-        tools.push(Box::new(HomeFsEditTool::new(home_dir.to_string())));
+    push(&mut tools, Box::new(TodoWriteTool::new(input.todos.clone())));
+    push(&mut tools, Box::new(input.skill_list.clone()));
+    push(&mut tools, Box::new(input.skills_set.clone()));
+
+    if let Some(d) = &input.delegate {
+        push(&mut tools, Box::new(d.clone()));
     }
 
-    if granted_tools.contains("fs_glob") {
-        tools.push(Box::new(FsGlobTool::new(working_dir.to_string())));
-    } else {
-        tools.push(Box::new(HomeFsGlobTool::new(home_dir.to_string())));
-    }
+    push(&mut tools, Box::new(input.rag_add_documents.clone()));
+    push(&mut tools, Box::new(input.rag_search.clone()));
 
-    if granted_tools.contains("fs_grep") {
-        tools.push(Box::new(FsGrepTool::new(working_dir.to_string())));
-    } else {
-        tools.push(Box::new(HomeFsGrepTool::new(home_dir.to_string())));
-    }
-
-    tools
-}
-
-fn build_extra_tools(
-    input: &ExtraToolsInput<'_>,
-) -> Vec<Box<dyn ToolDyn>> {
-    let mut tools: Vec<Box<dyn ToolDyn>> = vec![
-        Box::new(LearnTool::new(
-            input.emit_state.clone(),
-            input.agent_home.clone(),
-            input.resolved_model.clone(),
-        )),
-        Box::new(AskTool::new(
-            input.emit_state.clone(),
-            input.owner_pubkey.to_string(),
-        )),
-        Box::new(ProjectListTool::new(input.base_dir.to_path_buf())),
-        Box::new(ConversationGetTool::new(input.conv_db_path.clone())),
-        Box::new(ConversationListTool::new(input.conv_db_path.clone())),
-        Box::new(ConversationSearchTool::new(input.conv_db_path.clone())),
-        Box::new(ChangeModelTool::new(
-            input.conv_db_path.clone(),
-            input.conversation_id.clone(),
-            input.agent_pubkey.clone(),
-        )),
-        Box::new(KillTool::new(input.project_d_tag.clone())),
-        Box::new(ScheduleTaskTool::new(
-            input.project_d_tag.clone(),
-            input.agent_pubkey.clone(),
-            input.agent_slug.clone(),
-            input.project_id.clone(),
-        )),
-    ];
+    push(&mut tools, Box::new(LearnTool::new(
+        input.emit_state.clone(),
+        input.agent_home.to_path_buf(),
+        input.resolved_model.clone(),
+    )));
+    push(&mut tools, Box::new(AskTool::new(
+        input.emit_state.clone(),
+        input.owner_pubkey.to_string(),
+    )));
+    push(&mut tools, Box::new(ProjectListTool::new(input.base_dir.to_path_buf())));
+    push(&mut tools, Box::new(ConversationGetTool::new(input.conv_db_path.clone())));
+    push(&mut tools, Box::new(ConversationListTool::new(input.conv_db_path.clone())));
+    push(&mut tools, Box::new(ConversationSearchTool::new(
+        input.rag_store.clone(),
+        input.embed_config.clone(),
+        input.base_dir.to_path_buf(),
+        input.project_id.to_string(),
+    )));
+    push(&mut tools, Box::new(ChangeModelTool::new(
+        input.conv_db_path.clone(),
+        input.conversation_id.to_string(),
+        input.agent_pubkey.to_string(),
+    )));
+    push(&mut tools, Box::new(KillTool::new(input.project_d_tag.to_string())));
+    push(&mut tools, Box::new(ScheduleTaskTool::new(
+        input.project_d_tag.to_string(),
+        input.agent_pubkey.to_string(),
+        input.agent_slug.to_string(),
+        input.project_id.to_string(),
+    )));
 
     if input.allows_delegation {
-        tools.push(Box::new(SelfDelegateTool::new(input.emit_state.clone())));
-        tools.push(Box::new(DelegateCrossProjectTool::new(input.emit_state.clone())));
-        tools.push(Box::new(DelegateFollowupTool::new(
+        push(&mut tools, Box::new(SelfDelegateTool::new(input.emit_state.clone())));
+        push(&mut tools, Box::new(DelegateCrossProjectTool::new(input.emit_state.clone())));
+        push(&mut tools, Box::new(DelegateFollowupTool::new(
             input.emit_state.clone(),
             input.project_agents.clone(),
             input.teams.clone(),
         )));
     }
 
-    tools.push(Box::new(NoResponseTool::new(input.suppress_response.clone())));
-    tools.push(Box::new(ReportPublishTool::new(
+    push(&mut tools, Box::new(NoResponseTool::new(input.suppress_response.clone())));
+    push(&mut tools, Box::new(ReportPublishTool::new(
         input.emit_state.clone(),
-        input.project_base.clone(),
+        input.project_base.to_string(),
     )));
-    tools.push(Box::new(AgentsWriteTool::new(
+    push(&mut tools, Box::new(AgentsWriteTool::new(
         tenex_project::paths::agents_dir(input.base_dir),
     )));
 
     tools
 }
 
-struct ExtraToolsInput<'a> {
-    emit_state: &'a Arc<EmitState>,
-    project_agents: &'a Arc<Vec<tenex_project::Agent>>,
-    teams: &'a Arc<Vec<tenex_project::Team>>,
+struct AgentToolsInput<'a> {
+    emit_state: Arc<EmitState>,
+    project_agents: Arc<Vec<tenex_project::Agent>>,
+    teams: Arc<Vec<tenex_project::Team>>,
     owner_pubkey: &'a str,
     base_dir: &'a std::path::Path,
     allows_delegation: bool,
     conv_db_path: std::path::PathBuf,
-    conversation_id: String,
-    agent_pubkey: String,
-    agent_home: std::path::PathBuf,
+    conversation_id: &'a str,
+    agent_pubkey: &'a str,
+    agent_home: &'a std::path::Path,
+    agent_home_str: &'a str,
     resolved_model: Arc<ResolvedModel>,
-    project_d_tag: String,
-    agent_slug: String,
-    project_id: String,
+    project_d_tag: &'a str,
+    agent_slug: &'a str,
+    project_id: &'a str,
     suppress_response: Arc<AtomicBool>,
-    project_base: String,
+    rag_store: Option<Arc<RagStore>>,
+    embed_config: Option<EmbedConfig>,
+    project_base: &'a str,
+    working_dir: &'a str,
+    shell_env: Vec<(String, String)>,
+    granted_tools: &'a std::collections::HashSet<String>,
+    todos: Arc<Mutex<Vec<TodoItem>>>,
+    skill_list: SkillListTool,
+    skills_set: SkillsSetTool,
+    delegate: Option<DelegateTool>,
+    rag_add_documents: RagAddDocumentsTool,
+    rag_search: RagSearchTool,
 }
 
 fn load_todos_from_store(
@@ -610,18 +619,18 @@ async fn main() -> Result<()> {
     let skills_set_tool = SkillsSetTool::new(skill_ctx.clone(), self_applied_skills.clone());
 
     // Initialize RAG store for the embedding tools.
-    let rag_store: Option<Arc<RagStore>> = (|| -> Option<Arc<RagStore>> {
-        let embed_config = EmbedConfig::load()?;
-        let base_dir = dirs_next::home_dir()?.join(".tenex");
-        let db_path = base_dir.join("projects").join(&project_id).join("embeddings.db");
-        match RagStore::open(&db_path, &embed_config) {
+    let embed_config: Option<EmbedConfig> = EmbedConfig::load();
+    let rag_store: Option<Arc<RagStore>> = embed_config.as_ref().and_then(|cfg| {
+        let rag_base = dirs_next::home_dir()?.join(".tenex");
+        let db_path = rag_base.join("projects").join(&project_id).join("embeddings.db");
+        match RagStore::open(&db_path, cfg) {
             Ok(store) => Some(Arc::new(store)),
             Err(e) => {
                 eprintln!("[tenex-agent] RAG store unavailable: {e}");
                 None
             }
         }
-    })();
+    });
 
     let rag_add_documents = RagAddDocumentsTool::new(rag_store.clone(), project_id.clone(), pubkey_hex.clone());
     let rag_search = RagSearchTool::new(rag_store.clone(), project_id.clone(), pubkey_hex.clone());
@@ -662,9 +671,9 @@ async fn main() -> Result<()> {
         }
     }
 
-    // Project conversation history. Filters out System (handled by preamble) and
-    // ToolResult messages (excluded until projection captures tool_calls on assistant
-    // records — without paired tool_calls providers reject the sequence).
+    // Project conversation history. The projection produces interleaved
+    // assistant + tool-result messages; the system prompt is dropped here
+    // because rig handles it via `preamble`.
     let history: Vec<RigMessage> = conv_store
         .as_ref()
         .and_then(|store| {
@@ -689,10 +698,7 @@ async fn main() -> Result<()> {
                     let msgs: Vec<RigMessage> = projection
                         .messages
                         .into_iter()
-                        .filter(|m| !matches!(
-                            m,
-                            CtxMessage::System { .. } | CtxMessage::ToolResult { .. }
-                        ))
+                        .filter(|m| !matches!(m, CtxMessage::System { .. }))
                         .map(ctx_msg_to_rig)
                         .collect();
                     Some(msgs)
@@ -718,23 +724,35 @@ async fn main() -> Result<()> {
 
     let agent_slug = agent_config.identity_name().to_string();
     let suppress_response = Arc::new(AtomicBool::new(false));
-    let extra_tools_input = ExtraToolsInput {
-        emit_state: &emit_state,
-        project_agents: &project_agents,
-        teams: &teams,
+    let agent_tools_input = AgentToolsInput {
+        emit_state: emit_state.clone(),
+        project_agents: project_agents.clone(),
+        teams: teams.clone(),
         owner_pubkey: owner_pubkey_hex,
         base_dir: &base_dir,
         allows_delegation,
         conv_db_path: conv_db_path.clone(),
-        conversation_id: conversation_id.clone(),
-        agent_pubkey: pubkey_hex.clone(),
-        agent_home: agent_home.clone(),
+        conversation_id: &conversation_id,
+        agent_pubkey: &pubkey_hex,
+        agent_home: &agent_home,
+        agent_home_str: &agent_home_str,
         resolved_model: Arc::new(resolved.clone()),
-        project_d_tag: project_meta.d_tag.clone(),
-        agent_slug: agent_slug.clone(),
-        project_id: project_id.clone(),
+        project_d_tag: &project_meta.d_tag,
+        agent_slug: &agent_slug,
+        project_id: &project_id,
         suppress_response: suppress_response.clone(),
-        project_base: working_dir.clone(),
+        project_base: &working_dir,
+        rag_store: rag_store.clone(),
+        embed_config: embed_config.clone(),
+        working_dir: &working_dir,
+        shell_env: shell_env.clone(),
+        granted_tools: &granted_tools,
+        todos: todos.clone(),
+        skill_list: skill_list_tool.clone(),
+        skills_set: skills_set_tool.clone(),
+        delegate: delegate_tool.clone(),
+        rag_add_documents: rag_add_documents.clone(),
+        rag_search: rag_search.clone(),
     };
 
     // Keep a handle with shared Arc refs so we can read the pending final turn
@@ -754,6 +772,11 @@ async fn main() -> Result<()> {
             h
         };
 
+        // Fresh recorder per turn. RecordingTool clones forward into every
+        // tool call so the inner loop's invocations all land here.
+        let recorder = ToolRecorder::new();
+        let tools = build_recorded_tools(&agent_tools_input, recorder.clone());
+
         let final_response = match resolved.provider.as_str() {
             "openrouter" => {
                 let key = resolved
@@ -767,17 +790,8 @@ async fn main() -> Result<()> {
                     &system_prompt,
                     &current_message,
                     current_history,
-                    working_dir,
-                    shell_env,
-                    todos,
                     hook.clone(),
-                    delegate_tool.clone(),
-                    rag_add_documents.clone(),
-                    rag_search.clone(),
-                    skill_list_tool.clone(),
-                    skills_set_tool.clone(),
-                    build_fs_tools(&granted_tools, &working_dir, &agent_home_str),
-                    build_extra_tools(&extra_tools_input)
+                    tools
                 )
             }
             "openai" => {
@@ -792,17 +806,8 @@ async fn main() -> Result<()> {
                     &system_prompt,
                     &current_message,
                     current_history,
-                    working_dir,
-                    shell_env,
-                    todos,
                     hook.clone(),
-                    delegate_tool.clone(),
-                    rag_add_documents.clone(),
-                    rag_search.clone(),
-                    skill_list_tool.clone(),
-                    skills_set_tool.clone(),
-                    build_fs_tools(&granted_tools, &working_dir, &agent_home_str),
-                    build_extra_tools(&extra_tools_input)
+                    tools
                 )
             }
             "ollama" => {
@@ -817,17 +822,8 @@ async fn main() -> Result<()> {
                     &system_prompt,
                     &current_message,
                     current_history,
-                    working_dir,
-                    shell_env,
-                    todos,
                     hook.clone(),
-                    delegate_tool.clone(),
-                    rag_add_documents.clone(),
-                    rag_search.clone(),
-                    skill_list_tool.clone(),
-                    skills_set_tool.clone(),
-                    build_fs_tools(&granted_tools, &working_dir, &agent_home_str),
-                    build_extra_tools(&extra_tools_input)
+                    tools
                 )
             }
             _ => {
@@ -846,20 +842,13 @@ async fn main() -> Result<()> {
                     &system_prompt,
                     &current_message,
                     current_history,
-                    working_dir,
-                    shell_env,
-                    todos,
                     hook.clone(),
-                    delegate_tool.clone(),
-                    rag_add_documents.clone(),
-                    rag_search.clone(),
-                    skill_list_tool.clone(),
-                    skills_set_tool.clone(),
-                    build_fs_tools(&granted_tools, &working_dir, &agent_home_str),
-                    build_extra_tools(&extra_tools_input)
+                    tools
                 )
             }
         };
+
+        let recorded_calls = recorder.take_records();
 
         // Persist final todos and self-applied skills back to the conversation store.
         if let Some(ref store) = conv_store {
@@ -874,15 +863,45 @@ async fn main() -> Result<()> {
             );
         }
 
+        // Persist the tool calls captured during this turn into `tool_messages`.
+        // These rows pair with `tool_calls` on the assistant prompt-history entry
+        // below: projection re-emits them as `Message::ToolResult` immediately
+        // after the assistant message that issued the calls.
+        if let Some(ref store) = conv_store {
+            for rec in &recorded_calls {
+                let new_tool = NewToolMessage {
+                    tool_call_id: rec.call_id.clone(),
+                    parent_message_id: None,
+                    agent_pubkey: pubkey_hex.clone(),
+                    tool_name: rec.tool_name.clone(),
+                    call_input: rec.args.clone(),
+                    result_output: Some(rec.result.clone()),
+                    is_error: rec.is_error,
+                    timestamp: Some(rec.timestamp_ms),
+                };
+                if let Err(e) = store.record_tool_message(&conversation_id, &new_tool) {
+                    eprintln!("[tenex-agent] Failed to persist tool message: {e}");
+                }
+            }
+        }
+
         // Record this turn's messages into the conversation store for future history projection.
         if let Some(ref store) = conv_store {
             let stream_usage = final_response.usage();
+            let assistant_tool_calls: Vec<CtxToolCall> = recorded_calls
+                .iter()
+                .map(|r| CtxToolCall {
+                    id: r.call_id.clone(),
+                    name: r.tool_name.clone(),
+                    arguments: r.args.clone(),
+                })
+                .collect();
             let turn = TurnRecord {
                 messages_visible: vec![
                     CtxMessage::User { content: current_message.clone() },
                     CtxMessage::Assistant {
                         content: final_response.response().to_string(),
-                        tool_calls: Vec::new(),
+                        tool_calls: assistant_tool_calls,
                     },
                 ],
                 reminders_applied: Vec::new(),

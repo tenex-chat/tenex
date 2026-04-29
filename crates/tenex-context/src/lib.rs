@@ -55,7 +55,8 @@ pub fn project(
         "projecting conversation"
     );
 
-    let messages = projection::project_messages(store, conversation_id, system_prompt)?;
+    let messages =
+        projection::project_messages(store, conversation_id, agent_pubkey, system_prompt)?;
     let telemetry = ProjectionTelemetry::default();
     let agent_todos = store
         .get_agent_context_state(conversation_id, agent_pubkey)

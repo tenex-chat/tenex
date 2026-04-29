@@ -1,15 +1,18 @@
+use std::path::PathBuf;
+use std::sync::Arc;
+
 use rig::{completion::ToolDefinition, tool::Tool};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use std::path::PathBuf;
-use tenex_conversations::ConversationStore;
+use tenex_rag::{EmbedConfig, RagStore};
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct ConversationSearchArgs {
     pub query: String,
-    /// "keyword" (default, title/summary search) or "full-text" (also searches message content)
-    pub mode: Option<String>,
-    pub limit: Option<i64>,
+    /// Omit (or pass current project ID) to search the current project only.
+    /// Pass "ALL" to search across every project that has a conversations index.
+    pub project_id: Option<String>,
+    pub limit: Option<u32>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -18,13 +21,35 @@ pub struct ConversationSearchError(String);
 
 #[derive(Clone)]
 pub struct ConversationSearchTool {
-    db_path: PathBuf,
+    /// Current project's RAG store (None if embedding not configured).
+    store: Option<Arc<RagStore>>,
+    /// Needed to open other projects' stores when project_id == "ALL".
+    embed_config: Option<EmbedConfig>,
+    /// `~/.tenex` base directory.
+    base_dir: PathBuf,
+    current_project_id: String,
 }
 
 impl ConversationSearchTool {
-    pub fn new(db_path: PathBuf) -> Self {
-        Self { db_path }
+    pub fn new(
+        store: Option<Arc<RagStore>>,
+        embed_config: Option<EmbedConfig>,
+        base_dir: PathBuf,
+        current_project_id: String,
+    ) -> Self {
+        Self { store, embed_config, base_dir, current_project_id }
     }
+}
+
+#[derive(Debug, Serialize)]
+struct ConvSearchResult {
+    score: f32,
+    content: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    title: Option<String>,
+    id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    project_id: Option<String>,
 }
 
 impl Tool for ConversationSearchTool {
@@ -36,25 +61,24 @@ impl Tool for ConversationSearchTool {
     async fn definition(&self, _prompt: String) -> ToolDefinition {
         ToolDefinition {
             name: Self::NAME.to_string(),
-            description: "Search conversations by keyword. Returns matching conversations with \
-                IDs, titles, and metadata. mode='keyword' (default) matches title, summary, and \
-                last user message. mode='full-text' also searches all message content."
+            description: "Search past conversations using semantic similarity. \
+                Defaults to the current project. Pass project_id='ALL' to search \
+                across all projects (results include which project matched)."
                 .to_string(),
             parameters: json!({
                 "type": "object",
                 "properties": {
                     "query": {
                         "type": "string",
-                        "description": "Search term to match against conversation titles and content"
+                        "description": "Natural language search query"
                     },
-                    "mode": {
+                    "project_id": {
                         "type": "string",
-                        "enum": ["keyword", "full-text"],
-                        "description": "Search mode: 'keyword' (default, fast) or 'full-text' (searches all messages)"
+                        "description": "Project ID to search, or 'ALL' for all projects. Defaults to current project."
                     },
                     "limit": {
                         "type": "integer",
-                        "description": "Maximum number of results (default: 20)"
+                        "description": "Maximum number of results to return (default: 10)"
                     }
                 },
                 "required": ["query"]
@@ -63,56 +87,88 @@ impl Tool for ConversationSearchTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<String, Self::Error> {
-        let store = ConversationStore::open(&self.db_path).map_err(|e| {
-            ConversationSearchError(format!("failed to open conversation store: {e}"))
-        })?;
+        let no_embed_msg = "Error: embedding is not configured. \
+            Run `tenex config embed` to set up an embedding provider.";
 
-        let full_text = args.mode.as_deref() == Some("full-text");
-        let limit = args.limit.unwrap_or(20);
+        let limit = args.limit.unwrap_or(10) as usize;
+        let scope = args.project_id.as_deref().unwrap_or("");
+        let search_all = scope.eq_ignore_ascii_case("ALL");
 
-        let conversations = store
-            .search_conversations(&args.query, full_text, limit)
+        if search_all {
+            let embed_config = match &self.embed_config {
+                Some(c) => c,
+                None => return Ok(no_embed_msg.to_string()),
+            };
+
+            let projects_dir = self.base_dir.join("projects");
+            let entries = std::fs::read_dir(&projects_dir)
+                .map_err(|e| ConversationSearchError(format!("cannot read projects dir: {e}")))?;
+
+            let mut all_results: Vec<ConvSearchResult> = Vec::new();
+
+            for entry in entries.flatten() {
+                let db_path = entry.path().join("embeddings.db");
+                if !db_path.exists() {
+                    continue;
+                }
+                let project_id = entry.file_name().to_string_lossy().into_owned();
+                let store = match RagStore::open(&db_path, embed_config) {
+                    Ok(s) => s,
+                    Err(_) => continue,
+                };
+                let results = match store.search(&args.query, &["conversations"], limit).await {
+                    Ok(r) => r,
+                    Err(_) => continue,
+                };
+                for r in results {
+                    all_results.push(ConvSearchResult {
+                        score: (r.score * 100.0).round() / 100.0,
+                        content: r.content,
+                        title: r.title,
+                        id: r.id,
+                        project_id: Some(project_id.clone()),
+                    });
+                }
+            }
+
+            if all_results.is_empty() {
+                return Ok(format!("No conversations found matching '{}'.", args.query));
+            }
+
+            all_results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+            all_results.truncate(limit);
+
+            return serde_json::to_string_pretty(&all_results)
+                .map_err(|e| ConversationSearchError(format!("serialize results: {e}")));
+        }
+
+        // Single-project search (current project or explicit match).
+        let store = match &self.store {
+            Some(s) => s,
+            None => return Ok(no_embed_msg.to_string()),
+        };
+
+        let results = store
+            .search(&args.query, &["conversations"], limit)
+            .await
             .map_err(|e| ConversationSearchError(format!("search failed: {e}")))?;
 
-        if conversations.is_empty() {
-            return Ok(format!(
-                "No conversations found matching '{}'.",
-                args.query
-            ));
+        if results.is_empty() {
+            return Ok(format!("No conversations found matching '{}'.", args.query));
         }
 
-        let mode_label = if full_text { "full-text" } else { "keyword" };
-        let mut lines = vec![format!(
-            "{} conversation(s) matching '{}' ({mode_label}):",
-            conversations.len(),
-            args.query
-        )];
+        let output: Vec<ConvSearchResult> = results
+            .into_iter()
+            .map(|r| ConvSearchResult {
+                score: (r.score * 100.0).round() / 100.0,
+                content: r.content,
+                title: r.title,
+                id: r.id,
+                project_id: None,
+            })
+            .collect();
 
-        for conv in &conversations {
-            let id_short = &conv.id[..8.min(conv.id.len())];
-            let title = conv.title.as_deref().unwrap_or("(untitled)");
-            let summary = conv
-                .summary
-                .as_deref()
-                .map(|s| {
-                    let truncated: String = s.chars().take(80).collect();
-                    if s.chars().count() > 80 {
-                        format!(" | {truncated}…")
-                    } else {
-                        format!(" | {truncated}")
-                    }
-                })
-                .unwrap_or_default();
-            let activity = conv
-                .last_activity
-                .map(|ts| format!(" [last: {ts}]"))
-                .unwrap_or_default();
-            lines.push(format!(
-                "  {}: {}{}{} — full id: {}",
-                id_short, title, activity, summary, conv.id,
-            ));
-        }
-
-        Ok(lines.join("\n"))
+        serde_json::to_string_pretty(&output)
+            .map_err(|e| ConversationSearchError(format!("serialize results: {e}")))
     }
 }
