@@ -212,38 +212,6 @@ fn format_summary_line(label: &str, value: &str) -> String {
 }
 
 /// `display.providerCheck(text)` — `:107-109`. Returns the styled fragment
-/// `<SELECTED bold>[✓]</> <text>` for inline composition (e.g. inside
-/// inquire choice labels).
-///
-/// TS chalk wire bytes: `chalk.ansi256(114).bold("[✓]")` emits
-/// `\x1b[38;5;114m\x1b[1m[✓]\x1b[22m\x1b[39m` — SGR 22 + SGR 39 close,
-/// not SGR 0. Use raw escapes to match.
-pub fn provider_check(text: &str) -> String {
-    use crate::tui::theme::{BOLD_CLOSE, BOLD_OPEN, FG_RESET};
-    // ansi256 #114 = chalk.ansi256(114) — `display.ts:6` `SELECTED`.
-    const SELECTED_OPEN: &str = "\x1b[38;5;114m";
-    format!("{SELECTED_OPEN}{BOLD_OPEN}[✓]{BOLD_CLOSE}{FG_RESET} {text}")
-}
-
-/// `display.providerUncheck(text)` — `:114-115`. Returns `<dim>[ ]</> <text>`.
-///
-/// TS chalk wire bytes: `chalk.dim("[ ]")` emits `\x1b[2m[ ]\x1b[22m`.
-pub fn provider_uncheck(text: &str) -> String {
-    use crate::tui::theme::{DIM_CLOSE, DIM_OPEN};
-    format!("{DIM_OPEN}[ ]{DIM_CLOSE} {text}")
-}
-
-/// `display.doneLabel()` — `:121-123`. Returns `<ACCENT bold>  Done</>` with
-/// the two leading spaces *inside* the styled span (the TS template inserts
-/// a separate two-space cursor pad outside).
-///
-/// TS chalk wire bytes: `chalk.ansi256(214).bold("  Done")` emits
-/// `\x1b[38;5;214m\x1b[1m  Done\x1b[22m\x1b[39m`.
-pub fn done_label() -> String {
-    use crate::tui::theme::{BOLD_CLOSE, BOLD_OPEN, FG_RESET};
-    const ACCENT_OPEN: &str = "\x1b[38;5;214m";
-    format!("{ACCENT_OPEN}{BOLD_OPEN}  Done{BOLD_CLOSE}{FG_RESET}")
-}
 
 #[cfg(test)]
 mod tests {
