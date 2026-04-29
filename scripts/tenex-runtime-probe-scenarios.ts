@@ -18,10 +18,12 @@ export const availableScenarios = [
     "fs-read-adjustment",
     "mcp-tool-basic",
     "acp-worker-basic",
+    "acp-delegation-mcp",
     "agent-config-reload",
     "agent-config-update",
     "project-membership-reload",
     "shell-kill-duplicate",
+    "root-agents-md",
 ] as const;
 
 export type ScenarioName = (typeof availableScenarios)[number];
@@ -40,11 +42,16 @@ export type MockRequestRecord = {
 
 export const delegationUserRequest =
     "Please delegate to worker and ask them to choose one random color. Tell me what they picked.";
-const delegationWorkerPrompt =
+export const acpDelegationMcpUserRequest =
+    "Use the TENEX MCP delegate tool, not the backend Task tool, to ask worker to choose one random color.";
+export const delegationWorkerPrompt =
     "Choose one random color. Reply with exactly one lowercase color word and no punctuation.";
 export const delegationWorkerCompletionText = "blue";
+export const acpProbeModelName = "probe-acp";
 export const agentConfigUpdateModelName = "mock-updated";
 export const agentConfigUpdateSkills = ["read-access", "shell", "write-access"] as const;
+export const rootAgentsMdInstruction = "ROOT_AGENTS_MD_PROBE";
+export const worktreeAgentsMdInstruction = "WORKTREE_AGENTS_MD_SHOULD_NOT_APPEAR";
 
 const colorWords = [
     "red", "blue", "green", "yellow", "purple", "orange", "pink", "black",
@@ -118,6 +125,9 @@ export function scenarioProjectDtag(name: ScenarioName): string {
     if (name === "acp-worker-basic") {
         return "probe-acp-worker";
     }
+    if (name === "acp-delegation-mcp") {
+        return "probe-acp-delegation-mcp";
+    }
     if (name === "agent-config-reload") {
         return "probe-agent-config-reload";
     }
@@ -129,6 +139,9 @@ export function scenarioProjectDtag(name: ScenarioName): string {
     }
     if (name === "shell-kill-duplicate") {
         return "probe-shell-kill-duplicate";
+    }
+    if (name === "root-agents-md") {
+        return "probe-root-agents-md";
     }
     return "probe-fs-read-adjustment";
 }
@@ -146,6 +159,9 @@ export function pmInstructions(name: ScenarioName): string {
     if (name === "acp-worker-basic") {
         return "This scenario targets the ACP worker directly; remain idle unless directly mentioned.";
     }
+    if (name === "acp-delegation-mcp") {
+        return "This scenario verifies TENEX MCP delegation from an ACP backend. Use the TENEX MCP delegate tool, not backend-native delegation, to delegate to worker with the random-color task. Stop after delegating; do not invent a color.";
+    }
     if (name === "agent-config-reload") {
         return "This scenario verifies runtime agent config reload; remain idle unless directly mentioned.";
     }
@@ -157,6 +173,9 @@ export function pmInstructions(name: ScenarioName): string {
     }
     if (name === "shell-kill-duplicate") {
         return pmShellKillDuplicateInstructions;
+    }
+    if (name === "root-agents-md") {
+        return "This scenario verifies root AGENTS.md prompt injection. Answer with the exact observed probe phrase.";
     }
     return "Use fs_read one file at a time. If the user corrects the requested total, follow the latest total before finishing.";
 }
@@ -276,6 +295,20 @@ export function mockScenario(name: ScenarioName): unknown {
         return { responses: [], defaultContent: "ACP worker scenario uses an ACP backend." };
     }
 
+    if (name === "acp-delegation-mcp") {
+        return {
+            responses: [
+                {
+                    agent: "worker",
+                    turn: 1,
+                    contains: delegationWorkerPrompt,
+                    content: delegationWorkerCompletionText,
+                },
+            ],
+            defaultContent: "ACP delegation MCP probe should only use native mock LLM for worker.",
+        };
+    }
+
     if (name === "agent-config-reload") {
         return {
             responses: [],
@@ -303,6 +336,20 @@ export function mockScenario(name: ScenarioName): unknown {
 
     if (name === "shell-kill-duplicate") {
         return shellKillDuplicateMockScenario();
+    }
+
+    if (name === "root-agents-md") {
+        return {
+            responses: [
+                {
+                    agent: "pm",
+                    turn: 1,
+                    containsAll: ["root AGENTS check", rootAgentsMdInstruction],
+                    content: `${rootAgentsMdInstruction} observed.`,
+                },
+            ],
+            defaultContent: "Root AGENTS.md probe did not match expected prompt state.",
+        };
     }
 
     const mockDelayMs = Number(process.env.TENEX_PROBE_MOCK_DELAY_MS ?? 750);
@@ -342,6 +389,8 @@ export async function runScenario(name: ScenarioName, context: ScenarioContext):
         await runMcpToolProbe(context);
     } else if (name === "acp-worker-basic") {
         await runAcpWorkerProbe(context);
+    } else if (name === "acp-delegation-mcp") {
+        await runAcpDelegationMcpProbe(context);
     } else if (name === "agent-config-reload") {
         await runAgentConfigReloadProbe(context);
     } else if (name === "agent-config-update") {
@@ -350,6 +399,8 @@ export async function runScenario(name: ScenarioName, context: ScenarioContext):
         await runProjectMembershipReloadProbe(context);
     } else if (name === "shell-kill-duplicate") {
         await runShellKillDuplicateProbe(context);
+    } else if (name === "root-agents-md") {
+        await runRootAgentsMdProbe(context);
     } else {
         await runFsReadAdjustmentProbe(context);
     }
@@ -534,8 +585,74 @@ async function runMcpToolProbe(context: ScenarioContext): Promise<void> {
     await context.delay(Number(process.env.TENEX_PROBE_WAIT_MS ?? 5_000));
 }
 
+async function runRootAgentsMdProbe(context: ScenarioContext): Promise<void> {
+    const userEvent = context.sign(
+        {
+            kind: 1,
+            created_at: context.now(),
+            content: "root AGENTS check",
+            tags: [["a", context.projectRef]],
+        },
+        context.userSecret
+    );
+    await Promise.all(context.pool.publish([context.relayUrl], userEvent));
+    await context.waitForRequestRecord(
+        context.requestRecordPath,
+        (records) =>
+            records.some(
+                (record) =>
+                    record.agent === "pm" &&
+                    record.requestDebug.includes(rootAgentsMdInstruction)
+            ),
+        Number(process.env.TENEX_PROBE_WAIT_MS ?? 10_000),
+        "PM prompt with root AGENTS.md"
+    );
+}
+
 async function runAcpWorkerProbe(context: ScenarioContext): Promise<void> {
     await publishAcpWorkerRequest(context);
+}
+
+async function runAcpDelegationMcpProbe(context: ScenarioContext): Promise<void> {
+    const timeoutMs = Number(process.env.TENEX_PROBE_WAIT_MS ?? 12_000);
+    const userEvent = context.sign(
+        {
+            kind: 1,
+            created_at: context.now(),
+            content: acpDelegationMcpUserRequest,
+            tags: [["a", context.projectRef]],
+        },
+        context.userSecret
+    );
+    await Promise.all(context.pool.publish([context.relayUrl], userEvent));
+    await context.waitForObservedEvent(
+        context.events,
+        (event) =>
+            event.kind === 1 &&
+            event.pubkey === context.pmPubkey &&
+            hasEventTag(event, "p", context.workerPubkey) &&
+            !hasAnyEventTag(event, "tool"),
+        timeoutMs,
+        "ACP PM delegation event"
+    );
+    await context.waitForObservedEvent(
+        context.events,
+        (event) =>
+            event.kind === 1 &&
+            event.pubkey === context.pmPubkey &&
+            hasTag(event, "tool", "delegate"),
+        timeoutMs,
+        "ACP PM delegate tool event"
+    );
+    await context.waitForObservedEvent(
+        context.events,
+        (event) =>
+            event.kind === 1 &&
+            event.pubkey === context.workerPubkey &&
+            includesColorChoice(event.content),
+        timeoutMs,
+        "worker color completion from ACP MCP delegation"
+    );
 }
 
 async function runAgentConfigReloadProbe(context: ScenarioContext): Promise<void> {

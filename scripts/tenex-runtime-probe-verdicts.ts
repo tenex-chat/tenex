@@ -6,14 +6,18 @@ import {
     type ConversationTranscript,
 } from "./tenex-runtime-probe-conversations";
 import {
+    acpDelegationMcpUserRequest,
+    acpProbeModelName,
     agentConfigUpdateModelName,
     agentConfigUpdateSkills,
     delegationUserRequest,
     delegationWorkerCompletionText,
     extractColorChoice,
     includesColorChoice,
+    rootAgentsMdInstruction,
     type MockRequestRecord,
     type ScenarioName,
+    worktreeAgentsMdInstruction,
 } from "./tenex-runtime-probe-scenarios";
 import { evaluateShellKillDuplicate } from "./tenex-runtime-probe-shell-verdicts";
 
@@ -45,8 +49,22 @@ export function evaluate(
     if (name === "mcp-tool-basic") {
         return [...commonVerdicts, ...evaluateMcpTool(events, requestRecords, context)];
     }
-    if (name === "acp-worker-basic" || name === "agent-config-reload") {
+    if (name === "acp-worker-basic") {
+        return [
+            evaluateAgentModelAccess(events, context.pmPubkey, "pm", context.modelName),
+            evaluateAgentModelAccess(events, context.workerPubkey, "worker", acpProbeModelName),
+            ...evaluateAcpWorker(events, context),
+        ];
+    }
+    if (name === "agent-config-reload") {
         return [...commonVerdicts, ...evaluateAcpWorker(events, context)];
+    }
+    if (name === "acp-delegation-mcp") {
+        return [
+            evaluateAgentModelAccess(events, context.pmPubkey, "pm", acpProbeModelName),
+            evaluateAgentModelAccess(events, context.workerPubkey, "worker", context.modelName),
+            ...evaluateAcpDelegationMcp(events, context),
+        ];
     }
     if (name === "agent-config-update") {
         return [...commonVerdicts, ...evaluateAgentConfigUpdate(events, context)];
@@ -57,7 +75,113 @@ export function evaluate(
     if (name === "shell-kill-duplicate") {
         return [...commonVerdicts, ...evaluateShellKillDuplicate(events, requestRecords, context)];
     }
+    if (name === "root-agents-md") {
+        return [...commonVerdicts, ...evaluateRootAgentsMd(events, requestRecords, context)];
+    }
     return [...commonVerdicts, ...evaluateFsReadAdjustment(events, requestRecords, context)];
+}
+
+function evaluateAcpDelegationMcp(events: Event[], context: EvaluateContext): Verdict[] {
+    const initialUserEvent = events.find(
+        (event) => event.kind === 1 && event.content === acpDelegationMcpUserRequest
+    );
+    const delegation = events.find(
+        (event) =>
+            event.kind === 1 &&
+            event.pubkey === context.pmPubkey &&
+            hasTag(event, "p", context.workerPubkey) &&
+            !hasTag(event, "tool")
+    );
+    const delegateTool = events.find(
+        (event) =>
+            event.kind === 1 &&
+            event.pubkey === context.pmPubkey &&
+            hasTag(event, "tool", "delegate")
+    );
+    const workerCompletion = events.find(
+        (event) =>
+            event.kind === 1 &&
+            event.pubkey === context.workerPubkey &&
+            includesColorChoice(event.content)
+    );
+    const acpAcknowledgement = events.find(
+        (event) =>
+            event.kind === 1 &&
+            event.pubkey === context.pmPubkey &&
+            event.content.includes("Delegation started")
+    );
+    const storedWorkerCompletion = initialUserEvent
+        ? readConversationTranscript(context.conversationDbPath, initialUserEvent.id).messages.find(
+              (message) =>
+                  message.authorPubkey === context.workerPubkey &&
+                  includesColorChoice(messageText(message))
+          )
+        : undefined;
+
+    return [
+        {
+            name: "ACP PM emitted delegation event to worker",
+            ok: Boolean(delegation),
+            detail: "Expected kind:1 from ACP PM with p-tag targeting worker.",
+        },
+        {
+            name: "ACP PM emitted delegate tool event",
+            ok: Boolean(delegateTool),
+            detail: "Expected ACP MCP delegate call to publish a tool=delegate event.",
+        },
+        {
+            name: "Runtime routed ACP MCP delegation to worker",
+            ok: Boolean(workerCompletion),
+            detail: "Expected worker kind:1 containing a random-color completion.",
+        },
+        {
+            name: "Store recorded worker completion in parent conversation",
+            ok: Boolean(storedWorkerCompletion),
+            detail: "Expected parent conversation transcript to contain worker color completion.",
+        },
+        {
+            name: "ACP delegation acknowledgement stayed pending",
+            ok: Boolean(acpAcknowledgement) && !hasTag(acpAcknowledgement!, "status", "completed"),
+            detail: "Expected ACP's same-turn delegation acknowledgement to omit status=completed.",
+        },
+    ];
+}
+
+function evaluateRootAgentsMd(
+    events: Event[],
+    requestRecords: MockRequestRecord[],
+    context: EvaluateContext
+): Verdict[] {
+    const promptRequest = requestRecords.find(
+        (record) =>
+            record.agent === "pm" && record.requestDebug.includes(rootAgentsMdInstruction)
+    );
+    const completion = events.find(
+        (event) =>
+            event.kind === 1 &&
+            event.pubkey === context.pmPubkey &&
+            event.content.includes(`${rootAgentsMdInstruction} observed`)
+    );
+
+    return [
+        {
+            name: "Prompt included root AGENTS.md",
+            ok: Boolean(promptRequest),
+            detail: "Expected the PM model request to contain the root AGENTS.md probe instruction.",
+        },
+        {
+            name: "Prompt ignored worktree-local AGENTS.md",
+            ok:
+                Boolean(promptRequest) &&
+                !promptRequest?.requestDebug.includes(worktreeAgentsMdInstruction),
+            detail: "Expected root-only AGENTS.md injection; worktree-local AGENTS.md appeared in the request.",
+        },
+        {
+            name: "Agent completed after matching root instruction",
+            ok: Boolean(completion),
+            detail: "Expected PM completion from the mock response matched on the root AGENTS.md instruction.",
+        },
+    ];
 }
 
 function evaluateProjectMembershipReload(
@@ -201,6 +325,29 @@ function evaluateProjectStatusModelTag(events: Event[], context: EvaluateContext
         ok: Boolean(modelTag),
         detail:
             `Expected kind:24010 model tag for ${context.modelName} with pm and worker; ` +
+            `saw ${modelTags.length > 0 ? modelTags.map((tag) => JSON.stringify(tag)).join(", ") : "<none>"}.`,
+    };
+}
+
+function evaluateAgentModelAccess(
+    events: Event[],
+    pubkey: string,
+    slug: string,
+    modelName: string
+): Verdict {
+    const statusEvents = events.filter((event) => event.kind === 24010);
+    const modelTags = statusEvents
+        .flatMap((event) => event.tags)
+        .filter((tag) => tag[0] === "model" && tag[1] === modelName);
+    const modelTag = modelTags.find(
+        (tag) => tag.slice(2).includes(slug) || tag.slice(2).includes(pubkey)
+    );
+
+    return {
+        name: `Project status publishes ${slug} model access`,
+        ok: Boolean(modelTag),
+        detail:
+            `Expected kind:24010 model tag for ${modelName} containing ${slug}; ` +
             `saw ${modelTags.length > 0 ? modelTags.map((tag) => JSON.stringify(tag)).join(", ") : "<none>"}.`,
     };
 }

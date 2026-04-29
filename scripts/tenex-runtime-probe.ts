@@ -18,13 +18,17 @@ import {
 } from "./tenex-runtime-probe-conversations";
 import { setupMcpProbeFixture } from "./tenex-runtime-probe-mcp";
 import {
+    acpProbeModelName,
     agentConfigUpdateModelName,
     availableScenarios,
+    delegationWorkerPrompt,
     mockScenario,
     pmInstructions,
+    rootAgentsMdInstruction,
     runScenario,
     scenarioProjectDtag,
     type ScenarioName,
+    worktreeAgentsMdInstruction,
 } from "./tenex-runtime-probe-scenarios";
 import {
     bytesToHex,
@@ -93,6 +97,10 @@ const cassetteRecordPath = llm.recordCassettePath
     ? path.resolve(llm.recordCassettePath)
     : path.join(runDir, "llm-cassette.jsonl");
 const llmModelName = llm.mode === "ollama" ? "probe-real" : "mock";
+const usesAcp =
+    scenarioName === "acp-worker-basic" ||
+    scenarioName === "acp-delegation-mcp" ||
+    scenarioName === "agent-config-reload";
 
 mkdirSync(relayDir, { recursive: true });
 mkdirSync(projectDir, { recursive: true });
@@ -100,6 +108,18 @@ mkdirSync(agentsDir, { recursive: true });
 mkdirSync(workspaceDir, { recursive: true });
 for (let index = 1; index <= 10; index += 1) {
     writeFileSync(path.join(workspaceDir, `file-${index}.txt`), `content-file-${index}\n`);
+}
+const rootAgentsMdWorktreeDir = path.join(workspaceDir, ".worktrees", "root-agents-probe");
+if (scenarioName === "root-agents-md") {
+    mkdirSync(rootAgentsMdWorktreeDir, { recursive: true });
+    writeFileSync(
+        path.join(workspaceDir, "AGENTS.md"),
+        `Root AGENTS instruction: ${rootAgentsMdInstruction}\n`
+    );
+    writeFileSync(
+        path.join(rootAgentsMdWorktreeDir, "AGENTS.md"),
+        `Worktree instruction: ${worktreeAgentsMdInstruction}\n`
+    );
 }
 const mcpProbe =
     scenarioName === "mcp-tool-basic"
@@ -110,8 +130,8 @@ const mcpProbe =
           })
         : undefined;
 const acpProbe =
-    scenarioName === "acp-worker-basic"
-        ? buildAcpProbeRuntime()
+    usesAcp
+        ? buildAcpProbeRuntime({ delegateViaMcp: scenarioName === "acp-delegation-mcp" })
         : undefined;
 
 const relayPort = await freePort();
@@ -130,6 +150,8 @@ const initialProjectAgentPubkeys =
         : [pm.pubkey, worker.pubkey];
 const projectEvent = buildProjectEvent(initialProjectAgentPubkeys);
 const projectRef = `31933:${owner.pubkey}:${projectDtag}`;
+const pmWorkingDirectory =
+    scenarioName === "root-agents-md" ? rootAgentsMdWorktreeDir : workspaceDir;
 
 writeJson(path.join(projectDir, "event.json"), projectEvent);
 writeJson(path.join(baseDir, "config.json"), {
@@ -139,17 +161,21 @@ writeJson(path.join(baseDir, "config.json"), {
     relays: [relayUrl],
     telemetry: { enabled: false },
 });
+const llmConfigurations: Record<string, unknown> =
+    llm.mode === "ollama"
+        ? {
+              [llmModelName]: { provider: "ollama", model: llm.ollamaModel },
+              [agentConfigUpdateModelName]: { provider: "ollama", model: llm.ollamaModel },
+          }
+        : {
+              mock: { provider: "mock", model: scenarioName },
+              [agentConfigUpdateModelName]: { provider: "mock", model: scenarioName },
+          };
+if (acpProbe) {
+    llmConfigurations[acpProbeModelName] = acpProbe;
+}
 writeJson(path.join(baseDir, "llms.json"), {
-    configurations:
-        llm.mode === "ollama"
-            ? {
-                  [llmModelName]: { provider: "ollama", model: llm.ollamaModel },
-                  [agentConfigUpdateModelName]: { provider: "ollama", model: llm.ollamaModel },
-              }
-            : {
-                  mock: { provider: "mock", model: scenarioName },
-                  [agentConfigUpdateModelName]: { provider: "mock", model: scenarioName },
-              },
+    configurations: llmConfigurations,
     default: llmModelName,
 });
 writeJson(path.join(baseDir, "providers.json"), {
@@ -178,10 +204,14 @@ writeJson(path.join(agentsDir, `${pm.pubkey}.json`), {
     category: "orchestrator",
     description: "Delegates probe tasks to workers",
     instructions: pmInstructions(scenarioName),
-    ...(scenarioName === "project-membership-reload" ? {} : { working_directory: workspaceDir }),
+    ...(scenarioName === "project-membership-reload"
+        ? {}
+        : { working_directory: pmWorkingDirectory }),
     default:
         scenarioName === "mcp-tool-basic"
             ? { model: llmModelName, mcp: ["probe"] }
+            : scenarioName === "acp-delegation-mcp"
+            ? { model: acpProbeModelName }
             : scenarioName === "fs-read-adjustment"
             ? { model: llmModelName, skills: ["read-access"] }
             : { model: llmModelName },
@@ -194,8 +224,8 @@ writeJson(path.join(agentsDir, `${worker.pubkey}.json`), {
     description: "Completes delegated probe tasks",
     instructions:
         "Complete delegated probe tasks with a concise result. If asked to choose a random color, never call no_response; reply with exactly one lowercase color word and no punctuation.",
-    default: { model: llmModelName },
-    ...(acpProbe ? { runtime: acpProbe } : {}),
+    default: { model: scenarioName === "acp-worker-basic" ? acpProbeModelName : llmModelName },
+    ...(scenarioName === "acp-worker-basic" && acpProbe ? { runtime: acpProbe } : {}),
 });
 
 const mockScenarioPath = path.join(runDir, "mock-llm.json");
@@ -216,7 +246,7 @@ const tenexBin = process.env.TENEX_BIN ?? path.join(repoRoot, "target", "debug",
 const agentBin = path.join(path.dirname(tenexBin), "tenex-agent");
 const agentAcpBin = path.join(path.dirname(tenexBin), "tenex-agent-acp");
 
-if (!existsSync(tenexBin) || !existsSync(agentBin) || (scenarioName === "acp-worker-basic" && !existsSync(agentAcpBin))) {
+if (!existsSync(tenexBin) || !existsSync(agentBin) || (usesAcp && !existsSync(agentAcpBin))) {
     console.error("Missing Rust binaries. Build them first:");
     console.error("  cargo build -p tenex -p tenex-agent");
     process.exit(2);
@@ -289,6 +319,7 @@ try {
         configureWorkerForAcp: () => {
             const workerAgentPath = path.join(agentsDir, `${worker.pubkey}.json`);
             const agent = JSON.parse(readFileSync(workerAgentPath, "utf8")) as Record<string, unknown>;
+            agent.default = { model: acpProbeModelName };
             agent.runtime = buildAcpProbeRuntime();
             writeJson(workerAgentPath, agent);
         },
@@ -457,7 +488,7 @@ function describeLlm(options: ProbeLlmOptions): string {
     return "mock";
 }
 
-function buildAcpProbeRuntime(): Record<string, unknown> {
+function buildAcpProbeRuntime(options: { delegateViaMcp?: boolean } = {}): Record<string, unknown> {
     const backend = process.env.TENEX_PROBE_ACP_BACKEND ?? "fake";
     const model = process.env.TENEX_PROBE_ACP_MODEL ?? "haiku";
     if (backend === "claude") {
@@ -477,7 +508,7 @@ function buildAcpProbeRuntime(): Record<string, unknown> {
             }
         }
         return {
-            kind: "acp",
+            provider: "acp",
             backend: "claude-code",
             command,
             args,
@@ -486,18 +517,24 @@ function buildAcpProbeRuntime(): Record<string, unknown> {
             env,
         };
     }
+    const env: Record<string, string> = {
+        ANTHROPIC_MODEL: model,
+        TENEX_PROBE_ACP_MODEL: model,
+        TENEX_PROBE_ACP_RESPONSE: `haiku acp worker completed with model ${model}`,
+    };
+    if (options.delegateViaMcp) {
+        env.TENEX_PROBE_ACP_DELEGATE_RECIPIENT = "worker";
+        env.TENEX_PROBE_ACP_DELEGATE_PROMPT = delegationWorkerPrompt;
+        env.TENEX_PROBE_ACP_RESPONSE = "Delegation started.";
+    }
     return {
-        kind: "acp",
+        provider: "acp",
         backend: "fake-claude-code",
         command: process.execPath,
         args: [path.join(scriptDir, "tenex-runtime-probe-acp.ts")],
         model,
         permissionPolicy: "allow",
-        env: {
-            ANTHROPIC_MODEL: model,
-            TENEX_PROBE_ACP_MODEL: model,
-            TENEX_PROBE_ACP_RESPONSE: `haiku acp worker completed with model ${model}`,
-        },
+        env,
     };
 }
 
