@@ -4,7 +4,7 @@
 //! file is replaced wholesale; nothing outside it knows the format.
 
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 use rusqlite::{Connection, OpenFlags};
@@ -30,7 +30,6 @@ pub struct CandidateRow {
 #[derive(Debug)]
 pub struct ConversationContent {
     pub transcript: String,
-    pub last_activity: i64,
     pub project_event: ProjectEvent,
 }
 
@@ -193,11 +192,8 @@ pub fn fetch_content(
     }
     let transcript = lines.join("\n\n");
 
-    let last_activity = file_mtime_secs(&path).unwrap_or(0);
-
     Ok(Some(ConversationContent {
         transcript,
-        last_activity,
         project_event: project_event.clone(),
     }))
 }
@@ -277,14 +273,4 @@ pub fn write_metadata(
     fs::rename(&tmp, &path)
         .with_context(|| format!("rename {} -> {}", tmp.display(), path.display()))?;
     Ok(())
-}
-
-fn file_mtime_secs(path: &Path) -> Option<i64> {
-    fs::metadata(path)
-        .ok()?
-        .modified()
-        .ok()?
-        .duration_since(std::time::UNIX_EPOCH)
-        .ok()
-        .map(|d| d.as_secs() as i64)
 }

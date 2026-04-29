@@ -97,6 +97,7 @@ async fn scan_once(cfg: &Config, state: &SummaryStateStore, publisher: &Publishe
                         project,
                         &project_event,
                         &cand.conversation_id,
+                        cand.last_activity,
                     )
                     .await
                     {
@@ -150,12 +151,13 @@ async fn process_one(
     project: &ProjectRef,
     project_event: &ProjectEvent,
     conversation_id: &str,
+    catalog_last_activity: i64,
 ) -> bool {
     let started = std::time::Instant::now();
     let result = process_inner(cfg, publisher, project, project_event, conversation_id).await;
     match result {
-        Ok(Some((summary, last_activity))) => {
-            if let Err(e) = state.record(conversation_id, last_activity, now_ms()) {
+        Ok(Some(summary)) => {
+            if let Err(e) = state.record(conversation_id, catalog_last_activity, now_ms()) {
                 warn!(error = %e, "state.record failed");
             }
             if !summary.categories.is_empty() {
@@ -173,8 +175,7 @@ async fn process_one(
             true
         }
         Ok(None) => {
-            // No content; record state to avoid re-evaluating until activity advances.
-            if let Err(e) = state.record(conversation_id, now_secs(), now_ms()) {
+            if let Err(e) = state.record(conversation_id, catalog_last_activity, now_ms()) {
                 warn!(error = %e, "state.record failed");
             }
             false
@@ -198,7 +199,7 @@ async fn process_inner(
     project: &ProjectRef,
     project_event: &ProjectEvent,
     conversation_id: &str,
-) -> Result<Option<(Summary, i64)>> {
+) -> Result<Option<Summary>> {
     let content = match source::fetch_content(project, project_event, conversation_id)? {
         Some(c) => c,
         None => return Ok(None),
@@ -226,7 +227,7 @@ async fn process_inner(
         )
         .await?;
 
-    Ok(Some((summary, content.last_activity)))
+    Ok(Some(summary))
 }
 
 fn non_empty(s: &str) -> Option<String> {
@@ -242,13 +243,6 @@ fn now_ms() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)
-        .unwrap_or(0)
-}
-
-fn now_secs() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
         .unwrap_or(0)
 }
 
