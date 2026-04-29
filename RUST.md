@@ -1,6 +1,6 @@
 # TENEX Rust Adoption Status
 
-_Last updated: 2026-04-29 (eighteenth pass). Auto-maintained by scheduled debt check._
+_Last updated: 2026-04-29 (nineteenth pass). Auto-maintained by scheduled debt check._
 
 ---
 
@@ -177,9 +177,20 @@ Note: `conversation_get`, `conversation_list`, `kill` (scheduled tasks only), `s
 
 ## Compilation Status
 
-**As of 2026-04-29 (eighteenth debt check pass): workspace compiles clean — zero errors, zero `unreachable!`/`todo!`/`unimplemented!` macros. ~290 dead-code warnings from porting-in-progress code (TUI glyphs, onboard LLM test substrate, Codex config enums); all waiting for caller wiring, none orphaned.**
+**As of 2026-04-29 (nineteenth debt check pass): workspace compiles clean — zero errors, zero `unreachable!`/`todo!`/`unimplemented!` macros.**
 
 **MILESTONE: Every tool in `tenex-agent` is now verified end-to-end (see `RUST_REPORT.md`).** RAG (real embedding API), skills_set, delegate_crossproject, multi-turn context projection — all passing. `cargo test --workspace` clean: 27 tests across 4 crates.
+
+### Architectural gap — `record_turn` infrastructure not yet consumed
+
+`record_turn` in `tenex-context` writes to three stores:
+- `agent_prompt_history` table — the "frozen prompt" record of exactly what the LLM saw per turn
+- `agent_context_state.cache_anchored` — whether the provider hit the prompt cache
+- `agent_context_state.compaction_state` + `reminder_state` — per-turn compaction metadata
+
+**None of these are currently read by `project()` or the compaction strategies.** The projection reads only `agent_context_state.todos` and the raw `messages` table. The strategies (compaction, decay, reminders) run without consulting prior-turn cache or compaction state.
+
+This is intentional per the design doc ("write now, consume later") — the infrastructure is pre-built for future strategies that need per-turn context history. But it means current compaction/caching decisions are stateless. **Next step when compaction strategies need history: wire `list_prompt_history()` into a strategy that consults prior turns.**
 
 **MILESTONE: tenex-agent is live-tested end-to-end (see `RUST_REPORT.md`)**:
 - Basic completion ✅, streaming (kind:24135 deltas) ✅, final ConversationIntent ✅
@@ -188,6 +199,10 @@ Note: `conversation_get`, `conversation_list`, `kill` (scheduled tasks only), `s
 - Conversation history persistence (10 convs, 20 history entries) ✅
 - Supervision (worker todo block) ✅
 - FK bug fixed: ensure_conversation() on store open
+
+Resolved between eighteenth and nineteenth passes:
+- **Test script write-back**: `scripts/run_rust_test.sh` now writes agent responses to `messages` table after each run (Python snippet). In production, `tenex runtime` does this when it processes outbound kind:1 events. Without this, multi-turn test invocations only saw user-role messages in history projection.
+- **Architectural audit**: `record_turn` writes to `agent_prompt_history`, `cache_anchored`, `compaction_state` — none consumed yet by projection strategies (see gap note above). Confirmed intentional per design doc.
 
 Resolved between seventeenth and eighteenth passes:
 - **All tools verified end-to-end**: RAG add_documents + search (real OpenRouter embedding API, SQLite store, cosine similarity), skills_set, delegate_crossproject, multi-turn context projection all confirmed passing. Open items cleared.
