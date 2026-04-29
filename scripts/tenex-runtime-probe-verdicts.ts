@@ -1,4 +1,5 @@
 import type { Event } from "nostr-tools";
+import { evaluateAcpWorker } from "./tenex-runtime-probe-acp-verdicts";
 import {
     messageText,
     readConversationTranscript,
@@ -555,35 +556,6 @@ function evaluateMcpTool(
             name: "No mock fallback responses were used",
             ok: !unexpectedDefault,
             detail: "A fallback response means a model turn missed the expected MCP result.",
-        },
-    ];
-}
-
-function evaluateAcpWorker(events: Event[], context: EvaluateContext): Verdict[] {
-    const completion = events.find(
-        (event) =>
-            event.kind === 1 &&
-            event.pubkey === context.workerPubkey &&
-            event.content.toLowerCase().includes("haiku acp worker completed") &&
-            hasTag(event, "status", "completed")
-    );
-    const toolEvent = events.find(
-        (event) =>
-            event.kind === 1 &&
-            event.pubkey === context.workerPubkey &&
-            event.tags.some((tag) => tag[0] === "tool")
-    );
-
-    return [
-        {
-            name: "ACP worker emitted completed Nostr response",
-            ok: Boolean(completion),
-            detail: "Expected worker completion from tenex-agent-acp containing the ACP backend response.",
-        },
-        {
-            name: "ACP worker did not receive TENEX tool surface",
-            ok: !toolEvent,
-            detail: `Expected no TENEX tool-use events from ACP worker; saw ${toolEvent ? JSON.stringify(toolEvent.tags) : "<none>"}.`,
         },
     ];
 }
