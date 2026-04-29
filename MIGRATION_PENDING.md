@@ -130,7 +130,7 @@ Pre-tool and post-completion contexts are missing fields that the two unimplemen
 
 ### 6.1 Search Capability Gaps
 - [ ] Free-form collection names in `rag_search`: TypeScript accepts any collection name or provider name; Rust hardcodes `conversations`, `project_{id}`, `agent_{pubkey}`
-- [ ] `prompt` parameter in `rag_search` — LLM-focused extraction from results (TypeScript only)
+- ✅ `prompt` parameter in `rag_search` — LLM-focused extraction from results
 - [ ] Scope-aware search (global / project / personal) via `RAGCollectionRegistry`
 - [ ] Multiple specialized search providers: `ConversationSearchProvider`, `LessonSearchProvider`, `GenericCollectionSearchProvider`
 - 🚫 `UnifiedSearchService` — won't port (Rust `rag_search` is the single search surface; provider multiplexing not needed)
