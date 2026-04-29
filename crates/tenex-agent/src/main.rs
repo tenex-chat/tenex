@@ -9,6 +9,7 @@ mod hook;
 mod injections;
 mod mock_llm;
 mod progress_monitor;
+mod project_instructions;
 mod runtime_control;
 mod runtime_state;
 mod runtime_state_json;
@@ -355,6 +356,9 @@ async fn run() -> Result<()> {
                 .map(|p| p.display().to_string())
                 .unwrap_or_else(|_| ".".to_string())
         });
+    let project_root =
+        std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(&working_dir));
+    let root_agents_md = project_instructions::read_root_agents_md(&project_root);
 
     // Open project and load context used for prompts + delegate tool.
     let project = Project::open_default(&project_id)
@@ -590,6 +594,7 @@ async fn run() -> Result<()> {
             instructions: agent_config.instructions.as_deref(),
             working_dir: &working_dir,
             project_meta: Some(&project_meta),
+            root_agents_md: root_agents_md.as_deref(),
             agents: &project_agents,
             teams_fragment: &teams_fragment,
             home: &home_info,
