@@ -258,13 +258,18 @@ fn run_llm_submenu(base_dir: &std::path::Path) -> Result<()> {
     // doesn't recurse into a broken editor.
     let providers = ProvidersDoc::load(base_dir)?;
     if providers.provider_ids().is_empty() {
+        // TS at commands/config/llm.ts:26 emits:
+        //   console.log(amber("→") + chalk.bold(" Run tenex config providers first"));
+        // where `amber` is INQUIRER-amber truecolor (chalk.hex("#FFC107")),
+        // NOT bold and NOT the display palette's xterm-256 #214. Emit
+        // the raw truecolor escape.
         let red = console::Style::new().red();
-        let amber = crate::tui::theme::display_accent();
         let bold = console::Style::new().bold();
+        let amber_open = crate::tui::theme::INQUIRER_AMBER_FG;
+        let amber_close = "\x1b[39m";
         eprintln!("{}", red.apply_to("❌ No providers configured."));
         eprintln!(
-            "{}{}",
-            amber.apply_to("→"),
+            "{amber_open}→{amber_close}{}",
             bold.apply_to(" Run tenex config providers first"),
         );
         std::process::exit(1);
