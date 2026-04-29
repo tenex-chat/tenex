@@ -30,7 +30,9 @@ pub fn run(json_mode: bool, local_relay_url: Option<&str>) -> Result<Option<Stri
             crate::onboard::TOTAL_STEPS,
             crate::onboard::STEP_LABELS[1],
         );
-        display::context("Choose a relay for your agents to communicate through.");
+        display::context(
+            crate::onboard::STEP_CONTEXTS[1].expect("step 2 has a TS context line"),
+        );
         display::blank();
     }
 

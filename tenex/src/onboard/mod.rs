@@ -60,13 +60,29 @@ pub const TOTAL_STEPS: usize = 7;
 /// drift detection works when the NDK port lands and the step gets
 /// wired up.
 pub const STEP_LABELS: [&str; TOTAL_STEPS] = [
-    "Identity",          // step 1 — `:884`
-    "Communication",     // step 2 — `:1013`
-    "AI Providers",      // step 3 — `:1103`
-    "Models",            // step 4 — `:1116`
-    "Model Roles",       // step 5 — `:1124`
-    "Embeddings",        // step 6 — `:1128`
-    "Project & Agents",  // step 7 — `:1135` (substrate-blocked, label preserved)
+    "Identity",         // step 1 — `:884`
+    "Communication",    // step 2 — `:1013`
+    "AI Providers",     // step 3 — `:1103`
+    "Models",           // step 4 — `:1116`
+    "Model Roles",      // step 5 — `:1124`
+    "Embeddings",       // step 6 — `:1128`
+    "Project & Agents", // step 7 — `:1135` (substrate-blocked, label preserved)
+];
+
+/// TS-verbatim per-step `display.context(...)` strings, in flow order.
+/// `None` for steps that have no context line in TS (steps 5 and 7).
+/// Source: each context call between the step header and the action,
+/// across `commands/onboard.ts:885-1129`. The Rust call sites use
+/// `STEP_CONTEXTS[N - 1].unwrap()` for steps that have a context — a
+/// regression test asserts each entry matches TS verbatim.
+pub const STEP_CONTEXTS: [Option<&str>; TOTAL_STEPS] = [
+    Some("Your identity is how your agents know you, and how others can reach you."), // step 1 — `:885`
+    Some("Choose a relay for your agents to communicate through."), // step 2 — `:1014`
+    Some("Connect the AI services your agents will use. You need at least one."), // step 3 — `:1104`
+    Some("Configure which models your agents will use."), // step 4 — `:1117`
+    None,                                                 // step 5 — no context call
+    Some("Choose an embedding model for semantic search and RAG."), // step 6 — `:1129`
+    None,                                                 // step 7 — no context call
 ];
 
 #[derive(Parser, Clone)]
@@ -132,9 +148,7 @@ async fn run_inner(args: OnboardArgs) -> Result<()> {
     if !json_mode {
         display::welcome();
         display::step(1, TOTAL_STEPS, STEP_LABELS[0]);
-        display::context(
-            "Your identity is how your agents know you, and how others can reach you.",
-        );
+        display::context(STEP_CONTEXTS[0].expect("step 1 has a TS context line"));
         display::blank();
     }
 
@@ -191,7 +205,7 @@ async fn run_inner(args: OnboardArgs) -> Result<()> {
             display::blank();
         }
         display::step(3, TOTAL_STEPS, STEP_LABELS[2]);
-        display::context("Connect the AI services your agents will use. You need at least one.");
+        display::context(STEP_CONTEXTS[2].expect("step 3 has a TS context line"));
         display::blank();
     }
 
@@ -238,7 +252,7 @@ async fn run_inner(args: OnboardArgs) -> Result<()> {
     if !configured_provider_ids.is_empty() {
         if !json_mode {
             display::step(4, TOTAL_STEPS, STEP_LABELS[3]);
-            display::context("Configure which models your agents will use.");
+            display::context(STEP_CONTEXTS[3].expect("step 4 has a TS context line"));
             display::blank();
         }
         // Step 4 (sub-step B): interactive LLM config editor.
@@ -287,7 +301,7 @@ async fn run_inner(args: OnboardArgs) -> Result<()> {
     if !configured_provider_ids.is_empty() {
         if !json_mode {
             display::step(6, TOTAL_STEPS, STEP_LABELS[5]);
-            display::context("Choose an embedding model for semantic search and RAG.");
+            display::context(STEP_CONTEXTS[5].expect("step 6 has a TS context line"));
             display::blank();
         }
         match embeddings::run(&base_dir, &configured_provider_ids)? {
@@ -583,6 +597,25 @@ mod tests {
                 "Model Roles",
                 "Embeddings",
                 "Project & Agents",
+            ],
+        );
+    }
+
+    /// Pin the per-step `display.context(…)` strings against TS verbatim.
+    /// Steps 5 and 7 have NO context call in TS — preserve as `None`.
+    /// Sources cited per step in the const definition.
+    #[test]
+    fn step_contexts_match_ts_verbatim() {
+        assert_eq!(
+            STEP_CONTEXTS,
+            [
+                Some("Your identity is how your agents know you, and how others can reach you."),
+                Some("Choose a relay for your agents to communicate through."),
+                Some("Connect the AI services your agents will use. You need at least one."),
+                Some("Configure which models your agents will use."),
+                None,
+                Some("Choose an embedding model for semantic search and RAG."),
+                None,
             ],
         );
     }
