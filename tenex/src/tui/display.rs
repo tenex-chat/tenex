@@ -65,8 +65,23 @@ pub fn context(text: &str) {
 
 /// `display.success(text)` — `:40-42`. `  <bold green ✓> <text>`.
 pub fn success(text: &str) {
-    let glyph = Style::new().green().bold().apply_to("✓").to_string();
-    println!("  {glyph} {text}");
+    println!("{}", format_success_line(text));
+}
+
+/// Returns the styled success line as a `String` (without trailing
+/// newline) — extracted so tests can assert exact bytes.
+///
+/// TS chalk wire bytes: `chalk.green.bold("✓")` emits
+/// `\x1b[32m\x1b[1m✓\x1b[22m\x1b[39m` — separate closes for bold (SGR 22)
+/// and foreground (SGR 39). Console-rs's `Style.apply_to(...)` would
+/// emit `\x1b[32m\x1b[1m✓\x1b[0m` (single SGR 0 full-reset). Visually
+/// identical, but byte-different. Use raw escape constants from
+/// [`crate::tui::theme`] to match TS chalk byte-for-byte.
+fn format_success_line(text: &str) -> String {
+    use crate::tui::theme::{BOLD_CLOSE, BOLD_OPEN, FG_RESET};
+    // Basic ANSI green = `\x1b[32m`. chalk.green's exact open code.
+    const GREEN_OPEN: &str = "\x1b[32m";
+    format!("  {GREEN_OPEN}{BOLD_OPEN}✓{BOLD_CLOSE}{FG_RESET} {text}")
 }
 
 /// `display.hint(text)` — `:47-49`. `  <ACCENT →> <ACCENT text>`.
@@ -157,6 +172,36 @@ mod tests {
     fn done_label_has_two_leading_spaces_and_word_done() {
         let s = strip_ansi_codes(&done_label()).into_owned();
         assert_eq!(s, "  Done");
+    }
+
+    /// Pin display.success's wire bytes to match TS chalk exactly:
+    /// `chalk.green.bold("✓")` emits
+    /// `\x1b[32m\x1b[1m✓\x1b[22m\x1b[39m` (separate closes for bold
+    /// and fg, no SGR 0 full-reset). The full success line is
+    /// `  <styled-✓> <text>` per `display.ts:41`.
+    #[test]
+    fn success_line_matches_ts_chalk_byte_sequence() {
+        let s = format_success_line("All set");
+        assert_eq!(
+            s,
+            "  \x1b[32m\x1b[1m✓\x1b[22m\x1b[39m All set",
+        );
+    }
+
+    #[test]
+    fn success_line_ansi_stripped_text_is_verbatim() {
+        let s = format_success_line("Saved");
+        let plain = strip_ansi_codes(&s).into_owned();
+        assert_eq!(plain, "  ✓ Saved");
+    }
+
+    #[test]
+    fn success_line_does_not_emit_sgr_0_full_reset() {
+        let s = format_success_line("x");
+        assert!(
+            !s.contains("\x1b[0m"),
+            "success() should use SGR 22 + SGR 39 (TS chalk), not SGR 0; got: {s:?}",
+        );
     }
 
     #[test]
