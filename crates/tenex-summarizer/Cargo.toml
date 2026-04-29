@@ -23,7 +23,6 @@ rusqlite = { version = "0.31", features = ["bundled"] }
 nostr = "0.44"
 nostr-sdk = "0.44"
 rig-core = "0.35"
-rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 dirs-next = "2"
 libc = "0.2"
 async-trait = "0.1"

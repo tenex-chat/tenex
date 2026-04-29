@@ -104,6 +104,8 @@ pub fn init_with_base_dir(default_service_name: &str, base_dir: Option<&Path>) -
 }
 
 pub fn init_from_config(config: TelemetryConfig) -> TelemetryGuard {
+    install_rustls_crypto_provider();
+
     global::set_text_map_propagator(TraceContextPropagator::new());
 
     let filter =
@@ -163,6 +165,10 @@ pub fn init_from_config(config: TelemetryConfig) -> TelemetryGuard {
     TelemetryGuard {
         provider: Some(provider),
     }
+}
+
+fn install_rustls_crypto_provider() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
 }
 
 pub fn current_traceparent() -> Option<String> {

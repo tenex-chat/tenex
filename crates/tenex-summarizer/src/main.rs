@@ -34,7 +34,6 @@ enum Command {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    install_rustls_crypto_provider();
     let telemetry = tenex_telemetry::init("tenex-summarizer");
 
     let cli = Cli::parse();
@@ -44,10 +43,6 @@ async fn main() -> Result<()> {
     };
     telemetry.shutdown();
     result
-}
-
-fn install_rustls_crypto_provider() {
-    let _ = rustls::crypto::ring::default_provider().install_default();
 }
 
 async fn run() -> Result<()> {

@@ -156,7 +156,6 @@ macro_rules! run_agent {
     }};
 }
 
-
 fn load_todos_from_store(
     store: &ConversationStore,
     conversation_id: &str,
@@ -290,7 +289,6 @@ async fn render_active_shell_tasks_reminder(
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    install_rustls_crypto_provider();
     let telemetry = tenex_telemetry::init("tenex-agent");
     let root_span = info_span!("tenex.agent.process");
     if let Some(parent) = tenex_telemetry::parent_context_from_env() {
@@ -299,10 +297,6 @@ async fn main() -> Result<()> {
     let result = run().instrument(root_span).await;
     telemetry.shutdown();
     result
-}
-
-fn install_rustls_crypto_provider() {
-    let _ = rustls::crypto::ring::default_provider().install_default();
 }
 
 async fn run() -> Result<()> {
