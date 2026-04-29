@@ -11,31 +11,39 @@ use crate::refs::{MessageRef, PrincipalRef, ProjectRef};
 
 use super::encoder::EncodeError;
 
+pub(super) fn tag<I, T>(parts: I) -> Result<Tag, EncodeError>
+where
+    I: IntoIterator<Item = T>,
+    T: Into<String>,
+{
+    Tag::parse(parts).map_err(|e| EncodeError::Tag(e.to_string()))
+}
+
 pub fn project_a_tag(project: &ProjectRef) -> Result<Tag, EncodeError> {
-    Tag::parse(["a", &project.coordinate()]).map_err(|e| EncodeError::Tag(e.to_string()))
+    tag(["a", &project.coordinate()])
 }
 
 pub fn e_root_tag(root_id: &EventId) -> Result<Tag, EncodeError> {
-    Tag::parse(["e", &root_id.to_hex(), "", "root"]).map_err(|e| EncodeError::Tag(e.to_string()))
+    tag(["e", &root_id.to_hex(), "", "root"])
 }
 
 pub fn e_reply_tag(event_id: &EventId) -> Result<Tag, EncodeError> {
-    Tag::parse(["e", &event_id.to_hex(), "", "reply"]).map_err(|e| EncodeError::Tag(e.to_string()))
+    tag(["e", &event_id.to_hex(), "", "reply"])
 }
 
 pub fn p_tag(principal: &PrincipalRef) -> Result<Tag, EncodeError> {
     let PrincipalRef::Nostr { pubkey, .. } = principal;
-    Tag::parse(["p", &pubkey.to_hex()]).map_err(|e| EncodeError::Tag(e.to_string()))
+    tag(["p", &pubkey.to_hex()])
 }
 
 pub fn q_tag(message: &MessageRef) -> Result<Tag, EncodeError> {
     let MessageRef::Nostr { event_id } = message;
-    Tag::parse(["q", &event_id.to_hex()]).map_err(|e| EncodeError::Tag(e.to_string()))
+    tag(["q", &event_id.to_hex()])
 }
 
 pub fn e_agent_definition_tag(message: &MessageRef) -> Result<Tag, EncodeError> {
     let MessageRef::Nostr { event_id } = message;
-    Tag::parse(["e", &event_id.to_hex()]).map_err(|e| EncodeError::Tag(e.to_string()))
+    tag(["e", &event_id.to_hex()])
 }
 
 pub fn message_event_id(message: &MessageRef) -> &EventId {
@@ -54,42 +62,26 @@ pub fn add_standard_tags(
     builder = builder.tag(project_a_tag(&ctx.project)?);
 
     if let Some(model) = ctx.model.as_deref() {
-        builder = builder
-            .tag(Tag::parse(["llm-model", model]).map_err(|e| EncodeError::Tag(e.to_string()))?);
+        builder = builder.tag(tag(["llm-model", model])?);
     }
 
     if let Some(cost) = ctx.cost_usd {
-        builder = builder.tag(
-            Tag::parse(["llm-cost-usd", &format_cost(cost)])
-                .map_err(|e| EncodeError::Tag(e.to_string()))?,
-        );
+        builder = builder.tag(tag(["llm-cost-usd", &format_cost(cost)])?);
     }
 
     if let Some(ms) = ctx.execution_time_ms {
-        builder = builder.tag(
-            Tag::parse(["execution-time", &ms.to_string()])
-                .map_err(|e| EncodeError::Tag(e.to_string()))?,
-        );
+        builder = builder.tag(tag(["execution-time", &ms.to_string()])?);
     }
 
     if let Some(ms) = ctx.llm_runtime_ms.filter(|m| *m > 0) {
-        builder = builder.tag(
-            Tag::parse(["llm-runtime", &ms.to_string(), "ms"])
-                .map_err(|e| EncodeError::Tag(e.to_string()))?,
-        );
+        builder = builder.tag(tag(["llm-runtime", &ms.to_string(), "ms"])?);
     }
 
     if let Some(ms) = ctx.llm_runtime_total_ms.filter(|m| *m > 0) {
-        builder = builder.tag(
-            Tag::parse(["llm-runtime-total", &ms.to_string(), "ms"])
-                .map_err(|e| EncodeError::Tag(e.to_string()))?,
-        );
+        builder = builder.tag(tag(["llm-runtime-total", &ms.to_string(), "ms"])?);
     }
 
-    builder = builder.tag(
-        Tag::parse(["llm-ral", &ctx.ral.to_string()])
-            .map_err(|e| EncodeError::Tag(e.to_string()))?,
-    );
+    builder = builder.tag(tag(["llm-ral", &ctx.ral.to_string()])?);
 
     Ok(builder)
 }
@@ -103,12 +95,10 @@ pub fn forward_branch_team(
     ctx: &EncodingContext,
 ) -> Result<EventBuilder, EncodeError> {
     if let Some(branch) = ctx.branch.as_deref() {
-        builder = builder
-            .tag(Tag::parse(["branch", branch]).map_err(|e| EncodeError::Tag(e.to_string()))?);
+        builder = builder.tag(tag(["branch", branch])?);
     }
     if let Some(team) = ctx.team.as_deref() {
-        builder =
-            builder.tag(Tag::parse(["team", team]).map_err(|e| EncodeError::Tag(e.to_string()))?);
+        builder = builder.tag(tag(["team", team])?);
     }
     Ok(builder)
 }
@@ -119,16 +109,10 @@ pub fn add_llm_usage_tags(
     usage: &LlmUsage,
 ) -> Result<EventBuilder, EncodeError> {
     if let Some(n) = usage.input_tokens {
-        builder = builder.tag(
-            Tag::parse(["llm-prompt-tokens", &n.to_string()])
-                .map_err(|e| EncodeError::Tag(e.to_string()))?,
-        );
+        builder = builder.tag(tag(["llm-prompt-tokens", &n.to_string()])?);
     }
     if let Some(n) = usage.output_tokens {
-        builder = builder.tag(
-            Tag::parse(["llm-completion-tokens", &n.to_string()])
-                .map_err(|e| EncodeError::Tag(e.to_string()))?,
-        );
+        builder = builder.tag(tag(["llm-completion-tokens", &n.to_string()])?);
     }
     let total = usage
         .total_tokens
@@ -137,34 +121,19 @@ pub fn add_llm_usage_tags(
             _ => None,
         });
     if let Some(n) = total {
-        builder = builder.tag(
-            Tag::parse(["llm-total-tokens", &n.to_string()])
-                .map_err(|e| EncodeError::Tag(e.to_string()))?,
-        );
+        builder = builder.tag(tag(["llm-total-tokens", &n.to_string()])?);
     }
     if let Some(c) = usage.cost_usd {
-        builder = builder.tag(
-            Tag::parse(["llm-cost-usd", &c.to_string()])
-                .map_err(|e| EncodeError::Tag(e.to_string()))?,
-        );
+        builder = builder.tag(tag(["llm-cost-usd", &c.to_string()])?);
     }
     if let Some(n) = usage.reasoning_tokens {
-        builder = builder.tag(
-            Tag::parse(["llm-reasoning-tokens", &n.to_string()])
-                .map_err(|e| EncodeError::Tag(e.to_string()))?,
-        );
+        builder = builder.tag(tag(["llm-reasoning-tokens", &n.to_string()])?);
     }
     if let Some(n) = usage.cached_input_tokens {
-        builder = builder.tag(
-            Tag::parse(["llm-cached-input-tokens", &n.to_string()])
-                .map_err(|e| EncodeError::Tag(e.to_string()))?,
-        );
+        builder = builder.tag(tag(["llm-cached-input-tokens", &n.to_string()])?);
     }
     if let Some(n) = usage.context_window {
-        builder = builder.tag(
-            Tag::parse(["llm-context-window", &n.to_string()])
-                .map_err(|e| EncodeError::Tag(e.to_string()))?,
-        );
+        builder = builder.tag(tag(["llm-context-window", &n.to_string()])?);
     }
     Ok(builder)
 }
@@ -175,48 +144,28 @@ pub fn add_llm_metadata_tags(
     md: &LlmMetadata,
 ) -> Result<EventBuilder, EncodeError> {
     if let Some(s) = md.thread_id.as_deref() {
-        builder = builder
-            .tag(Tag::parse(["llm-thread-id", s]).map_err(|e| EncodeError::Tag(e.to_string()))?);
+        builder = builder.tag(tag(["llm-thread-id", s])?);
     }
     if let Some(s) = md.turn_id.as_deref() {
-        builder = builder
-            .tag(Tag::parse(["llm-turn-id", s]).map_err(|e| EncodeError::Tag(e.to_string()))?);
+        builder = builder.tag(tag(["llm-turn-id", s])?);
     }
     if let Some(n) = md.tool_total_calls {
-        builder = builder.tag(
-            Tag::parse(["llm-tool-total-calls", &n.to_string()])
-                .map_err(|e| EncodeError::Tag(e.to_string()))?,
-        );
+        builder = builder.tag(tag(["llm-tool-total-calls", &n.to_string()])?);
     }
     if let Some(n) = md.tool_total_duration_ms {
-        builder = builder.tag(
-            Tag::parse(["llm-tool-total-duration-ms", &n.to_string()])
-                .map_err(|e| EncodeError::Tag(e.to_string()))?,
-        );
+        builder = builder.tag(tag(["llm-tool-total-duration-ms", &n.to_string()])?);
     }
     if let Some(n) = md.tool_command_calls {
-        builder = builder.tag(
-            Tag::parse(["llm-tool-command-calls", &n.to_string()])
-                .map_err(|e| EncodeError::Tag(e.to_string()))?,
-        );
+        builder = builder.tag(tag(["llm-tool-command-calls", &n.to_string()])?);
     }
     if let Some(n) = md.tool_file_change_calls {
-        builder = builder.tag(
-            Tag::parse(["llm-tool-file-change-calls", &n.to_string()])
-                .map_err(|e| EncodeError::Tag(e.to_string()))?,
-        );
+        builder = builder.tag(tag(["llm-tool-file-change-calls", &n.to_string()])?);
     }
     if let Some(n) = md.tool_mcp_calls {
-        builder = builder.tag(
-            Tag::parse(["llm-tool-mcp-calls", &n.to_string()])
-                .map_err(|e| EncodeError::Tag(e.to_string()))?,
-        );
+        builder = builder.tag(tag(["llm-tool-mcp-calls", &n.to_string()])?);
     }
     if let Some(n) = md.tool_other_calls {
-        builder = builder.tag(
-            Tag::parse(["llm-tool-other-calls", &n.to_string()])
-                .map_err(|e| EncodeError::Tag(e.to_string()))?,
-        );
+        builder = builder.tag(tag(["llm-tool-other-calls", &n.to_string()])?);
     }
     Ok(builder)
 }

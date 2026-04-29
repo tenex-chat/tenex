@@ -74,11 +74,12 @@ pub(crate) fn project_messages(
                     .and_then(|r| r.timestamp)
                     .unwrap_or(i64::MAX);
                 let mut paired: Vec<ToolMessage> = Vec::new();
-                while let Some(front) = tool_msgs.front() {
-                    if order_key(front) < next_user_ts {
-                        paired.push(tool_msgs.pop_front().expect("front exists"));
-                    } else {
-                        break;
+                while tool_msgs
+                    .front()
+                    .is_some_and(|front| order_key(front) < next_user_ts)
+                {
+                    if let Some(tool) = tool_msgs.pop_front() {
+                        paired.push(tool);
                     }
                 }
 

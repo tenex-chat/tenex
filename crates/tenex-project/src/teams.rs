@@ -1,6 +1,6 @@
 use serde::Deserialize;
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// A resolved team entry — members always includes team_lead.
 #[derive(Debug, Clone)]
@@ -30,29 +30,31 @@ struct TeamsFile {
 pub fn load_teams(base_dir: &Path, project_id: Option<&str>) -> Vec<Team> {
     let mut map: HashMap<String, Team> = HashMap::new();
 
-    let global_path = base_dir.join("teams.json");
-    if let Ok(content) = std::fs::read_to_string(&global_path) {
-        if let Ok(file) = serde_json::from_str::<TeamsFile>(&content) {
-            for (name, def) in file.teams {
-                map.insert(name.clone(), normalize(name, def));
-            }
-        }
-    }
+    insert_teams_file(&mut map, base_dir.join("teams.json"));
 
     if let Some(id) = project_id {
-        let project_path = base_dir.join("projects").join(id).join("teams.json");
-        if let Ok(content) = std::fs::read_to_string(&project_path) {
-            if let Ok(file) = serde_json::from_str::<TeamsFile>(&content) {
-                for (name, def) in file.teams {
-                    map.insert(name.clone(), normalize(name, def));
-                }
-            }
-        }
+        insert_teams_file(
+            &mut map,
+            base_dir.join("projects").join(id).join("teams.json"),
+        );
     }
 
     let mut teams: Vec<Team> = map.into_values().collect();
     teams.sort_by(|a, b| a.name.cmp(&b.name));
     teams
+}
+
+fn insert_teams_file(map: &mut HashMap<String, Team>, path: PathBuf) {
+    let Ok(content) = std::fs::read_to_string(path) else {
+        return;
+    };
+    let Ok(file) = serde_json::from_str::<TeamsFile>(&content) else {
+        return;
+    };
+
+    for (name, def) in file.teams {
+        map.insert(name.clone(), normalize(name, def));
+    }
 }
 
 fn normalize(name: String, def: TeamDefinition) -> Team {

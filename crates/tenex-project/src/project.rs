@@ -80,7 +80,7 @@ impl Project {
     }
 
     pub fn agent_by_pubkey(&self, pubkey: &str) -> Result<Option<Agent>> {
-        if !self.member_pubkeys()?.contains(&pubkey.to_string()) {
+        if !self.member_pubkeys()?.iter().any(|pk| pk == pubkey) {
             return Ok(None);
         }
         let path = paths::agent_file(&self.base_dir, pubkey);
@@ -151,11 +151,13 @@ fn extract_p_tag_pubkeys(ev: &RawProjectEvent) -> Vec<String> {
     let mut out = Vec::new();
     for tag in &ev.tags {
         let mut parts = tag.iter();
-        if parts.next().map(String::as_str) == Some("p") {
-            if let Some(pk) = parts.next() {
-                if pk.len() == 64 && pk.bytes().all(|b| b.is_ascii_hexdigit()) {
-                    out.push(pk.clone());
-                }
+        if parts.next().map(String::as_str) != Some("p") {
+            continue;
+        }
+
+        if let Some(pk) = parts.next() {
+            if pk.len() == 64 && pk.bytes().all(|b| b.is_ascii_hexdigit()) {
+                out.push(pk.clone());
             }
         }
     }
@@ -209,13 +211,13 @@ fn read_agent_file(path: &Path, pubkey: &str) -> Result<Agent> {
     let bytes = std::fs::read(path)?;
     let raw: RawStoredAgent = serde_json::from_slice(&bytes)?;
     let signer_ref = raw.nsec.as_ref().map(|n| format!("nsec:{n}"));
+    let slug = raw.slug;
+    let name = raw.name.unwrap_or_else(|| slug.clone().unwrap_or_default());
+    let slug = slug.unwrap_or_else(|| pubkey[..8].to_string());
     Ok(Agent {
         pubkey: pubkey.to_string(),
-        slug: raw.slug.clone().unwrap_or_else(|| pubkey[..8].to_string()),
-        name: raw
-            .name
-            .clone()
-            .unwrap_or_else(|| raw.slug.clone().unwrap_or_default()),
+        slug,
+        name,
         role: raw.role,
         description: raw.description,
         instructions: raw.instructions,

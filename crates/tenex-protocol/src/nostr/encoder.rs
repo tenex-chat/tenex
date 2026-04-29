@@ -4,7 +4,7 @@
 //! randomness). Each intent variant has a private `encode_*` function; the
 //! public [`NostrEncoder::encode`] dispatches on the [`Intent`] enum.
 
-use nostr::{EventBuilder, Kind, Tag, Timestamp};
+use nostr::{EventBuilder, Kind, Timestamp};
 
 use crate::context::EncodingContext;
 use crate::intent::{
@@ -17,7 +17,7 @@ use crate::refs::{ConversationRef, MessageRef};
 use super::kinds;
 use super::tags::{
     add_llm_metadata_tags, add_llm_usage_tags, add_standard_tags, e_agent_definition_tag,
-    e_reply_tag, e_root_tag, forward_branch_team, p_tag, project_a_tag, q_tag,
+    e_reply_tag, e_root_tag, forward_branch_team, p_tag, project_a_tag, q_tag, tag,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -78,8 +78,7 @@ fn encode_completion(
         .as_ref()
         .unwrap_or(&ctx.triggering_principal);
     builder = builder.tag(p_tag(recipient)?);
-    builder = builder
-        .tag(Tag::parse(["status", "completed"]).map_err(|e| EncodeError::Tag(e.to_string()))?);
+    builder = builder.tag(tag(["status", "completed"])?);
 
     if let Some(usage) = intent.usage.as_ref() {
         builder = add_llm_usage_tags(builder, usage)?;
@@ -100,8 +99,7 @@ fn encode_conversation(
     builder = add_conversation_tags(builder, ctx)?;
 
     if intent.is_reasoning {
-        builder =
-            builder.tag(Tag::parse(["reasoning"]).map_err(|e| EncodeError::Tag(e.to_string()))?);
+        builder = builder.tag(tag(["reasoning"])?);
     }
     if let Some(usage) = intent.usage.as_ref() {
         builder = add_llm_usage_tags(builder, usage)?;
@@ -136,9 +134,7 @@ fn encode_delegation(
             builder = builder.tag(p_tag(&d.recipient)?);
 
             if let Some(branch) = d.branch.as_deref() {
-                builder = builder.tag(
-                    Tag::parse(["branch", branch]).map_err(|e| EncodeError::Tag(e.to_string()))?,
-                );
+                builder = builder.tag(tag(["branch", branch])?);
             }
 
             builder = add_standard_tags(builder, ctx)?;
@@ -156,8 +152,7 @@ fn encode_ask(intent: &AskIntent, ctx: &EncodingContext) -> Result<EventBuilder,
     let mut builder = EventBuilder::new(Kind::TextNote, &intent.context);
     builder = add_conversation_tags(builder, ctx)?;
     builder = builder.tag(p_tag(&intent.recipient)?);
-    builder = builder
-        .tag(Tag::parse(["title", &intent.title]).map_err(|e| EncodeError::Tag(e.to_string()))?);
+    builder = builder.tag(tag(["title", &intent.title])?);
 
     for question in &intent.questions {
         let parts = match question {
@@ -180,11 +175,10 @@ fn encode_ask(intent: &AskIntent, ctx: &EncodingContext) -> Result<EventBuilder,
                 v
             }
         };
-        builder = builder.tag(Tag::parse(parts).map_err(|e| EncodeError::Tag(e.to_string()))?);
+        builder = builder.tag(tag(parts)?);
     }
 
-    builder =
-        builder.tag(Tag::parse(["intent", "ask"]).map_err(|e| EncodeError::Tag(e.to_string()))?);
+    builder = builder.tag(tag(["intent", "ask"])?);
     builder = add_standard_tags(builder, ctx)?;
     builder = forward_branch_team(builder, ctx)?;
     Ok(builder)
@@ -195,12 +189,10 @@ fn encode_error(intent: &ErrorIntent, ctx: &EncodingContext) -> Result<EventBuil
     builder = add_conversation_tags(builder, ctx)?;
 
     let error_type = intent.error_type.as_deref().unwrap_or("system");
-    builder = builder
-        .tag(Tag::parse(["error", error_type]).map_err(|e| EncodeError::Tag(e.to_string()))?);
+    builder = builder.tag(tag(["error", error_type])?);
 
     builder = builder.tag(p_tag(&ctx.triggering_principal)?);
-    builder = builder
-        .tag(Tag::parse(["status", "completed"]).map_err(|e| EncodeError::Tag(e.to_string()))?);
+    builder = builder.tag(tag(["status", "completed"])?);
     builder = add_standard_tags(builder, ctx)?;
     builder = forward_branch_team(builder, ctx)?;
     Ok(builder)
@@ -211,15 +203,12 @@ fn encode_lesson(
     ctx: &EncodingContext,
 ) -> Result<EventBuilder, EncodeError> {
     let mut builder = EventBuilder::new(kinds::custom(kinds::AGENT_LESSON), &intent.lesson);
-    builder = builder
-        .tag(Tag::parse(["title", &intent.title]).map_err(|e| EncodeError::Tag(e.to_string()))?);
+    builder = builder.tag(tag(["title", &intent.title])?);
     if let Some(category) = intent.category.as_deref() {
-        builder = builder
-            .tag(Tag::parse(["category", category]).map_err(|e| EncodeError::Tag(e.to_string()))?);
+        builder = builder.tag(tag(["category", category])?);
     }
     for hashtag in &intent.hashtags {
-        builder =
-            builder.tag(Tag::parse(["t", hashtag]).map_err(|e| EncodeError::Tag(e.to_string()))?);
+        builder = builder.tag(tag(["t", hashtag])?);
     }
     if let Some(agent_def) = intent.agent_definition_id.as_ref() {
         builder = builder.tag(e_agent_definition_tag(agent_def)?);
@@ -234,16 +223,14 @@ fn encode_tool_use(
 ) -> Result<EventBuilder, EncodeError> {
     let mut builder = EventBuilder::new(Kind::TextNote, &intent.content);
     builder = add_conversation_tags(builder, ctx)?;
-    builder = builder
-        .tag(Tag::parse(["tool", &intent.tool_name]).map_err(|e| EncodeError::Tag(e.to_string()))?);
+    builder = builder.tag(tag(["tool", &intent.tool_name])?);
 
     if let Some(args) = intent.args_json.as_deref() {
         let tag = if args.len() <= 100_000 {
-            Tag::parse(["tool-args", args])
+            tag(["tool-args", args])
         } else {
-            Tag::parse(["tool-args"])
-        }
-        .map_err(|e| EncodeError::Tag(e.to_string()))?;
+            tag(["tool-args"])
+        }?;
         builder = builder.tag(tag);
     }
 
@@ -269,17 +256,10 @@ fn encode_stream_text_delta(
     builder = builder.tag(project_a_tag(&ctx.project)?);
 
     if let Some(model) = ctx.model.as_deref() {
-        builder = builder
-            .tag(Tag::parse(["llm-model", model]).map_err(|e| EncodeError::Tag(e.to_string()))?);
+        builder = builder.tag(tag(["llm-model", model])?);
     }
-    builder = builder.tag(
-        Tag::parse(["llm-ral", &ctx.ral.to_string()])
-            .map_err(|e| EncodeError::Tag(e.to_string()))?,
-    );
-    builder = builder.tag(
-        Tag::parse(["stream-seq", &intent.sequence.to_string()])
-            .map_err(|e| EncodeError::Tag(e.to_string()))?,
-    );
+    builder = builder.tag(tag(["llm-ral", &ctx.ral.to_string()])?);
+    builder = builder.tag(tag(["stream-seq", &intent.sequence.to_string()])?);
 
     builder = forward_branch_team(builder, ctx)?;
     Ok(builder)
@@ -299,10 +279,7 @@ fn encode_intervention_review(
     let mut builder = EventBuilder::new(Kind::TextNote, content);
 
     builder = builder.tag(p_tag(&intent.target)?);
-    builder = builder.tag(
-        Tag::parse(["context", "intervention-review"])
-            .map_err(|e| EncodeError::Tag(e.to_string()))?,
-    );
+    builder = builder.tag(tag(["context", "intervention-review"])?);
     builder = builder.tag(project_a_tag(&ctx.project)?);
     Ok(builder)
 }
@@ -312,12 +289,8 @@ fn encode_publish_article(
     ctx: &EncodingContext,
 ) -> Result<EventBuilder, EncodeError> {
     let mut builder = EventBuilder::new(kinds::custom(kinds::LONG_FORM_ARTICLE), &intent.content);
-    builder =
-        builder.tag(Tag::parse(["d", &intent.d_tag]).map_err(|e| EncodeError::Tag(e.to_string()))?);
-    builder = builder.tag(
-        Tag::parse(["document", &intent.document_tag])
-            .map_err(|e| EncodeError::Tag(e.to_string()))?,
-    );
+    builder = builder.tag(tag(["d", &intent.d_tag])?);
+    builder = builder.tag(tag(["document", &intent.document_tag])?);
     builder = builder.tag(project_a_tag(&ctx.project)?);
     Ok(builder)
 }
