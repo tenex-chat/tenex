@@ -49,18 +49,18 @@ pub fn render_help_row<W: Write>(
                 stdout,
                 SetAttribute(Attribute::Dim),
                 Print(" • "),
-                SetAttribute(Attribute::Reset),
+                SetAttribute(Attribute::NormalIntensity),
             )?;
         }
         queue!(
             stdout,
             SetAttribute(Attribute::Bold),
             Print(*key),
-            SetAttribute(Attribute::Reset),
+            SetAttribute(Attribute::NormalIntensity),
             Print(" "),
             SetAttribute(Attribute::Dim),
             Print(*label),
-            SetAttribute(Attribute::Reset),
+            SetAttribute(Attribute::NormalIntensity),
         )?;
     }
     queue!(stdout, Print("\r\n"))?;
@@ -97,17 +97,23 @@ mod tests {
     }
 
     #[test]
-    fn embeds_ansi_bold_and_dim_codes() {
+    fn embeds_ansi_bold_and_dim_codes_with_normal_intensity_close() {
         // SGR 1 = bold (chalk.bold opens), SGR 2 = dim (chalk.dim opens).
-        // After each bold/dim we close with crossterm's Attribute::Reset
-        // which emits SGR 0 (full reset). The TS source uses SGR 22
-        // ("neither bold nor faint"); SGR 0 is a strict superset and
-        // produces visually identical output for this pure-text row.
+        // Close codes use crossterm's `Attribute::NormalIntensity` which
+        // emits SGR 22 ("neither bold nor faint") — byte-for-byte
+        // matching TS chalk's bold/dim close. (Earlier port emitted
+        // SGR 0 via `Attribute::Reset`; that produced visually identical
+        // output but byte-different from chalk.)
         let mut buf: Vec<u8> = Vec::new();
         render_help_row(&mut buf, "  ", &[("↑↓", "navigate")]).unwrap();
         let s = String::from_utf8(buf).unwrap();
         assert!(s.contains("\x1b[1m"), "bold open missing: {s:?}");
         assert!(s.contains("\x1b[2m"), "dim open missing: {s:?}");
+        assert!(s.contains("\x1b[22m"), "SGR 22 close missing: {s:?}");
+        assert!(
+            !s.contains("\x1b[0m"),
+            "SGR 0 (full reset) leaked — should be SGR 22 to match chalk: {s:?}",
+        );
     }
 
     /// `@inquirer/select` auto-helpLine starts at column 0 — no indent.

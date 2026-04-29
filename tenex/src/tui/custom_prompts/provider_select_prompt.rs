@@ -619,7 +619,7 @@ fn render_frame<W: Write>(
         Print(" "),
         SetAttribute(Attribute::Bold),
         Print(message),
-        SetAttribute(Attribute::Reset),
+        SetAttribute(Attribute::NormalIntensity),
         Print("\r\n"),
     )?;
     let mut height: u16 = 1;
@@ -660,7 +660,7 @@ fn render_browse<W: Write>(
                 SetForegroundColor(ANSI114_SELECTED),
                 SetAttribute(Attribute::Bold),
                 Print("[✓]"),
-                SetAttribute(Attribute::Reset),
+                SetAttribute(Attribute::NormalIntensity),
                 ResetColor,
                 Print(format!(" {name}")),
             )?;
@@ -684,7 +684,7 @@ fn render_browse<W: Write>(
                 stdout,
                 SetAttribute(Attribute::Dim),
                 Print("[ ]"),
-                SetAttribute(Attribute::Reset),
+                SetAttribute(Attribute::NormalIntensity),
                 Print(format!(" {name}")),
             )?;
             if let Some(hint) = provider_hints.get(pid) {
@@ -692,7 +692,7 @@ fn render_browse<W: Write>(
                     stdout,
                     SetAttribute(Attribute::Dim),
                     Print(format!(" — {hint}")),
-                    SetAttribute(Attribute::Reset),
+                    SetAttribute(Attribute::NormalIntensity),
                 )?;
             }
         }
@@ -714,7 +714,7 @@ fn render_browse<W: Write>(
         SetForegroundColor(ANSI214_ACCENT),
         SetAttribute(Attribute::Bold),
         Print("  Done"),
-        SetAttribute(Attribute::Reset),
+        SetAttribute(Attribute::NormalIntensity),
         ResetColor,
         Print("\r\n"),
     )?;
@@ -757,11 +757,11 @@ fn render_keys<W: Write>(stdout: &mut W, state: &ProviderState) -> io::Result<u1
         Print("  "),
         SetAttribute(Attribute::Bold),
         Print(provider_display_name(target)),
-        SetAttribute(Attribute::Reset),
+        SetAttribute(Attribute::NormalIntensity),
         Print(" "),
         SetAttribute(Attribute::Dim),
         Print("— API Keys"),
-        SetAttribute(Attribute::Reset),
+        SetAttribute(Attribute::NormalIntensity),
         Print("\r\n"),
     )?;
     height += 1;
@@ -773,7 +773,7 @@ fn render_keys<W: Write>(stdout: &mut W, state: &ProviderState) -> io::Result<u1
         Print("  "),
         SetAttribute(Attribute::Dim),
         Print(rule),
-        SetAttribute(Attribute::Reset),
+        SetAttribute(Attribute::NormalIntensity),
         Print("\r\n"),
     )?;
     height += 1;
@@ -794,7 +794,7 @@ fn render_keys<W: Write>(stdout: &mut W, state: &ProviderState) -> io::Result<u1
                 stdout,
                 SetAttribute(Attribute::Dim),
                 Print(format!("  {label}")),
-                SetAttribute(Attribute::Reset),
+                SetAttribute(Attribute::NormalIntensity),
             )?;
         }
         if is_active {
@@ -802,7 +802,7 @@ fn render_keys<W: Write>(stdout: &mut W, state: &ProviderState) -> io::Result<u1
                 stdout,
                 SetAttribute(Attribute::Dim),
                 Print("  d delete"),
-                SetAttribute(Attribute::Reset),
+                SetAttribute(Attribute::NormalIntensity),
             )?;
         }
         queue!(stdout, Print("\r\n"))?;
@@ -820,7 +820,7 @@ fn render_keys<W: Write>(stdout: &mut W, state: &ProviderState) -> io::Result<u1
         stdout,
         SetAttribute(Attribute::Dim),
         Print("+ Add another key"),
-        SetAttribute(Attribute::Reset),
+        SetAttribute(Attribute::NormalIntensity),
         Print("\r\n"),
     )?;
     height += 1;
@@ -836,7 +836,7 @@ fn render_keys<W: Write>(stdout: &mut W, state: &ProviderState) -> io::Result<u1
         stdout,
         SetAttribute(Attribute::Dim),
         Print("← Back"),
-        SetAttribute(Attribute::Reset),
+        SetAttribute(Attribute::NormalIntensity),
         Print("\r\n"),
     )?;
     height += 1;

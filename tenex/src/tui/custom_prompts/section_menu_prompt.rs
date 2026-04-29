@@ -312,7 +312,7 @@ fn render_frame<W: Write>(
         Print(" "),
         SetAttribute(Attribute::Bold),
         Print(message),
-        SetAttribute(Attribute::Reset),
+        SetAttribute(Attribute::NormalIntensity),
         Print("\r\n"),
     )?;
     let mut height: u16 = 1;
@@ -332,7 +332,7 @@ fn render_frame<W: Write>(
                     Print(" "),
                     SetAttribute(Attribute::Dim),
                     Print(format!("── {h} ──")),
-                    SetAttribute(Attribute::Reset),
+                    SetAttribute(Attribute::NormalIntensity),
                     Print("\r\n"),
                 )?;
             }
@@ -363,7 +363,7 @@ fn render_frame<W: Write>(
                     Print(" "),
                     SetAttribute(Attribute::Dim),
                     Print(dashes),
-                    SetAttribute(Attribute::Reset),
+                    SetAttribute(Attribute::NormalIntensity),
                     Print("\r\n"),
                 )?;
             }
@@ -390,7 +390,7 @@ fn render_frame<W: Write>(
                         Print(pfx),
                         SetAttribute(Attribute::Dim),
                         Print("  Back"),
-                        SetAttribute(Attribute::Reset),
+                        SetAttribute(Attribute::NormalIntensity),
                         Print("\r\n"),
                     )?;
                 }

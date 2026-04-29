@@ -308,7 +308,7 @@ fn render_frame<W: Write>(
         Print(" "),
         SetAttribute(Attribute::Bold),
         Print(message),
-        SetAttribute(Attribute::Reset),
+        SetAttribute(Attribute::NormalIntensity),
         Print("\r\n"),
     )?;
     queue!(stdout, Print("\r\n"))?;
@@ -331,7 +331,7 @@ fn render_frame<W: Write>(
             stdout,
             SetAttribute(Attribute::Bold),
             Print(padded_label),
-            SetAttribute(Attribute::Reset),
+            SetAttribute(Attribute::NormalIntensity),
             Print("  "),
         )?;
         let assigned = state.assignments.get(role).cloned().unwrap_or_default();
@@ -339,7 +339,7 @@ fn render_frame<W: Write>(
             stdout,
             SetAttribute(Attribute::Dim),
             Print(assigned),
-            SetAttribute(Attribute::Reset),
+            SetAttribute(Attribute::NormalIntensity),
             Print("\r\n"),
         )?;
         height += 1;
@@ -352,7 +352,7 @@ fn render_frame<W: Write>(
                 SetForegroundColor(AMBER),
                 SetAttribute(Attribute::Dim),
                 Print(role.recommendation()),
-                SetAttribute(Attribute::Reset),
+                SetAttribute(Attribute::NormalIntensity),
                 ResetColor,
                 Print("\r\n"),
             )?;
@@ -393,7 +393,7 @@ fn render_frame<W: Write>(
         SetForegroundColor(ANSI214_ACCENT),
         SetAttribute(Attribute::Bold),
         Print("  Done"),
-        SetAttribute(Attribute::Reset),
+        SetAttribute(Attribute::NormalIntensity),
         ResetColor,
         Print("\r\n"),
     )?;

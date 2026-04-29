@@ -311,7 +311,7 @@ fn render_frame<W: Write>(
         Print(" "),
         SetAttribute(Attribute::Bold),
         Print(message),
-        SetAttribute(Attribute::Reset),
+        SetAttribute(Attribute::NormalIntensity),
         Print("\r\n"),
     )?;
     let mut height: u16 = 1;
@@ -351,7 +351,7 @@ fn render_frame<W: Write>(
         SetForegroundColor(ANSI214_ACCENT),
         SetAttribute(Attribute::Bold),
         Print("  Done"),
-        SetAttribute(Attribute::Reset),
+        SetAttribute(Attribute::NormalIntensity),
         ResetColor,
         Print("\r\n"),
     )?;
@@ -373,7 +373,7 @@ fn render_frame<W: Write>(
             stdout,
             SetAttribute(Attribute::Dim),
             Print("  No installed agents"),
-            SetAttribute(Attribute::Reset),
+            SetAttribute(Attribute::NormalIntensity),
             Print("\r\n"),
         )?;
         height += 1;
@@ -385,7 +385,7 @@ fn render_frame<W: Write>(
                 stdout,
                 SetAttribute(Attribute::Dim),
                 Print(format!("  ↑ {} more", window.start)),
-                SetAttribute(Attribute::Reset),
+                SetAttribute(Attribute::NormalIntensity),
                 Print("\r\n"),
             )?;
             height += 1;
@@ -416,7 +416,7 @@ fn render_frame<W: Write>(
                     stdout,
                     SetAttribute(Attribute::Dim),
                     Print("[ ]"),
-                    SetAttribute(Attribute::Reset),
+                    SetAttribute(Attribute::NormalIntensity),
                 )?;
             }
             queue!(stdout, Print(" "))?;
@@ -433,7 +433,7 @@ fn render_frame<W: Write>(
                 stdout,
                 SetAttribute(Attribute::Dim),
                 Print(format!("  ↓ {} more", items.len() - window.end)),
-                SetAttribute(Attribute::Reset),
+                SetAttribute(Attribute::NormalIntensity),
                 Print("\r\n"),
             )?;
             height += 1;

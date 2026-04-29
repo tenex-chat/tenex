@@ -346,7 +346,7 @@ fn render_frame<W: Write>(
         Print(" "),
         SetAttribute(Attribute::Bold),
         Print(message),
-        SetAttribute(Attribute::Reset),
+        SetAttribute(Attribute::NormalIntensity),
         Print("\r\n"),
     )?;
     queue!(stdout, Print("\r\n"))?;
@@ -354,7 +354,7 @@ fn render_frame<W: Write>(
         stdout,
         SetAttribute(Attribute::Dim),
         Print("  Variants:"),
-        SetAttribute(Attribute::Reset),
+        SetAttribute(Attribute::NormalIntensity),
         Print("\r\n"),
     )?;
     let mut height: u16 = 3;
@@ -388,7 +388,7 @@ fn render_frame<W: Write>(
                 stdout,
                 SetAttribute(Attribute::Dim),
                 Print(" (default)"),
-                SetAttribute(Attribute::Reset),
+                SetAttribute(Attribute::NormalIntensity),
             )?;
         }
         queue!(stdout, Print("\r\n"))?;
@@ -444,7 +444,7 @@ fn render_frame<W: Write>(
             stdout,
             SetAttribute(Attribute::Dim),
             Print("Done (need at least 2 variants)"),
-            SetAttribute(Attribute::Reset),
+            SetAttribute(Attribute::NormalIntensity),
             Print("\r\n"),
         )?;
     } else {
@@ -453,7 +453,7 @@ fn render_frame<W: Write>(
             SetForegroundColor(ANSI214_ACCENT),
             SetAttribute(Attribute::Bold),
             Print("  Done"),
-            SetAttribute(Attribute::Reset),
+            SetAttribute(Attribute::NormalIntensity),
             ResetColor,
             Print("\r\n"),
         )?;

@@ -325,7 +325,7 @@ fn render_frame<W: Write>(
         Print(" "),
         SetAttribute(Attribute::Bold),
         Print(cfg.message),
-        SetAttribute(Attribute::Reset),
+        SetAttribute(Attribute::NormalIntensity),
         Print("\r\n"),
     )?;
 
@@ -397,7 +397,7 @@ fn render_done<W: Write>(stdout: &mut W, message: &str, answer: &str) -> io::Res
         Print(" "),
         SetAttribute(Attribute::Bold),
         Print(message),
-        SetAttribute(Attribute::Reset),
+        SetAttribute(Attribute::NormalIntensity),
         Print(" "),
     )?;
     queue!(stdout, SetForegroundColor(AMBER))?;
