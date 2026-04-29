@@ -21,57 +21,20 @@ export type MockRequestRecord = {
     toolCalls?: string[];
 };
 
-const delegationUserRequest =
+export const delegationUserRequest =
     "Please delegate to worker and ask them to choose one random color. Tell me what they picked.";
 const delegationWorkerPrompt =
     "Choose one random color. Reply with exactly one lowercase color word and no punctuation.";
 export const delegationWorkerCompletionText = "blue";
 
 const colorWords = [
-    "red",
-    "blue",
-    "green",
-    "yellow",
-    "purple",
-    "orange",
-    "pink",
-    "black",
-    "white",
-    "gray",
-    "grey",
-    "brown",
-    "cyan",
-    "magenta",
-    "teal",
-    "lime",
-    "indigo",
-    "violet",
-    "turquoise",
-    "gold",
-    "silver",
-    "maroon",
-    "navy",
-    "cerulean",
-    "lavender",
-    "beige",
-    "coral",
-    "azure",
-    "ochre",
-    "chartreuse",
-    "crimson",
-    "scarlet",
-    "amber",
-    "emerald",
-    "sapphire",
-    "mauve",
-    "aquamarine",
-    "fuchsia",
-    "olive",
-    "plum",
-    "salmon",
-    "peach",
-    "mint",
-    "rose",
+    "red", "blue", "green", "yellow", "purple", "orange", "pink", "black",
+    "white", "gray", "grey", "brown", "cyan", "magenta", "teal", "lime",
+    "indigo", "violet", "turquoise", "gold", "silver", "maroon", "navy",
+    "cerulean", "lavender", "beige", "coral", "azure", "ochre",
+    "chartreuse", "crimson", "scarlet", "amber", "emerald", "sapphire",
+    "mauve", "aquamarine", "fuchsia", "olive", "plum", "salmon", "peach",
+    "mint", "rose",
 ] as const;
 
 const colorChoicePattern = new RegExp(

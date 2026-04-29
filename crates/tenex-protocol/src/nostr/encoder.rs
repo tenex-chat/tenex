@@ -381,7 +381,7 @@ mod tests {
 
     #[test]
     fn completion_has_status_and_p_tag() {
-        let ctx = test_ctx();
+        let mut ctx = test_ctx();
         let intent = CompletionIntent {
             content: "done".into(),
             usage: Some(LlmUsage {
@@ -396,15 +396,18 @@ mod tests {
         let tags = signed_tags(builders.into_iter().next().unwrap());
         assert!(tags.iter().any(|t| t[0] == "status" && t[1] == "completed"));
         assert!(tags.iter().any(|t| t[0] == "p"));
-        assert!(tags
-            .iter()
-            .any(|t| t[0] == "e" && t.len() >= 4 && t[3] == "root"));
-        assert!(tags
-            .iter()
-            .any(|t| t[0] == "llm-prompt-tokens" && t[1] == "100"));
-        assert!(tags
-            .iter()
-            .any(|t| t[0] == "llm-total-tokens" && t[1] == "150"));
+        assert!(
+            tags.iter()
+                .any(|t| t[0] == "e" && t.len() >= 4 && t[3] == "root")
+        );
+        assert!(
+            tags.iter()
+                .any(|t| t[0] == "llm-prompt-tokens" && t[1] == "100")
+        );
+        assert!(
+            tags.iter()
+                .any(|t| t[0] == "llm-total-tokens" && t[1] == "150")
+        );
     }
 
     #[test]
@@ -437,9 +440,10 @@ mod tests {
         let builders = NostrEncoder::encode(&Intent::ToolUse(intent), &ctx).expect("encode");
         let tags = signed_tags(builders.into_iter().next().unwrap());
         assert!(tags.iter().any(|t| t[0] == "tool" && t[1] == "delegate"));
-        assert!(tags
-            .iter()
-            .any(|t| t[0] == "tool-args" && t[1] == "{\"x\":1}"));
+        assert!(
+            tags.iter()
+                .any(|t| t[0] == "tool-args" && t[1] == "{\"x\":1}")
+        );
         assert!(tags.iter().any(|t| t[0] == "q"));
     }
 
@@ -471,13 +475,15 @@ mod tests {
         let builders = NostrEncoder::encode(&Intent::PublishArticle(intent), &ctx).expect("encode");
         assert_eq!(builders.len(), 1);
         let tags = signed_tags(builders.into_iter().next().unwrap());
-        assert!(tags
-            .iter()
-            .any(|t| t[0] == "d" && t[1] == "notes/2024-01-01"));
+        assert!(
+            tags.iter()
+                .any(|t| t[0] == "d" && t[1] == "notes/2024-01-01")
+        );
         assert!(tags.iter().any(|t| t[0] == "document" && t[1] == "notes"));
-        assert!(tags
-            .iter()
-            .any(|t| t[0] == "a" && t[1].starts_with("31933:")));
+        assert!(
+            tags.iter()
+                .any(|t| t[0] == "a" && t[1].starts_with("31933:"))
+        );
         // Must NOT carry conversation threading tags
         assert!(!tags.iter().any(|t| t[0] == "e"));
         assert!(!tags.iter().any(|t| t[0] == "p"));

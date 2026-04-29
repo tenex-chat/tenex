@@ -1,5 +1,6 @@
 import type { Event } from "nostr-tools";
 import {
+    delegationUserRequest,
     delegationWorkerCompletionText,
     extractColorChoice,
     includesColorChoice,
@@ -61,6 +62,9 @@ function evaluateDelegation(events: Event[], context: EvaluateContext): Verdict[
             event.pubkey === context.pmPubkey &&
             hasTag(event, "p", context.workerPubkey)
     );
+    const initialUserEvent = events.find(
+        (event) => event.kind === 1 && event.content === delegationUserRequest
+    );
     const delegateTool = events.find(
         (event) =>
             event.kind === 1 &&
@@ -85,6 +89,9 @@ function evaluateDelegation(events: Event[], context: EvaluateContext): Verdict[
     );
     const pmObservedWorker = pmColorReports[0];
     const pmReportedColor = pmObservedWorker ? extractColorChoice(pmObservedWorker.content) : null;
+    const pmObservedInParentConversation =
+        Boolean(initialUserEvent && pmObservedWorker) &&
+        hasMarkedTag(pmObservedWorker!, "e", initialUserEvent!.id, "root");
     const completedStatus = events.find(
         (event) =>
             event.kind === 1 &&
@@ -112,6 +119,11 @@ function evaluateDelegation(events: Event[], context: EvaluateContext): Verdict[
             name: "PM observed worker completion",
             ok: Boolean(pmObservedWorker) && pmReportedColor === workerColor,
             detail: `Expected first PM color report to repeat ${workerColor ?? "<worker color>"}; saw ${pmReportedColor ?? "<none>"}.`,
+        },
+        {
+            name: "PM observed worker completion in parent conversation",
+            ok: pmObservedInParentConversation,
+            detail: "Expected PM follow-up to keep the original user event as the root e-tag.",
         },
         {
             name: "Agent completion contract includes status=completed",
@@ -346,6 +358,10 @@ function toolArgPath(event: Event): string | undefined {
 
 function hasTag(event: Event, name: string, value?: string): boolean {
     return event.tags.some((tag) => tag[0] === name && (value === undefined || tag[1] === value));
+}
+
+function hasMarkedTag(event: Event, name: string, value: string, marker: string): boolean {
+    return event.tags.some((tag) => tag[0] === name && tag[1] === value && tag[3] === marker);
 }
 
 function tagValue(event: Event, name: string): string | undefined {
