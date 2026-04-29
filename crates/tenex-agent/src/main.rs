@@ -8,6 +8,7 @@ mod home;
 mod hook;
 mod injections;
 mod mock_llm;
+mod oauth_client;
 mod progress_monitor;
 mod project_instructions;
 mod runtime_control;
@@ -53,8 +54,6 @@ use tenex_rag::{EmbedConfig, RagStore};
 use tenex_supervision::heuristics::default_supervisor;
 use tenex_supervision::supervisor::PostCompletionOutcome;
 use tenex_supervision::types::{TodoEntry as SupTodoEntry, TodoStatus as SupTodoStatus};
-use tenex_telegram::composite::CompositeChannel;
-use tenex_telegram::delivery::TelegramContext;
 use tools::{
     DelegateTool, FindSkillsTool, McpProxyTool, RagAddDocumentsTool, RagSearchTool, SkillListTool,
     SkillsSetTool, TodoItem, TodoStatus, ToolRecorder, ToolSet,
@@ -319,29 +318,14 @@ async fn run() -> Result<()> {
         .await
         .context("Failed to parse triggering event from stdin")?;
 
-    // Initialize channel (parses nsec, derives pubkey, signs to NDJSON-stdout)
-    let nostr_channel = Arc::new(
+    // Initialize channel (parses nsec, derives pubkey, signs to NDJSON-stdout).
+    // Telegram delivery used to live here via CompositeChannel; that path is
+    // now owned by `tenex-telegram`, which reads agent-emitted events off the
+    // runtime control socket and renders them to the originating chat.
+    let channel: Arc<dyn Channel> = Arc::new(
         NostrChannel::from_nsec(&agent_config.nsec, StdoutNdjsonSink::new())
             .context("Failed to initialize Nostr channel")?,
     );
-    let channel: Arc<dyn Channel> = if let (Some(tg_cfg), Some(tg_meta)) =
-        (&agent_config.telegram, &envelope.metadata.telegram)
-    {
-        let tg_ctx = TelegramContext {
-            chat_id: tg_meta.chat_id.clone(),
-            message_id: tg_meta.message_id.clone(),
-            thread_id: tg_meta.thread_id.clone(),
-        };
-        let publish_conversation = tg_cfg.publish_conversation_to_telegram.unwrap_or(false);
-        Arc::new(CompositeChannel::new(
-            nostr_channel,
-            tg_cfg.clone(),
-            tg_ctx,
-            publish_conversation,
-        ))
-    } else {
-        nostr_channel
-    };
     let pubkey_hex = match channel.identity() {
         PrincipalRef::Nostr { pubkey, .. } => pubkey.to_hex(),
     };
@@ -940,17 +924,40 @@ async fn run() -> Result<()> {
                             resolved.provider.to_uppercase().replace('-', "_")
                         )
                     })?;
-                    let client =
-                        RecordingClient::new(anthropic::Client::new(&key)?, cassette_recorder.clone());
-                    run_agent!(
-                        client,
-                        &resolved.model,
-                        &system_prompt,
-                        &turn_message,
-                        current_history,
-                        hook.clone(),
-                        tools
-                    )
+                    if oauth_client::is_oauth_token(&key) {
+                        let http_client = oauth_client::build_oauth_http_client(&key);
+                        let client = RecordingClient::new(
+                            anthropic::Client::builder()
+                                .api_key(&key)
+                                .anthropic_betas(oauth_client::OAUTH_BETAS)
+                                .http_client(http_client)
+                                .build()?,
+                            cassette_recorder.clone(),
+                        );
+                        run_agent!(
+                            client,
+                            &resolved.model,
+                            &system_prompt,
+                            &turn_message,
+                            current_history,
+                            hook.clone(),
+                            tools
+                        )
+                    } else {
+                        let client = RecordingClient::new(
+                            anthropic::Client::new(&key)?,
+                            cassette_recorder.clone(),
+                        );
+                        run_agent!(
+                            client,
+                            &resolved.model,
+                            &system_prompt,
+                            &turn_message,
+                            current_history,
+                            hook.clone(),
+                            tools
+                        )
+                    }
                 }
             };
             Ok::<_, anyhow::Error>(response)

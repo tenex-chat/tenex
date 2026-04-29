@@ -2389,6 +2389,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "reqwest-middleware"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "199dda04a536b532d0cc04d7979e39b1c763ea749bf91507017069c00b96056f"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "http",
+ "reqwest 0.13.3",
+ "serde",
+ "thiserror 2.0.18",
+ "tower-service",
+]
+
+[[package]]
 name = "rig-core"
 version = "0.35.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2410,6 +2425,7 @@ dependencies = [
  "ordered-float",
  "pin-project-lite",
  "reqwest 0.13.3",
+ "reqwest-middleware",
  "schemars",
  "serde",
  "serde_json",
@@ -2994,9 +3010,12 @@ dependencies = [
  "dirs-next",
  "futures",
  "glob",
+ "http",
  "indexmap",
  "nostr",
  "regex",
+ "reqwest 0.13.3",
+ "reqwest-middleware",
  "rig-core",
  "serde",
  "serde_json",
