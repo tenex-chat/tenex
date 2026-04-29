@@ -348,25 +348,25 @@ describe("AgentStorage", () => {
             expect(loaded?.default?.model).toBe("anthropic:claude-opus-4");
         });
 
-        it("should update default mcpAccess in storage", async () => {
+        it("should update default mcp in storage", async () => {
             const signer = NDKPrivateKeySigner.generate();
             const agent = createStoredAgent({
                 nsec: signer.nsec,
                 slug: "test-agent",
                 name: "Test Agent",
                 role: "assistant",
-                defaultConfig: { mcpAccess: ["github", "slack"] },
+                defaultConfig: { mcp: ["github", "slack"] },
             });
 
             await storage.saveAgent(agent);
 
             const success = await storage.updateDefaultConfig(signer.pubkey, {
-                mcpAccess: ["github", "notion"],
+                mcp: ["github", "notion"],
             });
             expect(success).toBe(true);
 
             const loaded = await storage.loadAgent(signer.pubkey);
-            expect(loaded?.default?.mcpAccess).toEqual(["github", "notion"]);
+            expect(loaded?.default?.mcp).toEqual(["github", "notion"]);
         });
 
         it("should update top-level Telegram config in storage", async () => {

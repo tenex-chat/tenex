@@ -311,12 +311,12 @@ export function getToolsObject(
 
     effectiveNames = filterDelegateToolsForAgentCategory(effectiveNames, context.agent.category);
 
-    // Separate regular tools (MCP tools are injected via mcpAccess, not via tool names)
+    // Separate regular tools (MCP tools are injected via resolved MCP access, not via tool names)
     const regularTools: ToolName[] = [];
 
     for (const name of effectiveNames) {
         if (name.startsWith("mcp__")) {
-            // mcp__ entries in tool lists are no longer valid; they are injected via mcpAccess
+            // mcp__ entries in tool lists are no longer valid; they are injected via resolved MCP access
             continue;
         } else if (name in toolFactories) {
             // Filter out conversation-required tools when no conversation available
@@ -426,7 +426,7 @@ export function getToolsObject(
         }
     }
 
-    // Inject all MCP tools from servers the agent has access to via mcpAccess
+    // Inject all MCP tools from servers the agent has access to via resolved MCP access
     if ("agent" in context && context.agent?.mcpAccess && context.agent.mcpAccess.length > 0 && "mcpManager" in context && context.mcpManager) {
         try {
             const accessibleServerSlugs = new Set(context.agent.mcpAccess);

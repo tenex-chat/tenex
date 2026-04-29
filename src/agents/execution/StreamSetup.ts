@@ -86,7 +86,7 @@ export async function setupStreamExecution(
         ? await SkillService.getInstance().fetchSkills(requestedSkillIds, skillLookupContext)
         : { skills: [], content: "", toolPermissions: {} };
 
-    // Start MCP servers the agent has access to via mcpAccess.
+    // Start MCP servers the agent has access to via default.mcp.
     // MCP startup is expensive (e.g. chrome-devtools-mcp launches a browser, ~6GB RSS).
     const mcpServerSlugs = context.agent.mcpAccess ?? [];
     if (mcpServerSlugs.length > 0 && "mcpManager" in context && context.mcpManager) {

@@ -44,7 +44,7 @@ export async function createAgentInstance(
 
     const effectiveLLMConfig = storedAgent.default?.model;
     const effectiveAlwaysSkills = storedAgent.default?.skills;
-    const effectiveMcpAccess = storedAgent.default?.mcpAccess;
+    const effectiveMcpAccess = storedAgent.default?.mcp;
 
     // Resolve category before tool assignment so category-specific capability
     // policy applies on the first hydrated instance.
@@ -232,4 +232,3 @@ export async function loadStoredAgentIntoRegistry(
 
     return instance;
 }
-

@@ -24,8 +24,8 @@ export interface AgentDefaultConfig {
     model?: string;
     /** Skill IDs that are always active for this agent across all conversations. Local skill directory IDs are authoritative. */
     skills?: string[];
-    /** MCP server slugs (from mcp.json) this agent can access. */
-    mcpAccess?: string[];
+    /** Project MCP server slugs this agent can access. */
+    mcp?: string[];
 }
 
 /**

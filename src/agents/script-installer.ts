@@ -94,7 +94,7 @@ async function downloadFile(url: string): Promise<Buffer> {
         return Buffer.from(arrayBuffer);
     } catch (error) {
         if (error instanceof Error && error.name === "AbortError") {
-            throw new Error(`Download timed out after ${DOWNLOAD_TIMEOUT_MS}ms`);
+            throw new Error(`Download timed out after ${DOWNLOAD_TIMEOUT_MS}ms`, { cause: error });
         }
         throw error;
     } finally {
@@ -227,7 +227,9 @@ export async function installAgentScripts(
             results.push(result);
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : String(error);
-            throw new Error(`[ScriptInstaller] Failed to install script ${scriptRef.eventId}: ${errorMessage}`);
+            throw new Error(`[ScriptInstaller] Failed to install script ${scriptRef.eventId}: ${errorMessage}`, {
+                cause: error,
+            });
         }
     }
 

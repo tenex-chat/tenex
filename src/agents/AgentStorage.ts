@@ -969,11 +969,11 @@ export class AgentStorage {
             }
         }
 
-        if (updates.mcpAccess !== undefined) {
-            if (updates.mcpAccess.length > 0) {
-                agent.default.mcpAccess = updates.mcpAccess;
+        if (updates.mcp !== undefined) {
+            if (updates.mcp.length > 0) {
+                agent.default.mcp = updates.mcp;
             } else {
-                agent.default.mcpAccess = undefined;
+                agent.default.mcp = undefined;
             }
         }
 

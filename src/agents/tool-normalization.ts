@@ -76,7 +76,7 @@ export function normalizeAgentTools(requestedTools: string[], category?: AgentCa
  * Validate and filter tools.
  *
  * MCP tools (mcp__ prefix) are no longer valid in tool lists — agents declare
- * MCP server access via mcpAccess instead. Any mcp__ entries are dropped with a warning.
+ * MCP server access via default.mcp instead. Any mcp__ entries are dropped with a warning.
  * Other unrecognized tools are also logged as warnings.
  */
 export function validateTools(toolNames: string[]): string[] {
@@ -96,7 +96,7 @@ export function validateTools(toolNames: string[]): string[] {
 
     if (droppedMcpTools.length > 0) {
         logger.warn(
-            `[tool-normalization] Dropping ${droppedMcpTools.length} mcp__ tool(s) — use mcpAccess instead: ${droppedMcpTools.join(", ")}`
+            `[tool-normalization] Dropping ${droppedMcpTools.length} mcp__ tool(s) — use default.mcp instead: ${droppedMcpTools.join(", ")}`
         );
     }
 
@@ -116,7 +116,7 @@ export function validateTools(toolNames: string[]): string[] {
  * Returns final list of valid tool names.
  *
  * MCP tools are no longer resolved here — agents declare server-level access
- * via mcpAccess and tools are injected at execution time.
+ * via default.mcp and tools are injected at execution time.
  */
 export function processAgentTools(requestedTools: string[], category?: AgentCategory): string[] {
     // Step 1: Normalize

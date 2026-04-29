@@ -76,7 +76,7 @@ export class AgentConfigUpdateService {
 
         const hasMcpTags = params.event.tags.some((tag) => tag[0] === "mcp");
         if (hasMcpTags) {
-            defaultUpdates.mcpAccess = params.mcpServerSlugs;
+            defaultUpdates.mcp = params.mcpServerSlugs;
         }
 
         const configUpdated = await agentStorage.updateDefaultConfig(
