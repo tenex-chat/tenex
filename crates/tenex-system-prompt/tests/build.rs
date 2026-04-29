@@ -30,6 +30,7 @@ fn minimal_input<'a>(home: &'a HomeDirectoryInfo<'a>) -> BuildSystemPromptInput<
         home,
         preloaded_skills_block: None,
         telegram_channel_bindings: &[],
+        telegram_chat_context: None,
     }
 }
 
@@ -70,6 +71,7 @@ fn identical_inputs_produce_byte_identical_output() {
         home: &home_a,
         preloaded_skills_block: None,
         telegram_channel_bindings: &[],
+        telegram_chat_context: None,
     });
     let b = build_system_prompt(BuildSystemPromptInput {
         identity_name: "stable",
@@ -88,6 +90,7 @@ fn identical_inputs_produce_byte_identical_output() {
         home: &home_b,
         preloaded_skills_block: None,
         telegram_channel_bindings: &[],
+        telegram_chat_context: None,
     });
     assert_eq!(a, b);
 }
@@ -113,6 +116,7 @@ fn orchestrator_category_skips_env_vars() {
         home: &home,
         preloaded_skills_block: None,
         telegram_channel_bindings: &[],
+        telegram_chat_context: None,
     });
     assert!(!out.contains("<environment-variables>"));
     assert!(out.contains("Orchestrator Guidance"));
@@ -138,6 +142,7 @@ fn includes_root_agents_md_when_supplied() {
         home: &home,
         preloaded_skills_block: None,
         telegram_channel_bindings: &[],
+        telegram_chat_context: None,
     });
     assert!(out.contains("  <agents.md>\n# Project Rules\nUse repo conventions.\n  </agents.md>"));
 }
@@ -162,6 +167,7 @@ fn project_context_renders_project_base_relative_cwd() {
         home: &home,
         preloaded_skills_block: None,
         telegram_channel_bindings: &[],
+        telegram_chat_context: None,
     });
     assert!(out.contains("cwd: $PROJECT_BASE/src"), "output was: {out}");
     assert!(out.contains("root: $PROJECT_BASE"));
@@ -187,6 +193,7 @@ fn project_context_renders_exact_root_as_project_base() {
         home: &home,
         preloaded_skills_block: None,
         telegram_channel_bindings: &[],
+        telegram_chat_context: None,
     });
     assert!(out.contains("cwd: $PROJECT_BASE"), "output was: {out}");
     assert!(!out.contains("cwd: $PROJECT_BASE/"), "should not append slash: {out}");
@@ -212,6 +219,7 @@ fn project_context_does_not_rewrite_sibling_path() {
         home: &home,
         preloaded_skills_block: None,
         telegram_channel_bindings: &[],
+        telegram_chat_context: None,
     });
     assert!(out.contains("cwd: /home/u/other-proj"), "output was: {out}");
     assert!(!out.contains("cwd: $PROJECT_BASE"));
@@ -237,6 +245,7 @@ fn project_context_renders_project_id_and_conversation_id() {
         home: &home,
         preloaded_skills_block: None,
         telegram_channel_bindings: &[],
+        telegram_chat_context: None,
     });
     assert!(out.contains("ID: my-cool-project"), "output was: {out}");
     assert!(out.contains("Conversation ID: deadbeef"), "output was: {out}");
@@ -267,6 +276,7 @@ fn project_context_renders_telegram_channel_bindings() {
         home: &home,
         preloaded_skills_block: None,
         telegram_channel_bindings: &bindings,
+        telegram_chat_context: None,
     });
     assert!(out.contains("<channels>"), "output was: {out}");
     assert!(out.contains(r#"type="dm" id="telegram:chat:12345""#), "output was: {out}");

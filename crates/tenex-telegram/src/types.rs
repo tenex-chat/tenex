@@ -1,5 +1,35 @@
 use serde::{Deserialize, Serialize};
 
+/// Returned by `getChat` — superset of [`TelegramChat`] with full info.
+#[derive(Debug, Clone, Deserialize)]
+pub struct TelegramChatInfo {
+    pub id: i64,
+    #[serde(rename = "type")]
+    pub chat_type: String,
+    pub title: Option<String>,
+    pub username: Option<String>,
+}
+
+/// One entry from `getChatAdministrators`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct TelegramChatMemberAdministrator {
+    /// `"administrator"` or `"creator"`.
+    pub status: String,
+    pub user: TelegramUser,
+    pub custom_title: Option<String>,
+}
+
+/// Returned by `getForumTopic` / `getForumTopicInfo`.
+///
+/// Note: the Telegram Bot API method `getForumTopicInfo` requires the bot to
+/// have `can_manage_topics` permission. This call will fail for bots without
+/// that permission — the caller must handle the error gracefully.
+#[derive(Debug, Clone, Deserialize)]
+pub struct TelegramForumTopic {
+    pub message_thread_id: i64,
+    pub name: String,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct TelegramUpdate {
     pub update_id: i64,

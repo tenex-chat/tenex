@@ -82,6 +82,20 @@ impl TelegramChannelBinding {
     }
 }
 
+/// Plain-data Telegram chat context passed into the system prompt builder.
+/// Defined here (rather than imported from `tenex-telegram`) so
+/// `tenex-system-prompt` has no dependency on the Telegram crate.
+pub struct TelegramChatContextForPrompt {
+    pub chat_title: Option<String>,
+    pub topic_title: Option<String>,
+    /// Pre-formatted administrator strings (display name + optional @handle +
+    /// optional [custom title]).
+    pub admin_names: Vec<String>,
+    pub member_count: Option<i64>,
+    /// Display names / handles of recently observed participants.
+    pub recently_seen: Vec<String>,
+}
+
 pub struct BuildSystemPromptInput<'a> {
     pub identity_name: &'a str,
     pub pubkey_hex: &'a str,
@@ -104,6 +118,9 @@ pub struct BuildSystemPromptInput<'a> {
     pub preloaded_skills_block: Option<&'a str>,
     /// Telegram channel bindings for this agent in the current project.
     pub telegram_channel_bindings: &'a [TelegramChannelBinding],
+    /// Telegram chat context for Fragment 33. `None` when the triggering event
+    /// did not arrive via Telegram.
+    pub telegram_chat_context: Option<TelegramChatContextForPrompt>,
 }
 
 fn render_home_directory(info: &HomeDirectoryInfo) -> String {
@@ -175,6 +192,51 @@ When delegating tasks, a todo list helps you track progress and stay organized.
 - Include anticipated delegations so progress is visible
 - Mark your current task as in_progress when delegating";
 
+const TELEGRAM_DELIVERY_RULES: &str = "## Telegram Delivery Rules
+- To send a Telegram voice reply, output the reserved marker `[[telegram_voice:/absolute/path/to/file.ogg]]` on its own line.
+- Use an absolute local path only, and emit the marker only when the file already exists and is ready to send.
+- Prefer an `.ogg` voice-note file for this marker.
+- If you include prose outside the marker, TENEX will send the voice message first and then send the remaining text as a normal Telegram message.
+- Never explain the marker, quote it back to the user, or include more than one `telegram_voice` marker in the same reply.";
+
+fn render_telegram_chat_context(ctx: &TelegramChatContextForPrompt) -> String {
+    let mut detail_lines: Vec<String> = Vec::new();
+
+    if let Some(title) = &ctx.chat_title {
+        detail_lines.push(format!("- Chat title: {title}"));
+    }
+
+    if let Some(topic) = &ctx.topic_title {
+        detail_lines.push(format!("- Topic: {topic}"));
+    }
+
+    if let Some(count) = ctx.member_count {
+        detail_lines.push(format!("- Member count (Telegram API snapshot): {count}"));
+    }
+
+    if !ctx.admin_names.is_empty() {
+        detail_lines.push(format!(
+            "- Administrators (Telegram API snapshot): {}",
+            ctx.admin_names.join(", ")
+        ));
+    }
+
+    if !ctx.recently_seen.is_empty() {
+        detail_lines.push(format!(
+            "- Recently seen participants (TENEX-local observations): {}",
+            ctx.recently_seen.join(", ")
+        ));
+    }
+
+    if detail_lines.is_empty() {
+        return String::new();
+    }
+
+    let mut lines = vec!["## Telegram Chat Context".to_string()];
+    lines.extend(detail_lines);
+    lines.join("\n")
+}
+
 const AGENT_DIRECTED_MONITORING: &str = "## Monitoring Delegated Work
 
 Delegation is **asynchronous**: after you call `delegate`, stop for the turn. The system automatically re-invokes you when the delegatee completes and returns their response.
@@ -206,6 +268,7 @@ pub fn build_system_prompt(input: BuildSystemPromptInput<'_>) -> String {
         home,
         preloaded_skills_block,
         telegram_channel_bindings,
+        telegram_chat_context,
     } = input;
     let mut parts: Vec<String> = Vec::new();
 
@@ -418,6 +481,19 @@ Creating a todo list helps you stay organized, shows your progress to observers,
         Some(AgentCategory::DomainExpert) | Some(AgentCategory::Worker)
     ) {
         parts.push(AGENT_DIRECTED_MONITORING.to_string());
+    }
+
+    // Fragment 33: Telegram chat context (only when triggered via Telegram)
+    if let Some(ctx) = telegram_chat_context {
+        let rendered = render_telegram_chat_context(&ctx);
+        if !rendered.is_empty() {
+            parts.push(rendered);
+        }
+    }
+
+    // Fragment 34: Telegram delivery rules (when agent has Telegram bindings)
+    if !telegram_channel_bindings.is_empty() {
+        parts.push(TELEGRAM_DELIVERY_RULES.to_string());
     }
 
     parts.join("\n\n")

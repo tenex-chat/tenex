@@ -2,7 +2,8 @@ use anyhow::{Context, Result};
 use serde::Serialize;
 
 use crate::types::{
-    parse_response, TelegramBotCommand, TelegramBotInfo, TelegramMessage, TelegramUpdate,
+    parse_response, TelegramBotCommand, TelegramBotInfo, TelegramChatInfo,
+    TelegramChatMemberAdministrator, TelegramForumTopic, TelegramMessage, TelegramUpdate,
 };
 
 #[derive(Clone)]
@@ -164,6 +165,76 @@ impl BotClient {
             .context("sendVoice request")?;
         let body = resp.text().await.context("sendVoice body")?;
         parse_response::<TelegramMessage>(&body).context("sendVoice parse")
+    }
+
+    /// Fetch full chat info via `getChat`.
+    ///
+    /// Works for groups, supergroups, channels, and private chats.
+    pub async fn get_chat(&self, chat_id: &str) -> Result<TelegramChatInfo> {
+        let resp = self
+            .http
+            .get(self.url("getChat"))
+            .query(&[("chat_id", chat_id)])
+            .send()
+            .await
+            .context("getChat request")?;
+        let body = resp.text().await.context("getChat body")?;
+        parse_response::<TelegramChatInfo>(&body).context("getChat parse")
+    }
+
+    /// Fetch the list of administrators for a group/supergroup/channel via
+    /// `getChatAdministrators`. Not valid for private chats.
+    pub async fn get_chat_administrators(
+        &self,
+        chat_id: &str,
+    ) -> Result<Vec<TelegramChatMemberAdministrator>> {
+        let resp = self
+            .http
+            .get(self.url("getChatAdministrators"))
+            .query(&[("chat_id", chat_id)])
+            .send()
+            .await
+            .context("getChatAdministrators request")?;
+        let body = resp.text().await.context("getChatAdministrators body")?;
+        parse_response::<Vec<TelegramChatMemberAdministrator>>(&body)
+            .context("getChatAdministrators parse")
+    }
+
+    /// Fetch the member count for a group/supergroup/channel via
+    /// `getChatMemberCount`. Not valid for private chats.
+    pub async fn get_chat_member_count(&self, chat_id: &str) -> Result<i64> {
+        let resp = self
+            .http
+            .get(self.url("getChatMemberCount"))
+            .query(&[("chat_id", chat_id)])
+            .send()
+            .await
+            .context("getChatMemberCount request")?;
+        let body = resp.text().await.context("getChatMemberCount body")?;
+        parse_response::<i64>(&body).context("getChatMemberCount parse")
+    }
+
+    /// Fetch forum topic metadata via `getForumTopicInfo`.
+    ///
+    /// Requires the bot to have `can_manage_topics` permission. Returns an
+    /// error if the bot lacks that permission — callers must handle gracefully.
+    pub async fn get_forum_topic_info(
+        &self,
+        chat_id: &str,
+        message_thread_id: &str,
+    ) -> Result<TelegramForumTopic> {
+        let resp = self
+            .http
+            .get(self.url("getForumTopicInfo"))
+            .query(&[
+                ("chat_id", chat_id),
+                ("message_thread_id", message_thread_id),
+            ])
+            .send()
+            .await
+            .context("getForumTopicInfo request")?;
+        let body = resp.text().await.context("getForumTopicInfo body")?;
+        parse_response::<TelegramForumTopic>(&body).context("getForumTopicInfo parse")
     }
 
     /// URL to download a file previously obtained via getFile.
