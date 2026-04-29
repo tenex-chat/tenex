@@ -33,7 +33,7 @@ Canonical spec: `docs/RUST-AGENT-SPEC.md`. Fleet context: `docs/plans/2026-04-28
 ## How to approach changes
 
 1. `cargo build -p tenex-agent && cargo test -p tenex-agent`.
-2. System prompt fragments: `src/prompt.rs`. Match TENEX's `FragmentRegistry` numbering when adding fragments.
+2. System prompt fragments live in `crates/tenex-system-prompt`. Runner-owned prompt inputs such as root `AGENTS.md` loading live in `src/project_instructions.rs`.
 3. Nostr event construction and signing: `src/nostr.rs`. Keep the hook (`NostrHook`) and signer (`AgentSigner`) in sync.
 4. Model/provider resolution: `src/config.rs`. Reads `~/.tenex/llms.json` and `~/.tenex/providers.json`.
 5. Any change to the stdout frame format must be coordinated with the bun `AgentExecutor` and the runtime orchestrator spec.
