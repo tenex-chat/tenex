@@ -181,7 +181,7 @@ writeJson(path.join(agentsDir, `${worker.pubkey}.json`), {
     category: "worker",
     description: "Completes delegated probe tasks",
     instructions:
-        "Complete delegated probe tasks with a concise result. If asked to choose a random color, never call no_response; reply with exactly one color name.",
+        "Complete delegated probe tasks with a concise result. If asked to choose a random color, never call no_response; reply with exactly one lowercase color word and no punctuation.",
     default: { model: llmModelName },
 });
 
