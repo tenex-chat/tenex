@@ -166,7 +166,7 @@ mod tests {
     use indexmap::IndexMap;
     use serde_json::Value;
     use std::sync::atomic::{AtomicU64, Ordering};
-    use tenex_agent_registry::{AgentDoc, generate_nsec_bech32};
+    use tenex_agent_registry::{generate_nsec_bech32, AgentDoc};
 
     fn unique_temp() -> std::path::PathBuf {
         static COUNTER: AtomicU64 = AtomicU64::new(0);

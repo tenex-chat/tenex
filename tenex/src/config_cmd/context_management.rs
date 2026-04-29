@@ -226,12 +226,6 @@ struct CdDefaults {
 
 fn read_cm_defaults(doc: &TenexConfigDoc) -> CmDefaults {
     let block = doc.context_management_block();
-    let bool_or = |key: &str, fallback: bool| -> bool {
-        block
-            .and_then(|b| b.get(key))
-            .and_then(serde_json::Value::as_bool)
-            .unwrap_or(fallback)
-    };
     let u64_or = |key: &str, fallback: u64| -> u64 {
         block
             .and_then(|b| b.get(key))
@@ -303,19 +297,6 @@ fn read_cm_defaults(doc: &TenexConfigDoc) -> CmDefaults {
         strategies_compaction: strat_bool("compaction", true),
         strategies_context_utilization_reminder: strat_bool("contextUtilizationReminder", true),
         strategies_context_window_status: strat_bool("contextWindowStatus", true),
-        // The unused `bool_or` is reserved for future fields that use the
-        // `?? false` pattern (rather than `!== false`); calls above use
-        // `!= Some(false)` directly.
-    }
-    .with_unused(bool_or)
-}
-
-impl CmDefaults {
-    fn with_unused<F>(self, _f: F) -> Self
-    where
-        F: Fn(&str, bool) -> bool,
-    {
-        self
     }
 }
 

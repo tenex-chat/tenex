@@ -33,7 +33,7 @@ use crossterm::cursor::{MoveToColumn, MoveUp};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use crossterm::style::{Attribute, Color, Print, ResetColor, SetAttribute, SetForegroundColor};
 use crossterm::terminal::{Clear, ClearType};
-use crossterm::{QueueableCommand, queue};
+use crossterm::{queue, QueueableCommand};
 use indexmap::IndexMap;
 
 use crate::tui::glyphs;
@@ -696,11 +696,9 @@ mod tests {
         let state = state_with(three_variants(), "fast");
         let lines = compose_lines(&state, "Edit variants");
         // The done row appears between rule and help; check verbatim text.
-        assert!(
-            lines
-                .iter()
-                .any(|l| l.trim_start() == "Done" || l.contains("  Done"))
-        );
+        assert!(lines
+            .iter()
+            .any(|l| l.trim_start() == "Done" || l.contains("  Done")));
     }
 
     #[test]
@@ -709,11 +707,9 @@ mod tests {
         variants.insert("only".into(), variant("m"));
         let state = state_with(variants, "only");
         let lines = compose_lines(&state, "Edit variants");
-        assert!(
-            lines
-                .iter()
-                .any(|l| l.contains("Done (need at least 2 variants)"))
-        );
+        assert!(lines
+            .iter()
+            .any(|l| l.contains("Done (need at least 2 variants)")));
     }
 
     #[test]

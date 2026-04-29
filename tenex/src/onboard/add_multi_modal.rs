@@ -13,14 +13,14 @@
 
 use std::path::Path;
 
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use indexmap::IndexMap;
 use inquire::InquireError;
 
 use crate::onboard::add_configuration::{config_name_validation, standard_config_names};
 use crate::store::llms::{LlmsDoc, MetaConfig, MetaVariant};
 use crate::tui::custom_prompts::variant_list_prompt::{
-    MetaVariantData, VariantListState, VariantOutcome, run as variant_list_run,
+    run as variant_list_run, MetaVariantData, VariantListState, VariantOutcome,
 };
 use crate::tui::{display, prompts};
 

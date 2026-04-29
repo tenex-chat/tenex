@@ -22,16 +22,16 @@ use notify::{
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter};
-use tracing::{Instrument, info, info_span, warn};
+use tracing::{info, info_span, warn, Instrument};
 
-use control::{RuntimeControlState, serve_control_socket};
+use control::{serve_control_socket, RuntimeControlState};
 use tenex_conversations::{
     AgentContextState, ConversationStore, MessageQuery, NewMessage, Project as ConversationsProject,
 };
 use tenex_mcp::{ProjectMcpRuntime, SocketServerConfig};
 use tenex_project::{
-    Agent, Project,
     models::{ProjectAgent, ProjectMetadata},
+    Agent, Project,
 };
 
 use crate::daemon::config;
@@ -2339,13 +2339,11 @@ mod tests {
         write_trace_carrier_to_runtime_state(&mut state, &carrier, "event2", "agent2");
 
         assert_eq!(trace_carrier_from_runtime_state(&state), Some(carrier));
-        assert!(
-            state
-                .get("rustRuntime")
-                .and_then(|v| v.get("consumedMessages"))
-                .and_then(|v| v.get("event1"))
-                .is_some()
-        );
+        assert!(state
+            .get("rustRuntime")
+            .and_then(|v| v.get("consumedMessages"))
+            .and_then(|v| v.get("event1"))
+            .is_some());
     }
 
     #[test]
@@ -2635,16 +2633,14 @@ mod tests {
             ],
         );
 
-        assert!(
-            register_delegation_route_if_needed(
-                &store,
-                &followup,
-                &agent_pubkeys,
-                Some(&parent_job)
-            )
-            .unwrap()
-            .is_none()
-        );
+        assert!(register_delegation_route_if_needed(
+            &store,
+            &followup,
+            &agent_pubkeys,
+            Some(&parent_job)
+        )
+        .unwrap()
+        .is_none());
         assert_eq!(
             conversation_id_from_event(&followup),
             delegation.id.to_hex()

@@ -23,7 +23,7 @@
 
 use std::path::Path;
 
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use inquire::InquireError;
 use serde_json::Value;
 
