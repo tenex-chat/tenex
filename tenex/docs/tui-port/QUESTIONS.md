@@ -88,6 +88,27 @@ add a separate `config_cmd/embed.rs` that ports `embed.ts` and switch
 the `tenex config embed` dispatch to it; keep
 `onboard::embeddings::run` for the Step 6 path.
 
+### `inquire` multi-select inserts an extra space between cursor and checkbox
+
+TS `@inquirer/checkbox/dist/index.js:178` renders each row as
+`${cursor}${checkbox} ${name}` — NO space between cursor and checkbox.
+For active rows that's `❯◉ name` / `❯◯ name`; for inactive
+` ◉ name` / ` ◯ name`.
+
+Rust `inquire` 0.7's MultiSelect backend
+(`ui/backend.rs:413-440`) hard-codes
+`<prefix> <space> <checkbox> <space> <name>` — one extra space
+between the cursor/prefix and the checkbox column. There's no
+`RenderConfig` knob to suppress that interstitial space; fixing this
+would require either patching the inquire crate or replacing
+multi_select with a hand-rolled bespoke prompt (matching what we
+already do for variant_list / role_menu / etc.).
+
+Affects: the OpenClaw import checkbox at `onboard.ts:723` and the
+agent project-membership editor at `AgentManager.ts:418`. Visual
+divergence is one column of horizontal padding per row — not a
+correctness bug.
+
 ## Substrate-blocked surfaces (acknowledged, not stubs)
 
 ### `tenex doctor migrate` — only reports, doesn't migrate

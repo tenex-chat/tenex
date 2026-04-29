@@ -35,10 +35,18 @@ pub fn input<'a>(message: &'a str) -> Text<'a> {
 /// Build a [`Password`] prompt with the TENEX theme and masked-character
 /// display (matches the TS API-key entry behaviour at
 /// `src/llm/utils/provider-setup.ts` — `mask: "*"`, no second confirmation).
+///
+/// TS @inquirer/password (`@inquirer/password/dist/index.js:46-47`)
+/// renders the masked answer as `mask.repeat(value.length)` — the
+/// number of `*` chars equals the password length. Inquire's stock
+/// password formatter is a fixed `"********"` (8 stars regardless of
+/// input length, `prompts/password/mod.rs:134`). Override with a
+/// length-matching formatter to mirror TS exactly.
 pub fn password<'a>(message: &'a str) -> Password<'a> {
     Password::new(message)
         .with_render_config(theme())
         .with_display_mode(inquire::PasswordDisplayMode::Masked)
+        .with_formatter(&|s| "*".repeat(s.chars().count()))
         .without_confirmation()
 }
 
@@ -152,5 +160,28 @@ mod tests {
             }
             other => panic!("expected Invalid(Custom), got {other:?}"),
         }
+    }
+
+    /// Pin the password formatter to length-matching `*` repetition,
+    /// matching `@inquirer/password/dist/index.js:46-47`'s
+    /// `mask.repeat(value.length)`. Inquire's stock formatter returns
+    /// a fixed `"********"` (8 stars).
+    #[test]
+    fn password_formatter_returns_one_star_per_input_char() {
+        // Build the prompt and read its formatter slot. We can't run
+        // the prompt without a TTY, but we can invoke the formatter
+        // directly via `Password::formatter` access through the public
+        // builder API.
+        let prompt = password("nsec:");
+        // Length-matching formatter is set by `password()` via
+        // `with_formatter(...)`. Apply it to a few sample inputs and
+        // assert output is `*` repeated input.chars().count() times.
+        let formatter = prompt.formatter;
+        assert_eq!(formatter(""), "");
+        assert_eq!(formatter("abc"), "***");
+        assert_eq!(formatter("hello world"), "***********");
+        // Multi-byte chars: Rust's chars().count() == codepoint count.
+        // `é` is 1 codepoint (U+00E9 NFC) → 1 star.
+        assert_eq!(formatter("café"), "****");
     }
 }
