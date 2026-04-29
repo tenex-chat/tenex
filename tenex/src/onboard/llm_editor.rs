@@ -230,10 +230,17 @@ fn detail_string_for(doc: &LlmsDoc, name: &str) -> String {
     entry.model().unwrap_or("").to_owned()
 }
 
-/// Compose `<name>  <dim detail>` with embedded ANSI dim escape codes so
-/// the bespoke prompt renders the suffix dim without further wiring.
-/// Matches the TS template at `:188`:
-/// `name: \`${name}  ${chalk.dim(detail)}\``.
+/// Compose `<name> <dim detail>` (single space) with embedded ANSI dim
+/// escape codes so the bespoke prompt renders the suffix dim without
+/// further wiring.
+///
+/// TS template at `LLMConfigEditor.ts:203`:
+/// ```ts
+/// name: `${name} ${chalk.dim(detail)}`,
+/// ```
+/// Note the SINGLE space between `${name}` and the dim-wrapped detail —
+/// not two. (An earlier port-doc comment cited line 188 with two spaces;
+/// that was a misread of the source.)
 fn compose_display_name(name: &str, detail: &str) -> String {
     if detail.is_empty() {
         return name.to_owned();
@@ -241,7 +248,7 @@ fn compose_display_name(name: &str, detail: &str) -> String {
     let mut out = String::with_capacity(name.len() + detail.len() + 8);
     let dim_open = crate::tui::theme::DIM_OPEN;
     let dim_close = crate::tui::theme::DIM_CLOSE;
-    let _ = write!(out, "{name}  {dim_open}{detail}{dim_close}");
+    let _ = write!(out, "{name} {dim_open}{detail}{dim_close}");
     out
 }
 
@@ -381,11 +388,15 @@ mod tests {
 
     #[test]
     fn compose_display_name_embeds_dim_codes_around_detail() {
+        // TS at LLMConfigEditor.ts:203:
+        //   name: `${name} ${chalk.dim(detail)}`,
+        // — SINGLE space between name and the dim-wrapped detail.
         let s = compose_display_name("Sonnet", "anthropic/claude");
-        // Two leading spaces between name and detail; ANSI dim sequences
-        // wrap the detail.
-        assert!(s.contains("Sonnet  "), "got: {s:?}");
-        assert!(s.contains("\x1b[2manthropic/claude\x1b[22m"), "got: {s:?}");
+        assert_eq!(
+            s,
+            "Sonnet \x1b[2manthropic/claude\x1b[22m",
+            "got: {s:?}",
+        );
     }
 
     #[test]
