@@ -64,7 +64,47 @@ pub struct OnboardArgs {
     pub json: bool,
 }
 
+/// Top-level entry. Mirrors the TS catch-all at
+/// `src/commands/onboard.ts:1204-1215`:
+///
+/// ```ts
+/// try { await runOnboarding(options); }
+/// catch (error) {
+///     const errorMessage = error instanceof Error ? error.message : String(error);
+///     if (errorMessage?.includes("SIGINT") || errorMessage?.includes("force closed")) {
+///         process.exit(0);
+///     }
+///     console.error(chalk.red(`Setup failed: ${error}`));
+///     process.exit(1);
+/// }
+/// ```
+///
+/// In Rust most user-cancellation paths (Ctrl-C / Esc inside an inquire
+/// prompt) are caught at the call site and converted into a clean
+/// `Ok(())` return long before reaching this handler. Anything that
+/// bubbles up here is a real failure — surface it with the same red
+/// "Setup failed: …" prefix TS uses.
 pub async fn run(args: OnboardArgs) -> Result<()> {
+    match run_inner(args).await {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            let msg = format!("{e}");
+            // TS catches synthetic cancel-paths from inquirer's force-close
+            // hook and exits silently. Inquire's Rust binding raises
+            // `OperationInterrupted` instead — those are caught at the call
+            // site, so the SIGINT/force-closed substrings only appear here
+            // for the rare TS-style error message that survived translation.
+            if msg.contains("SIGINT") || msg.contains("force closed") {
+                std::process::exit(0);
+            }
+            let red = console::Style::new().red();
+            eprintln!("{}", red.apply_to(format!("Setup failed: {e}")));
+            std::process::exit(1);
+        }
+    }
+}
+
+async fn run_inner(args: OnboardArgs) -> Result<()> {
     let json_mode = args.json;
 
     if !json_mode {
