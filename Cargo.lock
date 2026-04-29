@@ -3019,6 +3019,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "tempfile",
  "tenex-llm-config",
  "thiserror 2.0.18",
  "tokio",
