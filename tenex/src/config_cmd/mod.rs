@@ -14,7 +14,7 @@
 //! - [`telegram`] — `tenex config telegram` (DM allowlist live; per-agent
 //!   bot config requires AgentStorage which is a separate iteration).
 //!
-//! Source: `src/commands/config/index.ts:77-154` (`runConfigMenu` +
+//! Source: `src/commands/config/index.ts:75-151` (`runConfigMenu` +
 //! command registration). The menu is a `while (true)` loop that
 //! re-renders after each submenu returns; on `Back` / Esc / Ctrl-C the
 //! loop exits.
@@ -53,7 +53,7 @@ use crate::tui::custom_prompts::section_menu_prompt::{
 use crate::tui::display;
 
 /// Mirror of the TS `configCommand` subcommand surface
-/// (`src/commands/config/index.ts:125-154`). Bare `tenex config` enters
+/// (`src/commands/config/index.ts:125-151`). Bare `tenex config` enters
 /// the interactive section menu; each named subcommand jumps straight
 /// to the corresponding submenu, matching every `tenex config <X>`
 /// shortcut TS exposes.
@@ -120,7 +120,7 @@ pub enum ConfigCommand {
 impl ConfigCommand {
     /// Stable token used by the section-menu dispatch path. Matches the
     /// values returned by the TS menu rows at
-    /// `src/commands/config/index.ts:33-75` so the same dispatcher
+    /// `src/commands/config/index.ts:32-73` so the same dispatcher
     /// works for both the menu and the direct-subcommand entry.
     fn dispatch_value(&self) -> &'static str {
         match self {
@@ -199,7 +199,7 @@ pub async fn run(args: ConfigArgs) -> Result<()> {
         // Direct subcommand path for flag-less variants — skip the
         // welcome banner and section menu, dispatch straight to the
         // submodule. Matches TS's `tenex config <name>` direct-action
-        // behaviour (`src/commands/config/index.ts:137-153`).
+        // behaviour (`src/commands/config/index.ts:137-151`).
         return dispatch(&base_dir, cmd.dispatch_value()).await;
     }
 
@@ -214,7 +214,7 @@ pub async fn run(args: ConfigArgs) -> Result<()> {
         match section_menu_prompt("Settings", &sections)? {
             SectionMenuResult::Back | SectionMenuResult::Cancelled => return Ok(()),
             SectionMenuResult::Selected(value) => {
-                // TS at config/index.ts:113-115 awaits the subcommand and
+                // TS at config/index.ts:117-122 awaits the subcommand and
                 // continues the menu loop on failure. Each subcommand's own
                 // catch already emitted the red error line (via `dispatch`'s
                 // wrapper); discard the propagated `Err` here so the menu
@@ -398,9 +398,9 @@ fn run_embed_submenu(base_dir: &std::path::Path) -> Result<()> {
 }
 
 /// Build the menu sections verbatim from `MENU_SECTIONS` at
-/// `src/commands/config/index.ts:33-75`. Labels are padded with
-/// trailing spaces to the 16-character slot per `:89` and rendered with
-/// the em-dash separator `"— "` per `:91`.
+/// `src/commands/config/index.ts:32-73`. Labels are padded with
+/// trailing spaces to the 16-character slot per `:87` and rendered with
+/// the em-dash separator `"— "` per `:88`.
 pub fn build_menu_sections() -> Vec<MenuSection> {
     let raw = [
         (
@@ -480,7 +480,7 @@ pub fn build_menu_sections() -> Vec<MenuSection> {
 /// Pad `label` to 16 visible characters, then append `"— "` and the
 /// description.
 ///
-/// Source: `src/commands/config/index.ts:89-91` —
+/// Source: `src/commands/config/index.ts:86-89` —
 /// ```ts
 /// const label = entry.label.padEnd(16);
 /// choices.push({ name: `  ${label}— ${entry.description}`, value: idx });
@@ -600,7 +600,7 @@ mod tests {
 
     #[test]
     fn config_subcommands_count_matches_ts() {
-        // Spec doc 02 §2.4 / TS commands/config/index.ts:137-153 — 15
+        // Spec doc 02 §2.4 / TS commands/config/index.ts:137-151 — 15
         // subcommands attached after the NIP-46 cutover (was 16 before).
         use clap::CommandFactory;
         let cmd = ConfigArgs::command();
@@ -749,7 +749,7 @@ mod tests {
     #[test]
     fn menu_labels_pad_to_at_least_16_chars_before_em_dash() {
         // TS prepends 2 leading spaces inside the choice name
-        // (config/index.ts:89). Plus 16-char-padded label. Total 18
+        // (config/index.ts:88). Plus 16-char-padded label. Total 18
         // chars before "— ".
         let s = build_menu_sections();
         for sec in &s {
@@ -795,7 +795,7 @@ mod tests {
 
     #[test]
     fn format_label_prepends_two_leading_spaces_per_ts_template() {
-        // TS at config/index.ts:89-91 wraps the padded label in a
+        // TS at config/index.ts:86-89 wraps the padded label in a
         // template with TWO leading spaces inside the choice name:
         //   `  ${label}— ${entry.description}`
         // Pin those leading spaces — they're what makes the visible
