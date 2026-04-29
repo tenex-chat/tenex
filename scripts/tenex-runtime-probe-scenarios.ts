@@ -12,6 +12,7 @@ export const availableScenarios = [
     "mcp-tool-basic",
     "acp-worker-basic",
     "agent-config-reload",
+    "project-membership-reload",
 ] as const;
 
 export type ScenarioName = (typeof availableScenarios)[number];
@@ -61,7 +62,9 @@ type ScenarioContext = {
     pool: SimplePool;
     events: Event[];
     relayUrl: string;
+    projectDtag: string;
     projectRef: string;
+    workspaceDir: string;
     conversationDbPath: string;
     pmPubkey: string;
     workerPubkey: string;
@@ -86,6 +89,7 @@ type ScenarioContext = {
         conversationId: string,
         onEvent?: (event: Event) => void
     ) => ConversationMonitor;
+    publishProjectEvent: (agentPubkeys: string[], createdAt?: number) => Promise<Event>;
     configureWorkerForAcp?: () => void;
 };
 
@@ -105,6 +109,9 @@ export function scenarioProjectDtag(name: ScenarioName): string {
     if (name === "agent-config-reload") {
         return "probe-agent-config-reload";
     }
+    if (name === "project-membership-reload") {
+        return "probe-project-membership-reload";
+    }
     return "probe-fs-read-adjustment";
 }
 
@@ -123,6 +130,9 @@ export function pmInstructions(name: ScenarioName): string {
     }
     if (name === "agent-config-reload") {
         return "This scenario verifies runtime agent config reload; remain idle unless directly mentioned.";
+    }
+    if (name === "project-membership-reload") {
+        return "This scenario verifies project membership reload; answer only the exact requested probe phrase.";
     }
     return "Use fs_read one file at a time. If the user corrects the requested total, follow the latest total before finishing.";
 }
@@ -249,6 +259,24 @@ export function mockScenario(name: ScenarioName): unknown {
         };
     }
 
+    if (name === "project-membership-reload") {
+        return {
+            responses: [
+                {
+                    agent: "pm",
+                    contains: "membership check agent1",
+                    content: "membership agent1 active",
+                },
+                {
+                    agent: "worker",
+                    contains: "membership check agent2",
+                    content: "membership agent2 active",
+                },
+            ],
+            defaultContent: "Project membership reload probe did not match expected runtime state.",
+        };
+    }
+
     const mockDelayMs = Number(process.env.TENEX_PROBE_MOCK_DELAY_MS ?? 750);
     return {
         defaultDelayMs: mockDelayMs,
@@ -288,6 +316,8 @@ export async function runScenario(name: ScenarioName, context: ScenarioContext):
         await runAcpWorkerProbe(context);
     } else if (name === "agent-config-reload") {
         await runAgentConfigReloadProbe(context);
+    } else if (name === "project-membership-reload") {
+        await runProjectMembershipReloadProbe(context);
     } else {
         await runFsReadAdjustmentProbe(context);
     }
@@ -480,6 +510,123 @@ async function runAgentConfigReloadProbe(context: ScenarioContext): Promise<void
     context.configureWorkerForAcp?.();
     await context.delay(Number(process.env.TENEX_PROBE_RELOAD_WAIT_MS ?? 1_000));
     await publishAcpWorkerRequest(context);
+}
+
+async function runProjectMembershipReloadProbe(context: ScenarioContext): Promise<void> {
+    const timeoutMs = Number(process.env.TENEX_PROBE_WAIT_MS ?? 12_000);
+    const initialEvent = context.sign(
+        {
+            kind: 1,
+            created_at: context.now(),
+            content: "membership check agent1",
+            tags: [["p", context.pmPubkey]],
+        },
+        context.userSecret
+    );
+    await Promise.all(context.pool.publish([context.relayUrl], initialEvent));
+    await context.waitForObservedEvent(
+        context.events,
+        (event) =>
+            event.kind === 1 &&
+            event.pubkey === context.pmPubkey &&
+            event.content.includes("membership agent1 active"),
+        timeoutMs,
+        "initial agent1 completion"
+    );
+
+    const beforeAddStatus = new Set(
+        context.events.filter((event) => event.kind === 24010).map((event) => event.id)
+    );
+    await context.publishProjectEvent([context.pmPubkey, context.workerPubkey], context.now() + 1);
+    await context.waitForObservedEvent(
+        context.events,
+        (event) =>
+            event.kind === 24010 &&
+            !beforeAddStatus.has(event.id) &&
+            statusAgentSlugs(event).includes("pm") &&
+            statusAgentSlugs(event).includes("worker"),
+        timeoutMs,
+        "project status after adding agent2"
+    );
+
+    const workerEvent = context.sign(
+        {
+            kind: 1,
+            created_at: context.now() + 2,
+            content: "membership check agent2",
+            tags: [["p", context.workerPubkey]],
+        },
+        context.userSecret
+    );
+    await Promise.all(context.pool.publish([context.relayUrl], workerEvent));
+    await context.waitForObservedEvent(
+        context.events,
+        (event) =>
+            event.kind === 1 &&
+            event.pubkey === context.workerPubkey &&
+            event.content.includes("membership agent2 active"),
+        timeoutMs,
+        "agent2 completion after membership add"
+    );
+    await context.waitForRequestRecord(
+        context.requestRecordPath,
+        (records) =>
+            records.some(
+                (record) =>
+                    record.agent === "worker" &&
+                    record.requestDebug.includes(`cwd: ${context.workspaceDir}`)
+            ),
+        timeoutMs,
+        "agent2 prompt with project workspace cwd"
+    );
+
+    await context.delay(1_100);
+    const beforeRemoveStatus = new Set(
+        context.events.filter((event) => event.kind === 24010).map((event) => event.id)
+    );
+    await context.publishProjectEvent([context.pmPubkey], context.now() + 3);
+    await context.waitForObservedEvent(
+        context.events,
+        (event) =>
+            event.kind === 24010 &&
+            !beforeRemoveStatus.has(event.id) &&
+            statusAgentSlugs(event).includes("pm") &&
+            !statusAgentSlugs(event).includes("worker"),
+        timeoutMs,
+        "project status after removing agent2"
+    );
+
+    const removedWorkerEvent = context.sign(
+        {
+            kind: 1,
+            created_at: context.now() + 4,
+            content: "membership check agent2 after removal",
+            tags: [["p", context.workerPubkey]],
+        },
+        context.userSecret
+    );
+    const repliesBefore = context.events.filter(
+        (event) => event.kind === 1 && repliesTo(event, removedWorkerEvent.id)
+    ).length;
+    await Promise.all(context.pool.publish([context.relayUrl], removedWorkerEvent));
+    await context.delay(Number(process.env.TENEX_PROBE_REMOVAL_WAIT_MS ?? 1_500));
+    const repliesAfter = context.events.filter(
+        (event) => event.kind === 1 && repliesTo(event, removedWorkerEvent.id)
+    ).length;
+    if (repliesAfter !== repliesBefore) {
+        throw new Error("removed agent2 direct p-tagged event was still dispatched");
+    }
+}
+
+function statusAgentSlugs(event: Event): string[] {
+    return event.tags
+        .filter((tag) => tag[0] === "agent")
+        .map((tag) => tag[2])
+        .filter((slug): slug is string => typeof slug === "string");
+}
+
+function repliesTo(event: Event, parentId: string): boolean {
+    return event.tags.some((tag) => tag[0] === "e" && tag[1] === parentId);
 }
 
 async function publishAcpWorkerRequest(context: ScenarioContext): Promise<void> {

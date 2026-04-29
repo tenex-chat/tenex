@@ -82,7 +82,8 @@ const projectDtag = scenarioProjectDtag(scenarioName);
 const projectDir = path.join(baseDir, "projects", projectDtag);
 const convDbPath = conversationDbPath(baseDir, projectDtag);
 const agentsDir = path.join(baseDir, "agents");
-const workspaceDir = path.join(runDir, "workspace");
+const projectsBaseDir = path.join(runDir, "project-workspaces");
+const workspaceDir = path.join(projectsBaseDir, projectDtag);
 const artifactPath = path.join(runDir, "events.json");
 const transcriptArtifactPath = path.join(runDir, "conversation-transcripts.json");
 const processOutputArtifactPath = path.join(runDir, "process-output.json");
@@ -122,26 +123,18 @@ const backend = keypair();
 const pm = keypair();
 const worker = keypair();
 
-const projectEvent = sign(
-    {
-        kind: 31933,
-        created_at: now(),
-        content: "",
-        tags: [
-            ["d", projectDtag],
-            ["title", "TENEX runtime probe"],
-            ["p", pm.pubkey],
-            ["p", worker.pubkey],
-        ],
-    },
-    owner.secret
-);
+const initialProjectAgentPubkeys =
+    scenarioName === "project-membership-reload"
+        ? [pm.pubkey]
+        : [pm.pubkey, worker.pubkey];
+const projectEvent = buildProjectEvent(initialProjectAgentPubkeys);
 const projectRef = `31933:${owner.pubkey}:${projectDtag}`;
 
 writeJson(path.join(projectDir, "event.json"), projectEvent);
 writeJson(path.join(baseDir, "config.json"), {
     whitelistedPubkeys: [user.pubkey, owner.pubkey, backend.pubkey],
     tenexPrivateKey: bytesToHex(backend.secret),
+    projectsBase: projectsBaseDir,
     relays: [relayUrl],
     telemetry: { enabled: false },
 });
@@ -178,7 +171,7 @@ writeJson(path.join(agentsDir, `${pm.pubkey}.json`), {
     category: "orchestrator",
     description: "Delegates probe tasks to workers",
     instructions: pmInstructions(scenarioName),
-    working_directory: workspaceDir,
+    ...(scenarioName === "project-membership-reload" ? {} : { working_directory: workspaceDir }),
     default:
         scenarioName === "mcp-tool-basic"
             ? { model: llmModelName, mcp: ["probe"] }
@@ -267,7 +260,9 @@ try {
         pool,
         events,
         relayUrl,
+        projectDtag,
         projectRef,
+        workspaceDir,
         conversationDbPath: convDbPath,
         pmPubkey: pm.pubkey,
         workerPubkey: worker.pubkey,
@@ -278,6 +273,11 @@ try {
         delay,
         waitForObservedEvent,
         waitForRequestRecord,
+        publishProjectEvent: async (agentPubkeys, createdAt) => {
+            const event = buildProjectEvent(agentPubkeys, createdAt);
+            await Promise.all(pool.publish([relayUrl], event));
+            return event;
+        },
         configureWorkerForAcp: () => {
             const workerAgentPath = path.join(agentsDir, `${worker.pubkey}.json`);
             const agent = JSON.parse(readFileSync(workerAgentPath, "utf8")) as Record<string, unknown>;
@@ -491,6 +491,23 @@ function buildAcpProbeRuntime(): Record<string, unknown> {
             TENEX_PROBE_ACP_RESPONSE: `haiku acp worker completed with model ${model}`,
         },
     };
+}
+
+function buildProjectEvent(agentPubkeys: string[], createdAt = now()): Event {
+    return sign(
+        {
+            kind: 31933,
+            created_at: createdAt,
+            content: "",
+            tags: [
+                ["d", projectDtag],
+                ["title", "TENEX runtime probe"],
+                ["client", "tenex-runtime-probe"],
+                ...agentPubkeys.map((pubkey) => ["p", pubkey]),
+            ],
+        },
+        owner.secret
+    );
 }
 
 function positionalArgs(args: string[]): string[] {

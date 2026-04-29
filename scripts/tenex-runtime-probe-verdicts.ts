@@ -44,23 +44,112 @@ export function evaluate(
     if (name === "acp-worker-basic" || name === "agent-config-reload") {
         return [...commonVerdicts, ...evaluateAcpWorker(events, context)];
     }
+    if (name === "project-membership-reload") {
+        return [...commonVerdicts, ...evaluateProjectMembershipReload(events, requestRecords, context)];
+    }
     return [...commonVerdicts, ...evaluateFsReadAdjustment(events, requestRecords, context)];
+}
+
+function evaluateProjectMembershipReload(
+    events: Event[],
+    requestRecords: MockRequestRecord[],
+    context: EvaluateContext
+): Verdict[] {
+    const statusEvents = events.filter((event) => event.kind === 24010);
+    const statusWithBoth = statusEvents.find((event) => {
+        const slugs = statusAgentSlugs(event);
+        return slugs.includes("pm") && slugs.includes("worker");
+    });
+    const statusWithoutWorker = statusEvents.find((event) => {
+        const slugs = statusAgentSlugs(event);
+        return slugs.includes("pm") && !slugs.includes("worker");
+    });
+    const pmCompletion = events.find(
+        (event) =>
+            event.kind === 1 &&
+            event.pubkey === context.pmPubkey &&
+            event.content.includes("membership agent1 active")
+    );
+    const workerCompletion = events.find(
+        (event) =>
+            event.kind === 1 &&
+            event.pubkey === context.workerPubkey &&
+            event.content.includes("membership agent2 active")
+    );
+    const workerCwdRecord = requestRecords.find(
+        (record) =>
+            record.agent === "worker" &&
+            context.workspaceDir !== undefined &&
+            record.requestDebug.includes(`cwd: ${context.workspaceDir}`)
+    );
+    const removedWorkerRequest = events.find(
+        (event) => event.kind === 1 && event.content === "membership check agent2 after removal"
+    );
+    const removedWorkerReplies = removedWorkerRequest
+        ? events.filter((event) => event.kind === 1 && repliesTo(event, removedWorkerRequest.id))
+        : [];
+
+    return [
+        {
+            name: "Initial agent1 received project membership request",
+            ok: Boolean(pmCompletion),
+            detail: "Expected pm/agent1 completion before adding agent2.",
+        },
+        {
+            name: "Project status reflected added agent2",
+            ok: Boolean(statusWithBoth),
+            detail: "Expected a 24010 status with pm and worker agent tags.",
+        },
+        {
+            name: "Added agent2 received direct p-tagged request",
+            ok: Boolean(workerCompletion),
+            detail: "Expected worker/agent2 completion after 31933 add.",
+        },
+        {
+            name: "Agent prompt used project workspace cwd",
+            ok: Boolean(workerCwdRecord),
+            detail: `Expected worker prompt to contain cwd: ${context.workspaceDir ?? "<workspace>"}.`,
+        },
+        {
+            name: "Project status reflected removed agent2",
+            ok: Boolean(statusWithoutWorker),
+            detail: "Expected a 24010 status with pm and without worker after 31933 removal.",
+        },
+        {
+            name: "Removed agent2 direct request was not dispatched",
+            ok: Boolean(removedWorkerRequest) && removedWorkerReplies.length === 0,
+            detail: `Expected no agent replies to removed agent2 request; saw ${removedWorkerReplies.length}.`,
+        },
+    ];
+}
+
+function statusAgentSlugs(event: Event): string[] {
+    return event.tags
+        .filter((tag) => tag[0] === "agent")
+        .map((tag) => tag[2])
+        .filter((slug): slug is string => typeof slug === "string");
+}
+
+function repliesTo(event: Event, parentId: string): boolean {
+    return event.tags.some((tag) => tag[0] === "e" && tag[1] === parentId);
 }
 
 function evaluateProjectStatusModelTag(events: Event[], context: EvaluateContext): Verdict {
     const statusEvents = events.filter((event) => event.kind === 24010);
-    const modelTag = statusEvents
+    const modelTags = statusEvents
         .flatMap((event) => event.tags)
-        .find((tag) => tag[0] === "model" && tag[1] === context.modelName);
-    const agents = modelTag?.slice(2) ?? [];
+        .filter((tag) => tag[0] === "model" && tag[1] === context.modelName);
     const expectedAgents = ["pm", "worker"];
+    const modelTag = modelTags.find((tag) =>
+        expectedAgents.every((agent) => tag.slice(2).includes(agent))
+    );
 
     return {
         name: "Project status publishes model access",
-        ok: Boolean(modelTag) && expectedAgents.every((agent) => agents.includes(agent)),
+        ok: Boolean(modelTag),
         detail:
             `Expected kind:24010 model tag for ${context.modelName} with pm and worker; ` +
-            `saw ${modelTag ? JSON.stringify(modelTag) : "<none>"}.`,
+            `saw ${modelTags.length > 0 ? modelTags.map((tag) => JSON.stringify(tag)).join(", ") : "<none>"}.`,
     };
 }
 

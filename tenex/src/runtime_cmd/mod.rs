@@ -34,9 +34,11 @@ use tenex_project::{
 
 use crate::daemon::config;
 use crate::nostr_pub::{backend_signer, operations_status, project_status};
-use crate::store::resolve_base_dir;
+use crate::store::tenex_config::TenexConfigDoc;
+use crate::store::{atomic, resolve_base_dir};
 
 const DRIVER_STALE_AFTER_MS: i64 = 10 * 60 * 1000;
+const PROJECT_KIND: u16 = 31933;
 
 #[derive(Parser, Clone)]
 pub struct RuntimeArgs {
@@ -55,6 +57,7 @@ struct RuntimeShared {
     project_addr: String,
     whitelisted_pubkeys: Vec<String>,
     project_id: String,
+    project_dir: PathBuf,
     base_dir: PathBuf,
     agent_binary: PathBuf,
     agent_acp_binary: PathBuf,
@@ -99,6 +102,7 @@ impl RuntimeAgentSnapshot {
 #[derive(Clone)]
 struct RuntimeSubscriptionIds {
     project: SubscriptionId,
+    project_definition: SubscriptionId,
     directed: SubscriptionId,
     stop: SubscriptionId,
 }
@@ -107,6 +111,9 @@ impl RuntimeSubscriptionIds {
     fn new(project_id: &str) -> Self {
         Self {
             project: SubscriptionId::new(format!("tenex-runtime-{project_id}-project")),
+            project_definition: SubscriptionId::new(format!(
+                "tenex-runtime-{project_id}-project-definition"
+            )),
             directed: SubscriptionId::new(format!("tenex-runtime-{project_id}-directed")),
             stop: SubscriptionId::new(format!("tenex-runtime-{project_id}-stop")),
         }
@@ -115,6 +122,7 @@ impl RuntimeSubscriptionIds {
 
 struct RuntimeFilters {
     project: Filter,
+    project_definition: Filter,
     directed: Filter,
     stop: Filter,
 }
@@ -348,6 +356,8 @@ pub async fn run(args: RuntimeArgs) -> Result<()> {
         .owner_pubkey
         .as_deref()
         .context("project metadata has no owner_pubkey")?;
+    let owner_key = PublicKey::from_hex(owner_pubkey)
+        .with_context(|| format!("invalid project owner pubkey '{}'", owner_pubkey))?;
     let project_addr = format!("31933:{}:{}", owner_pubkey, meta.d_tag);
 
     let backend_keys = match backend_signer::ensure_backend_keys(&base_dir) {
@@ -362,7 +372,14 @@ pub async fn run(args: RuntimeArgs) -> Result<()> {
     subscribe_runtime_filters(
         &client,
         &subscription_ids,
-        build_runtime_filters(&authors, &project_addr, since, &agent_snapshot),
+        build_runtime_filters(
+            &authors,
+            &project_addr,
+            owner_key,
+            &meta.d_tag,
+            since,
+            &agent_snapshot,
+        ),
     )
     .await?;
     info!("subscriptions active");
@@ -410,7 +427,10 @@ pub async fn run(args: RuntimeArgs) -> Result<()> {
 
     let agent_binary = find_agent_binary();
     let agent_acp_binary = find_agent_acp_binary();
-    let project_dir = std::env::current_dir().context("resolving project working directory")?;
+    let project_dir = resolve_project_working_dir(&base_dir, &meta.d_tag)
+        .with_context(|| format!("resolving project working directory for '{}'", meta.d_tag))?;
+    std::fs::create_dir_all(&project_dir)
+        .with_context(|| format!("creating project directory {}", project_dir.display()))?;
     let mcp_runtime = ProjectMcpRuntime::load(&project_dir)
         .with_context(|| format!("loading project MCP config from {}", project_dir.display()))?;
     let configured_mcp_servers = mcp_runtime.configured_server_names();
@@ -428,6 +448,7 @@ pub async fn run(args: RuntimeArgs) -> Result<()> {
         project_addr: project_addr.clone(),
         whitelisted_pubkeys: cfg.whitelisted_pubkeys.clone(),
         project_id: meta.d_tag.clone(),
+        project_dir: project_dir.clone(),
         base_dir: base_dir.clone(),
         agent_binary,
         agent_acp_binary,
@@ -470,6 +491,8 @@ pub async fn run(args: RuntimeArgs) -> Result<()> {
                             &subscription_ids,
                             &authors,
                             &project_addr,
+                            owner_key,
+                            &meta.d_tag,
                             since,
                             &meta,
                         )
@@ -486,6 +509,23 @@ pub async fn run(args: RuntimeArgs) -> Result<()> {
                 match result {
                     Ok(RelayPoolNotification::Event { event, .. }) => {
                         if !mark_seen(&shared.seen, event.id) {
+                            continue;
+                        }
+                        if event.kind == Kind::Custom(PROJECT_KIND) {
+                            if let Err(e) = handle_project_definition_update(
+                                &shared,
+                                &subscription_ids,
+                                &authors,
+                                &project_addr,
+                                owner_key,
+                                &meta.d_tag,
+                                since,
+                                &event,
+                            )
+                            .await
+                            {
+                                warn!(event_id = %event.id.to_hex()[..8], error = %e, "project definition update failed");
+                            }
                             continue;
                         }
                         if event.kind == Kind::Custom(tenex_protocol::nostr::kinds::STOP_COMMAND) {
@@ -566,9 +606,19 @@ pub async fn run(args: RuntimeArgs) -> Result<()> {
     Ok(())
 }
 
+fn resolve_project_working_dir(base_dir: &Path, project_dtag: &str) -> Result<PathBuf> {
+    let config = TenexConfigDoc::load(base_dir)?;
+    let projects_base = config
+        .projects_base()
+        .unwrap_or_else(crate::onboard::commit::default_projects_base);
+    Ok(crate::utils::path_expand::resolve_path(&projects_base).join(project_dtag))
+}
+
 fn build_runtime_filters(
     authors: &[PublicKey],
     project_addr: &str,
+    owner: PublicKey,
+    project_dtag: &str,
     since: Timestamp,
     snapshot: &RuntimeAgentSnapshot,
 ) -> RuntimeFilters {
@@ -586,6 +636,10 @@ fn build_runtime_filters(
             .authors(authors.to_vec())
             .custom_tags(SingleLetterTag::lowercase(Alphabet::A), [project_addr])
             .since(since),
+        project_definition: Filter::new()
+            .kind(Kind::Custom(PROJECT_KIND))
+            .author(owner)
+            .custom_tags(SingleLetterTag::lowercase(Alphabet::D), [project_dtag]),
         directed: Filter::new()
             .kind(Kind::TextNote)
             .authors(p_authors)
@@ -604,8 +658,23 @@ async fn subscribe_runtime_filters(
     ids: &RuntimeSubscriptionIds,
     filters: RuntimeFilters,
 ) -> Result<()> {
+    for id in [
+        &ids.project,
+        &ids.project_definition,
+        &ids.directed,
+        &ids.stop,
+    ] {
+        client.unsubscribe(id).await;
+    }
     client
         .subscribe_with_id(ids.project.clone(), filters.project, None)
+        .await?;
+    client
+        .subscribe_with_id(
+            ids.project_definition.clone(),
+            filters.project_definition,
+            None,
+        )
         .await?;
     client
         .subscribe_with_id(ids.directed.clone(), filters.directed, None)
@@ -629,6 +698,8 @@ async fn reload_agent_snapshot(
     subscription_ids: &RuntimeSubscriptionIds,
     authors: &[PublicKey],
     project_addr: &str,
+    owner: PublicKey,
+    project_dtag: &str,
     since: Timestamp,
     meta: &ProjectMetadata,
 ) -> Result<()> {
@@ -643,7 +714,7 @@ async fn reload_agent_snapshot(
     subscribe_runtime_filters(
         &shared.client,
         subscription_ids,
-        build_runtime_filters(authors, project_addr, since, &snapshot),
+        build_runtime_filters(authors, project_addr, owner, project_dtag, since, &snapshot),
     )
     .await?;
     publish_project_status_now(shared, meta).await;
@@ -653,6 +724,126 @@ async fn reload_agent_snapshot(
     info!(
         agents = snapshot.agents.len(),
         added, removed, "reloaded agent configuration"
+    );
+    Ok(())
+}
+
+async fn handle_project_definition_update(
+    shared: &RuntimeShared,
+    subscription_ids: &RuntimeSubscriptionIds,
+    authors: &[PublicKey],
+    project_addr: &str,
+    owner: PublicKey,
+    project_dtag: &str,
+    since: Timestamp,
+    event: &Event,
+) -> Result<()> {
+    if event.pubkey != owner || project_definition_dtag(event).as_deref() != Some(project_dtag) {
+        return Ok(());
+    }
+    let persisted = persist_newer_project_definition(shared, project_dtag, event)?;
+    if !persisted {
+        return Ok(());
+    }
+
+    reload_project_membership_snapshot(
+        shared,
+        subscription_ids,
+        authors,
+        project_addr,
+        owner,
+        project_dtag,
+        since,
+    )
+    .await?;
+    info!(
+        event_id = %event.id.to_hex()[..8],
+        project = project_dtag,
+        "reloaded project definition"
+    );
+    Ok(())
+}
+
+fn project_definition_dtag(event: &Event) -> Option<String> {
+    let d_kind = TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::D));
+    event
+        .tags
+        .iter()
+        .find(|tag| tag.kind() == d_kind)
+        .and_then(|tag| tag.content().map(str::to_owned))
+}
+
+fn persist_newer_project_definition(
+    shared: &RuntimeShared,
+    project_dtag: &str,
+    event: &Event,
+) -> Result<bool> {
+    let current = Project::open(project_dtag, &shared.base_dir)
+        .with_context(|| format!("opening project '{}'", project_dtag))?
+        .metadata()
+        .with_context(|| format!("reading project metadata for '{}'", project_dtag))?;
+    let incoming_created_at = event.created_at.as_secs() as i64;
+    if current
+        .and_then(|meta| meta.ingested_at)
+        .is_some_and(|current_created_at| current_created_at >= incoming_created_at)
+    {
+        return Ok(false);
+    }
+
+    let path = shared
+        .base_dir
+        .join("projects")
+        .join(project_dtag)
+        .join("event.json");
+    atomic::write(&path, event.as_json().as_bytes())
+        .with_context(|| format!("persisting project event {}", path.display()))?;
+    Ok(true)
+}
+
+async fn reload_project_membership_snapshot(
+    shared: &RuntimeShared,
+    subscription_ids: &RuntimeSubscriptionIds,
+    authors: &[PublicKey],
+    project_addr: &str,
+    owner: PublicKey,
+    project_dtag: &str,
+    since: Timestamp,
+) -> Result<()> {
+    let project = Project::open(project_dtag, &shared.base_dir)
+        .with_context(|| format!("opening project '{}'", project_dtag))?;
+    let snapshot = RuntimeAgentSnapshot::load(&project)?;
+    if snapshot.agents.is_empty() {
+        anyhow::bail!(
+            "project '{}' has no readable agents after project definition reload",
+            project_dtag
+        );
+    }
+
+    let old_pubkeys = shared.agent_pubkeys();
+    let new_pubkeys = snapshot.agent_pubkeys.clone();
+    {
+        let mut current = shared.agent_snapshot.write().unwrap();
+        *current = snapshot.clone();
+    }
+
+    subscribe_runtime_filters(
+        &shared.client,
+        subscription_ids,
+        build_runtime_filters(authors, project_addr, owner, project_dtag, since, &snapshot),
+    )
+    .await?;
+
+    let project_meta = project
+        .metadata()
+        .context("reading reloaded project metadata")?
+        .context("reloaded project metadata is missing")?;
+    publish_project_status_now(shared, &project_meta).await;
+
+    let added = new_pubkeys.difference(&old_pubkeys).count();
+    let removed = old_pubkeys.difference(&new_pubkeys).count();
+    info!(
+        agents = snapshot.agents.len(),
+        added, removed, "reloaded project membership"
     );
     Ok(())
 }
@@ -843,6 +1034,13 @@ fn select_dispatch_target(
             child_conversation = %route.child_conversation_id,
             "delegation completion parent agent is not in this runtime"
         );
+    }
+
+    if has_p_tags(event)
+        && !targets_project_agent(event, &snapshot.agent_pubkeys)
+        && !targets_project_address(event, &shared.project_addr)
+    {
+        anyhow::bail!("directed event does not target a current project agent");
     }
 
     let agent = select_agent(event, &snapshot.agents, &snapshot.project_agents)?.clone();
@@ -1424,6 +1622,21 @@ fn targets_project_agent(event: &Event, agent_pubkeys: &HashSet<String>) -> bool
         .any(|pubkey| agent_pubkeys.contains(pubkey))
 }
 
+fn has_p_tags(event: &Event) -> bool {
+    let p_kind = TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::P));
+    event.tags.iter().any(|tag| tag.kind() == p_kind)
+}
+
+fn targets_project_address(event: &Event, project_addr: &str) -> bool {
+    let a_kind = TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::A));
+    event
+        .tags
+        .iter()
+        .filter(|tag| tag.kind() == a_kind)
+        .filter_map(|tag| tag.content())
+        .any(|addr| addr == project_addr)
+}
+
 fn select_agent<'a>(
     event: &Event,
     agents: &'a [Agent],
@@ -1480,6 +1693,7 @@ async fn run_agent(shared: Arc<RuntimeShared>, job: DispatchJob, key: DispatchKe
         .env("TENEX_BASE_DIR", &shared.base_dir)
         .env("TENEX_EXECUTION_ID", &execution_id)
         .env("TENEX_RUNTIME_CONTROL_SOCKET", shared.control.socket_path())
+        .current_dir(&shared.project_dir)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
