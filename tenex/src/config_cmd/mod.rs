@@ -767,14 +767,46 @@ mod tests {
 
     #[test]
     fn menu_descriptions_match_ts_verbatim() {
+        // Pin every description against TS `commands/config/index.ts:32-73`
+        // — drift in any of the 15 entries would silently change the
+        // user-facing config menu without test coverage.
         let s = build_menu_sections();
-        // Spot-check a few from spec 02 §3.3.
-        let providers = &s[0].entries[0];
-        assert!(providers.label.contains("API keys and connections"));
-        let llms = &s[0].entries[1];
-        assert!(llms.label.contains("Model configurations"));
-        let identity = &s[4].entries[0];
-        assert!(identity.label.contains("Authorized pubkeys"));
+        // Source-order: AI(4), Agents(3), Network(1), Conversations(2),
+        // Advanced(5).
+        let descriptions: Vec<&str> = vec![
+            "API keys and connections",                  // 0.0 Providers
+            "Model configurations",                      // 0.1 LLMs
+            "Which model handles what task",             // 0.2 Roles
+            "Text embedding model",                      // 0.3 Embeddings
+            "Route ask() through an agent first",        // 1.0 Escalation
+            "Auto-review when you're idle",              // 1.1 Intervention
+            "Agent bot transport and global DM access",  // 1.2 Telegram
+            "Nostr relay connections",                   // 2.0 Relays
+            "Auto-summary timing",                       // 3.0 Summarization
+            "Context management settings",               // 3.1 Context
+            "Authorized pubkeys",                        // 4.0 Identity
+            "Global prompt for all projects",            // 4.1 System Prompt
+            "File paths and storage",                    // 4.2 Paths
+            "Log level and file path",                   // 4.3 Logging
+            "OpenTelemetry tracing",                     // 4.4 Telemetry
+        ];
+        let actual: Vec<String> = s
+            .iter()
+            .flat_map(|sec| sec.entries.iter().map(|e| e.label.clone()))
+            .collect();
+        assert_eq!(
+            actual.len(),
+            descriptions.len(),
+            "menu entry count mismatch: expected 15, got {}",
+            actual.len(),
+        );
+        for (i, desc) in descriptions.iter().enumerate() {
+            assert!(
+                actual[i].contains(desc),
+                "entry {i} missing TS description {desc:?}: got {label:?}",
+                label = actual[i],
+            );
+        }
     }
 
     #[test]
