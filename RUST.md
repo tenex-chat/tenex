@@ -78,6 +78,7 @@ Spawned by `tenex runtime` per conversation turn via `tenex-agent <agent.json>` 
 - **Scheduling tools**: `schedule_task` (write one-off or recurring tasks to `schedules.json` via `tenex-scheduler` storage API), `kill` (cancel a scheduled task by ID; agent/shell kills require TS runtime in-process state)
 - **Model override**: `change_model` (persist `meta_model_variant` to `AgentContextState`; resolved on next invocation — accepts named preset, `provider:model`, or `provider/model`)
 - **Silent completion**: `no_response` (sets `Arc<AtomicBool>` flag; main loop skips final `ConversationIntent` emission — no Nostr event published)
+- **Report publishing**: `report_publish` (publish markdown files as NIP-23 long-form articles — kind:30023 — via `PublishArticleIntent`; accepts file or recursive directory; path-traversal-safe)
 - Provider dispatch: Anthropic, OpenAI, OpenRouter, Ollama (via `rig-core`)
 - LLM config resolution from `~/.tenex/llms.json` + `~/.tenex/providers.json`
 - Teams support: loads `teams.json`, renders `<teams-context>` fragment, routes delegation by team name

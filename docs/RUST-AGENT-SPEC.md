@@ -470,6 +470,15 @@ No parameters.
 
 Sets an `Arc<AtomicBool>` flag in the main loop. After the inner rig loop ends, `main.rs` checks this flag before emitting the final `ConversationIntent` — if set, no event is published and the turn ends silently. Note: the TS implementation (in `no_response.ts`) uses a similar early-exit pattern; the Rust version is behaviorally equivalent.
 
+### `report_publish`
+Publish markdown files as NIP-23 long-form articles (kind:30023) to Nostr, signed with the agent's keys. Accepts a single file or a directory (directory walk is recursive). Path may be absolute or relative to the project root.
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `path` | string | Absolute or project-relative path to a markdown file or directory |
+
+For a single file: `d_tag` = filename, `document_tag` = file stem. For a directory: `d_tag` = `dirName/relative/path`, `document_tag` = directory name. Path-traversal protection via `canonicalize() + starts_with(project_root)`. Returns `{ success, published: [d_tags], summary }`. Each file emits a `PublishArticleIntent` (→ `Intent::PublishArticle`) over the standard NDJSON-stdout channel with tags `[d]`, `[document]`, `[a]` (project link).
+
 ## Supervision Heuristics
 
 `tenex-supervision` is wired into the hook layer. It runs two kinds of checks:
@@ -543,4 +552,4 @@ API keys are resolved from provider-specific env vars (`ANTHROPIC_API_KEY`, `OPE
 ## Future Work (not yet implemented)
 
 - **ToolResult in history**: Projection filters out `ToolResult` messages because assistant records currently have empty `tool_calls`. Once `record_turn` captures tool calls inline, paired tool-call/result sequences can flow to providers.
-- **TS-only tools**: `conversation_search`, `send_message`, MCP tools (`mcp_list_resources`, `mcp_resource_read`, `mcp_subscribe`, `mcp_subscription_stop`), `report_publish`, `agents_write`, RAG subscription tools (`rag_subscription_create/delete/get/list`), RAG collection management tools (`rag_collection_create/delete/list`).
+- **TS-only tools**: `conversation_search`, `send_message`, MCP tools (`mcp_list_resources`, `mcp_resource_read`, `mcp_subscribe`, `mcp_subscription_stop`), `agents_write`, RAG subscription tools (`rag_subscription_create/delete/get/list`), RAG collection management tools (`rag_collection_create/delete/list`).
