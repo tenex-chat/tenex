@@ -115,8 +115,10 @@ fn remove_relay(
     existing: Vec<String>,
 ) -> Result<()> {
     if existing.is_empty() {
+        // TS at relays.ts:70 — `chalk.dim("  Nothing to remove.")`
+        // with the leading 2-space indent INSIDE the dim wrap.
         let dim = console::Style::new().dim();
-        println!("  {}", dim.apply_to("Nothing to remove."));
+        println!("{}", dim.apply_to("  Nothing to remove."));
         return Ok(());
     }
     let chosen = match prompt_select_relay("Remove which relay?", &existing) {
@@ -153,11 +155,14 @@ fn remove_identity_relay(
     existing: Vec<String>,
 ) -> Result<()> {
     if existing.is_empty() {
+        // TS at relays.ts:102 — `chalk.dim(\`  No custom identity relays
+        // configured (using default: ${DEFAULT_IDENTITY_RELAY}).\`)`
+        // with the leading 2-space indent INSIDE the dim wrap.
         let dim = console::Style::new().dim();
         println!(
-            "  {}",
+            "{}",
             dim.apply_to(format!(
-                "No custom identity relays configured (using default: {DEFAULT_IDENTITY_RELAY})."
+                "  No custom identity relays configured (using default: {DEFAULT_IDENTITY_RELAY})."
             )),
         );
         return Ok(());

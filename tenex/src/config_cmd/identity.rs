@@ -41,12 +41,17 @@ pub fn run(base_dir: &std::path::Path) -> Result<()> {
 }
 
 /// Print the listing block. Source: `:14-23`.
+///
+/// TS at identity.ts:16 emits `console.log(chalk.dim("  No authorized
+/// pubkeys.\n"))` — both the leading 2-space indent AND the trailing
+/// `\n` are INSIDE the dim wrap. console.log adds another newline,
+/// producing one styled line followed by one blank line. Mirror
+/// byte-for-byte by embedding the indent and trailing newline inside
+/// the dim'd payload.
 fn render_listing(pubkeys: &[String]) {
     let dim = console::Style::new().dim();
     if pubkeys.is_empty() {
-        // TS prints with a trailing `\n` embedded in the string.
-        println!("  {}", dim.apply_to("No authorized pubkeys."));
-        println!();
+        println!("{}", dim.apply_to("  No authorized pubkeys.\n"));
     } else {
         println!("  Authorized pubkeys:");
         for pk in pubkeys {
@@ -92,8 +97,10 @@ fn remove_pubkey(
     existing: Vec<String>,
 ) -> Result<()> {
     if existing.is_empty() {
+        // TS at identity.ts:50 — `chalk.dim("  Nothing to remove.")`
+        // with the leading 2-space indent INSIDE the dim wrap.
         let dim = console::Style::new().dim();
-        println!("  {}", dim.apply_to("Nothing to remove."));
+        println!("{}", dim.apply_to("  Nothing to remove."));
         return Ok(());
     }
     let chosen = match prompts::select("Remove which pubkey?", existing.clone()).prompt() {
