@@ -75,3 +75,53 @@ fn init_tracing() {
         .unwrap_or_else(|_| EnvFilter::new("info,nostr_sdk=warn"));
     tracing_subscriber::fmt().with_env_filter(filter).init();
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::CommandFactory;
+
+    /// Pin the top-level CLI's `about` string and the four TS-mirrored
+    /// subcommand descriptions visible via `tenex --help`. They must
+    /// match the TS source byte-for-byte:
+    ///
+    /// - top-level                — `src/index.ts:119`
+    /// - `tenex config`           — `src/commands/config/index.ts:126`
+    /// - `tenex onboard`          — `src/commands/onboard.ts:1200`
+    /// - `tenex doctor`           — `src/commands/doctor.ts:69`
+    /// - `tenex agent`            — `src/commands/agent/index.ts:52`
+    ///
+    /// The other entries (`mcp`, `cron`, `daemon`, `runtime`) are
+    /// Rust-only surfaces — no TS counterpart, so their wording isn't
+    /// pinned here.
+    #[test]
+    fn top_level_command_descriptions_match_ts_verbatim() {
+        let cmd = Cli::command();
+        assert_eq!(
+            cmd.get_about().map(|s| s.to_string()).as_deref(),
+            Some("TENEX Command Line Interface"),
+        );
+
+        let by_name: std::collections::HashMap<&str, String> = cmd
+            .get_subcommands()
+            .map(|s| (s.get_name(), s.get_about().map(|h| h.to_string()).unwrap_or_default()))
+            .collect();
+
+        assert_eq!(
+            by_name.get("config").map(|s| s.as_str()),
+            Some("Configure TENEX backend settings"),
+        );
+        assert_eq!(
+            by_name.get("onboard").map(|s| s.as_str()),
+            Some("Initial setup wizard for TENEX"),
+        );
+        assert_eq!(
+            by_name.get("doctor").map(|s| s.as_str()),
+            Some("Diagnose and repair TENEX state"),
+        );
+        assert_eq!(
+            by_name.get("agent").map(|s| s.as_str()),
+            Some("Manage TENEX agents"),
+        );
+    }
+}
