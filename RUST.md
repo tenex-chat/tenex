@@ -1,6 +1,6 @@
 # TENEX Rust Adoption Status
 
-_Last updated: 2026-04-29 (thirtieth pass). Auto-maintained by scheduled debt check._
+_Last updated: 2026-04-29 (thirty-first pass). Auto-maintained by scheduled debt check._
 
 ---
 
@@ -24,7 +24,7 @@ The Rust port is underway crate by crate. The TypeScript daemon still owns per-p
 | `tenex-context` | lib | — | Conversation projection + compaction/decay/reminder strategies |
 | `tenex-conversations` | lib | — | Per-project SQLite conversation store |
 | `tenex-llm-config` | lib | — | LLM config resolver + NDJSON Unix-socket IPC server |
-| `tenex-agent-storage` | lib | — | Global installed-agent JSON records (`~/.tenex/agents/<pubkey>.json`) and installed-agent index |
+| `tenex-agent-registry` | lib | — | Global installed-agent JSON records (`~/.tenex/agents/<pubkey>.json`) and installed-agent index (renamed from `tenex-agent-storage`) |
 | `tenex-project` | lib | — | File-backed view of per-project TENEX state — reads `projects/<dTag>/event.json` + agent JSON projections. No database, no write API |
 | `tenex-protocol` | lib | — | Transport-agnostic agent intents + Nostr/stdin channel adapters |
 | `tenex-rag` | lib | — | RAG: SQLite vector store + embedding client |
@@ -199,6 +199,16 @@ Note: `conversation_get`, `conversation_list`, `conversation_search`, `kill` (sc
 - Conversation history persistence (10 convs, 20 history entries) ✅
 - Supervision (worker todo block) ✅
 - FK bug fixed: ensure_conversation() on store open
+
+Resolved between thirtieth and thirty-first passes:
+- **`mock_llm.rs` fixed**: `EmptyListError` is a unit struct — no `drain()` method. `response_to_choice` already guards with `items.is_empty()`, so `OneOrMany::many(items).unwrap()` is correct. Compilation restored for `tenex-agent` test harness.
+- **Runtime state persistence**: `crates/tenex-agent/src/runtime_state.rs` — `RuntimeStateHandle` persists per-turn agent state to the conversation SQLite store. `tenex-conversations/src/store.rs` gains `set_runtime_state` and `update_runtime_state` (immediate write and atomic read-modify-write under `TransactionBehavior::Immediate`).
+- **Message injection tracking**: `crates/tenex-agent/src/injections.rs` — `MessageInjectionTracker` polls the conversation DB for external messages injected between turns and surfaces them as user-turn content for the next LLM invocation.
+- **Dispatch coordinator**: `tenex/src/runtime_cmd/mod.rs` gains `DispatchCoordinator` — serializes concurrent events to the same (agent, conversation) pair; queues a follow-up run if a second event arrives while one is in flight.
+- **`tenex-agent-storage` → `tenex-agent-registry`**: Crate renamed; all callers migrated to `tenex_agent_registry`.
+- **Dead code cleanup**: `cfg(test)` visibility gates on test-only store APIs (`api_keys`, `embed`, `llms`, `mcp`, `models_dev`, `project_members`, `provider_ids`, `conversation_disk_reader`); unused glyphs constants removed (`glyphs.rs`); `variant_list_prompt` I/O loop removed; `project_mutation` `trigger` field and verbose `ProjectEventPublishResult` struct removed; `PublishOutcome::as_str` removed.
+- **Warning count**: 0 (clean).
+- **Test count**: 1372 (up from 1212).
 
 Resolved between twenty-ninth and thirtieth passes:
 - **`tenex-agent-storage` crate added**: New dedicated crate for global installed-agent JSON storage (`~/.tenex/agents/<pubkey>.json` + index). API: `AgentStorage::open`, `get_all_stored_agents`, `save_agent`; `AgentDoc` wraps `IndexMap<String, Value>` (preserves field order + unknown fields); `generate_nsec_bech32()` key generation. `agents_write` tool now uses this crate instead of raw `serde_json` file I/O. `tenex-project` reads agent projections via `tenex_agent_storage::read_agent_projection_file`. Workspace crate count: 17.
