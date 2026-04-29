@@ -32,7 +32,7 @@ impl PostCompletionHeuristic for ConsecutiveToolsWithoutTodoHeuristic {
             heuristic_name: self.name(),
             message,
             enforcement: EnforcementMode::OncePerExecution,
-            re_engage: false,
+            re_engage: true,
         })
     }
 }
