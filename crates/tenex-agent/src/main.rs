@@ -13,7 +13,10 @@ use rig::client::{CompletionClient, Nothing};
 use rig::completion::{AssistantContent, Message as RigMessage};
 use rig::completion::message::{ToolResult, ToolResultContent, UserContent};
 use rig::providers::{anthropic, ollama, openai, openrouter};
-use std::sync::{Arc, Mutex};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc, Mutex,
+};
 use tenex_context::{CacheObservation, Message as CtxMessage, ModelProfile, ToolDef, TurnRecord};
 use tenex_conversations::{AgentContextState, ConversationStore};
 use tenex_project::Project;
@@ -34,7 +37,7 @@ use tools::{
     DelegateCrossProjectTool, DelegateFollowupTool, DelegateTool,
     FsEditTool, FsGlobTool, FsGrepTool, FsReadTool, FsWriteTool,
     HomeFsEditTool, HomeFsGlobTool, HomeFsGrepTool, HomeFsReadTool, HomeFsWriteTool,
-    KillTool, LearnTool, ProjectListTool, RagAddDocumentsTool,
+    KillTool, LearnTool, NoResponseTool, ProjectListTool, RagAddDocumentsTool,
     RagSearchTool, ScheduleTaskTool, SelfDelegateTool, ShellTool,
     SkillListTool, SkillsSetTool, TodoItem, TodoStatus, TodoWriteTool,
 };
@@ -216,6 +219,8 @@ fn build_extra_tools(
         )));
     }
 
+    tools.push(Box::new(NoResponseTool::new(input.suppress_response.clone())));
+
     tools
 }
 
@@ -234,6 +239,7 @@ struct ExtraToolsInput<'a> {
     project_d_tag: String,
     agent_slug: String,
     project_id: String,
+    suppress_response: Arc<AtomicBool>,
 }
 
 fn load_todos_from_store(
@@ -701,6 +707,7 @@ async fn main() -> Result<()> {
     };
 
     let agent_slug = agent_config.identity_name().to_string();
+    let suppress_response = Arc::new(AtomicBool::new(false));
     let extra_tools_input = ExtraToolsInput {
         emit_state: &emit_state,
         project_agents: &project_agents,
@@ -716,6 +723,7 @@ async fn main() -> Result<()> {
         project_d_tag: project_meta.d_tag.clone(),
         agent_slug: agent_slug.clone(),
         project_id: project_id.clone(),
+        suppress_response: suppress_response.clone(),
     };
 
     // Keep a handle with shared Arc refs so we can read the pending final turn
@@ -882,24 +890,27 @@ async fn main() -> Result<()> {
         eprintln!("[tenex-agent] Agent completed.");
 
         let stream_usage = final_response.usage();
+        let suppressed = suppress_response.load(Ordering::Acquire);
         if let Some((final_content, final_ral)) = hook_handle.take_pending() {
-            let final_ctx = emit_state.build_ctx(final_ral);
-            let intent = ConversationIntent {
-                content: final_content,
-                is_reasoning: false,
-                usage: Some(LlmUsage {
-                    input_tokens: Some(stream_usage.input_tokens),
-                    output_tokens: Some(stream_usage.output_tokens),
-                    total_tokens: Some(stream_usage.total_tokens),
-                    cached_input_tokens: Some(stream_usage.cached_input_tokens),
-                    ..Default::default()
-                }),
-                metadata: None,
-            };
-            channel
-                .send(Intent::Conversation(intent), &final_ctx)
-                .await
-                .context("Failed to emit final conversation event")?;
+            if !suppressed {
+                let final_ctx = emit_state.build_ctx(final_ral);
+                let intent = ConversationIntent {
+                    content: final_content,
+                    is_reasoning: false,
+                    usage: Some(LlmUsage {
+                        input_tokens: Some(stream_usage.input_tokens),
+                        output_tokens: Some(stream_usage.output_tokens),
+                        total_tokens: Some(stream_usage.total_tokens),
+                        cached_input_tokens: Some(stream_usage.cached_input_tokens),
+                        ..Default::default()
+                    }),
+                    metadata: None,
+                };
+                channel
+                    .send(Intent::Conversation(intent), &final_ctx)
+                    .await
+                    .context("Failed to emit final conversation event")?;
+            }
         }
 
         // Post-completion supervision: check if pending todos warrant re-engagement.
