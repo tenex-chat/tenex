@@ -640,15 +640,28 @@ fn render_browse<W: Write>(
     provider_hints: &IndexMap<String, String>,
 ) -> io::Result<u16> {
     let mut height: u16 = 0;
-    let cursor_active = format!("{} ", glyphs::CURSOR_THIN);
 
     for (i, pid) in provider_ids.iter().enumerate() {
         let is_active = i == state.active;
-        let pfx = if is_active { cursor_active.as_str() } else { "  " };
+        // TS at `provider-select-prompt.ts` defines
+        //   const cursor = chalk.hex("#FFC107")("›");
+        //   const pfx = isActive ? `${cursor} ` : "  ";
+        // — the trailing space is OUTSIDE the chalk wrap. Print the
+        // cursor glyph inside the amber span and the literal space
+        // after `ResetColor`. (Same fix as `role_menu_prompt`,
+        // `variant_list_prompt`, `agent_select_prompt`; see
+        // `docs/tui-port/QUESTIONS.md` for the systemic
+        // crossterm-vs-chalk reset-code divergence.)
         if is_active {
-            queue!(stdout, SetForegroundColor(AMBER), Print(pfx), ResetColor)?;
+            queue!(
+                stdout,
+                SetForegroundColor(AMBER),
+                Print(glyphs::CURSOR_THIN),
+                ResetColor,
+                Print(" "),
+            )?;
         } else {
-            queue!(stdout, Print(pfx))?;
+            queue!(stdout, Print("  "))?;
         }
 
         let name = provider_display_name(pid);
@@ -701,13 +714,19 @@ fn render_browse<W: Write>(
     }
 
     // Done row: ansi256-#214 bold `  Done` (`display.doneLabel` at
-    // `src/commands/config/display.ts:121-123`).
+    // `src/commands/config/display.ts:121-123`). Same `${cursor} `
+    // byte-fidelity rule as the provider rows above.
     let done_active = state.active == provider_ids.len();
-    let pfx = if done_active { cursor_active.as_str() } else { "  " };
     if done_active {
-        queue!(stdout, SetForegroundColor(AMBER), Print(pfx), ResetColor)?;
+        queue!(
+            stdout,
+            SetForegroundColor(AMBER),
+            Print(glyphs::CURSOR_THIN),
+            ResetColor,
+            Print(" "),
+        )?;
     } else {
-        queue!(stdout, Print(pfx))?;
+        queue!(stdout, Print("  "))?;
     }
     queue!(
         stdout,
@@ -748,7 +767,6 @@ fn render_keys<W: Write>(stdout: &mut W, state: &ProviderState) -> io::Result<u1
         .unwrap_or_default();
     let add_index = keys.len();
     let back_index = keys.len() + 1;
-    let cursor_active = format!("{} ", glyphs::CURSOR_THIN);
     let mut height: u16 = 0;
 
     // `  <bold name> <dim — API Keys>`
@@ -780,11 +798,18 @@ fn render_keys<W: Write>(stdout: &mut W, state: &ProviderState) -> io::Result<u1
 
     for (i, raw) in keys.iter().enumerate() {
         let is_active = state.keys_active == i;
-        let pfx = if is_active { cursor_active.as_str() } else { "  " };
+        // Same `${cursor} ` byte-fidelity rule as the browse pane —
+        // space lands OUTSIDE the amber wrap.
         if is_active {
-            queue!(stdout, SetForegroundColor(AMBER), Print(pfx), ResetColor)?;
+            queue!(
+                stdout,
+                SetForegroundColor(AMBER),
+                Print(glyphs::CURSOR_THIN),
+                ResetColor,
+                Print(" "),
+            )?;
         } else {
-            queue!(stdout, Print(pfx))?;
+            queue!(stdout, Print("  "))?;
         }
         let parsed = parse_api_key_entry(raw);
         let masked = mask_key(target, &parsed.key);
@@ -810,11 +835,16 @@ fn render_keys<W: Write>(stdout: &mut W, state: &ProviderState) -> io::Result<u1
     }
 
     let add_active = state.keys_active == add_index;
-    let pfx = if add_active { cursor_active.as_str() } else { "  " };
     if add_active {
-        queue!(stdout, SetForegroundColor(AMBER), Print(pfx), ResetColor)?;
+        queue!(
+            stdout,
+            SetForegroundColor(AMBER),
+            Print(glyphs::CURSOR_THIN),
+            ResetColor,
+            Print(" "),
+        )?;
     } else {
-        queue!(stdout, Print(pfx))?;
+        queue!(stdout, Print("  "))?;
     }
     queue!(
         stdout,
@@ -826,11 +856,16 @@ fn render_keys<W: Write>(stdout: &mut W, state: &ProviderState) -> io::Result<u1
     height += 1;
 
     let back_active = state.keys_active == back_index;
-    let pfx = if back_active { cursor_active.as_str() } else { "  " };
     if back_active {
-        queue!(stdout, SetForegroundColor(AMBER), Print(pfx), ResetColor)?;
+        queue!(
+            stdout,
+            SetForegroundColor(AMBER),
+            Print(glyphs::CURSOR_THIN),
+            ResetColor,
+            Print(" "),
+        )?;
     } else {
-        queue!(stdout, Print(pfx))?;
+        queue!(stdout, Print("  "))?;
     }
     queue!(
         stdout,
@@ -1385,5 +1420,81 @@ mod tests {
         // Last 4 of the key part are kept; label appears with a 2-space prefix.
         assert!(key_row.contains("ghij"), "got: {key_row}");
         assert!(key_row.contains("pfer@me.com"), "got: {key_row}");
+    }
+
+    /// Pin: in the Browse pane, the active-row cursor's trailing space
+    /// lands OUTSIDE the amber colour span. TS at
+    /// `provider-select-prompt.ts` defines `cursor = chalk.hex("#FFC107")("›")`
+    /// and `pfx = isActive ? \`${cursor} \` : "  "` — the literal space
+    /// is OUTSIDE the chalk wrap. Wire bytes:
+    /// `\x1b[38;2;255;193;7m›\x1b[<reset>m ` (space AFTER the foreground
+    /// reset). Tolerates either FG closer per the systemic
+    /// crossterm-vs-chalk reset-code divergence (`docs/tui-port/QUESTIONS.md`).
+    #[test]
+    fn render_browse_active_provider_cursor_has_space_outside_amber_wrap() {
+        let mut state = empty_state();
+        state.active = 0;
+        let pids = pids();
+        let mut buf: Vec<u8> = Vec::new();
+        render_browse(&mut buf, &state, &pids, &IndexMap::new()).unwrap();
+        let s = String::from_utf8(buf).expect("render output must be UTF-8");
+        let space_outside_full_reset = s.contains("\x1b[38;2;255;193;7m›\x1b[0m ");
+        let space_outside_fg_reset = s.contains("\x1b[38;2;255;193;7m›\x1b[39m ");
+        assert!(
+            space_outside_full_reset || space_outside_fg_reset,
+            "active provider cursor must emit `›` + colour-closer + literal space; got {s:?}",
+        );
+        assert!(
+            !s.contains("\x1b[38;2;255;193;7m› \x1b[0m")
+                && !s.contains("\x1b[38;2;255;193;7m› \x1b[39m"),
+            "must not wrap the cursor's trailing space inside the amber span; got {s:?}",
+        );
+    }
+
+    /// Same `${cursor} ` byte rule for the Browse pane's Done row.
+    #[test]
+    fn render_browse_active_done_cursor_has_space_outside_amber_wrap() {
+        let mut state = empty_state();
+        let pids = pids();
+        state.active = pids.len(); // Done row
+        let mut buf: Vec<u8> = Vec::new();
+        render_browse(&mut buf, &state, &pids, &IndexMap::new()).unwrap();
+        let s = String::from_utf8(buf).expect("render output must be UTF-8");
+        let with_full_reset = s.contains(
+            "\x1b[38;2;255;193;7m›\x1b[0m \x1b[38;5;214m\x1b[1m  Done",
+        );
+        let with_fg_reset = s.contains(
+            "\x1b[38;2;255;193;7m›\x1b[39m \x1b[38;5;214m\x1b[1m  Done",
+        );
+        assert!(
+            with_full_reset || with_fg_reset,
+            "Done row must emit cursor + close + literal space + ansi256(214)+bold for the label; got {s:?}",
+        );
+    }
+
+    /// Same `${cursor} ` byte rule for the Keys pane's active key row.
+    #[test]
+    fn render_keys_active_key_cursor_has_space_outside_amber_wrap() {
+        let mut state = empty_state();
+        state
+            .providers
+            .insert("anthropic".into(), cred_multi(&["sk-aaaa1234", "sk-bbbb5678"]));
+        state.mode = ProviderMode::Keys;
+        state.keys_target = Some("anthropic".into());
+        state.keys_active = 0;
+        let mut buf: Vec<u8> = Vec::new();
+        render_keys(&mut buf, &state).unwrap();
+        let s = String::from_utf8(buf).expect("render output must be UTF-8");
+        let space_outside_full_reset = s.contains("\x1b[38;2;255;193;7m›\x1b[0m ");
+        let space_outside_fg_reset = s.contains("\x1b[38;2;255;193;7m›\x1b[39m ");
+        assert!(
+            space_outside_full_reset || space_outside_fg_reset,
+            "active key cursor must emit `›` + colour-closer + literal space; got {s:?}",
+        );
+        assert!(
+            !s.contains("\x1b[38;2;255;193;7m› \x1b[0m")
+                && !s.contains("\x1b[38;2;255;193;7m› \x1b[39m"),
+            "must not wrap the cursor's trailing space inside the amber span; got {s:?}",
+        );
     }
 }
