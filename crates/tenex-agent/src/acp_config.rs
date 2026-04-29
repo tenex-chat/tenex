@@ -61,8 +61,7 @@ pub(crate) enum AcpPermissionPolicy {
 }
 
 pub(crate) fn load_acp_config(base_dir: &Path, config_name: &str) -> Result<AcpRuntimeConfig> {
-    let llms = tenex_llm_config::resolver::load_llms(base_dir)
-        .context("loading llms.json")?;
+    let llms = tenex_llm_config::resolver::load_llms(base_dir).context("loading llms.json")?;
     let config = llms
         .configurations
         .get(config_name)

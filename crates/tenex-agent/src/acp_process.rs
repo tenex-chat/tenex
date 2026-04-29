@@ -1,10 +1,16 @@
 use anyhow::{anyhow, Context, Result};
 use serde_json::{json, Value};
+use std::future::Future;
 use std::process::Stdio;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter, Lines};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 
 use crate::acp_config::{AcpPermissionPolicy, AcpRuntimeConfig};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum AcpUpdate {
+    AgentMessageChunk { text: String },
+}
 
 #[derive(Default)]
 pub(crate) struct AcpUpdates {
@@ -12,27 +18,31 @@ pub(crate) struct AcpUpdates {
 }
 
 impl AcpUpdates {
-    fn apply(&mut self, message: &Value) {
+    fn apply(&mut self, message: &Value) -> Option<AcpUpdate> {
         let update = match message
             .get("params")
             .and_then(|params| params.get("update"))
         {
             Some(update) => update,
-            None => return,
+            None => return None,
         };
         let Some(kind) = update.get("sessionUpdate").and_then(Value::as_str) else {
-            return;
+            return None;
         };
         if kind != "agent_message_chunk" {
-            return;
+            return None;
         }
-        if let Some(text) = update
+        let Some(text) = update
             .get("content")
             .and_then(|content| content.get("text"))
             .and_then(Value::as_str)
-        {
-            self.visible_text.push_str(text);
-        }
+        else {
+            return None;
+        };
+        self.visible_text.push_str(text);
+        Some(AcpUpdate::AgentMessageChunk {
+            text: text.to_string(),
+        })
     }
 }
 
@@ -84,6 +94,21 @@ impl AcpProcess {
         params: Value,
         updates: &mut AcpUpdates,
     ) -> Result<Value> {
+        self.request_with_update_handler(method, params, updates, |_| async {})
+            .await
+    }
+
+    pub(crate) async fn request_with_update_handler<H, Fut>(
+        &mut self,
+        method: &str,
+        params: Value,
+        updates: &mut AcpUpdates,
+        mut on_update: H,
+    ) -> Result<Value>
+    where
+        H: FnMut(AcpUpdate) -> Fut,
+        Fut: Future<Output = ()>,
+    {
         let id = self.next_id;
         self.next_id += 1;
         self.write_json(&json!({
@@ -101,7 +126,9 @@ impl AcpProcess {
                 continue;
             }
             if message.get("method").and_then(Value::as_str) == Some("session/update") {
-                updates.apply(&message);
+                if let Some(update) = updates.apply(&message) {
+                    on_update(update).await;
+                }
                 continue;
             }
             if message.get("id") == Some(&json!(id)) {
@@ -185,5 +212,67 @@ fn choose_permission_option(request: &Value, policy: AcpPermissionPolicy) -> Val
     match option_id {
         Some(option_id) => json!({"outcome": "selected", "optionId": option_id}),
         None => json!({"outcome": "cancelled"}),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn apply_agent_message_chunk_accumulates_and_returns_delta() {
+        let mut updates = AcpUpdates::default();
+        let first = json!({
+            "jsonrpc": "2.0",
+            "method": "session/update",
+            "params": {
+                "update": {
+                    "sessionUpdate": "agent_message_chunk",
+                    "content": {"type": "text", "text": "hello "}
+                }
+            }
+        });
+        let second = json!({
+            "jsonrpc": "2.0",
+            "method": "session/update",
+            "params": {
+                "update": {
+                    "sessionUpdate": "agent_message_chunk",
+                    "content": {"type": "text", "text": "world"}
+                }
+            }
+        });
+
+        assert_eq!(
+            updates.apply(&first),
+            Some(AcpUpdate::AgentMessageChunk {
+                text: "hello ".to_string()
+            })
+        );
+        assert_eq!(
+            updates.apply(&second),
+            Some(AcpUpdate::AgentMessageChunk {
+                text: "world".to_string()
+            })
+        );
+        assert_eq!(updates.visible_text, "hello world");
+    }
+
+    #[test]
+    fn apply_ignores_non_visible_updates() {
+        let mut updates = AcpUpdates::default();
+        let ignored = json!({
+            "jsonrpc": "2.0",
+            "method": "session/update",
+            "params": {
+                "update": {
+                    "sessionUpdate": "tool_call",
+                    "content": {"type": "text", "text": "hidden"}
+                }
+            }
+        });
+
+        assert_eq!(updates.apply(&ignored), None);
+        assert!(updates.visible_text.is_empty());
     }
 }
