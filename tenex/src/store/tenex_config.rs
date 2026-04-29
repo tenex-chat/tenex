@@ -12,7 +12,9 @@ use std::path::Path;
 
 use anyhow::{anyhow, Context, Result};
 use indexmap::IndexMap;
-use serde_json::{json, Value};
+#[cfg(test)]
+use serde_json::json;
+use serde_json::Value;
 
 use super::atomic;
 
@@ -25,6 +27,7 @@ pub struct TenexConfigDoc {
 
 impl TenexConfigDoc {
     /// Empty config (no file on disk yet).
+    #[cfg(test)]
     pub fn new() -> Self {
         Self::default()
     }
@@ -56,6 +59,7 @@ impl TenexConfigDoc {
 
     /// Direct access to the underlying ordered map. Use sparingly — prefer
     /// the typed accessors below.
+    #[cfg(test)]
     pub fn raw(&self) -> &IndexMap<String, Value> {
         &self.raw
     }
@@ -74,6 +78,7 @@ impl TenexConfigDoc {
         self.raw.get("version").and_then(Value::as_u64)
     }
 
+    #[cfg(test)]
     pub fn set_version(&mut self, v: u64) {
         self.raw.insert("version".into(), json!(v));
     }
@@ -153,14 +158,6 @@ impl TenexConfigDoc {
     pub fn set_blossom_server_url(&mut self, url: String) {
         self.raw
             .insert("blossomServerUrl".into(), Value::String(url));
-    }
-
-    pub fn project_naddr(&self) -> Option<String> {
-        string_field(&self.raw, "projectNaddr")
-    }
-
-    pub fn set_project_naddr(&mut self, naddr: String) {
-        self.raw.insert("projectNaddr".into(), Value::String(naddr));
     }
 
     /// Read `logging.level`. Source: `TenexConfigSchema:149-153`.
