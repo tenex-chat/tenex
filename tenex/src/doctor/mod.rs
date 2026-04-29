@@ -411,9 +411,16 @@ fn preview_conversations_status() -> Result<()> {
 /// gate, prompt phrasing, exit-on-cancel behavior, and "Cancelled." line
 /// are all wired byte-for-byte. The reindex itself surfaces the DB
 /// substrate hint.
+///
+/// The TS source uses raw `readline.question(chalk.blue("Continue? (yes/no): "))`
+/// (`commands/doctor.ts:238-246`) — NOT inquirer. So this site routes
+/// directly through stdin/stdout to match: blue prompt text, no `?`
+/// prefix, no inquirer help-line, trailing space inside the colored
+/// span. Empty / EOF / non-yes answers fall through to "Cancelled.".
 fn reindex_conversations(confirm: bool) -> Result<()> {
-    use crate::tui::prompts;
-    use crate::tui::theme::{chalk_gray_str, chalk_yellow};
+    use std::io::{self, BufRead, Write};
+
+    use crate::tui::theme::{chalk_blue, chalk_gray_str, chalk_yellow};
 
     if !confirm {
         println!(
@@ -430,14 +437,19 @@ fn reindex_conversations(confirm: bool) -> Result<()> {
         );
         println!("{}", chalk_gray_str("Run with --confirm to skip this prompt.\n"));
 
-        let answer = match prompts::input("Continue? (yes/no):").prompt() {
-            Ok(s) => s.trim().to_lowercase(),
-            Err(inquire::InquireError::OperationCanceled)
-            | Err(inquire::InquireError::OperationInterrupted) => {
-                println!("{}", chalk_gray_str("Cancelled."));
-                return Ok(());
-            }
-            Err(e) => return Err(anyhow::anyhow!("reindex confirm prompt: {e}")),
+        // TS at `commands/doctor.ts:245`:
+        //   rl.question(chalk.blue("Continue? (yes/no): "), resolve)
+        // The trailing space is INSIDE the chalk.blue wrap. No newline
+        // after the prompt — readline reads on the same line.
+        print!("{}", chalk_blue("Continue? (yes/no): "));
+        io::stdout()
+            .flush()
+            .map_err(|e| anyhow::anyhow!("flush reindex confirm prompt: {e}"))?;
+
+        let mut line = String::new();
+        let answer = match io::stdin().lock().read_line(&mut line) {
+            Ok(_) => line.trim().to_lowercase(),
+            Err(e) => return Err(anyhow::anyhow!("reindex confirm read: {e}")),
         };
         if answer != "yes" && answer != "y" {
             println!("{}", chalk_gray_str("Cancelled."));
@@ -584,6 +596,50 @@ mod tests {
         assert_eq!(
             migrate.get_about().map(|s| s.to_string()).as_deref(),
             Some("Apply pending TENEX state migrations")
+        );
+    }
+
+    /// Pin the reindex confirmation prompt's wire bytes.
+    ///
+    /// TS source (`commands/doctor.ts:245`):
+    ///   `rl.question(chalk.blue("Continue? (yes/no): "), resolve)`
+    /// The trailing space is INSIDE the chalk.blue wrap (consumed as part
+    /// of the colored prompt run). Wire bytes: `\x1b[34m` + the literal
+    /// `Continue? (yes/no): ` + `\x1b[39m`. No `?` prefix, no inquirer
+    /// `[help]` footer, no SGR-0 full reset — those are inquire-isms that
+    /// must NOT leak into this raw-readline-style prompt.
+    #[test]
+    fn reindex_confirm_prompt_matches_ts_chalk_blue_wire_bytes() {
+        let s = crate::tui::theme::chalk_blue("Continue? (yes/no): ");
+        assert_eq!(s, "\x1b[34mContinue? (yes/no): \x1b[39m");
+        assert!(!s.contains("\x1b[0m"), "must not emit SGR 0 full reset");
+    }
+
+    /// Pin the two yellow warnings + gray hint preceding the reindex
+    /// confirm prompt. TS source (`commands/doctor.ts:234-236`):
+    ///   chalk.yellow("This will clear all conversation indexing state and re-index all conversations.")
+    ///   chalk.yellow("This may take several minutes depending on the number of conversations.\n")
+    ///   chalk.gray("Run with --confirm to skip this prompt.\n")
+    /// Note the embedded `\n` in the second yellow line and the gray
+    /// line — those produce the blank line separation TS emits.
+    #[test]
+    fn reindex_confirm_warnings_match_ts_verbatim() {
+        use crate::tui::theme::{chalk_gray_str, chalk_yellow};
+        assert_eq!(
+            chalk_yellow(
+                "This will clear all conversation indexing state and re-index all conversations.",
+            ),
+            "\x1b[33mThis will clear all conversation indexing state and re-index all conversations.\x1b[39m"
+        );
+        assert_eq!(
+            chalk_yellow(
+                "This may take several minutes depending on the number of conversations.\n",
+            ),
+            "\x1b[33mThis may take several minutes depending on the number of conversations.\n\x1b[39m"
+        );
+        assert_eq!(
+            chalk_gray_str("Run with --confirm to skip this prompt.\n"),
+            "\x1b[90mRun with --confirm to skip this prompt.\n\x1b[39m"
         );
     }
 }
