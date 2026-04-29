@@ -1,6 +1,6 @@
 # TENEX Rust Adoption Status
 
-_Last updated: 2026-04-29 (twenty-second pass). Auto-maintained by scheduled debt check._
+_Last updated: 2026-04-29 (twenty-third pass). Auto-maintained by scheduled debt check._
 
 ---
 
@@ -178,7 +178,7 @@ Note: `conversation_get`, `conversation_list`, `kill` (scheduled tasks only), `s
 
 ## Compilation Status
 
-**As of 2026-04-29 (twenty-second debt check pass): workspace compiles clean — zero errors. `cargo test --workspace`: 1290 tests passing across all crates.**
+**As of 2026-04-29 (twenty-third debt check pass): workspace compiles clean — zero errors. `cargo test --workspace`: 1320 tests passing across all crates.**
 
 **MILESTONE: Every tool in `tenex-agent` is now verified end-to-end, including supervision re-engagement (see `RUST_REPORT.md`).** The `ConsecutiveToolsWithoutTodo` heuristic was silent (re_engage: false) — fixed. Multi-turn history projection verified with both user and assistant messages persisted.
 
@@ -198,6 +198,13 @@ Note: `conversation_get`, `conversation_list`, `kill` (scheduled tasks only), `s
 - Conversation history persistence (10 convs, 20 history entries) ✅
 - Supervision (worker todo block) ✅
 - FK bug fixed: ensure_conversation() on store open
+
+Resolved between twenty-second and twenty-third passes:
+- **`no_response` tool ported**: `Arc<AtomicBool>` flag set when agent calls `no_response`; main loop checks it before emitting final `ConversationIntent`. Silent completion — no Nostr event published.
+- **Compaction and reminders strategy unit tests**: 4 tests for `CompactionToolStrategy` (below-threshold noop, zero-max-tokens, middle-collapse with head+tail preservation, keep-tail sentinel) and 6 for `RemindersStrategy` (absent/done todos, pending todos inject block, appends to last user message, counts, system-only skip).
+- **`config_success` centralized**: 9 config_cmd files had inline `print_success_line()` — consolidated into `tui::display::config_success()`. Three wire-byte unit tests pin the exact chalk byte sequence.
+- **`display_accent_plain` removed**: Added last pass, superseded when `step()` and `hint()` were rewritten to raw escape codes. Dead production code — deleted from theme.rs. Test simplified to pin `display_accent()` bold assertion only.
+- **Test count**: 1320 (up from 1290).
 
 Resolved between twenty-first and twenty-second passes:
 - **`display_accent_plain()` added**: `display.step()` rule and `display.hint()` use plain `ACCENT(...)` in TS; `display.step()` header/title uses `ACCENT.bold(...)`. Split into two helpers; test pins the bold/no-bold distinction against regression.
