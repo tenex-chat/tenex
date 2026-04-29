@@ -7,8 +7,8 @@
 //!
 //! When a helper takes ownership of the line (e.g. [`step`], [`success`],
 //! [`hint`]) it appends a single `\n` via `println!`. When it returns a
-//! styled fragment for inline composition (e.g. [`provider_check`]),
-//! it returns a `String` whose ANSI codes are already embedded.
+//! styled fragment for inline composition it returns a `String` whose ANSI
+//! codes are already embedded.
 //!
 //! Test coverage uses ANSI-stripped comparisons for ergonomics; the colour
 //! pin lives in `crate::tui::theme` (single source of truth) so the same
@@ -211,30 +211,11 @@ fn format_summary_line(label: &str, value: &str) -> String {
     format!("    {INFO_OPEN}{padded}{FG_RESET}{value}")
 }
 
-/// `display.providerCheck(text)` — `:107-109`. Returns the styled fragment
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use console::strip_ansi_codes;
-
-    #[test]
-    fn provider_check_contains_check_glyph_and_text() {
-        let s = strip_ansi_codes(&provider_check("OpenRouter")).into_owned();
-        assert_eq!(s, "[✓] OpenRouter");
-    }
-
-    #[test]
-    fn provider_uncheck_contains_empty_brackets_and_text() {
-        let s = strip_ansi_codes(&provider_uncheck("Anthropic")).into_owned();
-        assert_eq!(s, "[ ] Anthropic");
-    }
-
-    #[test]
-    fn done_label_has_two_leading_spaces_and_word_done() {
-        let s = strip_ansi_codes(&done_label()).into_owned();
-        assert_eq!(s, "  Done");
-    }
 
     /// Pin display.success's wire bytes to match TS chalk exactly:
     /// `chalk.green.bold("✓")` emits
@@ -296,26 +277,6 @@ mod tests {
         assert_eq!(
             format_context_line("Some hint"),
             "  \x1b[2mSome hint\x1b[22m",
-        );
-    }
-
-    /// Pin provider_uncheck wire bytes: `chalk.dim("[ ]") + " " + text` →
-    /// `\x1b[2m[ ]\x1b[22m <text>`.
-    #[test]
-    fn provider_uncheck_byte_sequence_matches_ts_chalk() {
-        assert_eq!(
-            provider_uncheck("Anthropic"),
-            "\x1b[2m[ ]\x1b[22m Anthropic",
-        );
-    }
-
-    /// Pin done_label wire bytes: `chalk.ansi256(214).bold("  Done")` →
-    /// `\x1b[38;5;214m\x1b[1m  Done\x1b[22m\x1b[39m`.
-    #[test]
-    fn done_label_byte_sequence_matches_ts_chalk() {
-        assert_eq!(
-            done_label(),
-            "\x1b[38;5;214m\x1b[1m  Done\x1b[22m\x1b[39m",
         );
     }
 
@@ -389,21 +350,6 @@ mod tests {
         let s = format_config_success_line("X");
         let plain = strip_ansi_codes(&s).into_owned();
         assert_eq!(plain, "✓ X");
-    }
-
-    /// Pin provider_check's wire bytes to TS chalk verbatim:
-    /// `chalk.ansi256(114).bold("[✓]") + " X"` →
-    /// `\x1b[38;5;114m\x1b[1m[✓]\x1b[22m\x1b[39m X`.
-    /// Now that we emit raw escapes (not console-rs's Style.apply_to),
-    /// the bytes are deterministic regardless of terminal detection.
-    #[test]
-    fn provider_check_byte_sequence_matches_ts_chalk() {
-        assert_eq!(
-            provider_check("X"),
-            "\x1b[38;5;114m\x1b[1m[✓]\x1b[22m\x1b[39m X",
-        );
-        // ANSI-stripped form survives.
-        assert_eq!(strip_ansi_codes(&provider_check("X")).into_owned(), "[✓] X");
     }
 
     /// `display_accent()` must emit bold — it's used by cron_cmd and banner
