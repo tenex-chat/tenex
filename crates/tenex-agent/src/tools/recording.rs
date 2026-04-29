@@ -17,7 +17,7 @@ use std::sync::{Arc, Mutex};
 use rig::completion::ToolDefinition;
 use rig::tool::{ToolDyn, ToolError};
 use rig::wasm_compat::WasmBoxedFuture;
-use tracing::{Instrument, info_span};
+use tracing::{info_span, Instrument};
 
 use crate::injections::MessageInjectionTracker;
 use crate::runtime_state::RuntimeStateHandle;
@@ -59,7 +59,7 @@ impl ToolRecorder {
 }
 
 /// `ToolDyn` wrapper that captures every call into a shared [`ToolRecorder`].
-pub struct RecordingTool {
+pub(crate) struct RecordingTool {
     inner: Box<dyn ToolDyn>,
     recorder: Arc<ToolRecorder>,
     runtime_state: Option<RuntimeStateHandle>,
@@ -68,7 +68,7 @@ pub struct RecordingTool {
 
 impl RecordingTool {
     /// Wrap an erased tool so its calls are captured into `recorder`.
-    pub fn wrap_dyn(
+    pub(crate) fn wrap_dyn(
         tool: Box<dyn ToolDyn>,
         recorder: Arc<ToolRecorder>,
         runtime_state: Option<RuntimeStateHandle>,

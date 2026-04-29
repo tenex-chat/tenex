@@ -1,6 +1,8 @@
 ---
 name: teams
 description: Understand and manage agent team configurations
+tools:
+  - agents_write
 ---
 
 # Teams
