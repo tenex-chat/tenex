@@ -534,30 +534,38 @@ fn render_frame<W: Write>(
                 queue!(stdout, Print("  "))?;
             }
             // Status glyph: spinner / ✓ / ✗ / blank.
+            // TS at `LLMConfigEditor.ts:150,154`:
+            //   chalk.yellow(frame)            → \x1b[33m<frame>\x1b[39m
+            //   chalk.green("✓") / chalk.red("✗")
+            // Use the raw SGR-3* opens / SGR-39 close from theme so the
+            // wire bytes match chalk's basic 16-colour foreground exactly
+            // (crossterm's `Color::Dark{Yellow,Green,Red}` would emit
+            // 256-colour palette indices instead, a *visible* shade
+            // difference).
             let name = item.config_name.as_deref();
             if name.is_some() && state.testing.as_deref() == name {
                 queue!(
                     stdout,
-                    SetForegroundColor(Color::DarkYellow),
+                    Print(crate::tui::theme::CHALK_YELLOW_OPEN),
                     Print(SPINNER_FRAMES[state.spinner_frame % SPINNER_FRAMES.len()]),
-                    ResetColor,
+                    Print(crate::tui::theme::FG_RESET),
                     Print(" "),
                 )?;
             } else if let Some(result) = name.and_then(|n| state.results.get(n)) {
                 if result.success {
                     queue!(
                         stdout,
-                        SetForegroundColor(Color::DarkGreen),
+                        Print(crate::tui::theme::CHALK_GREEN_OPEN),
                         Print(glyphs::CHECK),
-                        ResetColor,
+                        Print(crate::tui::theme::FG_RESET),
                         Print(" "),
                     )?;
                 } else {
                     queue!(
                         stdout,
-                        SetForegroundColor(Color::DarkRed),
+                        Print(crate::tui::theme::CHALK_RED_OPEN),
                         Print(glyphs::CROSS),
-                        ResetColor,
+                        Print(crate::tui::theme::FG_RESET),
                         Print(" "),
                     )?;
                 }

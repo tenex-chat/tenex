@@ -358,9 +358,15 @@ fn render_frame<W: Write>(
     }
 
     if let Some(err) = &state.error {
-        queue!(stdout, SetForegroundColor(Color::DarkRed))?;
+        // TS at `onboard.ts:113`:
+        //   const errorLine = error ? `\n${chalk.red(error)}` : "";
+        // chalk.red emits basic 16-colour SGR-31; crossterm's
+        // `Color::DarkRed` would emit 256-colour palette index 1.
+        // Use the raw SGR-31/-39 constants from theme for byte-perfect
+        // chalk.red wrap.
+        queue!(stdout, Print(crate::tui::theme::CHALK_RED_OPEN))?;
         queue!(stdout, Print(err))?;
-        queue!(stdout, ResetColor)?;
+        queue!(stdout, Print(crate::tui::theme::FG_RESET))?;
         queue!(stdout, Print("\r\n"))?;
         height += 1;
     }
@@ -385,13 +391,17 @@ fn clear_frame<W: Write>(stdout: &mut W, height: u16) -> io::Result<()> {
 fn render_done<W: Write>(stdout: &mut W, message: &str, answer: &str) -> io::Result<()> {
     // TS at onboard.ts:91-94 emits
     //   `${prefix} ${message} ${theme.style.answer(answer)}`
-    // where prefix is the answered-state green-✓, message is bold (per
-    // `theme.style.message(...)` default at `@inquirer/core/dist/lib/theme.js:14`),
-    // and the answer is amber (per inquirerTheme at cli-theme.ts:11).
-    // Mirror byte-for-byte.
-    queue!(stdout, SetForegroundColor(Color::DarkGreen))?;
+    // where prefix is `inquirerTheme.prefix.done = chalk.green("✓")`
+    // (cli-theme.ts:7), message is bold (per `theme.style.message(...)`
+    // default at `@inquirer/core/dist/lib/theme.js:14`), and the answer
+    // is amber (per inquirerTheme at cli-theme.ts:11).
+    // chalk.green emits basic 16-colour SGR-32; crossterm's
+    // `Color::DarkGreen` would emit 256-colour palette index 2 — a
+    // *visible* shade difference. Use the raw SGR constants for
+    // byte-perfect chalk.green wrap.
+    queue!(stdout, Print(crate::tui::theme::CHALK_GREEN_OPEN))?;
     queue!(stdout, Print("✓"))?;
-    queue!(stdout, ResetColor)?;
+    queue!(stdout, Print(crate::tui::theme::FG_RESET))?;
     queue!(
         stdout,
         Print(" "),

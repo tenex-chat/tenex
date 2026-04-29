@@ -435,11 +435,16 @@ fn render_frame<W: Write>(
                 .map(|pk| state.selected_pubkeys.iter().any(|x| x == pk))
                 .unwrap_or(false);
             if selected {
+                // TS at `AgentManager.ts:161` emits
+                //   chalk.green("[x]")  → \x1b[32m[x]\x1b[39m
+                // basic 16-colour SGR-32. crossterm's `Color::DarkGreen`
+                // would emit 256-colour palette index 2 — a *visible*
+                // shade difference. Use the raw SGR constants.
                 queue!(
                     stdout,
-                    SetForegroundColor(Color::DarkGreen),
+                    Print(crate::tui::theme::CHALK_GREEN_OPEN),
                     Print("[x]"),
-                    ResetColor,
+                    Print(crate::tui::theme::FG_RESET),
                 )?;
             } else {
                 queue!(
@@ -825,6 +830,32 @@ mod tests {
             !s.contains("\x1b[38;2;255;193;7m❯ \x1b[0m")
                 && !s.contains("\x1b[38;2;255;193;7m❯ \x1b[39m"),
             "must not wrap the cursor's trailing space inside the amber span; got {s:?}",
+        );
+    }
+
+    /// Pin: the selected `[x]` checkbox uses chalk.green SGR-32, not
+    /// crossterm Color::DarkGreen's 256-colour palette index 2.
+    /// TS at `AgentManager.ts:161`: `chalk.green("[x]")` →
+    /// `\x1b[32m[x]\x1b[39m`.
+    #[test]
+    fn render_frame_selected_checkbox_uses_chalk_green_sgr32() {
+        let actions = actions_sample();
+        let items = items_sample(2);
+        let mut state = empty_state();
+        // Mark the first agent as selected.
+        state.selected_pubkeys.push(items[0].pubkey.clone().unwrap());
+        // Activate the first agent row so it renders.
+        state.active = actions.len() + 1;
+        let mut buf: Vec<u8> = Vec::new();
+        render_frame(&mut buf, "Manage agents", &state, &actions, &items, 0).unwrap();
+        let s = String::from_utf8(buf).expect("render output must be UTF-8");
+        assert!(
+            s.contains("\x1b[32m[x]\x1b[39m"),
+            "selected checkbox must be wrapped in chalk.green SGR-32; got {s:?}",
+        );
+        assert!(
+            !s.contains("\x1b[38;5;2m[x]"),
+            "must not emit 256-colour palette green for the checkbox; got {s:?}",
         );
     }
 }
