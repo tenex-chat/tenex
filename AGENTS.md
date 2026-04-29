@@ -14,6 +14,14 @@ Multi-agent AI coordination system built on Nostr. Bun CLI application.
 - Hard limit: 500 LOC
 - When a file approaches 300 LOC, split it by responsibility before adding more
 
+## End-to-End Runtime Probes
+
+When adding a new feature or changing runtime behavior, prefer validating it with a real end-to-end probe in addition to focused unit tests. A good probe should run the actual TENEX binaries, use the local TENEX relay, create an isolated TENEX base directory, seed realistic projects/agents, drive signed Nostr events, and inspect the published events and telemetry to verify the behavior occurred.
+
+For agent/runtime behavior, use or extend the runtime probe harness (for example `scripts/tenex-runtime-probe.ts`) rather than relying only on mocks around individual functions. Mock LLM responses are acceptable at the LLM boundary for deterministic probes, but the process, relay, event routing, tool execution, persistence, and status publication should be as real as practical.
+
+If the probe exposes a gap, keep the probe as the reproduction and fix the runtime until the event timeline matches the expected behavior. Record any missing telemetry as part of the feature work when internal state transitions are needed to debug failures.
+
 ## Rust Agent Design Decisions
 
 ### RAG: Agents Do Not Manage Collections
