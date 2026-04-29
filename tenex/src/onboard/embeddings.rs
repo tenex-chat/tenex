@@ -1,15 +1,15 @@
 //! Onboarding Screen 6: Embeddings.
 //!
-//! Source: `src/commands/onboard.ts:387-475` `runEmbeddingSetup`. The TS
+//! Source: `src/commands/onboard.ts:384-489` `runEmbeddingSetup`. The TS
 //! flow has three substantive layers:
 //!
 //! 1. **Auto-pick** the recommended `(provider, model)` based on which
 //!    credentials the user just configured. Priority OpenAI → OpenRouter →
-//!    Local Transformers (`:392-403`).
+//!    Local Transformers (`:388-401`).
 //! 2. **Recommend / change** select with the auto-pick as the default
-//!    answer (`:417-432`).
+//!    answer (`:414-423`).
 //! 3. **Change branch**: provider select gated on configured providers,
-//!    then per-provider model select (`:434-487`).
+//!    then per-provider model select (`:432-487`).
 //!
 //! Persisted via [`crate::store::embed::EmbedDoc`] — never writes `apiKey`
 //! to disk; credentials remain in `providers.json`.
@@ -39,7 +39,7 @@ pub struct EmbeddingChoice {
 }
 
 /// Auto-pick the recommended choice given the set of configured providers.
-/// Source: `:392-403`. Order: OpenAI → OpenRouter → Local Transformers.
+/// Source: `:388-401`. Order: OpenAI → OpenRouter → Local Transformers.
 pub fn auto_pick(configured_providers: &[String]) -> EmbeddingChoice {
     let configured: IndexSet<&str> = configured_providers.iter().map(String::as_str).collect();
     if configured.contains(PROVIDER_OPENAI) {
@@ -95,7 +95,7 @@ pub fn run(
     let auto = auto_pick(configured_providers);
 
     // Use existing config if present, otherwise the auto-picked default
-    // (`:406-407`).
+    // (`:403-405`).
     let recommended = EmbeddingChoice {
         provider: existing
             .provider()
@@ -115,7 +115,7 @@ pub fn run(
     display::blank();
 
     // Accept / change select. The TS source uses `Use <Label> / <model>` for
-    // the accept option (`:422`).
+    // the accept option (`:419`).
     let accept_label = format!("Use {label} / {model}", model = recommended.model);
     let accept = AcceptOrChange::Accept(accept_label.clone());
     let change = AcceptOrChange::Change;
@@ -129,7 +129,7 @@ pub fn run(
             Err(e) => return Err(anyhow!("embedding accept/change prompt: {e}")),
         };
 
-    // TS at `:425-428` (accept) and `:484-487` (change) emit asymmetric
+    // TS at `:425-428` (accept) and `:486-488` (change) emit asymmetric
     // success-line provider tokens: the accept branch labelizes the
     // provider id (`providerLabel` → "OpenAI"), the change branch uses
     // the raw id (`chosenProvider` → "openai"). Mirror byte-for-byte.
@@ -155,7 +155,7 @@ pub fn run(
     Ok(EmbeddingsResult::Configured(chosen))
 }
 
-/// Provider+model select branch (`:434-487`). Returns `Ok(None)` on cancel.
+/// Provider+model select branch (`:432-487`). Returns `Ok(None)` on cancel.
 fn run_change_branch(
     configured_providers: &[String],
     current: &EmbeddingChoice,
@@ -219,9 +219,9 @@ fn run_change_branch(
 }
 
 /// Per-provider model list. Sources verbatim:
-/// - Local: `:460-465`
-/// - OpenAI: `:472-474`
-/// - OpenRouter: `:476-478`
+/// - Local: `:458-460`
+/// - OpenAI: `:469-470`
+/// - OpenRouter: `:473-474`
 pub fn embedding_models_for(provider: &str) -> Vec<ModelChoice> {
     match provider {
         PROVIDER_LOCAL => vec![
