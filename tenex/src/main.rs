@@ -13,7 +13,8 @@ mod types;
 mod utils;
 
 use anyhow::Result;
-use clap::{Parser, Subcommand};
+use clap::{Args, Parser, Subcommand};
+use std::path::PathBuf;
 
 #[derive(Parser)]
 #[command(name = "tenex", version, about = "TENEX Command Line Interface")]
@@ -50,6 +51,17 @@ enum Command {
     /// Run a per-project Nostr orchestrator: subscribe, dispatch inbound
     /// kind:1 events to the right agent, publish completions.
     Runtime(runtime_cmd::RuntimeArgs),
+
+    /// Internal foreground whitelist process supervised by `tenex daemon`.
+    #[command(name = "whitelist-run", hide = true)]
+    WhitelistRun(WhitelistRunArgs),
+}
+
+#[derive(Args)]
+struct WhitelistRunArgs {
+    /// TENEX base directory (default: $TENEX_BASE_DIR or ~/.tenex).
+    #[arg(long, value_name = "PATH")]
+    base_dir: Option<PathBuf>,
 }
 
 #[tokio::main]
@@ -66,6 +78,12 @@ async fn main() -> Result<()> {
         Command::Cron(args) => cron_cmd::run(args).await,
         Command::Daemon(args) => daemon::run(args).await,
         Command::Runtime(args) => runtime_cmd::run(args).await,
+        Command::WhitelistRun(args) => {
+            if let Some(base_dir) = args.base_dir {
+                std::env::set_var("TENEX_BASE_DIR", base_dir);
+            }
+            tenex_whitelist::run_foreground()
+        }
     };
     telemetry.shutdown();
     result
@@ -75,6 +93,7 @@ fn command_base_dir(command: &Command) -> Option<&std::path::Path> {
     match command {
         Command::Daemon(args) => args.base_dir.as_deref(),
         Command::Runtime(args) => args.base_dir.as_deref(),
+        Command::WhitelistRun(args) => args.base_dir.as_deref(),
         _ => None,
     }
 }

@@ -1,15 +1,17 @@
 //! Whitelist trust daemon — library API.
 //!
 //! The daemon answers `CHECK <pubkey> <dtag>\n` queries over a Unix socket.
-//! It self-bootstraps via double-fork on first connection: callers connect to
-//! the socket, and if no daemon is bound, a grandchild is spawned to bind it.
+//! It can self-bootstrap via double-fork on first CLI connection, and can also
+//! run in the foreground for supervision by the `tenex daemon` process.
 //!
 //! Library entry points:
 //!   - [`ensure_running`] — bind a daemon if one isn't already, drop the probe
 //!     connection. Used by other supervisor processes (e.g. the `tenex` daemon)
 //!     that depend on the whitelist gate.
-//!   - [`run_cli`] — used by the `whitelist` binary's `check` / `status`
-//!     subcommands. Each opens its own connection.
+//!   - [`run_foreground`] — bind and serve without detaching; used by process
+//!     supervisors that need to restart the trust gate if it dies.
+//!   - [`run_cli`] — used by the `whitelist` binary's `check` / `status` /
+//!     `run` subcommands.
 
 mod cache;
 mod client;
@@ -26,7 +28,7 @@ use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::Path;
 use std::process::ExitCode;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use cache::TrustCache;
 
@@ -38,10 +40,67 @@ pub fn ensure_running() -> Result<()> {
     Ok(())
 }
 
+/// Run the whitelist daemon in the foreground.
+///
+/// If a detached legacy instance already owns the singleton lock, this process
+/// stays alive and monitors the socket. Once that instance goes away, this
+/// process attempts to take over the lock and bind the socket itself. That
+/// keeps process supervisors from repeatedly respawning while an older
+/// self-daemonized whitelist process is still serving requests.
+pub fn run_foreground() -> Result<()> {
+    fs::create_dir_all(paths::whitelist_dir()).context("create whitelist runtime dir")?;
+
+    loop {
+        match run_daemon()? {
+            DaemonRunOutcome::Served => return Ok(()),
+            DaemonRunOutcome::AlreadyRunning => {
+                eprintln!("[whitelist] another instance owns the lock; monitoring existing socket");
+                monitor_existing_daemon();
+            }
+        }
+    }
+}
+
+/// Wait until an already-running whitelist daemon answers `STATUS`.
+///
+/// Unlike [`ensure_running`], this never starts a detached daemon. It is used by
+/// supervisors after spawning a foreground child.
+pub fn wait_until_ready(timeout: Duration) -> Result<()> {
+    let socket = paths::socket_path();
+    let deadline = Instant::now() + timeout;
+
+    loop {
+        let attempt_error = match UnixStream::connect(&socket) {
+            Ok(stream) => {
+                let _ = stream.set_read_timeout(Some(Duration::from_millis(250)));
+                let _ = stream.set_write_timeout(Some(Duration::from_millis(250)));
+                match client::status(stream) {
+                    Ok(response) if response.starts_with("OK ") => return Ok(()),
+                    Ok(response) => format!("unexpected status response: {response:?}"),
+                    Err(e) => e.to_string(),
+                }
+            }
+            Err(e) => e.to_string(),
+        };
+
+        if Instant::now() >= deadline {
+            return Err(anyhow!(
+                "whitelist daemon did not become ready at {} within {:?}: {}",
+                socket.display(),
+                timeout,
+                attempt_error
+            ));
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
 /// Dispatch the `whitelist` binary's CLI args. Returns the process exit code.
-/// Recognized verbs: `check <hex_pubkey> <project_dtag>`, `status`, `help`.
+/// Recognized verbs: `run`, `check <hex_pubkey> <project_dtag>`, `status`,
+/// `help`.
 pub fn run_cli(args: &[String]) -> ExitCode {
     let result = match args.first().map(String::as_str) {
+        Some("run") => run_foreground().map(|_| ExitCode::from(0)),
         Some("check") => cmd_check(&args[1..]),
         Some("status") => cmd_status(),
         Some("help") | Some("-h") | Some("--help") => {
@@ -69,6 +128,8 @@ pub fn run_cli(args: &[String]) -> ExitCode {
 
 fn print_help() {
     eprintln!("Usage:");
+    eprintln!("  whitelist run");
+    eprintln!("       run the daemon in the foreground");
     eprintln!("  whitelist check <hex_pubkey> <project_dtag>");
     eprintln!("       exit 0 if allowed, 1 if denied, 2 on error");
     eprintln!("  whitelist status");
@@ -130,7 +191,7 @@ fn run_daemon_role() -> ! {
         std::process::exit(1);
     }
     match run_daemon() {
-        Ok(()) => std::process::exit(0),
+        Ok(_) => std::process::exit(0),
         Err(e) => {
             eprintln!("whitelist daemon: {e:#}");
             std::process::exit(1);
@@ -138,7 +199,12 @@ fn run_daemon_role() -> ! {
     }
 }
 
-fn run_daemon() -> Result<()> {
+enum DaemonRunOutcome {
+    Served,
+    AlreadyRunning,
+}
+
+fn run_daemon() -> Result<DaemonRunOutcome> {
     let pid_path = paths::pid_path();
     let socket_path = paths::socket_path();
 
@@ -155,7 +221,7 @@ fn run_daemon() -> Result<()> {
     if !try_lock(pid_file.as_raw_fd())? {
         // Another daemon is starting/running. The other will publish the
         // socket; nothing for us to do.
-        return Ok(());
+        return Ok(DaemonRunOutcome::AlreadyRunning);
     }
     // Keep the lock for the lifetime of the process.
     std::mem::forget(pid_file);
@@ -184,7 +250,21 @@ fn run_daemon() -> Result<()> {
     watch::spawn(cache.clone())?;
 
     eprintln!("[whitelist] listening on {}", socket_path.display());
-    server::serve(listener, cache)
+    server::serve(listener, cache)?;
+    Ok(DaemonRunOutcome::Served)
+}
+
+fn monitor_existing_daemon() {
+    loop {
+        match UnixStream::connect(paths::socket_path()) {
+            Ok(_) => std::thread::sleep(Duration::from_secs(1)),
+            Err(e) => {
+                eprintln!("[whitelist] existing socket unavailable: {e}; attempting takeover");
+                std::thread::sleep(Duration::from_millis(250));
+                return;
+            }
+        }
+    }
 }
 
 fn try_lock(fd: i32) -> Result<bool> {

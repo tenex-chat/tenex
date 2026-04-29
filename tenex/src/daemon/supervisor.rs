@@ -72,6 +72,14 @@ impl Supervisor {
     /// `key` is an opaque identifier used for logging and idempotency.
     /// `path` is the absolute path to the binary (no extra args are passed).
     pub async fn boot_binary(&self, key: String, path: PathBuf) {
+        self.boot_command(key, vec![path.to_string_lossy().into_owned()])
+            .await;
+    }
+
+    /// Spawn and supervise an arbitrary command.
+    ///
+    /// `argv[0]` is the program and the remaining entries are arguments.
+    pub async fn boot_command(&self, key: String, argv: Vec<String>) {
         if *self.shutdown_rx.borrow() {
             return;
         }
@@ -82,7 +90,11 @@ impl Supervisor {
             return;
         }
 
-        let argv = vec![path.to_string_lossy().into_owned()];
+        if argv.is_empty() {
+            error!(key, "cannot supervise empty argv");
+            return;
+        }
+
         let base_dir = self.base_dir.clone();
         let mut shutdown = self.shutdown_rx.clone();
         let key_owned = key.clone();

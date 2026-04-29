@@ -8,7 +8,8 @@ pub mod nostr;
 pub mod supervisor;
 pub mod whitelist_export;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use anyhow::{Context, Result};
 use clap::Parser;
@@ -55,35 +56,8 @@ pub async fn run(args: DaemonArgs) -> Result<()> {
 
     let _lock = lockfile::Lockfile::acquire(&base_dir).context("acquiring daemon lockfile")?;
 
-    // Bootstrap the whitelist trust daemon. Every event the TS runtimes process
-    // is gated by it (PubkeyGateService is fail-closed), so there is no useful
-    // work this supervisor can do without it bound.
-    tenex_whitelist::ensure_running().context("bootstrapping whitelist daemon")?;
-    info!("whitelist daemon ready");
-
-    // Bootstrap the identity daemon. Non-fatal: PubkeyService falls back to
-    // NDK if the daemon is absent.
-    if let Err(e) = tenex_identity::ensure_running() {
-        tracing::warn!(error = %e, "identity daemon failed to start; name resolution will use NDK fallback");
-    } else {
-        info!("identity daemon ready");
-    }
-
     whitelist_export::write_backend_pubkey(&base_dir, cfg.tenex_private_key.as_deref())
         .context("publish backend pubkey for whitelist daemon")?;
-
-    // Start the LLM config IPC server. TypeScript runtimes resolve config
-    // names and report key failures through this socket rather than reading
-    // providers.json / llms.json directly.
-    {
-        let llm_base = base_dir.clone();
-        tokio::spawn(async move {
-            if let Err(e) = tenex_llm_config::Server::start(llm_base).await {
-                error!(error = %e, "llm-config IPC server failed");
-            }
-        });
-    }
-    info!("llm-config IPC server started");
 
     let boot_argv = if let Some(cmd) = args.ts {
         info!(boot_command = %cmd, "boot command resolved (--ts)");
@@ -99,6 +73,36 @@ pub async fn run(args: DaemonArgs) -> Result<()> {
     };
 
     let supervisor = supervisor::Supervisor::new(boot_argv, base_dir.clone());
+
+    // Bootstrap the whitelist trust daemon as a supervised foreground child.
+    // Every runtime gates inbound events through it and fails closed on socket
+    // errors, so the daemon must be ready before any project runtime starts.
+    if let Err(e) = start_whitelist_service(&supervisor, &base_dir).await {
+        supervisor.shutdown().await;
+        return Err(e);
+    }
+    info!("whitelist daemon ready");
+
+    // Bootstrap the identity daemon. Non-fatal: PubkeyService falls back to
+    // NDK if the daemon is absent.
+    if let Err(e) = tenex_identity::ensure_running() {
+        tracing::warn!(error = %e, "identity daemon failed to start; name resolution will use NDK fallback");
+    } else {
+        info!("identity daemon ready");
+    }
+
+    // Start the LLM config IPC server. TypeScript runtimes resolve config
+    // names and report key failures through this socket rather than reading
+    // providers.json / llms.json directly.
+    {
+        let llm_base = base_dir.clone();
+        tokio::spawn(async move {
+            if let Err(e) = tenex_llm_config::Server::start(llm_base).await {
+                error!(error = %e, "llm-config IPC server failed");
+            }
+        });
+    }
+    info!("llm-config IPC server started");
 
     // Spawn host-level companion daemons. Binaries are expected alongside the
     // tenex binary (same target/ dir for cargo builds, same bin/ for installs).
@@ -159,6 +163,27 @@ pub async fn run(args: DaemonArgs) -> Result<()> {
     nostr_handle.abort();
     supervisor.shutdown().await;
     Ok(())
+}
+
+async fn start_whitelist_service(
+    supervisor: &supervisor::Supervisor,
+    base_dir: &Path,
+) -> Result<()> {
+    let exe = std::env::current_exe().context("resolve current tenex executable")?;
+    supervisor
+        .boot_command(
+            "tenex-whitelist".to_string(),
+            vec![
+                exe.to_string_lossy().into_owned(),
+                "whitelist-run".to_string(),
+                "--base-dir".to_string(),
+                base_dir.to_string_lossy().into_owned(),
+            ],
+        )
+        .await;
+
+    tenex_whitelist::wait_until_ready(Duration::from_secs(5))
+        .context("waiting for whitelist daemon readiness")
 }
 
 async fn wait_for_signal() {
