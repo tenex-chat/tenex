@@ -88,19 +88,23 @@ fn run_show(base_dir: &Path) -> Result<()> {
         println!("{}", gray.apply_to("No global system prompt configured."));
         return Ok(());
     }
-    let amber_bold = console::Style::new()
-        .color256(214)
-        .bold();
-    let amber = console::Style::new().color256(214);
+    // TS at system-prompt.ts:95-98 uses `amberBold` and `amber` from
+    // utils/cli-theme.ts — chalk.hex('#FFC107') / chalk.hex('#FFC107').bold,
+    // i.e. the INQUIRER-amber truecolor (NOT the display palette's
+    // xterm-256 #214). Emit raw `\x1b[38;2;255;193;7m` so the wire
+    // bytes match TS chalk.hex output exactly.
+    let amber_open = crate::tui::theme::INQUIRER_AMBER_FG;
+    let amber_close = "\x1b[39m";
+    let bold_open = "\x1b[1m";
+    let bold_close = "\x1b[22m";
     let label = if enabled { "enabled" } else { "disabled" };
     println!(
-        "{}",
-        amber_bold.apply_to(format!("Global System Prompt ({label}):"))
+        "{amber_open}{bold_open}Global System Prompt ({label}):{bold_close}{amber_close}"
     );
     let rule = "─".repeat(50);
-    println!("{}", amber.apply_to(&rule));
+    println!("{amber_open}{rule}{amber_close}");
     println!("{content}");
-    println!("{}", amber.apply_to(&rule));
+    println!("{amber_open}{rule}{amber_close}");
     Ok(())
 }
 
@@ -115,11 +119,16 @@ fn run_set_enabled(base_dir: &Path, enabled: bool) -> Result<()> {
 
 fn run_edit(base_dir: &Path) -> Result<()> {
     let editor = preferred_editor();
-    let amber_bold = console::Style::new().color256(214).bold();
+    // TS at system-prompt.ts:162 uses `amberBold` from utils/cli-theme
+    // (chalk.hex('#FFC107').bold) — INQUIRER-amber truecolor, not the
+    // display palette's xterm-256 #214. Emit raw truecolor escape.
+    let amber_open = crate::tui::theme::INQUIRER_AMBER_FG;
+    let amber_close = "\x1b[39m";
+    let bold_open = "\x1b[1m";
+    let bold_close = "\x1b[22m";
     let gray = crate::tui::theme::chalk_gray();
     println!(
-        "{}",
-        amber_bold.apply_to("Opening editor to configure global system prompt...")
+        "{amber_open}{bold_open}Opening editor to configure global system prompt...{bold_close}{amber_close}"
     );
     // TS at system-prompt.ts:163 puts the trailing `\n` INSIDE the gray
     // wrap: `chalk.gray(`(Using editor: ${getEditor()})\n`)`. console.log
