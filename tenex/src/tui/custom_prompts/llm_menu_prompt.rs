@@ -348,10 +348,11 @@ pub enum LlmMenuResult {
 /// Execute one round of the bespoke prompt. The optional `on_test` callback
 /// (when supplied) runs synchronously when the user presses `t` on a row
 /// with `config_name`; the function blocks the prompt's redraw loop until
-/// the callback returns. The TS source uses an async promise + spinner —
-/// we serialize for now; if a long-running test needs the spinner, the
-/// caller can wrap `on_test` to run on a worker thread and feed
-/// `SpinnerTick` events. (Spinner-thread integration is its own iteration.)
+/// the callback returns. The TS source uses an async promise + spinner.
+/// To get the same spinner-while-testing UX in Rust, callers wrap
+/// `on_test` to run on a worker thread and feed `SpinnerTick` events to
+/// the loop — the state machine already exposes `spinner_frame` and the
+/// `TestCompleted` outcome variant for that exact flow.
 pub fn llm_menu_prompt<F>(
     message: &str,
     actions: &[ActionItem],
