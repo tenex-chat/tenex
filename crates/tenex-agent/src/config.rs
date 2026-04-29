@@ -17,12 +17,8 @@ pub struct AgentConfig {
     /// Slug identifier used in identity prompt (e.g. "code-reviewer")
     pub slug: Option<String>,
     pub nsec: String,
-    #[allow(dead_code)]
-    pub role: Option<String>,
     pub category: Option<String>,
     pub instructions: Option<String>,
-    #[allow(dead_code)]
-    pub description: Option<String>,
     pub working_directory: Option<String>,
     pub default: Option<AgentDefault>,
 }
