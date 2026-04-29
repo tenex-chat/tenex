@@ -93,16 +93,30 @@ impl SectionMenuInput {
 }
 
 /// Flattened layout: each row is either a non-selectable header or a
-/// selectable entry. The order is `[header_0, entries_0..., header_1,
-/// entries_1..., header_n, entries_n..., Back]` where each `header_*` is
-/// the section header and the trailing `Back` row is the only sentinel.
+/// selectable entry. The order is
+/// `[header_0, entries_0..., header_1, entries_1..., …, BlankSeparator, Back]`.
+/// The blank separator before `Back` mirrors `new inquirer.Separator()`
+/// (no arg) at `commands/config/index.ts:97` — `@inquirer/core`'s
+/// default separator content is
+/// `Array.from({ length: 15 }).join(figures.line)` (= 14 `─` chars,
+/// wrapped in `chalk.dim`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Row<'a> {
     Header(&'a str),
     Entry(&'a MenuEntry),
+    /// Non-selectable horizontal-line divider — renders as 14 dim `─`
+    /// chars matching `@inquirer/core/Separator.js:8`. Inserted just
+    /// before the trailing `Back` row.
+    BlankSeparator,
     /// Final selectable row.
     Back,
 }
+
+/// Width of the trailing blank separator's dash run, matching
+/// `@inquirer/core/Separator.js:8`'s
+/// `Array.from({ length: 15 }).join(figures.line)` — a 15-element array
+/// joined by 14 separators yields 14 dashes.
+pub const BLANK_SEPARATOR_DASHES: usize = 14;
 
 pub fn flatten<'a>(sections: &'a [MenuSection]) -> Vec<Row<'a>> {
     let mut rows = Vec::new();
@@ -112,6 +126,7 @@ pub fn flatten<'a>(sections: &'a [MenuSection]) -> Vec<Row<'a>> {
             rows.push(Row::Entry(entry));
         }
     }
+    rows.push(Row::BlankSeparator);
     rows.push(Row::Back);
     rows
 }
@@ -212,6 +227,9 @@ pub fn compose_lines(rows: &[Row<'_>], message: &str, active: usize) -> Vec<Stri
                 let pfx = if i == active { cursor_active.as_str() } else { "  " };
                 out.push(format!("{pfx}{}", entry.label));
             }
+            Row::BlankSeparator => {
+                out.push("─".repeat(BLANK_SEPARATOR_DASHES));
+            }
             Row::Back => {
                 let pfx = if i == active { cursor_active.as_str() } else { "  " };
                 out.push(format!("{pfx}Back"));
@@ -311,6 +329,18 @@ fn render_frame<W: Write>(
                     queue!(stdout, Print(pfx), Print(&entry.label), Print("\r\n"))?;
                 }
             }
+            Row::BlankSeparator => {
+                // `@inquirer/core/Separator.js:8` — default content is
+                // 14 `─` chars wrapped in `chalk.dim`. Mirror byte-for-byte.
+                let dashes = "─".repeat(BLANK_SEPARATOR_DASHES);
+                queue!(
+                    stdout,
+                    SetAttribute(Attribute::Dim),
+                    Print(dashes),
+                    SetAttribute(Attribute::Reset),
+                    Print("\r\n"),
+                )?;
+            }
             Row::Back => {
                 // TS at config/index.ts:98 — `chalk.dim("  Back")` with
                 // TWO leading spaces INSIDE the dim wrap. Inquirer
@@ -387,17 +417,20 @@ mod tests {
     }
 
     #[test]
-    fn flatten_yields_headers_then_entries_then_back() {
+    fn flatten_yields_headers_entries_blank_separator_then_back() {
         let sections = sample_sections();
         let rows = flatten(&sections);
-        // [Header(AI), Entry(Providers), Entry(LLMs), Header(Network), Entry(Relays), Back]
-        assert_eq!(rows.len(), 6);
+        // [Header(AI), Entry(Providers), Entry(LLMs), Header(Network),
+        //  Entry(Relays), BlankSeparator, Back] — the BlankSeparator
+        // mirrors `new inquirer.Separator()` at config/index.ts:97.
+        assert_eq!(rows.len(), 7);
         assert!(matches!(rows[0], Row::Header("AI")));
         assert!(matches!(rows[1], Row::Entry(_)));
         assert!(matches!(rows[2], Row::Entry(_)));
         assert!(matches!(rows[3], Row::Header("Network")));
         assert!(matches!(rows[4], Row::Entry(_)));
-        assert!(matches!(rows[5], Row::Back));
+        assert!(matches!(rows[5], Row::BlankSeparator));
+        assert!(matches!(rows[6], Row::Back));
     }
 
     #[test]
@@ -409,7 +442,7 @@ mod tests {
     }
 
     #[test]
-    fn down_skips_section_headers() {
+    fn down_skips_section_headers_and_blank_separator() {
         let sections = sample_sections();
         let rows = flatten(&sections);
         let mut state = SectionMenuState::new(&rows);
@@ -419,22 +452,22 @@ mod tests {
         // Down again — must skip the Network header at idx 3 → idx 4 (Relays).
         handle_key(&mut state, &rows, SectionMenuInput::Down);
         assert_eq!(state.active, 4);
-        // Down once more lands on Back at idx 5.
+        // Down once more — must skip BlankSeparator at idx 5 → land on Back at idx 6.
         handle_key(&mut state, &rows, SectionMenuInput::Down);
-        assert_eq!(state.active, 5);
+        assert_eq!(state.active, 6);
         // Down at the last row clamps (no further selectable).
         handle_key(&mut state, &rows, SectionMenuInput::Down);
-        assert_eq!(state.active, 5);
+        assert_eq!(state.active, 6);
     }
 
     #[test]
-    fn up_skips_section_headers_and_clamps_at_first() {
+    fn up_skips_section_headers_and_blank_separator_and_clamps_at_first() {
         let sections = sample_sections();
         let rows = flatten(&sections);
         let mut state = SectionMenuState::new(&rows);
-        state.active = 5; // Back
+        state.active = 6; // Back
         handle_key(&mut state, &rows, SectionMenuInput::Up);
-        assert_eq!(state.active, 4); // Relays
+        assert_eq!(state.active, 4); // Relays (skipped BlankSeparator at 5)
         handle_key(&mut state, &rows, SectionMenuInput::Up);
         assert_eq!(state.active, 2); // LLMs (skipped Network header at 3)
         handle_key(&mut state, &rows, SectionMenuInput::Up);
@@ -461,7 +494,7 @@ mod tests {
         let sections = sample_sections();
         let rows = flatten(&sections);
         let mut state = SectionMenuState::new(&rows);
-        state.active = 5; // Back
+        state.active = 6; // Back (after BlankSeparator at 5)
         assert_eq!(
             handle_key(&mut state, &rows, SectionMenuInput::Enter),
             SectionMenuOutcome::Back
@@ -522,8 +555,29 @@ mod tests {
     fn compose_lines_back_row_renders_word_back() {
         let sections = sample_sections();
         let rows = flatten(&sections);
-        let lines = compose_lines(&rows, "Settings", 5);
+        let lines = compose_lines(&rows, "Settings", 6);
         assert!(lines.iter().any(|l| l.contains("Back")));
+    }
+
+    /// Pin the BlankSeparator's rendered content to 14 `─` dashes —
+    /// matching `@inquirer/core/Separator.js:8`'s default
+    /// `Array.from({ length: 15 }).join(figures.line)`.
+    #[test]
+    fn compose_lines_blank_separator_renders_14_em_dashes() {
+        let sections = sample_sections();
+        let rows = flatten(&sections);
+        let lines = compose_lines(&rows, "Settings", 1);
+        let expected = "─".repeat(14);
+        assert!(
+            lines.iter().any(|l| l == &expected),
+            "missing 14-dash blank separator; got lines: {lines:?}"
+        );
+    }
+
+    #[test]
+    fn blank_separator_constant_matches_inquirer_default() {
+        // 15-element array joined by 14 separators yields 14 dashes.
+        assert_eq!(BLANK_SEPARATOR_DASHES, 14);
     }
 
     #[test]
