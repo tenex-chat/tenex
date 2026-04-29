@@ -34,10 +34,10 @@ mock.module("@/services/PubkeyService", () => ({
     }),
 }));
 
-const mockResolveAgentSlug = mock((slug: string) => {
-    if (slug === "agent-1") return { pubkey: "agent-pubkey-1", availableSlugs: ["agent-1", "agent-2"] };
-    if (slug === "agent-2") return { pubkey: "agent-pubkey-2", availableSlugs: ["agent-1", "agent-2"] };
-    return { pubkey: null, availableSlugs: ["agent-1", "agent-2"] };
+const mockResolveAgentId = mock((id: string) => {
+    if (id === "agent-1") return { pubkey: "agent-pubkey-1", slug: "agent-1", availableIds: ["agent-1", "agent-2"], availableSlugs: ["agent-1", "agent-2"] };
+    if (id === "agent-2") return { pubkey: "agent-pubkey-2", slug: "agent-2", availableIds: ["agent-1", "agent-2"], availableSlugs: ["agent-1", "agent-2"] };
+    return { pubkey: null, slug: null, availableIds: ["agent-1", "agent-2"], availableSlugs: ["agent-1", "agent-2"], failureReason: "not_found" as const };
 });
 
 const mockListConversations = mock((projectId: string) => buildCatalogEntriesForProject(projectId));
@@ -397,7 +397,7 @@ afterEach(() => {
 describe("conversation_list Tool", () => {
     let mockContext: ExecutionContext;
     let mockAgent: AgentInstance;
-    let resolveAgentSlugSpy: ReturnType<typeof spyOn>;
+    let resolveAgentIdSpy: ReturnType<typeof spyOn>;
     let parseNostrUserSpy: ReturnType<typeof spyOn>;
 
     beforeEach(() => {
@@ -411,8 +411,8 @@ describe("conversation_list Tool", () => {
             mockBuildConversationCatalogProjection as any
         );
 
-        resolveAgentSlugSpy = spyOn(agentResolutionModule, "resolveAgentSlug").mockImplementation(
-            mockResolveAgentSlug
+        resolveAgentIdSpy = spyOn(agentResolutionModule, "resolveAgentId").mockImplementation(
+            mockResolveAgentId
         );
         parseNostrUserSpy = spyOn(nostrEntityParserModule, "parseNostrUser").mockImplementation(
             (input: string | undefined) => {
@@ -488,7 +488,7 @@ describe("conversation_list Tool", () => {
     });
 
     afterEach(() => {
-        resolveAgentSlugSpy?.mockRestore();
+        resolveAgentIdSpy?.mockRestore();
         parseNostrUserSpy?.mockRestore();
         // Clear instantiated stores
         instantiatedStores.length = 0;
@@ -533,7 +533,7 @@ describe("conversation_list Tool", () => {
 
             expect(result.success).toBe(true);
             expect(result.conversations).toHaveLength(1);
-            // ID is now shortened to 12 characters
+            // ID is shortened for tool output
             expect(result.conversations[0].id).toBe("conv1".substring(0, 6));
             expect(result.conversations[0].title).toBe("Current Project Conversation");
             // New fields: lastActive and children
@@ -626,7 +626,7 @@ describe("conversation_list Tool", () => {
 
             expect(result.success).toBe(true);
             expect(result.conversations).toHaveLength(1);
-            // ID is now shortened to 12 characters
+            // ID is shortened for tool output
             expect(result.conversations[0].id).toBe("conv2".substring(0, 6));
         });
 
@@ -1011,7 +1011,7 @@ describe("conversation_list Tool", () => {
 
             expect(result.success).toBe(true);
             expect(result.conversations).toHaveLength(1);
-            expect(result.conversations[0].fullId).toBe("orphan-child");
+            expect(result.conversations[0].id).toBe("orphan-chi");
             expect(result.conversations[0].title).toBe("Orphan Child");
         });
     });
@@ -1537,15 +1537,15 @@ describe("conversation_list Tool", () => {
             );
         });
 
-        it("should include available slugs in error message when slug resolution fails", async () => {
+        it("should include available ids in error message when id resolution fails", async () => {
             const tool = createConversationListTool(mockContext);
 
             await expect(tool.execute({ with: "nonexistent-slug" })).rejects.toThrow(
-                /Available agent slugs in this project: agent-1, agent-2/
+                /Available agent ids in this project: agent-1, agent-2/
             );
         });
 
-        it("should throw an error when slug is used with projectId='all'", async () => {
+        it("should throw an error when project-scoped id is used with projectId='all'", async () => {
             (ConversationStore.listProjectIdsFromDisk as ReturnType<typeof mock>).mockReturnValue([
                 "current-project",
                 "other-project",
@@ -1553,13 +1553,12 @@ describe("conversation_list Tool", () => {
 
             const tool = createConversationListTool(mockContext);
 
-            // Using a slug with projectId="all" should throw an error
             await expect(tool.execute({ projectId: "all", with: "agent-1" })).rejects.toThrow(
-                /Agent slugs are not supported when projectId='all'/
+                /Project-scoped actor ids are not supported when projectId='all'/
             );
         });
 
-        it("should throw an error when slug is used with projectId='ALL' (case insensitive)", async () => {
+        it("should throw an error when project-scoped id is used with projectId='ALL' (case insensitive)", async () => {
             (ConversationStore.listProjectIdsFromDisk as ReturnType<typeof mock>).mockReturnValue([
                 "current-project",
                 "other-project",
@@ -1567,9 +1566,8 @@ describe("conversation_list Tool", () => {
 
             const tool = createConversationListTool(mockContext);
 
-            // Using a slug with projectId="ALL" (uppercase) should also throw
             await expect(tool.execute({ projectId: "ALL", with: "agent-1" })).rejects.toThrow(
-                /Agent slugs are not supported when projectId='all'/
+                /Project-scoped actor ids are not supported when projectId='all'/
             );
         });
 
@@ -1600,14 +1598,13 @@ describe("conversation_list Tool", () => {
             expect(result.conversations[0].title).toBe("Conv with hex pubkey");
         });
 
-        it("should throw descriptive error for invalid pubkey format", async () => {
+        it("should throw descriptive error for invalid id format", async () => {
             const tool = createConversationListTool(mockContext);
 
-            // A value that looks like a pubkey but is invalid
-            const invalidPubkey = "npub1invalid";
+            const invalidId = "npub1invalid";
 
-            await expect(tool.execute({ with: invalidPubkey })).rejects.toThrow(
-                /looks like a pubkey but could not be parsed/
+            await expect(tool.execute({ with: invalidId })).rejects.toThrow(
+                /looks like an id but could not be parsed/
             );
         });
 

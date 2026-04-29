@@ -5,6 +5,7 @@ import { llmServiceFactory } from "@/llm";
 import { config } from "@/services/ConfigService";
 import { ContextDiscoveryService } from "@/services/search/ContextDiscoveryService";
 import type { AISdkTool } from "@/tools/types";
+import { shortenConversationId } from "@/utils/conversation-id";
 import { logger } from "@/utils/logger";
 import { isHexPrefix, resolvePrefixToId } from "@/utils/nostr-entity-parser";
 import { tool } from "ai";
@@ -60,13 +61,13 @@ const conversationGetSchema = z.object({
         .string()
         .min(1, "conversationId is required")
         .describe(
-            "The stored conversation ID to retrieve. Pass the exact ID returned by conversation_list or shown in prompt context. For legacy 64-char hex Nostr-backed conversation IDs, 10-character hex prefixes are also resolved when indexed."
+            "The conversation id to retrieve. Pass the id returned by conversation_list or shown in prompt context."
         ),
     untilId: z
         .string()
         .optional()
         .describe(
-            "Optional stored message ID to retrieve the conversation slice up to and including that message. Pass the exact message/event ID from the transcript. For legacy 64-char hex Nostr-backed message IDs, 10-character hex prefixes are also resolved when indexed."
+            "Optional message id to retrieve the conversation slice up to and including that message."
         ),
     prompt: z
         .string()
@@ -193,7 +194,7 @@ function serializeConversation(
     });
 
     return {
-        id: String(conversation.id),
+        id: shortenConversationId(String(conversation.id)),
         title: conversation.title ? String(conversation.title) : undefined,
         executionTime: safeCopy(conversation.executionTime),
         messageCount: messages.length,

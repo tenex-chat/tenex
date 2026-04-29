@@ -230,7 +230,7 @@ export function createProjectListTool(context: ToolExecutionContext): AISdkTool 
     const coreTool = tool({
         description:
             "List known projects with their agents and running status. Optionally filter by search text. " +
-            'Agent keys ending with " (PM)" indicate the project manager; use the slug without the suffix when calling delegate_crossproject.',
+            'Agent keys ending with " (PM)" indicate the project manager; use the id without the suffix when calling delegate_crossproject.',
         inputSchema: projectListSchema,
         execute: async (input) => {
             return await executeProjectList(context, input);

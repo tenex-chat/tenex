@@ -14,7 +14,7 @@ mock.module("@/services/PubkeyService", () => ({
 }));
 
 mock.module("@/services/agents/AgentResolution", () => ({
-    resolveAgentSlug: (slug: string) => ({ pubkey: null, availableSlugs: [] }),
+    resolveAgentId: (_id: string) => ({ pubkey: null, slug: null, availableIds: [], availableSlugs: [] }),
 }));
 
 mock.module("@/utils/nostr-entity-parser", () => ({

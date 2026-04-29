@@ -2,7 +2,7 @@ import type { ToolExecutionContext } from "@/tools/types";
 import { SchedulerService } from "@/services/scheduling";
 import { formatDelay, formatExecuteAt, parseRelativeDelay } from "@/services/scheduling/utils";
 import type { AISdkTool } from "@/tools/types";
-import { resolveAgentSlug } from "@/services/agents";
+import { resolveAgentId } from "@/services/agents";
 import { logger } from "@/utils/logger";
 import { tool } from "ai";
 import * as cron from "node-cron";
@@ -26,7 +26,7 @@ export function createScheduleTaskTool(context: ToolExecutionContext): AISdkTool
                 .nullable()
                 .optional()
                 .describe(
-                    "Target agent slug (e.g., 'architect', 'claude-code'). Defaults to self."
+                    "Target agent id. Defaults to self."
                 ),
             targetChannel: z
                 .string()
@@ -39,16 +39,16 @@ export function createScheduleTaskTool(context: ToolExecutionContext): AISdkTool
             // Resolve target agent
             let targetAgentSlug: string;
             if (targetAgent) {
-                const resolution = resolveAgentSlug(targetAgent);
+                const resolution = resolveAgentId(targetAgent);
                 if (!resolution.pubkey) {
-                    const availableSlugsStr = resolution.availableSlugs.length > 0
-                        ? `Available agent slugs: ${resolution.availableSlugs.join(", ")}`
+                    const availableIdsStr = resolution.availableIds.length > 0
+                        ? `Available agent ids: ${resolution.availableIds.join(", ")}`
                         : "No agents available in the current project context.";
                     throw new Error(
-                        `Invalid agent slug: "${targetAgent}". Only agent slugs are accepted. ${availableSlugsStr}`
+                        `Invalid agent id: "${targetAgent}". ${availableIdsStr}`
                     );
                 }
-                targetAgentSlug = targetAgent;
+                targetAgentSlug = resolution.slug ?? targetAgent;
             } else {
                 targetAgentSlug = context.agent.slug;
             }

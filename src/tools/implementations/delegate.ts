@@ -17,7 +17,7 @@ import { getProjectContext } from "@/services/projects";
 import { RALRegistry } from "@/services/ral/RALRegistry";
 import type { PendingDelegation } from "@/services/ral/types";
 import type { AISdkTool } from "@/tools/types";
-import { resolveAgentSlug } from "@/services/agents";
+import { resolveAgentId } from "@/services/agents";
 import { logger } from "@/utils/logger";
 import { createEventContext } from "@/services/event-context";
 import { shortenConversationId } from "@/utils/conversation-id";
@@ -30,7 +30,7 @@ const delegationItemSchema = z.object({
   recipient: z
     .string()
     .describe(
-      "Agent slug or team name (e.g., 'architect', 'claude-code', 'explore-agent', 'design-team'). Agent slugs take priority when a value matches both."
+      "Recipient agent id or team name. Agent ids take priority when a value matches both."
     ),
   prompt: z.string().describe("The request or task for this agent"),
   branch: z
@@ -89,13 +89,13 @@ async function executeDelegate(
 
   const trimmedRecipient = delegation.recipient.trim();
 
-  // Resolve slug first, then fall back to a team name if no agent slug matches.
-  const resolution = resolveAgentSlug(trimmedRecipient);
+  const resolution = resolveAgentId(trimmedRecipient);
   let pubkey = resolution.pubkey;
+  let targetAgentId = resolution.slug ?? trimmedRecipient;
   let resolvedTeamName: string | undefined;
   let availableTeamNames: string[] = [];
 
-  if (!pubkey) {
+  if (!pubkey && resolution.failureReason !== "ambiguous") {
     let projectId: string | undefined;
     try {
       const projectContext = getProjectContext();
@@ -111,28 +111,29 @@ async function executeDelegate(
     if (matchedTeamName) {
       const teamLeadIdentifier = await teamService.resolveTeamToLead(matchedTeamName, projectId);
       if (teamLeadIdentifier) {
-        const teamLeadResolution = resolveAgentSlug(teamLeadIdentifier);
+        const teamLeadResolution = resolveAgentId(teamLeadIdentifier);
         if (!teamLeadResolution.pubkey) {
           throw new Error(
-            `Team lead "${teamLeadIdentifier}" for team "${matchedTeamName}" is not a known agent. ` +
-            `Available agent slugs: ${teamLeadResolution.availableSlugs.join(", ")}`
+            `Team lead "${teamLeadIdentifier}" for team "${matchedTeamName}" is not a known agent id. ` +
+            `Available agent ids: ${teamLeadResolution.availableIds.join(", ")}`
           );
         }
         pubkey = teamLeadResolution.pubkey;
+        targetAgentId = teamLeadResolution.slug ?? teamLeadIdentifier;
         resolvedTeamName = matchedTeamName;
       }
     }
   }
 
   if (!pubkey) {
-    const availableSlugsStr = resolution.availableSlugs.length > 0
-      ? `Available agent slugs: ${resolution.availableSlugs.join(", ")}`
+    const availableIdsStr = resolution.availableIds.length > 0
+      ? `Available agent ids: ${resolution.availableIds.join(", ")}`
       : "No agents available in the current project context.";
     const availableTeamsStr = availableTeamNames.length > 0
       ? `Available team names: ${availableTeamNames.join(", ")}`
       : "No teams available in the current project context.";
     throw new Error(
-      `Invalid agent slug or team name: "${delegation.recipient}". ${availableSlugsStr} ${availableTeamsStr}`
+      `Invalid agent id or team name: "${delegation.recipient}". ${availableIdsStr} ${availableTeamsStr}`
     );
   }
 
@@ -211,6 +212,7 @@ async function executeDelegate(
 
   logger.info("[delegate] Published delegation, agent continues without blocking", {
     delegationConversationId,
+    targetAgentId,
     circularWarningsCount: circularWarnings.length,
   });
 
@@ -236,7 +238,7 @@ async function executeDelegate(
 export function createDelegateTool(context: ToolExecutionContext): AISdkTool {
   const delegateSchema = delegationItemSchema;
 
-  const description = `Delegate a task to an agent in the project. Provide the recipient agent slug, prompt, and optional configuration. IMPORTANT: Delegated agents ONLY see your prompt - they cannot see any prior conversation. Include ALL necessary context, requirements, and constraints in your prompt.
+  const description = `Delegate a task to an agent in the project. Provide the recipient agent id, prompt, and optional configuration. IMPORTANT: Delegated agents ONLY see your prompt - they cannot see any prior conversation. Include ALL necessary context, requirements, and constraints in your prompt.
 
 Circular delegation detection: The tool detects when a delegation would create a circular chain (A→B→C→A). By default, circular delegations are skipped with a soft warning. Set \`force: true\` to bypass this check.
 

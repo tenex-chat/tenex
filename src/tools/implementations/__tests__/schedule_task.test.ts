@@ -9,7 +9,12 @@ const mockSchedulerService = {
     addOneoffTask: mock().mockResolvedValue("mock-oneoff-task-id"),
 };
 
-const mockResolveAgentSlug = mock().mockReturnValue({ pubkey: null, availableSlugs: [] });
+const mockResolveAgentId = mock().mockReturnValue({
+    pubkey: null,
+    slug: null,
+    availableIds: [],
+    availableSlugs: [],
+});
 
 import { createScheduleTaskTool } from "../schedule_task";
 
@@ -43,9 +48,14 @@ describe("Schedule Task Tool", () => {
     beforeEach(() => {
         mockSchedulerService.addTask.mockReset().mockResolvedValue("mock-task-id");
         mockSchedulerService.addOneoffTask.mockReset().mockResolvedValue("mock-oneoff-task-id");
-        mockResolveAgentSlug.mockReset().mockReturnValue({ pubkey: null, availableSlugs: [] });
-        spyOn(agentsModule, "resolveAgentSlug").mockImplementation(
-            mockResolveAgentSlug as typeof agentsModule.resolveAgentSlug
+        mockResolveAgentId.mockReset().mockReturnValue({
+            pubkey: null,
+            slug: null,
+            availableIds: [],
+            availableSlugs: [],
+        });
+        spyOn(agentsModule, "resolveAgentId").mockImplementation(
+            mockResolveAgentId as typeof agentsModule.resolveAgentId
         );
         spyOn(SchedulerService, "getInstance").mockReturnValue(mockSchedulerService as any);
         spyOn(logger, "info").mockImplementation(() => undefined);
@@ -229,9 +239,11 @@ describe("Schedule Task Tool", () => {
     });
 
     describe("Agent resolution", () => {
-        it("should resolve valid agent slug to pubkey", async () => {
-            mockResolveAgentSlug.mockReturnValue({
+        it("should resolve valid agent id to scheduling slug", async () => {
+            mockResolveAgentId.mockReturnValue({
                 pubkey: mockTargetPubkey,
+                slug: "architect",
+                availableIds: ["architect", "claude-code"],
                 availableSlugs: ["architect", "claude-code"],
             });
 
@@ -245,7 +257,7 @@ describe("Schedule Task Tool", () => {
             });
 
             expect(result.success).toBe(true);
-            expect(mockResolveAgentSlug).toHaveBeenCalledWith("architect");
+            expect(mockResolveAgentId).toHaveBeenCalledWith("architect");
             expect(mockSchedulerService.addTask).toHaveBeenCalledWith(
                 "0 9 * * *",
                 "Daily standup reminder",
@@ -257,9 +269,11 @@ describe("Schedule Task Tool", () => {
             );
         });
 
-        it("should throw for invalid agent slug with available-slugs hint", async () => {
-            mockResolveAgentSlug.mockReturnValue({
+        it("should throw for invalid agent id with available ids hint", async () => {
+            mockResolveAgentId.mockReturnValue({
                 pubkey: null,
+                slug: null,
+                availableIds: ["architect", "claude-code", "explore-agent"],
                 availableSlugs: ["architect", "claude-code", "explore-agent"],
             });
 
@@ -274,9 +288,9 @@ describe("Schedule Task Tool", () => {
                 });
                 expect(true).toBe(false); // Should not reach here
             } catch (error: any) {
-                expect(error.message).toContain("Invalid agent slug");
+                expect(error.message).toContain("Invalid agent id");
                 expect(error.message).toContain("nonexistent-agent");
-                expect(error.message).toContain("Available agent slugs");
+                expect(error.message).toContain("Available agent ids");
                 expect(error.message).toContain("architect");
             }
         });
@@ -292,7 +306,7 @@ describe("Schedule Task Tool", () => {
             });
 
             expect(result.success).toBe(true);
-            expect(mockResolveAgentSlug).not.toHaveBeenCalled();
+            expect(mockResolveAgentId).not.toHaveBeenCalled();
             expect(mockSchedulerService.addTask).toHaveBeenCalledWith(
                 "0 9 * * *",
                 "Self-reminder",
@@ -305,8 +319,10 @@ describe("Schedule Task Tool", () => {
         });
 
         it("should resolve agent for oneoff tasks too", async () => {
-            mockResolveAgentSlug.mockReturnValue({
+            mockResolveAgentId.mockReturnValue({
                 pubkey: mockTargetPubkey,
+                slug: "architect",
+                availableIds: ["architect"],
                 availableSlugs: ["architect"],
             });
 
@@ -321,7 +337,7 @@ describe("Schedule Task Tool", () => {
 
             expect(result.success).toBe(true);
             expect(result.type).toBe("oneoff");
-            expect(mockResolveAgentSlug).toHaveBeenCalledWith("architect");
+            expect(mockResolveAgentId).toHaveBeenCalledWith("architect");
             expect(mockSchedulerService.addOneoffTask).toHaveBeenCalledWith(
                 expect.any(Date),
                 "Remind architect",

@@ -174,7 +174,7 @@ describe("delegate_crossproject - Todo enforcement", () => {
             const input = {
                 content: "Please help with a task",
                 projectId: "target-project",
-                agentSlug: "target-agent",
+                agentId: "target-agent",
             };
 
             const result = await delegateTool.execute(input);
@@ -196,7 +196,7 @@ describe("delegate_crossproject - Todo enforcement", () => {
             const input = {
                 content: "Please help with a task",
                 projectId: "target-project",
-                agentSlug: "target-agent",
+                agentId: "target-agent",
             };
 
             const result = await delegateTool.execute(input);
@@ -217,7 +217,7 @@ describe("delegate_crossproject - Todo enforcement", () => {
             const input = {
                 content: "Please help with a task",
                 projectId: "target-project",
-                agentSlug: "target-agent",
+                agentId: "target-agent",
             };
 
             // Should succeed with todos present

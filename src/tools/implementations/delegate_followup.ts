@@ -89,7 +89,7 @@ const delegateFollowupSchema = z.object({
   delegation_conversation_id: z
     .string()
     .describe(
-      "The event ID of the delegation conversation. Use the delegationConversationId from the delegate response."
+      "The delegation conversation id returned by delegate."
     ),
   message: z.string().describe("Your follow-up question or clarification request"),
 });
@@ -120,7 +120,7 @@ async function executeDelegateFollowup(
     const resolved = resolveDelegationPrefix(trimmedConversationId);
     if (!resolved) {
       throw new Error(
-        `Could not resolve "${trimmedConversationId}" to a delegation conversation event ID. Use the delegationConversationId from the delegate response.`
+        `Could not resolve delegation conversation id "${trimmedConversationId}". Use the delegationConversationId from delegate.`
       );
     }
     delegation_conversation_id = resolved;
@@ -140,7 +140,7 @@ async function executeDelegateFollowup(
   // Step 3: Unknown format
   else {
     throw new Error(
-      `Invalid delegation conversation event ID: "${trimmedConversationId}". Use the delegationConversationId from delegate.`
+      `Invalid delegation conversation id: "${trimmedConversationId}". Use the delegationConversationId from delegate.`
     );
   }
 

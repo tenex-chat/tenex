@@ -7,8 +7,8 @@
  * It still loads ConversationStore on demand for returned conversations so the
  * response preserves sender/recipient formatting and metadata fallbacks.
  *
- * For ID formatting, it uses the centralized shortenConversationId() helper from
- * @/utils/conversation-id to maintain consistency across the codebase.
+ * It returns short conversation IDs. Lookup tools resolve those IDs through
+ * the centralized prefix store.
  *
  * For tools with simpler needs, use ConversationCatalogService + ConversationPresenter
  * for automatic ID formatting.
@@ -34,7 +34,7 @@ import { tool } from "ai";
 import { z } from "zod";
 import { PUBKEY_DISPLAY_LENGTH, STORAGE_PREFIX_LENGTH } from "@/utils/nostr-entity-parser";
 import { getPubkeyService } from "@/services/PubkeyService";
-import { resolveAgentSlug } from "@/services/agents/AgentResolution";
+import { resolveAgentId } from "@/services/agents/AgentResolution";
 import { parseNostrUser } from "@/utils/nostr-entity-parser";
 import { shortenConversationId, shortenPubkey } from "@/utils/conversation-id";
 import { type ProjectDTag, createProjectDTag } from "@/types/project-ids";
@@ -65,7 +65,7 @@ const conversationListSchema = z.object({
         .optional()
         .describe(
             "Filter to conversations where this actor was active. " +
-            "Accepts an agent slug (e.g., 'claude-code'), a pubkey (hex or npub format), or a 6-10 char hex pubkey prefix."
+            "Use an actor id from project context or prior tool output."
         ),
 });
 
@@ -74,8 +74,6 @@ type ConversationListInput = z.infer<typeof conversationListSchema>;
 interface ChildConversationSummary {
     /** Shortened conversation ID (10 chars) for display */
     id: string;
-    /** Full canonical conversation ID for lookups */
-    fullId: string;
     title?: string;
     /** Recipient agent name */
     recipient?: string;
@@ -88,8 +86,6 @@ interface ChildConversationSummary {
 interface ConversationSummary {
     /** Shortened conversation ID (10 chars) for display */
     id: string;
-    /** Full canonical conversation ID for lookups */
-    fullId: string;
     projectId?: string;
     title?: string;
     /** Full summary (not truncated) */
@@ -149,7 +145,7 @@ function resolveParticipantName(message: ConversationRecord): string {
 }
 
 /**
- * Resolve a pubkey to a display name using the PubkeyService.
+ * Resolve an author id to a display name using the PubkeyService.
  */
 function resolveNameFromPubkey(pubkey: string): string {
     return getPubkeyService().getNameSync(pubkey);
@@ -516,7 +512,6 @@ function summarizeIndexedChildConversation(
 
     return {
         id: shortenConversationId(conversation.entry.id),
-        fullId: conversation.entry.id,
         title: conversation.entry.title,
         recipient: extractRecipientFromIndexedConversation(conversation),
         lastActive: conversation.entry.lastActivity
@@ -539,7 +534,6 @@ function summarizeIndexedConversation(
 
     return {
         id: shortenConversationId(conversation.entry.id),
-        fullId: conversation.entry.id,
         projectId: conversation.projectId,
         title: store?.metadata?.title ?? store?.title ?? conversation.entry.title,
         summary: store?.metadata?.summary ?? conversation.entry.summary,
@@ -553,13 +547,11 @@ function summarizeIndexedConversation(
 }
 
 /**
- * Resolve the 'with' parameter to a pubkey.
- * Accepts agent slugs (single project only), exact pubkeys (hex or npub format),
- * or short hex pubkey prefixes.
+ * Resolve the 'with' parameter to a participant filter.
  *
  * @param withValue - The value to resolve
  * @param isAllProjects - Whether projectId="all" was specified
- * @throws Error if the value cannot be resolved to a pubkey
+ * @throws Error if the value cannot be resolved to an actor
  */
 function resolveWithParameter(withValue: string, isAllProjects: boolean): WithFilter {
     const trimmed = withValue.trim();
@@ -581,35 +573,31 @@ function resolveWithParameter(withValue: string, isAllProjects: boolean): WithFi
     ) {
         throw new Error(
             `Failed to resolve "with" parameter: "${withValue}". ` +
-            "The value looks like a pubkey but could not be parsed. " +
-            "Please provide a valid 64-character hex pubkey or npub format."
+            "The value looks like an id but could not be parsed. " +
+            "Please provide a valid id."
         );
     }
 
-    // It looks like a slug - check if we're in all-projects mode
     if (isAllProjects) {
         throw new Error(
-            "Agent slugs are not supported when projectId='all'. " +
-            `The slug "${withValue}" can only be resolved within the current project. ` +
-            "Please provide a pubkey (hex, short hex prefix, or npub format) instead."
+            "Project-scoped actor ids are not supported when projectId='all'. " +
+            `The id "${withValue}" can only be resolved within the current project.`
         );
     }
 
-    // Try to resolve as agent slug (single project only)
-    const agentResult = resolveAgentSlug(trimmed);
+    const agentResult = resolveAgentId(trimmed);
 
     if (agentResult.pubkey) {
         return { kind: "exact", pubkey: agentResult.pubkey };
     }
 
-    // Slug resolution failed - provide helpful error with available slugs
-    const availableSlugsMsg = agentResult.availableSlugs.length > 0
-        ? ` Available agent slugs in this project: ${agentResult.availableSlugs.join(", ")}.`
+    const availableIdsMsg = agentResult.availableIds.length > 0
+        ? ` Available agent ids in this project: ${agentResult.availableIds.join(", ")}.`
         : "";
 
     throw new Error(
         `Failed to resolve 'with' parameter: "${withValue}". ` +
-        `Could not find an agent with this slug or parse it as a pubkey.${availableSlugsMsg}`
+        `Could not find an actor with this id.${availableIdsMsg}`
     );
 }
 
@@ -634,7 +622,7 @@ async function executeConversationList(
     // Determine if we're querying all projects
     const isAllProjects = effectiveProjectId === "all";
 
-    // Resolve the 'with' parameter to a pubkey if provided
+    // Resolve the 'with' parameter to an actor filter if provided
     // This will throw an error if resolution fails, preventing silent fallback to unfiltered results
     let withFilter: WithFilter | null = null;
     if (withParam) {
@@ -743,7 +731,6 @@ export function createConversationListTool(context: ToolExecutionContext): AISdk
             "even if the root itself is old. The 'limit' parameter controls the number of root conversations " +
             "returned. Supports optional date range filtering with fromTime/toTime (Unix timestamps in seconds). " +
             "Use the 'with' parameter to filter to conversations where a specific actor was active. " +
-            "The filter accepts agent slugs, exact pubkeys, and short hex pubkey prefixes. " +
             "Use this to discover available conversations before retrieving specific ones with conversation_get.",
 
         inputSchema: conversationListSchema,

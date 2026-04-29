@@ -145,7 +145,7 @@ describe("Delegation tools - Self-delegation validation", () => {
             expect(result.delegationConversationId).toBeDefined();
         });
 
-        it("should reject pubkeys (only slugs accepted)", async () => {
+        it("should allow delegation by exact agent id", async () => {
             const context = {
                 ...createMockContext(1, true), // Provide ralNumber, with todos
                 agentPublisher: {
@@ -159,15 +159,9 @@ describe("Delegation tools - Self-delegation validation", () => {
                 prompt: "Do something",
             };
 
-            // Pubkeys are no longer accepted - should throw with helpful error
-            try {
-                await runWithProjectContext(() => delegateTool.execute(input));
-                expect(true).toBe(false); // Should not reach here
-            } catch (error: any) {
-                expect(error.message).toContain("Invalid agent slug");
-                expect(error.message).toContain("agent-pubkey-123");
-                expect(error.message).toContain("Available agent slugs");
-            }
+            const result = await runWithProjectContext(() => delegateTool.execute(input));
+            expect(result.success).toBe(true);
+            expect(result.delegationConversationId).toBeDefined();
         });
 
         it("should resolve team names to the team lead and propagate the team name", async () => {
@@ -272,7 +266,7 @@ describe("Delegation tools - Self-delegation validation", () => {
                 expect(true).toBe(false); // Should not reach here
             } catch (error: any) {
                 // Invalid ID format is rejected before lookup
-                expect(error.message).toContain("Invalid delegation conversation event ID");
+                expect(error.message).toContain("Invalid delegation conversation id");
             }
         });
     });
@@ -835,7 +829,7 @@ describe("delegate_followup - ID handling", () => {
             await followupTool.execute(input);
             expect(true).toBe(false);
         } catch (error: any) {
-            expect(error.message).toContain("Invalid delegation conversation event ID");
+            expect(error.message).toContain("Invalid delegation conversation id");
         }
     });
 
@@ -854,7 +848,7 @@ describe("delegate_followup - ID handling", () => {
             await followupTool.execute(input);
             expect(true).toBe(false);
         } catch (error: any) {
-            expect(error.message).toContain("Invalid delegation conversation event ID");
+            expect(error.message).toContain("Invalid delegation conversation id");
         }
     });
 

@@ -2,13 +2,14 @@ import type { ToolExecutionContext } from "@/tools/types";
 import { agentStorage } from "@/agents/AgentStorage";
 import { getDaemon } from "@/daemon";
 import { getNDK } from "@/nostr/ndkClient";
+import { resolveAgentIdFromCandidates, type AgentIdCandidate } from "@/services/agents";
 import { readProjectAgentPubkeys } from "@/services/projects/ProjectMembersReader";
 import { PendingDelegationsRegistry, RALRegistry } from "@/services/ral";
 import type { PendingDelegation } from "@/services/ral/types";
 import type { AISdkTool } from "@/tools/types";
 import { shortenConversationId } from "@/utils/conversation-id";
 import { logger } from "@/utils/logger";
-import { NDKEvent, NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
+import { NDKEvent } from "@nostr-dev-kit/ndk";
 import { tool } from "ai";
 import { z } from "zod";
 
@@ -19,10 +20,10 @@ const delegateCrossProjectSchema = z.object({
         .describe(
             "The project ID (dTag) to delegate to. Use project_list to discover available projects."
         ),
-    agentSlug: z
+    agentId: z
         .string()
         .describe(
-            "The slug of the agent within the target project to delegate to. Use project_list to see available agents."
+            "The id of the agent within the target project to delegate to. Use project_list to see available agents."
         ),
 });
 
@@ -47,7 +48,7 @@ async function executeDelegateCrossProject(
     input: DelegateCrossProjectInput,
     context: ToolExecutionContext
 ): Promise<DelegateCrossProjectOutput> {
-    const { content, projectId, agentSlug } = input;
+    const { content, projectId, agentId } = input;
 
     // Get known projects from daemon
     const daemon = getDaemon();
@@ -62,41 +63,46 @@ async function executeDelegateCrossProject(
         );
     }
 
-    // Find agent pubkey
-    let agentPubkey: string | null = null;
+    const candidates: AgentIdCandidate[] = [];
 
     // Try runtime first (if project is running)
     const runtime = activeRuntimes.get(projectId as import("@/types/project-ids").ProjectDTag);
     if (runtime) {
         const runtimeContext = runtime.getContext();
-        const agentMap = runtimeContext?.agentRegistry.getAllAgentsMap();
-        if (agentMap) {
-            for (const agent of agentMap.values()) {
-                if (agent.slug === agentSlug) {
-                    agentPubkey = agent.pubkey;
-                    break;
+        if (runtimeContext && typeof runtimeContext.getProjectAgentRuntimeInfo === "function") {
+            candidates.push(
+                ...runtimeContext.getProjectAgentRuntimeInfo().map((agent) => ({
+                    slug: agent.slug,
+                    pubkey: agent.pubkey,
+                }))
+            );
+        } else {
+            const agentMap = runtimeContext?.agentRegistry.getAllAgentsMap();
+            if (agentMap) {
+                for (const agent of agentMap.values()) {
+                    candidates.push({ slug: agent.slug, pubkey: agent.pubkey });
                 }
             }
         }
     }
 
-    // Fall back to storage: read pubkeys from the project's persisted event.json,
-    // then resolve each to its stored agent record by pubkey.
-    if (!agentPubkey) {
-        const projectPubkeys = await readProjectAgentPubkeys(projectId);
-        for (const pubkey of projectPubkeys) {
-            const agent = await agentStorage.loadAgent(pubkey);
-            if (agent?.slug === agentSlug) {
-                const signer = new NDKPrivateKeySigner(agent.nsec);
-                agentPubkey = signer.pubkey;
-                break;
-            }
+    const projectPubkeys = await readProjectAgentPubkeys(projectId);
+    for (const pubkey of projectPubkeys) {
+        const agent = await agentStorage.loadAgent(pubkey);
+        if (agent) {
+            candidates.push({ slug: agent.slug, pubkey });
         }
     }
 
+    const resolution = resolveAgentIdFromCandidates(agentId, candidates);
+    const agentPubkey = resolution.pubkey;
+
     if (!agentPubkey) {
+        const availableIds = resolution.availableIds.length > 0
+            ? `Available agent ids: ${resolution.availableIds.join(", ")}`
+            : "No agents are available in the target project.";
         throw new Error(
-            `Agent '${agentSlug}' not found in project '${projectId}'. Use project_list to see available agents.`
+            `Agent id '${agentId}' not found in project '${projectId}'. ${availableIds}`
         );
     }
 
@@ -105,7 +111,7 @@ async function executeDelegateCrossProject(
     logger.info("[delegate_crossproject] Publishing cross-project delegation", {
         agent: context.agent.name,
         targetProject: projectId,
-        targetAgent: agentSlug,
+        targetAgent: resolution.slug ?? agentId,
         recipientPubkey: agentPubkey.substring(0, 8),
     });
 
@@ -148,7 +154,7 @@ async function executeDelegateCrossProject(
     });
 
     // Return normal result - agent continues without blocking
-    let message = `Delegated to agent '${agentSlug}' in project '${projectId}'. The agent will respond when ready.`;
+    let message = `Delegated to agent '${resolution.slug ?? agentId}' in project '${projectId}'. The agent will respond when ready.`;
 
     if (!hasTodos(context)) {
         message +=

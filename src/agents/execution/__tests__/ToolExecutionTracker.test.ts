@@ -495,7 +495,7 @@ describe("ToolExecutionTracker", () => {
             const result = await tracker.trackExecution({
                 toolCallId: "crossproject-call",
                 toolName: "delegate_crossproject",
-                args: { content: "Cross-project task", projectId: "test-project", agentSlug: "target-agent" },
+                args: { content: "Cross-project task", projectId: "test-project", agentId: "target-agent" },
                 agentPublisher: mockAgentPublisher,
                 eventContext: mockEventContext,
             });
@@ -685,7 +685,7 @@ describe("ToolExecutionTracker", () => {
             const result = await tracker.trackExecution({
                 toolCallId: "mcp-crossproject-call",
                 toolName: "mcp__tenex__delegate_crossproject",
-                args: { content: "Cross-project", projectId: "proj", agentSlug: "agent" },
+                args: { content: "Cross-project", projectId: "proj", agentId: "agent" },
                 agentPublisher: mockAgentPublisher,
                 eventContext: mockEventContext,
             });

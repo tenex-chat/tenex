@@ -3,6 +3,7 @@ import type { ToolExecutionContext } from "@/tools/types";
 import type { AgentInstance } from "@/agents/types";
 import { config } from "@/services/ConfigService";
 import { prefixKVStore } from "@/services/storage";
+import { shortenConversationId } from "@/utils/conversation-id";
 
 // Mock dependencies - must be before imports
 mock.module("@/utils/logger", () => ({
@@ -747,7 +748,7 @@ describe("conversation_get Tool", () => {
                 const result = await tool.execute({ conversationId: targetConversationId });
 
                 expect(result.success).toBe(true);
-                expect((result.conversation as any).id).toBe(targetConversationId);
+                expect((result.conversation as any).id).toBe(shortenConversationId(targetConversationId));
                 expect((result.conversation as any).messages).toContain("Target conversation message");
                 expect((result.conversation as any).messages).not.toContain("Current conversation message");
                 expect(conversationStoreGetSpy).toHaveBeenCalledWith(targetConversationId);
@@ -1962,7 +1963,7 @@ describe("conversation_get Tool", () => {
             });
 
             expect(result.success).toBe(true);
-            expect((result.conversation as any).id).toBe(transportConversationId);
+            expect((result.conversation as any).id).toBe(shortenConversationId(transportConversationId));
             expect((result.conversation as any).messages).toContain("Hello from Telegram");
         });
     });

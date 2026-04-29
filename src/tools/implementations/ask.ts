@@ -4,14 +4,14 @@ import { getPubkeyService } from "@/services/PubkeyService";
 import type { AISdkTool } from "@/tools/types";
 import { logger } from "@/utils/logger";
 import { createEventContext } from "@/services/event-context";
-import { resolveRecipientToPubkey, resolveEscalationTarget } from "@/services/agents";
+import { resolveAgentId, resolveEscalationTarget } from "@/services/agents";
 import { ConversationStore } from "@/conversations/ConversationStore";
 import { wouldCreateCircularDelegation } from "@/utils/delegation-chain";
 import { tool } from "ai";
 import { z } from "zod";
 import { RALRegistry } from "@/services/ral";
 import type { PendingDelegation } from "@/services/ral/types";
-import { shortenEventId } from "@/utils/conversation-id";
+import { shortenConversationId, shortenEventId } from "@/utils/conversation-id";
 
 /**
  * Schema for a single-select question.
@@ -197,7 +197,7 @@ async function executeAsk(input: AskInput, context: ToolExecutionContext): Promi
     // If escalation agent is configured AND current agent is not the escalation agent,
     // route through escalation agent instead of directly to user
     if (escalationAgentSlug && context.agent.slug !== escalationAgentSlug) {
-      const escalationAgentPubkey = resolveRecipientToPubkey(escalationAgentSlug);
+      const escalationAgentPubkey = resolveAgentId(escalationAgentSlug).pubkey;
 
       if (!escalationAgentPubkey) {
         // This shouldn't happen since getEscalationTarget() validates it,
@@ -287,7 +287,7 @@ async function executeAsk(input: AskInput, context: ToolExecutionContext): Promi
 
           return {
             success: true,
-            delegationConversationId: eventId,
+            delegationConversationId: shortenConversationId(eventId),
           };
         }
       }
@@ -377,7 +377,7 @@ async function executeAsk(input: AskInput, context: ToolExecutionContext): Promi
 
   return {
     success: true,
-    delegationConversationId: eventId,
+    delegationConversationId: shortenConversationId(eventId),
   };
 }
 
