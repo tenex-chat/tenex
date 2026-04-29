@@ -1,6 +1,6 @@
 //! `tenex doctor` — diagnose and repair TENEX state.
 //!
-//! Source: `src/commands/doctor.ts:74-78`. Top-level command is a parent
+//! Source: `src/commands/doctor.ts:68-72`. Top-level command is a parent
 //! that **only dispatches to subcommands**; invoking `tenex doctor` with
 //! no subcommand prints commander's auto-generated help. Per spec doc 11
 //! §1.1 there is **no global "run-all" flow** — the Rust port must not
@@ -157,7 +157,7 @@ async fn run_agents(args: AgentsArgs) -> Result<()> {
 /// if result.failed > 0 { … exit 1 … }
 /// ```
 fn preview_categorize(dry_run: bool) -> Result<()> {
-    use crate::store::agent_storage::AgentStorage;
+    use tenex_agent_storage::AgentStorage;
 
     let base_dir = crate::store::resolve_base_dir(None);
     let storage = AgentStorage::open(&base_dir)?;
@@ -210,8 +210,8 @@ fn preview_categorize(dry_run: bool) -> Result<()> {
 /// - "Purging N orphaned agent(s)..." (blue), "  ✓ deleted <slug>" (green),
 ///   "Done: N deleted" (blue)
 fn find_orphaned_agents(purge: bool) -> Result<()> {
-    use crate::store::agent_storage::{derive_agent_pubkey_from_nsec, AgentStorage};
     use crate::store::project_members::list_projects_for_agent;
+    use tenex_agent_storage::{derive_agent_pubkey_from_nsec, AgentStorage};
 
     let base_dir = crate::store::resolve_base_dir(None);
     let mut storage = AgentStorage::open(&base_dir)?;
