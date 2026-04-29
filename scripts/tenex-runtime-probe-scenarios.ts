@@ -109,6 +109,12 @@ export function mockScenario(name: ScenarioName): unknown {
                 {
                     agent: "pm",
                     turn: 1,
+                    contains: delegationWorkerCompletionText,
+                    content: "The worker picked blue.",
+                },
+                {
+                    agent: "pm",
+                    turn: 1,
                     containsAll: ["delegate to worker", "choose one random color"],
                     toolCalls: [
                         {
@@ -126,12 +132,6 @@ export function mockScenario(name: ScenarioName): unknown {
                     turn: 1,
                     contains: delegationWorkerPrompt,
                     content: delegationWorkerCompletionText,
-                },
-                {
-                    agent: "pm",
-                    turn: 1,
-                    contains: delegationWorkerCompletionText,
-                    content: "The worker picked blue.",
                 },
             ],
             defaultContent: "Probe agent observed the latest event.",

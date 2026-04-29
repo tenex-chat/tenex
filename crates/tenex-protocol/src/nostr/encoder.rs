@@ -381,7 +381,7 @@ mod tests {
 
     #[test]
     fn completion_has_status_and_p_tag() {
-        let mut ctx = test_ctx();
+        let ctx = test_ctx();
         let intent = CompletionIntent {
             content: "done".into(),
             usage: Some(LlmUsage {
@@ -491,7 +491,7 @@ mod tests {
 
     #[test]
     fn delegation_omits_e_root_and_prepends_label() {
-        let ctx = test_ctx();
+        let mut ctx = test_ctx();
         ctx.triggering_message = None;
         let recipient_keys = Keys::generate();
         let intent = DelegationIntent {
