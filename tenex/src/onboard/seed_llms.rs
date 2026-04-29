@@ -1,24 +1,24 @@
 //! Onboarding Screen 4 (sub-step A): seed default LLM configurations.
 //!
-//! Source: `src/commands/onboard.ts:503-557` `seedDefaultLLMConfigs`. Pure
+//! Source: `src/commands/onboard.ts:500-554` `seedDefaultLLMConfigs`. Pure
 //! logic — given the set of provider IDs that have credentials configured,
 //! pre-populate `llms.json` with sensible standard + meta-model defaults.
 //!
 //! Behaviours (TS lines cited in tests):
 //!
 //! - **Early-return** when `llms.json` already has configurations
-//!   (`:507`) — never overwrite existing user-curated configs.
-//! - **Anthropic present** (`:512-538`): inserts `Sonnet`
+//!   (`:504`) — never overwrite existing user-curated configs.
+//! - **Anthropic present** (`:509-535`): inserts `Sonnet`
 //!   (`anthropic/claude-sonnet-4-6`), `Opus` (`anthropic/claude-opus-4-6`),
 //!   and a meta-model `Auto` with `fast → Sonnet` (keywords `quick, fast`)
 //!   and `powerful → Opus` (keywords `think, ultrathink, ponder`,
 //!   `default: "fast"`. Sets `default = "Auto"`.
-//! - **OpenAI present** (`:540-548`): inserts `GPT-4o`
+//! - **OpenAI present** (`:537-545`): inserts `GPT-4o`
 //!   (`openai/gpt-4o`). Sets `default = "GPT-4o"` only if no default
 //!   was already assigned in the Anthropic branch.
 //! - Returns the list of seeded entries — the caller renders one
 //!   `display::success("Seeded: <name> (<detail>)")` line per entry per
-//!   `:552-554`.
+//!   `:547-553`.
 
 use crate::store::llms::{LlmsDoc, MetaConfig, MetaVariant, StandardConfig};
 
@@ -199,8 +199,8 @@ mod tests {
 
     #[test]
     fn both_anthropic_and_openai_keeps_auto_as_default() {
-        // Per `:545-547`, when default already set by the Anthropic branch
-        // OpenAI does NOT override.
+        // Per `:535`, the Anthropic branch sets `llmsConfig.default = "Auto"`;
+        // the OpenAI branch (`:537-545`) does NOT override that default.
         let mut doc = LlmsDoc::new();
         let seeded = seed_default_llm_configs(&pids(&["anthropic", "openai"]), &mut doc);
         assert_eq!(seeded.len(), 4);
@@ -209,7 +209,7 @@ mod tests {
 
     #[test]
     fn other_providers_do_not_seed() {
-        // Per `:510-512` only Anthropic and OpenAI are seeded; Ollama,
+        // Per `:507-545` only Anthropic and OpenAI are seeded; Ollama,
         // OpenRouter, Codex, Claude Code never trigger a seed.
         let mut doc = LlmsDoc::new();
         let seeded = seed_default_llm_configs(

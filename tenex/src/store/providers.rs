@@ -37,6 +37,7 @@ pub struct ProvidersDoc {
 }
 
 impl ProvidersDoc {
+    #[cfg(test)]
     pub fn new() -> Self {
         Self::default()
     }
@@ -63,12 +64,9 @@ impl ProvidersDoc {
         atomic::write(&path, &bytes)
     }
 
+    #[cfg(test)]
     pub fn raw(&self) -> &IndexMap<String, Value> {
         &self.raw
-    }
-
-    pub fn raw_mut(&mut self) -> &mut IndexMap<String, Value> {
-        &mut self.raw
     }
 
     // ---- typed accessors (provider map) ---------------------------------
@@ -182,6 +180,7 @@ impl ProvidersDoc {
 
     /// Set or clear `baseUrl` for a provider. The provider must exist (set
     /// API keys first).
+    #[cfg(test)]
     pub fn set_base_url(&mut self, provider_id: &str, base_url: Option<String>) -> Result<()> {
         let entry = self
             .ensure_providers_obj_mut()
@@ -258,16 +257,14 @@ impl ProviderEntry<'_> {
         self.obj.get("apiKey")
     }
 
-    pub fn base_url(&self) -> Option<&str> {
+    #[cfg(test)]
+    fn base_url(&self) -> Option<&str> {
         self.obj.get("baseUrl").and_then(Value::as_str)
     }
 
-    pub fn timeout(&self) -> Option<u64> {
+    #[cfg(test)]
+    fn timeout(&self) -> Option<u64> {
         self.obj.get("timeout").and_then(Value::as_u64)
-    }
-
-    pub fn options(&self) -> Option<&Map<String, Value>> {
-        self.obj.get("options").and_then(Value::as_object)
     }
 
     /// Raw access for fields the typed view doesn't expose.
