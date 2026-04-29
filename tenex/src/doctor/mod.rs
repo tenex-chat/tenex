@@ -88,13 +88,21 @@ pub enum ConversationsCommand {
 
 pub async fn run(args: DoctorArgs) -> Result<()> {
     let Some(command) = args.command else {
-        // Bare `tenex doctor` prints help — clap handles this when the
-        // subcommand is required, but ours is `Option<>` for ergonomics.
-        // Surface the same hint commander emits.
-        eprintln!(
-            "tenex doctor: no subcommand specified. Try one of: agents, migrate, conversations.\n\
-             See `tenex doctor --help` for the full subcommand list."
-        );
+        // Bare `tenex doctor` prints help. Mirror commander.js's
+        // behavior at TS `commands/doctor.ts:68-72` — when no
+        // subcommand is given on a `new Command(...).addCommand(...)`
+        // parent without an `.action(...)`, commander prints help to
+        // stdout and exits 0. Use clap's auto-generated help so the
+        // listing stays in sync with the actual subcommand tree.
+        use clap::CommandFactory;
+        let mut cmd = DoctorArgs::command();
+        cmd.set_bin_name("tenex doctor");
+        // print_help() writes to stdout; `?` propagates I/O errors.
+        cmd.print_help()
+            .map_err(|e| anyhow::anyhow!("print doctor help: {e}"))?;
+        // Trailing newline so the prompt doesn't sit flush against the
+        // last help line — matches commander.js's auto-output shape.
+        println!();
         return Ok(());
     };
 
