@@ -184,6 +184,7 @@ async fn run() -> Result<()> {
             home: &home_info,
             preloaded_skills_block: None,
             telegram_channel_bindings: &telegram_channel_bindings,
+            telegram_chat_context: None,
         });
     let history = render_history(
         conv_store.as_ref(),

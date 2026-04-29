@@ -580,6 +580,36 @@ async fn run() -> Result<()> {
             .collect()
     };
 
+    // Fetch Telegram chat context for Fragment 33 when the triggering event
+    // arrived via the Telegram transport.
+    let telegram_chat_context: Option<tenex_system_prompt::TelegramChatContextForPrompt> =
+        if let (Some(tg_meta), Some(tg_config)) =
+            (&envelope.metadata.telegram, &agent_config.telegram)
+        {
+            let bot_client = tenex_telegram::client::BotClient::new(
+                tg_config.bot_token.clone(),
+                tg_config.api_base_url.clone(),
+            );
+            let svc = tenex_telegram::chat_context::TelegramChatContextService::new(bot_client);
+            let ctx = svc
+                .get_context(
+                    &tg_meta.chat_id,
+                    tg_meta.thread_id.as_deref(),
+                    &[],
+                )
+                .await;
+            let formatted = tenex_telegram::chat_context::TelegramChatContextForPrompt::from(ctx);
+            Some(tenex_system_prompt::TelegramChatContextForPrompt {
+                chat_title: formatted.chat_title,
+                topic_title: formatted.topic_title,
+                admin_names: formatted.admin_names,
+                member_count: formatted.member_count,
+                recently_seen: formatted.recently_seen,
+            })
+        } else {
+            None
+        };
+
     // Build system prompt
     let mut system_prompt =
         tenex_system_prompt::build_system_prompt(tenex_system_prompt::BuildSystemPromptInput {
@@ -599,6 +629,7 @@ async fn run() -> Result<()> {
             home: &home_info,
             preloaded_skills_block: preloaded_skills_block.as_deref(),
             telegram_channel_bindings: &telegram_channel_bindings,
+            telegram_chat_context,
         });
 
     // Load persisted todos and inject them as a system reminder into the user message.

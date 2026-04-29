@@ -1,4 +1,5 @@
 pub mod binding;
+pub mod chat_context;
 pub mod client;
 pub mod config;
 pub mod daemon_client;

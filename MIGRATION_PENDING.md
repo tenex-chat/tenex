@@ -50,8 +50,8 @@ Organized by functional area. Items marked ✅ are already at parity; items mark
 - 🚫 **Fragment 20 — Voice Mode**: TTS-specific formatting guidance — won't port (voice mode is not implemented in the Rust stack)
 - [ ] **Fragment 22 — Scheduled Tasks**: display agent's own scheduled tasks with human-readable cron expressions
 - [ ] **Fragment 28 — Agent-Directed Monitoring**: guidance on monitoring delegated work and using `delegate_followup` for mid-flight corrections (spec references but is not implemented in Rust code)
-- [ ] **Fragment 33 — Telegram Chat Context**: chat title, topic title, admin list, member count, recently seen participants (requires `TelegramChatContextService`)
-- [ ] **Fragment 34 — Telegram Delivery Rules**: `[[telegram_voice:…]]` marker syntax documentation
+- ✅ **Fragment 33 — Telegram Chat Context**: chat title, topic title, admin list, member count, recently seen participants (requires `TelegramChatContextService`)
+- ✅ **Fragment 34 — Telegram Delivery Rules**: `[[telegram_voice:…]]` marker syntax documentation
 
 ### 2.2 Missing Dynamic Context Injection
 - [ ] **Proactive RAG Context** — `ContextDiscoveryService`-powered semantic search injection (score ≥ 0.65, max 5 snippets per turn); mentioned in spec but not implemented in Rust code
@@ -149,8 +149,8 @@ Pre-tool and post-completion contexts are missing fields that the two unimplemen
 ## 7. Telegram Transport (`tenex-telegram`)
 
 ### 7.1 Missing Features
-- [ ] **`TelegramChatContextService`** — enriches agent context with chat title, topic title, admin list, member count, and recently-seen participant list via Telegram Bot API; cached with ~5-minute TTL. Without this, agents have no visibility into group/topic metadata
-- [ ] **System prompt fragments for Telegram** — Fragment 33 (chat context) and Fragment 34 (delivery rules) are not injected into the Rust agent system prompt (see §2.1)
+- ✅ **`TelegramChatContextService`** — enriches agent context with chat title, topic title, admin list, member count, and recently-seen participant list via Telegram Bot API; cached with ~5-minute TTL. Without this, agents have no visibility into group/topic metadata
+- ✅ **System prompt fragments for Telegram** — Fragment 33 (chat context) and Fragment 34 (delivery rules) are not injected into the Rust agent system prompt (see §2.1)
 - ✅ **`send_message` tool** — proactive messaging to bound channels (see §1.1)
 - [ ] **Identity binding validation for DMs** — TypeScript checks `AuthorizedIdentityService` before accepting DMs; Rust accepts all DMs that pass the `allows_dms()` config flag
 - ✅ **Persistent pending project selection** — `PendingSelectionStore` in `pending_selection_store.rs` persists pending channel-to-project selection state to `{base_dir}/data/pending-channel-selections.json` with 24-hour TTL; atomic writes via `.tmp` + rename; expired entries pruned on load and access
