@@ -120,9 +120,9 @@ Pre-tool and post-completion contexts are missing fields that the two unimplemen
 - [ ] Metadata caching with TTL for resources and templates (TypeScript uses 30s staleness)
 
 ### 5.2 MCP Server Lifecycle Differences
-- [ ] TypeScript defers server startup until first tool call (`ensureServersForTools()`); Rust starts servers eagerly at manifest load time
-- [ ] TypeScript supports dynamic tool cache refresh (`refreshToolCache()`); Rust requires restart
-- [ ] TypeScript supports `allowedPaths` security checks on filesystem-touching MCP servers
+- 🚫 TypeScript defers server startup until first tool call (`ensureServersForTools()`) — won't fix (eager startup at manifest load is the intentional Rust design)
+- 🚫 TypeScript supports dynamic tool cache refresh (`refreshToolCache()`) — won't fix (restart is acceptable; no live-reload requirement)
+- 🚫 TypeScript supports `allowedPaths` security checks on filesystem-touching MCP servers — won't fix
 
 ---
 
