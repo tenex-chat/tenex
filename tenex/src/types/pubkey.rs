@@ -1,11 +1,17 @@
 //! Nostr pubkey parsing.
 //!
-//! TS has two distinct entry points with different strictness:
+//! Two entry points with different strictness:
 //!
-//! - **`tenex onboard --pubkey` / decodeToPubkey** (`src/commands/onboard.ts:120-133`)
-//!   accepts hex64, `npub1...`, or `nprofile1...` and returns hex.
-//! - **`tenex setup` interactive** uses a strict regex `/^[a-f0-9]{64}$/i` —
-//!   hex only, no bech32.
+//! - **`tenex onboard --pubkey` / decodeToPubkey** (`src/commands/onboard.ts:117-130`)
+//!   accepts hex64, `npub1...`, or `nprofile1...` and returns hex. The TS
+//!   function's hex64 fast-path is a `/^[a-f0-9]{64}$/i` regex test
+//!   (`:118`) before falling through to `nip19.decode`. The Rust
+//!   [`Pubkey::parse_decoding`] mirrors that flow exactly.
+//! - **Strict hex64** ([`Pubkey::parse_hex64`]) — same regex, exposed as
+//!   its own constructor for callers that want to reject bech32 inputs
+//!   even when `parse_decoding` would accept them. No live TS surface
+//!   uses the strict form today; it's available for future screens or
+//!   external consumers that already canonicalise to hex.
 //! - **`tenex config identity → Add`** (per spec doc 07 §1) does NOT decode;
 //!   it stores the verbatim trimmed string. The Rust port preserves that
 //!   asymmetry by NOT routing the identity-add prompt through this module —
@@ -22,9 +28,11 @@ use nostr_sdk::PublicKey;
 pub struct Pubkey(String);
 
 impl Pubkey {
-    /// Hex-only constructor. Matches the `tenex setup` validator at
-    /// `src/commands/onboard.ts:1502` (regex `/^[a-f0-9]{64}$/i`).
-    /// Accepts upper- or lower-case input; output is lowercased.
+    /// Hex-only constructor. Matches the same `/^[a-f0-9]{64}$/i` regex
+    /// the TS `decodeToPubkey` fast-path uses (`src/commands/onboard.ts:118`),
+    /// but exposed as its own constructor for callers that want to
+    /// reject bech32 inputs. Accepts upper- or lower-case input; output
+    /// is lowercased.
     pub fn parse_hex64(input: &str) -> Result<Self, PubkeyError> {
         if input.len() != 64 {
             return Err(PubkeyError::Hex64WrongLength { len: input.len() });
@@ -36,7 +44,7 @@ impl Pubkey {
     }
 
     /// Decode `hex | npub1... | nprofile1...` into hex. Matches
-    /// `decodeToPubkey` at `src/commands/onboard.ts:120-133`.
+    /// `decodeToPubkey` at `src/commands/onboard.ts:117-130`.
     ///
     /// Used by `tenex onboard --pubkey <pubkeys...>` and any flow that wants
     /// to be permissive about input form.
@@ -71,7 +79,7 @@ impl Pubkey {
                 });
         }
 
-        // Mirror the TS error wording at `src/commands/onboard.ts:131`:
+        // Mirror the TS error wording at `src/commands/onboard.ts:128`:
         // `Unsupported identifier type: <type>`. Without a type prefix we don't
         // have a "type" to name, so report the more specific
         // "not hex64, npub1, or nprofile1".

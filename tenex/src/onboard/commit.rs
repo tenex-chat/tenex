@@ -31,9 +31,6 @@ pub struct InitialConfig {
 /// Result of [`commit`]: the resolved values that future steps may need.
 #[derive(Debug, Clone)]
 pub struct Committed {
-    /// Hex form of the daemon's private key — carried over from
-    /// `existingConfig.tenexPrivateKey` if present, otherwise generated.
-    pub tenex_private_key: String,
     /// Resolved (absolute, `~`-expanded) projects base dir.
     pub projects_base: PathBuf,
 }
@@ -84,10 +81,7 @@ pub fn commit(base_dir: &Path, input: InitialConfig) -> Result<Committed> {
     fs::create_dir_all(&projects_base)
         .with_context(|| format!("creating projects directory {}", projects_base.display()))?;
 
-    Ok(Committed {
-        tenex_private_key,
-        projects_base,
-    })
+    Ok(Committed { projects_base })
 }
 
 /// `~/tenex` (no leading dot — matches the TS path at `:1009`, where the
@@ -201,7 +195,15 @@ mod tests {
         .unwrap();
 
         assert!(projects.exists(), "projects dir was not created");
-        assert!(!committed.tenex_private_key.is_empty());
+        let _ = committed; // exhaust the binding — projects_base is checked above
+        let saved = TenexConfigDoc::load(&base).unwrap();
+        assert!(
+            saved
+                .tenex_private_key()
+                .filter(|k| !k.is_empty())
+                .is_some(),
+            "daemon key was not persisted to config.json",
+        );
 
         let written = std::fs::read_to_string(base.join("config.json")).unwrap();
         // Carried-over fields preserved.
@@ -230,7 +232,7 @@ mod tests {
         )
         .unwrap();
 
-        let committed = commit(
+        commit(
             &base,
             InitialConfig {
                 whitelisted_pubkeys: vec!["bb".repeat(32)],
@@ -239,7 +241,8 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(committed.tenex_private_key, known_key);
+        let saved = TenexConfigDoc::load(&base).unwrap();
+        assert_eq!(saved.tenex_private_key().as_deref(), Some(known_key.as_str()));
 
         std::fs::remove_dir_all(&base).ok();
     }
@@ -257,7 +260,7 @@ mod tests {
         )
         .unwrap();
 
-        let committed = commit(
+        commit(
             &base,
             InitialConfig {
                 whitelisted_pubkeys: vec!["bb".repeat(32)],
@@ -266,12 +269,13 @@ mod tests {
         )
         .unwrap();
 
-        // Generated key must be 64 hex chars.
-        assert_eq!(committed.tenex_private_key.len(), 64);
-        assert!(committed
-            .tenex_private_key
-            .bytes()
-            .all(|b| b.is_ascii_hexdigit()));
+        // Generated key must be 64 hex chars when reloaded from disk.
+        let saved = TenexConfigDoc::load(&base).unwrap();
+        let key = saved
+            .tenex_private_key()
+            .expect("commit should persist a daemon key");
+        assert_eq!(key.len(), 64);
+        assert!(key.bytes().all(|b| b.is_ascii_hexdigit()));
 
         std::fs::remove_dir_all(&base).ok();
     }
