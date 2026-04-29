@@ -479,6 +479,15 @@ pub async fn run(args: RuntimeArgs) -> Result<()> {
 
     let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
     let mut notifications = client.notifications();
+    let reload_context = RuntimeReloadContext {
+        subscription_ids: &subscription_ids,
+        authors: &authors,
+        project_addr: &project_addr,
+        owner: owner_key,
+        project_dtag: &meta.d_tag,
+        since,
+        meta: &meta,
+    };
 
     loop {
         tokio::select! {
@@ -486,16 +495,7 @@ pub async fn run(args: RuntimeArgs) -> Result<()> {
                 match event {
                     Ok(event) if agent_config_event_is_relevant(&event) => {
                         tokio::time::sleep(Duration::from_millis(100)).await;
-                        if let Err(error) = reload_agent_snapshot(
-                            &shared,
-                            &subscription_ids,
-                            &authors,
-                            &project_addr,
-                            owner_key,
-                            &meta.d_tag,
-                            since,
-                            &meta,
-                        )
+                        if let Err(error) = reload_agent_snapshot(&shared, &reload_context)
                         .await
                         {
                             warn!(error = %error, "agent config reload failed");
@@ -514,12 +514,7 @@ pub async fn run(args: RuntimeArgs) -> Result<()> {
                         if event.kind == Kind::Custom(PROJECT_KIND) {
                             if let Err(e) = handle_project_definition_update(
                                 &shared,
-                                &subscription_ids,
-                                &authors,
-                                &project_addr,
-                                owner_key,
-                                &meta.d_tag,
-                                since,
+                                &reload_context,
                                 &event,
                             )
                             .await
@@ -537,13 +532,7 @@ pub async fn run(args: RuntimeArgs) -> Result<()> {
                         if event.kind == Kind::Custom(tenex_protocol::nostr::kinds::AGENT_CONFIG_UPDATE) {
                             if let Err(e) = handle_agent_config_update(
                                 &shared,
-                                &subscription_ids,
-                                &authors,
-                                &project_addr,
-                                owner_key,
-                                &meta.d_tag,
-                                since,
-                                &meta,
+                                &reload_context,
                                 &event,
                             )
                             .await
@@ -728,15 +717,19 @@ fn agent_config_event_is_relevant(event: &NotifyEvent) -> bool {
     })
 }
 
+struct RuntimeReloadContext<'a> {
+    subscription_ids: &'a RuntimeSubscriptionIds,
+    authors: &'a [PublicKey],
+    project_addr: &'a str,
+    owner: PublicKey,
+    project_dtag: &'a str,
+    since: Timestamp,
+    meta: &'a ProjectMetadata,
+}
+
 async fn reload_agent_snapshot(
     shared: &RuntimeShared,
-    subscription_ids: &RuntimeSubscriptionIds,
-    authors: &[PublicKey],
-    project_addr: &str,
-    owner: PublicKey,
-    project_dtag: &str,
-    since: Timestamp,
-    meta: &ProjectMetadata,
+    ctx: &RuntimeReloadContext<'_>,
 ) -> Result<()> {
     let old_pubkeys = shared.agent_pubkeys();
     let snapshot = load_agent_snapshot_after_change(shared, &old_pubkeys).await?;
@@ -748,11 +741,18 @@ async fn reload_agent_snapshot(
 
     subscribe_runtime_filters(
         &shared.client,
-        subscription_ids,
-        build_runtime_filters(authors, project_addr, owner, project_dtag, since, &snapshot),
+        ctx.subscription_ids,
+        build_runtime_filters(
+            ctx.authors,
+            ctx.project_addr,
+            ctx.owner,
+            ctx.project_dtag,
+            ctx.since,
+            &snapshot,
+        ),
     )
     .await?;
-    publish_project_status_now(shared, meta).await;
+    publish_project_status_now(shared, ctx.meta).await;
 
     let added = new_pubkeys.difference(&old_pubkeys).count();
     let removed = old_pubkeys.difference(&new_pubkeys).count();
@@ -765,35 +765,23 @@ async fn reload_agent_snapshot(
 
 async fn handle_project_definition_update(
     shared: &RuntimeShared,
-    subscription_ids: &RuntimeSubscriptionIds,
-    authors: &[PublicKey],
-    project_addr: &str,
-    owner: PublicKey,
-    project_dtag: &str,
-    since: Timestamp,
+    ctx: &RuntimeReloadContext<'_>,
     event: &Event,
 ) -> Result<()> {
-    if event.pubkey != owner || project_definition_dtag(event).as_deref() != Some(project_dtag) {
+    if event.pubkey != ctx.owner
+        || project_definition_dtag(event).as_deref() != Some(ctx.project_dtag)
+    {
         return Ok(());
     }
-    let persisted = persist_newer_project_definition(shared, project_dtag, event)?;
+    let persisted = persist_newer_project_definition(shared, ctx.project_dtag, event)?;
     if !persisted {
         return Ok(());
     }
 
-    reload_project_membership_snapshot(
-        shared,
-        subscription_ids,
-        authors,
-        project_addr,
-        owner,
-        project_dtag,
-        since,
-    )
-    .await?;
+    reload_project_membership_snapshot(shared, ctx).await?;
     info!(
         event_id = %event.id.to_hex()[..8],
-        project = project_dtag,
+        project = ctx.project_dtag,
         "reloaded project definition"
     );
     Ok(())
@@ -837,20 +825,15 @@ fn persist_newer_project_definition(
 
 async fn reload_project_membership_snapshot(
     shared: &RuntimeShared,
-    subscription_ids: &RuntimeSubscriptionIds,
-    authors: &[PublicKey],
-    project_addr: &str,
-    owner: PublicKey,
-    project_dtag: &str,
-    since: Timestamp,
+    ctx: &RuntimeReloadContext<'_>,
 ) -> Result<()> {
-    let project = Project::open(project_dtag, &shared.base_dir)
-        .with_context(|| format!("opening project '{}'", project_dtag))?;
+    let project = Project::open(ctx.project_dtag, &shared.base_dir)
+        .with_context(|| format!("opening project '{}'", ctx.project_dtag))?;
     let snapshot = RuntimeAgentSnapshot::load(&project)?;
     if snapshot.agents.is_empty() {
         anyhow::bail!(
             "project '{}' has no readable agents after project definition reload",
-            project_dtag
+            ctx.project_dtag
         );
     }
 
@@ -863,8 +846,15 @@ async fn reload_project_membership_snapshot(
 
     subscribe_runtime_filters(
         &shared.client,
-        subscription_ids,
-        build_runtime_filters(authors, project_addr, owner, project_dtag, since, &snapshot),
+        ctx.subscription_ids,
+        build_runtime_filters(
+            ctx.authors,
+            ctx.project_addr,
+            ctx.owner,
+            ctx.project_dtag,
+            ctx.since,
+            &snapshot,
+        ),
     )
     .await?;
 
@@ -885,21 +875,15 @@ async fn reload_project_membership_snapshot(
 
 async fn handle_agent_config_update(
     shared: &RuntimeShared,
-    subscription_ids: &RuntimeSubscriptionIds,
-    authors: &[PublicKey],
-    project_addr: &str,
-    owner: PublicKey,
-    project_dtag: &str,
-    since: Timestamp,
-    meta: &ProjectMetadata,
+    ctx: &RuntimeReloadContext<'_>,
     event: &Event,
 ) -> Result<()> {
     let agent_pubkeys = shared.agent_pubkeys();
     let outcome = agent_config_update::apply_event(
         &shared.base_dir,
         event,
-        project_addr,
-        project_dtag,
+        ctx.project_addr,
+        ctx.project_dtag,
         &agent_pubkeys,
     )?;
 
@@ -925,17 +909,7 @@ async fn handle_agent_config_update(
     );
 
     if outcome.config_updated {
-        reload_agent_snapshot(
-            shared,
-            subscription_ids,
-            authors,
-            project_addr,
-            owner,
-            project_dtag,
-            since,
-            meta,
-        )
-        .await?;
+        reload_agent_snapshot(shared, ctx).await?;
     }
 
     Ok(())

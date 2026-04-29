@@ -33,7 +33,7 @@ use crossterm::cursor::{MoveToColumn, MoveUp};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use crossterm::style::{Attribute, Color, Print, ResetColor, SetAttribute, SetForegroundColor};
 use crossterm::terminal::{Clear, ClearType};
-use crossterm::{queue, QueueableCommand};
+use crossterm::{QueueableCommand, queue};
 use indexmap::IndexMap;
 
 use crate::tui::glyphs;
@@ -194,6 +194,7 @@ pub fn handle_key(state: &mut VariantListState, key: VariantInput) -> VariantOut
 /// Compose the rendered lines (unstyled — colour applied at render time by
 /// the I/O layer). Lines map directly to the TS template at
 /// `variant-list-prompt.ts:114-156`.
+#[cfg(test)]
 pub fn compose_lines(state: &VariantListState, message: &str) -> Vec<String> {
     let names: Vec<String> = state.variants.keys().cloned().collect();
     let add_index = names.len();
@@ -695,9 +696,11 @@ mod tests {
         let state = state_with(three_variants(), "fast");
         let lines = compose_lines(&state, "Edit variants");
         // The done row appears between rule and help; check verbatim text.
-        assert!(lines
-            .iter()
-            .any(|l| l.trim_start() == "Done" || l.contains("  Done")));
+        assert!(
+            lines
+                .iter()
+                .any(|l| l.trim_start() == "Done" || l.contains("  Done"))
+        );
     }
 
     #[test]
@@ -706,9 +709,11 @@ mod tests {
         variants.insert("only".into(), variant("m"));
         let state = state_with(variants, "only");
         let lines = compose_lines(&state, "Edit variants");
-        assert!(lines
-            .iter()
-            .any(|l| l.contains("Done (need at least 2 variants)")));
+        assert!(
+            lines
+                .iter()
+                .any(|l| l.contains("Done (need at least 2 variants)"))
+        );
     }
 
     #[test]

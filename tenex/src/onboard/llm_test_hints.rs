@@ -52,6 +52,7 @@ pub fn map_error_to_hint(error_message: &str) -> &str {
 /// Generic prefixes that indicate the error message is a wrapper rather
 /// than the actual cause. Matches `GENERIC_ERROR_PREFIXES` at
 /// `error-formatter.ts:122-128`.
+#[cfg(test)]
 const GENERIC_ERROR_PREFIXES: &[&str] = &[
     AI_API_CALL_ERROR,
     PROVIDER_RETURNED_ERROR,
@@ -65,17 +66,21 @@ const GENERIC_ERROR_PREFIXES: &[&str] = &[
 // `error.toString()`). Source: `error-formatter.ts:111-114`.
 
 /// `AI_APICallError` — the AI SDK's generic API-error class name.
+#[cfg(test)]
 pub const AI_API_CALL_ERROR: &str = "AI_APICallError";
 
 /// `Provider returned error` — wrapper used by some AI SDKs when the
 /// upstream API returned a structured error.
+#[cfg(test)]
 pub const PROVIDER_RETURNED_ERROR: &str = "Provider returned error";
 
 /// `openrouter` — substring marker (case-sensitive — the real provider
 /// name in error strings is lowercase).
+#[cfg(test)]
 pub const OPENROUTER_MARKER: &str = "openrouter";
 
 /// `422` — HTTP status code seen in a lot of AI-SDK error wrappers.
+#[cfg(test)]
 pub const HTTP_422_STATUS: &str = "422";
 
 /// Mirror `isMeaningfulAiMessage` (`error-formatter.ts:139-159`).
@@ -92,6 +97,7 @@ pub const HTTP_422_STATUS: &str = "422";
 /// - any message starting with a 3-digit HTTP status code followed by
 ///   a word boundary (`^\d{3}\b` — covers `"422"`, `"500 Internal
 ///   Server Error"`, etc., but not `"5000 tokens used"`)
+#[cfg(test)]
 pub fn is_meaningful_ai_message(message: Option<&str>) -> bool {
     let Some(raw) = message else {
         return false;
@@ -129,12 +135,14 @@ pub fn is_meaningful_ai_message(message: Option<&str>) -> bool {
 /// Categorises an error as either a system error or a flagged AI-API
 /// error. The string literals are user-visible — `"system"` and
 /// `"ai_api"` get logged + emitted to the chat UI.
+#[cfg(test)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StreamErrorType {
     System,
     AiApi,
 }
 
+#[cfg(test)]
 impl StreamErrorType {
     /// Verbatim TS literal at `error-formatter.ts:166, 176`.
     pub fn as_str(self) -> &'static str {
@@ -168,6 +176,7 @@ impl StreamErrorType {
 ///    `is_meaningful_ai_message` returns `true`, OR
 /// 2. extracts `provider_name` + `raw` via regex from the full string
 ///    and renders the verbose fallback.
+#[cfg(test)]
 pub fn format_stream_error(
     error_to_string: Option<&str>,
     error_message: Option<&str>,
@@ -215,6 +224,7 @@ pub fn format_stream_error(
 /// Extract `<field>":"<value>"` from a JSON-like haystack. Mirrors the
 /// two TS regexes `provider_name":"([^"]+)"` and `raw":"([^"]+)"` —
 /// both use the same shape.
+#[cfg(test)]
 fn extract_quoted_field(haystack: &str, field: &str) -> Option<String> {
     use regex::Regex;
     // Build pattern: <field>":"([^"]+)"

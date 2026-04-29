@@ -98,8 +98,7 @@ pub fn provider_mapping() -> [(&'static str, Option<&'static str>); 5] {
 
 /// Look up a TENEX provider ID in [`provider_mapping`]. Returns `None`
 /// for unknown TENEX providers (no entry) AND for known providers that
-/// have no models.dev mapping (`ollama`, `codex`). Callers usually want
-/// to distinguish those — use [`is_known_local_provider`] for that.
+/// have no models.dev mapping (`ollama`, `codex`).
 pub fn map_to_models_dev_provider(tenex_provider: &str) -> Option<&'static str> {
     provider_mapping()
         .iter()
@@ -109,6 +108,7 @@ pub fn map_to_models_dev_provider(tenex_provider: &str) -> Option<&'static str> 
 
 /// `true` iff `tenex_provider` is in the mapping table but maps to
 /// `None` (i.e. local/custom — not in models.dev).
+#[cfg(test)]
 pub fn is_known_local_provider(tenex_provider: &str) -> bool {
     provider_mapping()
         .iter()

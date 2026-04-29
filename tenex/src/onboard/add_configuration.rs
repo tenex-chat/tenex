@@ -23,7 +23,7 @@
 
 use std::path::Path;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use inquire::InquireError;
 use serde_json::Value;
 
@@ -70,6 +70,7 @@ pub fn configured_providers(doc: &ProvidersDoc) -> Vec<String> {
 ///
 /// - `"Name is required"` (`:127, :185`)
 /// - `"Configuration already exists"` (`:128, :186`)
+#[cfg(test)]
 pub fn validate_config_name(name: &str, doc: &LlmsDoc) -> Result<(), &'static str> {
     if name.trim().is_empty() {
         return Err("Name is required");
@@ -80,6 +81,19 @@ pub fn validate_config_name(name: &str, doc: &LlmsDoc) -> Result<(), &'static st
     Ok(())
 }
 
+pub fn config_name_validation(
+    name: &str,
+    existing_names: &[String],
+) -> inquire::validator::Validation {
+    if name.trim().is_empty() {
+        return inquire::validator::Validation::Invalid("Name is required".into());
+    }
+    if existing_names.contains(&name.to_owned()) {
+        return inquire::validator::Validation::Invalid("Configuration already exists".into());
+    }
+    inquire::validator::Validation::Valid
+}
+
 /// Build the default configuration name shown in the input prompt.
 /// Source: `:118` `\`${provider}/${modelDisplayName || model}\``.
 pub fn default_config_name(provider: &str, model_display: &str) -> String {
@@ -88,6 +102,7 @@ pub fn default_config_name(provider: &str, model_display: &str) -> String {
 
 /// Count of standard (non-meta) configurations in `doc`. Used by the
 /// multi-modal eligibility gate at `:160-169`.
+#[cfg(test)]
 pub fn standard_config_count(doc: &LlmsDoc) -> usize {
     doc.config_names()
         .into_iter()
@@ -178,7 +193,7 @@ fn select_codex_model() -> Result<Option<(String, Option<String>)>> {
     let model = match prompts::select("Select Codex model:", choices).prompt() {
         Ok(c) => c.id,
         Err(InquireError::OperationCanceled | InquireError::OperationInterrupted) => {
-            return Ok(None)
+            return Ok(None);
         }
         Err(e) => return Err(anyhow!("model select: {e}")),
     };
@@ -188,7 +203,7 @@ fn select_codex_model() -> Result<Option<(String, Option<String>)>> {
         Ok("use model default") => None,
         Ok(e) => Some(e.to_owned()),
         Err(InquireError::OperationCanceled | InquireError::OperationInterrupted) => {
-            return Ok(None)
+            return Ok(None);
         }
         Err(e) => return Err(anyhow!("effort select: {e}")),
     };
@@ -334,19 +349,7 @@ pub fn run(base_dir: &Path) -> Result<()> {
     let existing = doc.config_names();
     let name = match prompts::input("Configuration name:")
         .with_default(&default_name)
-        .with_validator(move |input: &str| {
-            if input.trim().is_empty() {
-                return Ok(inquire::validator::Validation::Invalid(
-                    "Name is required".into(),
-                ));
-            }
-            if existing.contains(&input.to_owned()) {
-                return Ok(inquire::validator::Validation::Invalid(
-                    "Configuration already exists".into(),
-                ));
-            }
-            Ok(inquire::validator::Validation::Valid)
-        })
+        .with_validator(move |input: &str| Ok(config_name_validation(input, &existing)))
         .prompt()
     {
         Ok(n) => n,

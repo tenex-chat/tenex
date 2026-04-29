@@ -27,6 +27,7 @@ pub const TEST_TIMEOUT_MS: u64 = 30_000;
 /// Verbatim agent-name passed to `createService` per spec doc 06 §3.4.
 /// Literal string, NOT slugified by the caller — the factory itself
 /// slugifies (TS `LLMServiceFactory.ts:121-124`).
+#[cfg(test)]
 pub const TEST_AGENT_NAME: &str = "configuration-tester";
 
 /// Spinner frames rendered while a test is in progress. Spec doc 06

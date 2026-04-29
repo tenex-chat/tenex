@@ -13,14 +13,14 @@
 
 use std::path::Path;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use indexmap::IndexMap;
 use inquire::InquireError;
 
-use crate::onboard::add_configuration::standard_config_names;
+use crate::onboard::add_configuration::{config_name_validation, standard_config_names};
 use crate::store::llms::{LlmsDoc, MetaConfig, MetaVariant};
 use crate::tui::custom_prompts::variant_list_prompt::{
-    run as variant_list_run, MetaVariantData, VariantListState, VariantOutcome,
+    MetaVariantData, VariantListState, VariantOutcome, run as variant_list_run,
 };
 use crate::tui::{display, prompts};
 
@@ -54,7 +54,7 @@ fn add_variant(state: &mut VariantListState, standard_configs: &[String]) -> Res
         {
             Ok(n) => n,
             Err(InquireError::OperationCanceled | InquireError::OperationInterrupted) => {
-                return Ok(false)
+                return Ok(false);
             }
             Err(e) => return Err(anyhow!("variant name prompt: {e}")),
         }
@@ -65,7 +65,7 @@ fn add_variant(state: &mut VariantListState, standard_configs: &[String]) -> Res
     {
         Ok(m) => m,
         Err(InquireError::OperationCanceled | InquireError::OperationInterrupted) => {
-            return Ok(false)
+            return Ok(false);
         }
         Err(e) => return Err(anyhow!("model select: {e}")),
     };
@@ -81,7 +81,7 @@ fn add_variant(state: &mut VariantListState, standard_configs: &[String]) -> Res
                 }
             }
             Err(InquireError::OperationCanceled | InquireError::OperationInterrupted) => {
-                return Ok(false)
+                return Ok(false);
             }
             Err(e) => return Err(anyhow!("description prompt: {e}")),
         }
@@ -167,7 +167,7 @@ fn edit_variant_detail(
         {
             Ok(f) => f,
             Err(InquireError::OperationCanceled | InquireError::OperationInterrupted) => {
-                return Ok(())
+                return Ok(());
             }
             Err(e) => return Err(anyhow!("field select: {e}")),
         };
@@ -180,7 +180,7 @@ fn edit_variant_detail(
             let model = match prompts::select("Select model:", standard_configs.to_vec()).prompt() {
                 Ok(m) => m,
                 Err(InquireError::OperationCanceled | InquireError::OperationInterrupted) => {
-                    continue
+                    continue;
                 }
                 Err(e) => return Err(anyhow!("model select: {e}")),
             };
@@ -199,7 +199,7 @@ fn edit_variant_detail(
             {
                 Ok(i) => i,
                 Err(InquireError::OperationCanceled | InquireError::OperationInterrupted) => {
-                    continue
+                    continue;
                 }
                 Err(e) => return Err(anyhow!("keywords input: {e}")),
             };
@@ -227,7 +227,7 @@ fn edit_variant_detail(
             {
                 Ok(i) => i,
                 Err(InquireError::OperationCanceled | InquireError::OperationInterrupted) => {
-                    continue
+                    continue;
                 }
                 Err(e) => return Err(anyhow!("description input: {e}")),
             };
@@ -250,7 +250,7 @@ fn edit_variant_detail(
             {
                 Ok(i) => i,
                 Err(InquireError::OperationCanceled | InquireError::OperationInterrupted) => {
-                    continue
+                    continue;
                 }
                 Err(e) => return Err(anyhow!("system prompt input: {e}")),
             };
@@ -293,19 +293,7 @@ pub fn run(base_dir: &Path) -> Result<()> {
 
     let existing_names = doc.config_names();
     let meta_name = match prompts::input("Multi-modal configuration name:")
-        .with_validator(move |input: &str| {
-            if input.trim().is_empty() {
-                return Ok(inquire::validator::Validation::Invalid(
-                    "Name is required".into(),
-                ));
-            }
-            if existing_names.contains(&input.to_owned()) {
-                return Ok(inquire::validator::Validation::Invalid(
-                    "Configuration already exists".into(),
-                ));
-            }
-            Ok(inquire::validator::Validation::Valid)
-        })
+        .with_validator(move |input: &str| Ok(config_name_validation(input, &existing_names)))
         .prompt()
     {
         Ok(n) => n,
