@@ -58,28 +58,31 @@ pub fn run(base_dir: &std::path::Path) -> Result<()> {
 }
 
 /// Print the listing block. Source: `:18-35`.
+///
+/// TS embeds the leading `\n` AND the 2/4-space indent INSIDE each
+/// chalk.dim wrap, e.g. `chalk.dim("\n  Relays:")`. Mirror byte-for-
+/// byte: include the same whitespace inside the dim'd payload so the
+/// wire ANSI sequence matches TS exactly.
 fn render_listing(relays: &[String], identity_relays: &[String]) {
-    println!();
     let dim = console::Style::new().dim();
     let cyan_bullet = console::Style::new().cyan().apply_to("●");
-    println!("  {}", dim.apply_to("Relays:"));
+    println!("{}", dim.apply_to("\n  Relays:"));
     if relays.is_empty() {
-        println!("    {}", dim.apply_to("No relays configured."));
+        println!("{}", dim.apply_to("    No relays configured."));
     } else {
         for r in relays {
             println!("    {cyan_bullet} {r}");
         }
     }
 
-    println!();
     println!(
-        "  {}",
-        dim.apply_to("Identity relays (for kind:0 events):"),
+        "{}",
+        dim.apply_to("\n  Identity relays (for kind:0 events):"),
     );
     if identity_relays.is_empty() {
         println!(
-            "    {}",
-            dim.apply_to(format!("{DEFAULT_IDENTITY_RELAY} (default)")),
+            "{}",
+            dim.apply_to(format!("    {DEFAULT_IDENTITY_RELAY} (default)")),
         );
     } else {
         for r in identity_relays {
