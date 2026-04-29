@@ -1,6 +1,6 @@
 # TENEX Rust Adoption Status
 
-_Last updated: 2026-04-29 (twenty-ninth pass). Auto-maintained by scheduled debt check._
+_Last updated: 2026-04-29 (twenty-ninth pass, updated). Auto-maintained by scheduled debt check._
 
 ---
 
@@ -29,6 +29,7 @@ The Rust port is underway crate by crate. The TypeScript daemon still owns per-p
 | `tenex-rag` | lib | — | RAG: SQLite vector store + embedding client |
 | `tenex-supervision` | lib | — | Post-completion and pre-tool heuristics (todo nudging, re-engagement, delegation gating) |
 | `tenex-system-prompt` | lib | — | Pure system-prompt assembly from identity + project + skills |
+| `tenex-telemetry` | lib | — | Shared OpenTelemetry/OTLP bootstrap, W3C traceparent propagation, tracing-subscriber init |
 
 ---
 
@@ -177,7 +178,7 @@ Note: `conversation_get`, `conversation_list`, `conversation_search`, `kill` (sc
 
 ## Compilation Status
 
-**As of 2026-04-29 (twenty-ninth debt check pass): workspace compiles clean — zero errors, 281 warnings (tenex-agent: 0). `cargo test --workspace`: 1356 tests passing across all crates.**
+**As of 2026-04-29 (twenty-ninth debt check pass): workspace compiles clean — zero errors, 71 warnings (down from 281 — stale incremental cache was inflating count; clean rebuild confirms 71). `cargo test --workspace`: 1362 tests passing across all crates.**
 
 **MILESTONE: Tool call/result history is now fully wired.** `RecordingTool` wrappers capture every tool invocation (call_id, args, result) into a shared `Arc<ToolRecorder>`. After each turn, records are written to `tool_messages` and the assistant `TurnRecord` carries the `tool_calls` slice. `projection.rs` interleaves `ToolResult` messages immediately after their parent assistant row (sorted by timestamp, agent-pubkey-filtered). The `CtxMessage::ToolResult` filter in `main.rs` is removed — providers now receive correctly paired `tool_use`→`tool_result` sequences.
 
@@ -197,6 +198,14 @@ Note: `conversation_get`, `conversation_list`, `conversation_search`, `kill` (sc
 - Conversation history persistence (10 convs, 20 history entries) ✅
 - Supervision (worker todo block) ✅
 - FK bug fixed: ensure_conversation() on store open
+
+Resolved between twenty-eighth and twenty-ninth passes (continued — telemetry):
+- **`tenex-telemetry` crate added**: New 252-line OpenTelemetry/OTLP shared crate. `init(service_name)` configures tracing-subscriber with `EnvFilter` + optional OTLP exporter (http-proto to localhost:4318). `TelemetryConfig::load()` reads from `~/.tenex/config.json`. `current_traceparent()` generates W3C traceparent for child process propagation; `parent_context_from_env()` extracts from `TRACEPARENT` env. All five binaries (tenex, tenex-agent, tenex-identity, tenex-intervention, tenex-scheduler, tenex-summarizer) migrated from inline `tracing_subscriber::fmt().init()` to `tenex_telemetry::init()`.
+- **Distributed tracing**: `runtime_cmd` passes `TRACEPARENT` env to `tenex-agent` subprocess; `tenex-agent main` extracts it as root span parent. Each tool call wrapped in `info_span!("tenex.agent.tool_call")` in `recording.rs`. Full trace tree: daemon → runtime dispatch → agent process → individual tool calls.
+- **`EmbedConfig::load_from_base_dir`**: New method avoids hardcoding `~/.tenex`; `tenex-agent` passes its `base_dir` directly. `default_base_dir()` added to `tenex-rag/config.rs` reads `TENEX_BASE_DIR` env. runtime_cmd propagates `TENEX_BASE_DIR` to agent subprocess.
+- **Architecture note (workspace crate count)**: 16 crates (was 15) — `tenex-telemetry` added to workspace.
+- **Warning count corrected**: Clean rebuild shows 71 warnings (not 281) — prior count was inflated by stale incremental build cache. Architecture table updated.
+- **Test count**: 1362 (up from 1351 — 11 new tests including tenex-telemetry unit tests and tenex-rag load_from_base_dir test).
 
 Resolved between twenty-eighth and twenty-ninth passes:
 - **Tool call/result history fixed**: `RecordingTool` (`tools/recording.rs`) wraps all tools at the `ToolDyn` layer so every invocation captures `(call_id, tool_name, args_json, result_json, is_error, timestamp_ms)` into `Arc<ToolRecorder>`. After the inner loop, `main.rs` drains the recorder: writes each record to `tool_messages` via `store.record_tool_message()`, attaches the `tool_calls` slice to the assistant `TurnRecord`. `projection.rs` reworked to sort tool messages by timestamp, filter to the projecting agent's pubkey, and interleave each `ToolResult` immediately after its parent assistant message. `CtxMessage::ToolResult` filter removed from `main.rs`. Providers now receive valid `tool_use`→`tool_result` pairs in multi-turn history.
