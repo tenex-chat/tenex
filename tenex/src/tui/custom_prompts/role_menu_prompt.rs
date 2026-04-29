@@ -389,12 +389,12 @@ fn render_frame<W: Write>(
     )?;
     height += 1;
 
-    queue!(
+    // TS at onboard.ts:337-341 — bold-key / dim-label help row
+    // (see `crate::tui::custom_prompts::help_row` for the chalk-equivalence
+    // rationale).
+    crate::tui::custom_prompts::help_row::render_help_row(
         stdout,
-        SetAttribute(Attribute::Dim),
-        Print("  ↑↓ navigate • ⏎ change"),
-        SetAttribute(Attribute::Reset),
-        Print("\r\n"),
+        &[("↑↓", "navigate"), ("⏎", "change")],
     )?;
     height += 1;
 

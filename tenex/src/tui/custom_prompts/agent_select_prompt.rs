@@ -430,13 +430,17 @@ fn render_frame<W: Write>(
         }
     }
 
-    // Help.
-    queue!(
+    // TS at AgentManager.ts:170-175 — bold-key / dim-label help row
+    // (see `crate::tui::custom_prompts::help_row` for the chalk-equivalence
+    // rationale). Note: TS line 172 ("space") and line 173 ("⏎") both
+    // map to the dim label "select" — preserve that intentional repetition.
+    crate::tui::custom_prompts::help_row::render_help_row(
         stdout,
-        SetAttribute(Attribute::Dim),
-        Print("  ↑↓ navigate • space select • ⏎ select"),
-        SetAttribute(Attribute::Reset),
-        Print("\r\n"),
+        &[
+            ("↑↓", "navigate"),
+            ("space", "select"),
+            ("⏎", "select"),
+        ],
     )?;
     height += 1;
 
