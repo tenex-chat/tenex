@@ -184,9 +184,13 @@ fn run_edit(base_dir: &Path) -> Result<()> {
                 cleaned.chars().count()
             ))
         );
+        // TS at system-prompt.ts:209 emits:
+        //   console.log(chalk.gray("\nThis prompt will be added to all agents' system prompts."));
+        // — leading `\n` is INSIDE the gray wrap. Mirror byte-for-byte by
+        // embedding it inside the apply_to string.
         println!(
-            "\n{}",
-            gray.apply_to("This prompt will be added to all agents' system prompts.")
+            "{}",
+            gray.apply_to("\nThis prompt will be added to all agents' system prompts.")
         );
     }
     Ok(())
