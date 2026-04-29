@@ -29,6 +29,7 @@ playwright/.cache/
 # IDE
 .vscode/
 .idea/
+.codex
 .codex/
 .obsidian/
 .claude/*.lock

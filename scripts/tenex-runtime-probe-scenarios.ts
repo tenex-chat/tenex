@@ -21,12 +21,26 @@ export type MockRequestRecord = {
     toolCalls?: string[];
 };
 
+const delegationUserRequest =
+    "Please delegate to worker and ask them to choose one random color. Tell me what they picked.";
+const delegationWorkerPrompt =
+    "Choose one random color and report it back in one concise sentence.";
+export const delegationWorkerCompletionText = "Worker picked the random color blue.";
+
+const colorChoicePattern =
+    /\b(red|blue|green|yellow|purple|orange|pink|black|white|gray|grey|brown|cyan|magenta|teal|lime|indigo|violet|turquoise|gold|silver|maroon|navy|cerulean|lavender|beige|coral|azure|ochre|chartreuse|crimson|scarlet|amber|emerald|sapphire)\b|#[0-9a-f]{3,6}\b/i;
+
+export function includesColorChoice(content: string): boolean {
+    return colorChoicePattern.test(content);
+}
+
 type ScenarioContext = {
     pool: SimplePool;
     events: Event[];
     relayUrl: string;
     projectRef: string;
     pmPubkey: string;
+    workerPubkey: string;
     userSecret: Uint8Array;
     requestRecordPath: string;
     sign: (template: EventTemplate, secret: Uint8Array) => Event;
@@ -61,7 +75,7 @@ export function scenarioProjectDtag(name: ScenarioName): string {
 
 export function pmInstructions(name: ScenarioName): string {
     if (name === "delegation-basic") {
-        return "Use delegate when the user asks you to hand work off.";
+        return "This is a delegation probe. Do not call todo_write. On the first turn, call only delegate to worker with the random-color task. Do not ask for clarification. When the worker replies with a color, do not call tools and do not delegate again; send one final sentence: The worker picked <color>.";
     }
     if (name === "same-agent-concurrency") {
         return "Use shell when asked to run sleep commands, and account for active tool reminders.";
@@ -79,13 +93,13 @@ export function mockScenario(name: ScenarioName): unknown {
                 {
                     agent: "pm",
                     turn: 1,
-                    contains: "hand this off to worker",
+                    containsAll: ["delegate to worker", "choose one random color"],
                     toolCalls: [
                         {
                             name: "delegate",
                             args: {
                                 recipient: "worker",
-                                prompt: "Complete the probe delegation task and report success.",
+                                prompt: delegationWorkerPrompt,
                             },
                         },
                     ],
@@ -94,7 +108,14 @@ export function mockScenario(name: ScenarioName): unknown {
                 {
                     agent: "worker",
                     turn: 1,
-                    content: "Worker completed delegated probe task.",
+                    contains: delegationWorkerPrompt,
+                    content: delegationWorkerCompletionText,
+                },
+                {
+                    agent: "pm",
+                    turn: 1,
+                    contains: delegationWorkerCompletionText,
+                    content: "The worker picked blue.",
                 },
             ],
             defaultContent: "Probe agent observed the latest event.",
@@ -241,13 +262,37 @@ async function runDelegationProbe(context: ScenarioContext): Promise<void> {
         {
             kind: 1,
             created_at: context.now(),
-            content: "Please hand this off to worker and tell me what happened.",
+            content: delegationUserRequest,
             tags: [["a", context.projectRef]],
         },
         context.userSecret
     );
     await Promise.all(context.pool.publish([context.relayUrl], userEvent));
-    await context.delay(Number(process.env.TENEX_PROBE_WAIT_MS ?? 8_000));
+    const timeoutMs = Number(process.env.TENEX_PROBE_WAIT_MS ?? 8_000);
+    const workerCompletion = await context.waitForObservedEvent(
+        context.events,
+        (event) =>
+            event.kind === 1 &&
+            event.pubkey === context.workerPubkey &&
+            includesColorChoice(event.content),
+        timeoutMs,
+        "worker random-color completion"
+    );
+    await context.waitForObservedEvent(
+        context.events,
+        (event) =>
+            event.kind === 1 &&
+            event.pubkey === context.pmPubkey &&
+            event.created_at >= workerCompletion.created_at &&
+            !hasEventTag(event, "tool", "delegate") &&
+            includesColorChoice(event.content),
+        timeoutMs,
+        "PM random-color follow-up"
+    );
+}
+
+function hasEventTag(event: Event, name: string, value: string): boolean {
+    return event.tags.some((tag) => tag[0] === name && tag[1] === value);
 }
 
 async function runSameAgentConcurrencyProbe(context: ScenarioContext): Promise<void> {

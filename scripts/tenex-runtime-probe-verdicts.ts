@@ -1,11 +1,17 @@
 import type { Event } from "nostr-tools";
-import type { MockRequestRecord, ScenarioName } from "./tenex-runtime-probe-scenarios";
+import {
+    delegationWorkerCompletionText,
+    includesColorChoice,
+    type MockRequestRecord,
+    type ScenarioName,
+} from "./tenex-runtime-probe-scenarios";
 
 type Verdict = { name: string; ok: boolean; detail: string };
 
 type EvaluateContext = {
     pmPubkey: string;
     workerPubkey: string;
+    modelName: string;
     mcpProbeRecords?: Array<Record<string, unknown>>;
     workspaceDir?: string;
 };
@@ -16,16 +22,35 @@ export function evaluate(
     requestRecords: MockRequestRecord[],
     context: EvaluateContext
 ): Verdict[] {
+    const commonVerdicts = [evaluateProjectStatusModelTag(events, context)];
+
     if (name === "delegation-basic") {
-        return evaluateDelegation(events, context);
+        return [...commonVerdicts, ...evaluateDelegation(events, context)];
     }
     if (name === "same-agent-concurrency") {
-        return evaluateSameAgentConcurrency(events, context);
+        return [...commonVerdicts, ...evaluateSameAgentConcurrency(events, context)];
     }
     if (name === "mcp-tool-basic") {
-        return evaluateMcpTool(events, requestRecords, context);
+        return [...commonVerdicts, ...evaluateMcpTool(events, requestRecords, context)];
     }
-    return evaluateFsReadAdjustment(events, requestRecords, context);
+    return [...commonVerdicts, ...evaluateFsReadAdjustment(events, requestRecords, context)];
+}
+
+function evaluateProjectStatusModelTag(events: Event[], context: EvaluateContext): Verdict {
+    const statusEvents = events.filter((event) => event.kind === 24010);
+    const modelTag = statusEvents
+        .flatMap((event) => event.tags)
+        .find((tag) => tag[0] === "model" && tag[1] === context.modelName);
+    const agents = modelTag?.slice(2) ?? [];
+    const expectedAgents = ["pm", "worker"];
+
+    return {
+        name: "Project status publishes model access",
+        ok: Boolean(modelTag) && expectedAgents.every((agent) => agents.includes(agent)),
+        detail:
+            `Expected kind:24010 model tag for ${context.modelName} with pm and worker; ` +
+            `saw ${modelTag ? JSON.stringify(modelTag) : "<none>"}.`,
+    };
 }
 
 function evaluateDelegation(events: Event[], context: EvaluateContext): Verdict[] {
@@ -45,14 +70,16 @@ function evaluateDelegation(events: Event[], context: EvaluateContext): Verdict[
         (event) =>
             event.kind === 1 &&
             event.pubkey === context.workerPubkey &&
-            event.content.includes("Worker completed delegated probe task")
+            (event.content.includes(delegationWorkerCompletionText) ||
+                includesColorChoice(event.content))
     );
     const pmObservedWorker = events.find(
         (event) =>
             event.kind === 1 &&
             event.pubkey === context.pmPubkey &&
             event.created_at >= (workerCompletion?.created_at ?? Number.MAX_SAFE_INTEGER) &&
-            event.content.includes("observed")
+            !hasTag(event, "tool", "delegate") &&
+            includesColorChoice(event.content)
     );
     const completedStatus = events.find(
         (event) =>
@@ -75,12 +102,12 @@ function evaluateDelegation(events: Event[], context: EvaluateContext): Verdict[
         {
             name: "Runtime routed delegation to worker",
             ok: Boolean(workerCompletion),
-            detail: "Expected worker kind:1 containing scripted completion text.",
+            detail: "Expected worker kind:1 containing scripted random-color completion text.",
         },
         {
             name: "PM observed worker completion",
             ok: Boolean(pmObservedWorker),
-            detail: "Expected worker completion to trigger a follow-up PM run.",
+            detail: "Expected worker completion to trigger a follow-up PM run naming the color.",
         },
         {
             name: "Agent completion contract includes status=completed",

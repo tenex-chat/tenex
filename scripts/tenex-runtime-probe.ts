@@ -1,20 +1,11 @@
 #!/usr/bin/env bun
 import { spawn, type ChildProcessByStdio } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { createServer } from "node:net";
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import type { Readable } from "node:stream";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import {
-    finalizeEvent,
-    generateSecretKey,
-    getPublicKey,
-    nip19,
-    SimplePool,
-    type Event,
-    type EventTemplate,
-} from "nostr-tools";
+import { nip19, SimplePool, type Event } from "nostr-tools";
 import {
     cassetteToMockScenario,
     parseProbeLlmOptions,
@@ -27,9 +18,24 @@ import {
     pmInstructions,
     runScenario,
     scenarioProjectDtag,
-    type MockRequestRecord,
     type ScenarioName,
 } from "./tenex-runtime-probe-scenarios";
+import {
+    bytesToHex,
+    delay,
+    freePort,
+    keypair,
+    mergeEvents,
+    now,
+    readJsonLines,
+    readRequestRecords,
+    sign,
+    waitForHealth,
+    waitForObservedEvent,
+    waitForOutput,
+    waitForRequestRecord,
+    writeJson,
+} from "./tenex-runtime-probe-utils";
 import { evaluate } from "./tenex-runtime-probe-verdicts";
 
 type Proc = {
@@ -174,7 +180,8 @@ writeJson(path.join(agentsDir, `${worker.pubkey}.json`), {
     nsec: nip19.nsecEncode(worker.secret),
     category: "worker",
     description: "Completes delegated probe tasks",
-    instructions: "Complete delegated probe tasks with a concise result.",
+    instructions:
+        "Complete delegated probe tasks with a concise result. If asked to choose a random color, never call no_response; reply with exactly one color name.",
     default: { model: llmModelName },
 });
 
@@ -246,6 +253,7 @@ await runScenario(scenarioName, {
     relayUrl,
     projectRef,
     pmPubkey: pm.pubkey,
+    workerPubkey: worker.pubkey,
     userSecret: user.secret,
     requestRecordPath,
     sign,
@@ -271,6 +279,7 @@ const mcpProbeRecords = mcpProbe ? readJsonLines(mcpProbe.logPath) : [];
 const verdicts = evaluate(scenarioName, mergedEvents, requestRecords, {
     pmPubkey: pm.pubkey,
     workerPubkey: worker.pubkey,
+    modelName: llmModelName,
     mcpProbeRecords,
     workspaceDir,
 });
@@ -418,152 +427,4 @@ function cleanup(): void {
             proc.child.kill("SIGTERM");
         }
     }
-}
-
-function keypair(): { secret: Uint8Array; pubkey: string } {
-    const secret = generateSecretKey();
-    return { secret, pubkey: getPublicKey(secret) };
-}
-
-function sign(template: EventTemplate, secret: Uint8Array): Event {
-    return finalizeEvent(template, secret);
-}
-
-function mergeEvents(...groups: Event[][]): Event[] {
-    const byId = new Map<string, Event>();
-    for (const group of groups) {
-        for (const event of group) {
-            byId.set(event.id, event);
-        }
-    }
-    return Array.from(byId.values()).sort((a, b) => a.created_at - b.created_at);
-}
-
-function writeJson(file: string, value: unknown): void {
-    mkdirSync(path.dirname(file), { recursive: true });
-    writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`);
-}
-
-function readRequestRecords(file: string): MockRequestRecord[] {
-    if (!existsSync(file)) {
-        return [];
-    }
-    return readFileSync(file, "utf8")
-        .split("\n")
-        .filter((line) => line.trim().length > 0)
-        .flatMap((line) => {
-            try {
-                return [JSON.parse(line) as MockRequestRecord];
-            } catch {
-                return [];
-            }
-        });
-}
-
-function readJsonLines(file: string): Array<Record<string, unknown>> {
-    if (!existsSync(file)) {
-        return [];
-    }
-    return readFileSync(file, "utf8")
-        .split("\n")
-        .filter((line) => line.trim().length > 0)
-        .flatMap((line) => {
-            try {
-                const parsed = JSON.parse(line) as unknown;
-                return parsed && typeof parsed === "object"
-                    ? [parsed as Record<string, unknown>]
-                    : [];
-            } catch {
-                return [];
-            }
-        });
-}
-
-function now(): number {
-    return Math.floor(Date.now() / 1000);
-}
-
-function delay(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function bytesToHex(bytes: Uint8Array): string {
-    return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
-}
-
-async function freePort(): Promise<number> {
-    return new Promise((resolve, reject) => {
-        const server = createServer();
-        server.listen(0, "127.0.0.1", () => {
-            const address = server.address();
-            if (typeof address === "object" && address?.port) {
-                const port = address.port;
-                server.close(() => resolve(port));
-            } else {
-                reject(new Error("failed to allocate port"));
-            }
-        });
-        server.on("error", reject);
-    });
-}
-
-async function waitForHealth(url: string, timeoutMs: number): Promise<void> {
-    const deadline = Date.now() + timeoutMs;
-    while (Date.now() < deadline) {
-        try {
-            const response = await fetch(url);
-            if (response.ok) {
-                return;
-            }
-        } catch {
-            // keep polling
-        }
-        await delay(100);
-    }
-    throw new Error(`relay did not become healthy: ${url}`);
-}
-
-async function waitForOutput(proc: Proc, needle: string, timeoutMs: number): Promise<void> {
-    const deadline = Date.now() + timeoutMs;
-    while (Date.now() < deadline) {
-        if (proc.output.includes(needle)) {
-            return;
-        }
-        await delay(100);
-    }
-    throw new Error(`${proc.label} did not print '${needle}' within ${timeoutMs}ms`);
-}
-
-async function waitForObservedEvent(
-    events: Event[],
-    predicate: (event: Event) => boolean,
-    timeoutMs: number,
-    label: string
-): Promise<Event> {
-    const deadline = Date.now() + timeoutMs;
-    while (Date.now() < deadline) {
-        const event = events.find(predicate);
-        if (event) {
-            return event;
-        }
-        await delay(100);
-    }
-    throw new Error(`did not observe ${label} within ${timeoutMs}ms`);
-}
-
-async function waitForRequestRecord(
-    file: string,
-    predicate: (records: MockRequestRecord[]) => boolean,
-    timeoutMs: number,
-    label: string
-): Promise<MockRequestRecord[]> {
-    const deadline = Date.now() + timeoutMs;
-    while (Date.now() < deadline) {
-        const records = readRequestRecords(file);
-        if (predicate(records)) {
-            return records;
-        }
-        await delay(50);
-    }
-    throw new Error(`did not observe ${label} within ${timeoutMs}ms`);
 }

@@ -20,6 +20,14 @@ When adding a new feature or changing runtime behavior, prefer validating it wit
 
 For agent/runtime behavior, use or extend the runtime probe harness (for example `scripts/tenex-runtime-probe.ts`) rather than relying only on mocks around individual functions. Mock LLM responses are acceptable at the LLM boundary for deterministic probes, but the process, relay, event routing, tool execution, persistence, and status publication should be as real as practical.
 
+For new or uncertain probe scenarios, prefer a real first pass with Ollama when practical and record it as a replay cassette. The probe harness supports:
+
+- Record: `TENEX_PROBE_LLM=ollama TENEX_PROBE_RECORD_CASSETTE=/path/to/file.jsonl`
+- Replay: `TENEX_PROBE_LLM=cassette TENEX_PROBE_CASSETTE=/path/to/file.jsonl`
+- Scale replay waits while debugging: `TENEX_PROBE_LLM_GENERATION_TIME_FACTOR=0.1`
+
+The same settings are available as `--llm`, `--record-cassette`, `--cassette`, and `--llm-generation-time-factor` flags. Replay preserves recorded LLM generation delays by default.
+
 If the probe exposes a gap, keep the probe as the reproduction and fix the runtime until the event timeline matches the expected behavior. Record any missing telemetry as part of the feature work when internal state transitions are needed to debug failures.
 
 ## Rust Agent Design Decisions
