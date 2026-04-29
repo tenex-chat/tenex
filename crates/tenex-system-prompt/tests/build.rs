@@ -21,6 +21,7 @@ fn contains_identity_fragment() {
         instructions: None,
         working_dir: "/home/u/proj",
         project_meta: None,
+        root_agents_md: None,
         agents: &[],
         teams_fragment: "",
         home: &home,
@@ -42,6 +43,7 @@ fn contains_todo_guidance() {
         instructions: None,
         working_dir: "/home/u/proj",
         project_meta: None,
+        root_agents_md: None,
         agents: &[],
         teams_fragment: "",
         home: &home,
@@ -62,6 +64,7 @@ fn identical_inputs_produce_byte_identical_output() {
         instructions: Some("hold steady"),
         working_dir: "/x",
         project_meta: None,
+        root_agents_md: None,
         agents: &[],
         teams_fragment: "",
         home: &home_a,
@@ -75,6 +78,7 @@ fn identical_inputs_produce_byte_identical_output() {
         instructions: Some("hold steady"),
         working_dir: "/x",
         project_meta: None,
+        root_agents_md: None,
         agents: &[],
         teams_fragment: "",
         home: &home_b,
@@ -95,6 +99,7 @@ fn orchestrator_category_skips_env_vars() {
         instructions: None,
         working_dir: "/home/u/proj",
         project_meta: None,
+        root_agents_md: None,
         agents: &[],
         teams_fragment: "",
         home: &home,
@@ -102,4 +107,24 @@ fn orchestrator_category_skips_env_vars() {
     });
     assert!(!out.contains("<environment-variables>"));
     assert!(out.contains("Orchestrator Guidance"));
+}
+
+#[test]
+fn includes_root_agents_md_when_supplied() {
+    let home = minimal_home();
+    let out = build_system_prompt(BuildSystemPromptInput {
+        identity_name: "scout",
+        pubkey_hex: "abcdef0123456789",
+        category_str: None,
+        category: None,
+        instructions: None,
+        working_dir: "/home/u/proj/.worktrees/feature",
+        project_meta: None,
+        root_agents_md: Some("\n# Project Rules\nUse repo conventions.\n"),
+        agents: &[],
+        teams_fragment: "",
+        home: &home,
+        preloaded_skills_block: None,
+    });
+    assert!(out.contains("  <agents.md>\n# Project Rules\nUse repo conventions.\n  </agents.md>"));
 }

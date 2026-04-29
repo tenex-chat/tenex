@@ -3,7 +3,6 @@
 //! The output string is the cache anchor for downstream LLM calls; identical
 //! inputs must yield byte-identical output.
 
-use std::path::Path;
 pub use tenex_supervision::types::AgentCategory;
 
 pub struct InjectedFile {
@@ -26,6 +25,7 @@ pub struct BuildSystemPromptInput<'a> {
     pub instructions: Option<&'a str>,
     pub working_dir: &'a str,
     pub project_meta: Option<&'a tenex_project::ProjectMetadata>,
+    pub root_agents_md: Option<&'a str>,
     pub agents: &'a [tenex_project::Agent],
     pub teams_fragment: &'a str,
     pub home: &'a HomeDirectoryInfo<'a>,
@@ -123,6 +123,7 @@ pub fn build_system_prompt(input: BuildSystemPromptInput<'_>) -> String {
         instructions,
         working_dir,
         project_meta,
+        root_agents_md,
         agents,
         teams_fragment,
         home,
@@ -184,7 +185,7 @@ Your nsec and other secrets are in $AGENT_HOME/.env (auto-loaded in shell sessio
         );
     }
 
-    // Fragment 08: Workspace + project context (with AGENTS.md if present and small)
+    // Fragment 08: Workspace + project context
     let mut project_lines = vec![format!("    cwd: {working_dir}")];
     if let Some(meta) = project_meta {
         if let Some(title) = &meta.title {
@@ -194,13 +195,15 @@ Your nsec and other secrets are in $AGENT_HOME/.env (auto-loaded in shell sessio
             project_lines.push(format!("    owner: {}", &owner[..8.min(owner.len())]));
         }
     }
-    let agents_md = read_agents_md(working_dir);
     let mut project_ctx = format!(
         "<project-context>\n  <workspace>\n{}\n  </workspace>",
         project_lines.join("\n")
     );
-    if let Some(content) = agents_md {
-        project_ctx.push_str(&format!("\n\n  <agents.md>\n{content}\n  </agents.md>"));
+    if let Some(content) = root_agents_md {
+        project_ctx.push_str(&format!(
+            "\n\n  <agents.md>\n{}\n  </agents.md>",
+            content.trim()
+        ));
     }
     project_ctx.push_str("\n</project-context>");
     parts.push(project_ctx);
@@ -283,13 +286,4 @@ Creating a todo list helps you stay organized, shows your progress to observers,
     }
 
     parts.join("\n\n")
-}
-
-fn read_agents_md(working_dir: &str) -> Option<String> {
-    let content = std::fs::read_to_string(Path::new(working_dir).join("AGENTS.md")).ok()?;
-    if content.len() > 2000 {
-        None
-    } else {
-        Some(content)
-    }
 }

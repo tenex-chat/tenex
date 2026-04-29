@@ -14,6 +14,7 @@ Canonical spec: `docs/plans/2026-04-28-tenex-system-prompt-library.md`.
 
 - Persona / identity composition (name, short pubkey, optional category).
 - Project-context rendering (working dir, optional title, optional owner).
+- Root `AGENTS.md` rendering when the runner supplies already-read content.
 - Available-skills declaration (name, when-to-use, the tool that loads each skill — pointers only).
 - Identity-level guidance fragments (todo usage, tool-description style) that don't change per turn.
 
