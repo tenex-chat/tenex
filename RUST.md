@@ -1,6 +1,6 @@
 # TENEX Rust Adoption Status
 
-_Last updated: 2026-04-29 (thirty-second pass). Auto-maintained by scheduled debt check._
+_Last updated: 2026-04-29 (thirty-third pass). Auto-maintained by scheduled debt check._
 
 ---
 
@@ -270,7 +270,7 @@ Note: `conversation_get`, `conversation_list`, `conversation_search`, `kill`, `s
 
 ## Compilation Status
 
-**As of 2026-04-29 (thirty-second debt check pass): workspace compiles clean — zero errors, zero warnings. `cargo test --workspace`: 1371 tests passing across all crates.**
+**As of 2026-04-29 (thirty-third debt check pass): workspace compiles clean — zero errors, zero warnings. `cargo test --workspace`: 1374 tests passing across all crates.**
 
 **MILESTONE: Tool call/result history is now fully wired.** `RecordingTool` wrappers capture every tool invocation (call_id, args, result) into a shared `Arc<ToolRecorder>`. After each turn, records are written to `tool_messages` and the assistant `TurnRecord` carries the `tool_calls` slice. `projection.rs` interleaves `ToolResult` messages immediately after their parent assistant row (sorted by timestamp, agent-pubkey-filtered). The `CtxMessage::ToolResult` filter in `main.rs` is removed — providers now receive correctly paired `tool_use`→`tool_result` sequences.
 
@@ -290,6 +290,18 @@ Note: `conversation_get`, `conversation_list`, `conversation_search`, `kill`, `s
 - Conversation history persistence (10 convs, 20 history entries) ✅
 - Supervision (worker todo block) ✅
 - FK bug fixed: ensure_conversation() on store open
+
+Resolved between thirty-second and thirty-third passes:
+- **Cassette recorder split**: `cassette.rs` retained only `CassetteRecorder` + `CassetteToolCall` types. `RecordingClient` / `RecordingModel` (generic rig-core `CompletionClient` + `CompletionModel` wrappers) extracted to `cassette_client.rs`. `request_debug()` helper (extracts last human-turn text from `CompletionRequest`) extracted to `cassette_request.rs`. Cleaner separation of recording types from recording logic.
+- **Model access in kind:24010**: `nostr_pub/project_status.rs` gains `ModelAccess` struct and `collect_model_access()` — mirrors TS `ProjectStatusService.gatherModelInfo`. Adds `["model", config_slug, agent_slug...]` tags to kind:24010 events so project status shows which agents use which LLM configs. Unit tests in `project_status_tests.rs`.
+- **Delegation route tracking**: `runtime_cmd/mod.rs` gains `DelegationRoute` (parent/child pubkey + conversation IDs + completion recipient), `register_delegation_route_if_needed()` (stores to `rustRuntime.delegationRoute` in conversation JSON), `delegation_route_for_completion()` (reads route on completion), and `select_dispatch_target()` (route-aware dispatch wrapper). Child agent completions now route back to the parent conversation rather than looping to the PM.
+- **`delegation_parent_tag`**: `tenex-protocol/src/nostr/tags.rs` gains `delegation_parent_tag(root_id)` — emits `["delegation", "<event-id-hex>"]`. `encoder.rs` calls it in `encode_delegation` for fresh delegations with a `conversation_root`.
+- **tenexBasePath threading** (TS): Optional `tenexBasePath` parameter added to `getAgentHomeDirectory`, `ensureAgentHomeDirectory`, `getOrCreateTenexFsTools`, and `getOrCreateHomeFsTools`. Tests can now inject isolated temp paths without mutating `TENEX_BASE_DIR` in `process.env`. Also threads `tenexBasePath` and `projectId` through `ToolExecutionContext` and uses `resolveToolEnvironment` hook for test isolation.
+- **Encoder test fix**: `let ctx = test_ctx()` → `let mut ctx = test_ctx()` in `delegation_omits_e_root_and_prepends_label` test (was causing compile error); unused `mut` removed from `completion_has_status_and_p_tag`.
+- **Probe scenario ordering fix**: `tenex-runtime-probe-scenarios.ts` reorders `delegation-basic` mock responses — PM turn 1 now precedes worker turn 1, matching the actual event timeline.
+- **`TENEX_CONVERSATION_ID` env override**: `tenex-agent main.rs` honours `TENEX_CONVERSATION_ID` when set, allowing `tenex runtime` to hand an explicit conversation ID to child agent processes.
+- **Warning count**: 0.
+- **Test count**: 1374 (up from 1371).
 
 Resolved between thirty-first and thirty-second passes:
 - **`tenex-mcp` crate added**: Project-scoped MCP runtime bridge — loads `mcp.json`, binds a Unix socket per project, proxies tool calls, exposes `ToolManifest` for agent discovery. Replaces `tenex/src/store/mcp.rs`. `McpProxyTool` in `tenex-agent` routes MCP calls through this bridge.
