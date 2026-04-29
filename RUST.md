@@ -1,6 +1,6 @@
 # TENEX Rust Adoption Status
 
-_Last updated: 2026-04-29 (twenty-seventh pass). Auto-maintained by scheduled debt check._
+_Last updated: 2026-04-29 (twenty-eighth pass). Auto-maintained by scheduled debt check._
 
 ---
 
@@ -177,7 +177,7 @@ Note: `conversation_get`, `conversation_list`, `conversation_search`, `kill` (sc
 
 ## Compilation Status
 
-**As of 2026-04-29 (twenty-seventh debt check pass): workspace compiles clean — zero errors, 281 warnings. `cargo test --workspace`: 1352 tests passing across all crates.**
+**As of 2026-04-29 (twenty-eighth debt check pass): workspace compiles clean — zero errors, 281 warnings (tenex-agent: 0). `cargo test --workspace`: 1351 tests passing across all crates.**
 
 **MILESTONE: Every tool in `tenex-agent` is now verified end-to-end, including supervision re-engagement (see `RUST_REPORT.md`).** The `ConsecutiveToolsWithoutTodo` heuristic was silent (re_engage: false) — fixed. Multi-turn history projection verified with both user and assistant messages persisted.
 
@@ -197,6 +197,14 @@ Note: `conversation_get`, `conversation_list`, `conversation_search`, `kill` (sc
 - Conversation history persistence (10 convs, 20 history entries) ✅
 - Supervision (worker todo block) ✅
 - FK bug fixed: ensure_conversation() on store open
+
+Resolved between twenty-seventh and twenty-eighth passes:
+- **`conversation_search` dead field removed**: `current_project_id` was stored in `ConversationSearchTool` but never read (single-project path uses `self.store`; multi-project iterates `projects/`). Field removed; constructor accepts the arg as `_current_project_id` for API stability. `tenex-agent` warning count: 1 → 0.
+- **Idiomatic cleanups across 14 files**: `#[derive(Default)]` replaces manual `Default` impls for `AgentSelectState` and `LlmMenuState`; `saturating_sub` for cron Up-nav; `.ok()` idiom in relays; `std::slice::from_ref` avoids clone in onboard; `is_ascii_lowercase()`/`is_ascii_hexdigit()` replace manual byte-range checks; `unwrap_or_default()` in provider_select_prompt; US spelling in doctor output.
+- **`conversation_search` description corrected**: Tool uses RAG/vector search (same `RagStore` as `rag_search`), not SQLite keyword search — RUST.md and note section updated.
+- **RUST_REPORT.md session 11**: `conversation_search` e2e verified (keyword and full-text modes, 3 unit tests passing).
+- **Architecture drift**: Clean. Both daemon delegations intact. No new TS bypasses.
+- **Test count**: 1351 (stable — some counts from parallel session fluctuation).
 
 Resolved between twenty-sixth and twenty-seventh passes:
 - **`agents_write` tool ported**: Pure file I/O against `~/.tenex/agents/<pubkey>.json` — no SQLite, no TS AgentProvisioningService dependency. Preserves unknown JSON fields across updates (category, eventId, mcpServers not clobbered). 441-line implementation + wired into `tenex-agent/src/main.rs`.
