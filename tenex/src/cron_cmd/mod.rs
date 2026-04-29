@@ -373,7 +373,7 @@ fn render<W: Write>(
         SetForegroundColor(ACCENT),
         SetAttribute(Attribute::Bold),
         Print(" TENEX Scheduled Tasks"),
-        SetAttribute(Attribute::Reset),
+        SetAttribute(Attribute::NormalIntensity),
         ResetColor,
         Print("\r\n"),
     )?;
@@ -395,7 +395,7 @@ fn render<W: Write>(
             type_ = COL_TYPE,
         ))
     )?;
-    queue!(out, SetAttribute(Attribute::Reset), ResetColor)?;
+    queue!(out, SetAttribute(Attribute::NormalIntensity), ResetColor)?;
     height += 1;
 
     // Separator.
@@ -413,7 +413,7 @@ fn render<W: Write>(
             out,
             SetAttribute(Attribute::Dim),
             Print(" No scheduled tasks. Press 'a' to add one.\r\n"),
-            SetAttribute(Attribute::Reset),
+            SetAttribute(Attribute::NormalIntensity),
         )?;
         height += 1;
     } else {
@@ -473,7 +473,7 @@ fn render<W: Write>(
         out,
         SetAttribute(Attribute::Dim),
         Print(summary),
-        SetAttribute(Attribute::Reset),
+        SetAttribute(Attribute::NormalIntensity),
         Print("\r\n"),
     )?;
     height += 1;
@@ -483,7 +483,7 @@ fn render<W: Write>(
         out,
         SetAttribute(Attribute::Dim),
         Print(" ↑↓/jk navigate  a add  d delete  r run now  q quit"),
-        SetAttribute(Attribute::Reset),
+        SetAttribute(Attribute::NormalIntensity),
         Print("\r\n"),
     )?;
     height += 1;
