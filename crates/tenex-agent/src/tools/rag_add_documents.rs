@@ -85,7 +85,7 @@ impl Tool for RagAddDocumentsTool {
                 return Err(RagAddDocumentsError(format!(
                     "Invalid audience '{}'. Use 'self' or 'project'.",
                     other
-                )))
+                )));
             }
         };
 

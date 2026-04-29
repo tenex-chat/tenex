@@ -1,4 +1,4 @@
-use nostr::{nips::nip19::ToBech32, SecretKey};
+use nostr::{SecretKey, nips::nip19::ToBech32};
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::os::unix::fs::OpenOptionsExt;

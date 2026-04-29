@@ -2,7 +2,7 @@ use rig::{completion::ToolDefinition, tool::Tool};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::path::PathBuf;
-use tenex_project::{paths, Project};
+use tenex_project::{Project, paths};
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct ProjectListArgs {}

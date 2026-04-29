@@ -17,7 +17,7 @@ use std::sync::{Arc, Mutex};
 use rig::completion::ToolDefinition;
 use rig::tool::{ToolDyn, ToolError};
 use rig::wasm_compat::WasmBoxedFuture;
-use tracing::{info_span, Instrument};
+use tracing::{Instrument, info_span};
 
 use crate::injections::MessageInjectionTracker;
 use crate::runtime_state::RuntimeStateHandle;

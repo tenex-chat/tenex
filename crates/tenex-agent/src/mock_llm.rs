@@ -5,6 +5,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
+use rig::OneOrMany;
 use rig::client::CompletionClient;
 use rig::completion::{
     CompletionError, CompletionModel, CompletionRequest, CompletionResponse, Usage,
@@ -13,7 +14,6 @@ use rig::message::{AssistantContent, Text, ToolCall, ToolFunction};
 use rig::streaming::{
     RawStreamingChoice, RawStreamingToolCall, StreamingCompletionResponse, StreamingResult,
 };
-use rig::OneOrMany;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone)]

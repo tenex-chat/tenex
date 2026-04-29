@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use serde::Deserialize;
 use std::fs;
-use tenex_llm_config::resolver::{load_providers, ProviderDocs};
+use tenex_llm_config::resolver::{ProviderDocs, load_providers};
 
 pub use tenex_supervision::types::AgentCategory;
 pub use tenex_telegram::config::TelegramAgentConfig;

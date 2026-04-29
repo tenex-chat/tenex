@@ -51,4 +51,4 @@ pub use self_delegate::SelfDelegateTool;
 pub use shell::ShellTool;
 pub use skill_list::SkillListTool;
 pub use skills_set::SkillsSetTool;
-pub use todo::{format_todos_reminder, TodoItem, TodoStatus, TodoWriteTool};
+pub use todo::{TodoItem, TodoStatus, TodoWriteTool, format_todos_reminder};

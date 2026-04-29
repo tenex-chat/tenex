@@ -2,7 +2,7 @@ use rig::{completion::ToolDefinition, tool::Tool};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::path::PathBuf;
-use tenex_conversations::{store::MessageQuery, ConversationStore};
+use tenex_conversations::{ConversationStore, store::MessageQuery};
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct ConversationGetArgs {

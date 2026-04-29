@@ -20,16 +20,16 @@ use config::{LlmsConfig, ResolvedModel};
 use emit::{AgentMeta, EmitState};
 use hook::EmitHook;
 use injections::MessageInjectionTracker;
+use rig::OneOrMany;
 use rig::client::{CompletionClient, Nothing};
 use rig::completion::message::{ToolResult, ToolResultContent, UserContent};
 use rig::completion::{AssistantContent, Message as RigMessage};
 use rig::providers::{anthropic, ollama, openai, openrouter};
 use rig::tool::ToolDyn;
-use rig::OneOrMany;
 use runtime_state::RuntimeStateHandle;
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
     Arc, Mutex,
+    atomic::{AtomicBool, Ordering},
 };
 use std::time::{SystemTime, UNIX_EPOCH};
 use tenex_context::{
@@ -39,11 +39,11 @@ use tenex_context::{
 use tenex_conversations::{AgentContextState, ConversationStore, NewToolMessage};
 use tenex_project::Project;
 use tenex_protocol::{
-    nostr::{read_one_from_stdin, NostrChannel},
-    sink::StdoutNdjsonSink,
     Channel, CompletionIntent, ConversationRef, Intent, ListShellTasksRequest, LlmUsage,
     MessageRef, PrincipalKind, PrincipalRef, ProjectRef, RuntimeControlRequest,
     RuntimeControlResponse,
+    nostr::{NostrChannel, read_one_from_stdin},
+    sink::StdoutNdjsonSink,
 };
 use tenex_rag::{EmbedConfig, RagStore};
 use tenex_supervision::heuristics::default_supervisor;
@@ -60,7 +60,7 @@ use tools::{
     ReportPublishTool, ScheduleTaskTool, SelfDelegateTool, ShellTool, SkillListTool, SkillsSetTool,
     TodoItem, TodoStatus, TodoWriteTool, ToolRecorder,
 };
-use tracing::{info_span, Instrument};
+use tracing::{Instrument, info_span};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 /// Convert a `tenex_context::Message` to `rig::completion::Message` for passing
@@ -932,7 +932,9 @@ async fn run() -> Result<()> {
             Ok(results) => {
                 let relevant: Vec<_> = results.into_iter().filter(|r| r.score >= 0.65).collect();
                 if !relevant.is_empty() {
-                    let mut block = String::from("\n\n<proactive-context>\nPotentially relevant information retrieved based on your task:\n");
+                    let mut block = String::from(
+                        "\n\n<proactive-context>\nPotentially relevant information retrieved based on your task:\n",
+                    );
                     for (i, r) in relevant.iter().enumerate() {
                         let snippet: String = r.content.chars().take(300).collect();
                         let ellipsis = if r.content.len() > 300 { "…" } else { "" };
