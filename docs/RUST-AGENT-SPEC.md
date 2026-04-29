@@ -468,7 +468,7 @@ Request a silent completion for the current turn. Use only when the user's messa
 
 No parameters.
 
-Sets an `Arc<AtomicBool>` flag in the main loop. After the inner rig loop ends, `main.rs` checks this flag before emitting the final `ConversationIntent` — if set, no event is published and the turn ends silently. Note: the TS implementation (in `no_response.ts`) uses a similar early-exit pattern; the Rust version is behaviorally equivalent.
+Uses `Arc<AtomicBool>::swap(true)` — idempotent: a second call detects the flag was already set and returns a "STOP — do not call this tool again" advisory instead of silently no-op'ing. After the inner rig loop ends, `main.rs` checks the flag before emitting the final `ConversationIntent` — if set, no event is published and the turn ends silently. Note: the TS implementation (in `no_response.ts`) uses a similar early-exit pattern; the Rust version is behaviorally equivalent.
 
 ### `report_publish`
 Publish markdown files as NIP-23 long-form articles (kind:30023) to Nostr, signed with the agent's keys. Accepts a single file or a directory (directory walk is recursive). Path may be absolute or relative to the project root.
