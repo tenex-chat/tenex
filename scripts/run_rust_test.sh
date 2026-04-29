@@ -241,13 +241,13 @@ for content in responses:
         "SELECT COALESCE(MAX(sequence)+1, 0) FROM messages WHERE conversation_id=?",
         (root_id,),
     ).fetchone()[0]
-    record_id = f"agent-resp-{seq}"
+    record_id = f"agent-resp-{root_id[:8]}-{seq}"
     db.execute(
         """INSERT OR IGNORE INTO messages
                (conversation_id, record_id, nostr_event_id, sequence,
                 author_pubkey, message_type, role, content, created_at)
-           VALUES (?, ?, ?, ?, ?, 'text', 'assistant', ?, ?)""",
-        (root_id, record_id, record_id, seq, agent_pubkey, content, now_ms),
+           VALUES (?, ?, NULL, ?, ?, 'text', 'assistant', ?, ?)""",
+        (root_id, record_id, seq, agent_pubkey, content, now_ms),
     )
 
 db.commit()

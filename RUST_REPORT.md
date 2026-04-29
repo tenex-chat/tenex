@@ -1,6 +1,6 @@
 # TENEX Rust Agent — Test Report
 
-Last updated: 2026-04-29 (session 4)
+Last updated: 2026-04-29 (session 6)
 
 ---
 
@@ -37,6 +37,8 @@ Last updated: 2026-04-29 (session 4)
 | skills_set tool | ✅ PASS | Activates skills from built-in set; returns skill content |
 | delegate_crossproject tool | ✅ PASS | Emits correct kind:1 with tool=delegate_crossproject + tool-args tags |
 | context projection (multi-turn) | ✅ PASS | Turn 2 correctly recalled info from turn 1 history |
+| ConsecutiveToolsWithoutTodo nudge | ✅ PASS | Bug fixed (re_engage: false → true); agent receives and acknowledges nudge on re-engagement |
+| Multi-turn history (messages table) | ✅ PASS | Harness write-back fix; both user and assistant turns persisted correctly |
 
 ---
 
@@ -222,6 +224,46 @@ Fix: swapped the check order — `provider/model` (slash-separated, with known-p
 | delegate_crossproject (Agents-Web-nxmkpn/ndk-blossom) | ✅ |
 | context projection multi-turn recall | ✅ |
 | cargo test --workspace | ✅ 0 failures |
+
+---
+
+### Run 6 — 2026-04-29 History Replay Fix + Supervision Bug Fix
+
+**Bug fixed: test harness multi-turn history (messages table)**
+
+`project()` reads conversation history from the `messages` table, but `record_turn()` writes to `agent_prompt_history` — these are separate tables. In production the TypeScript daemon populates `messages` when it ingests Nostr events (both user and agent). The test harness only inserted user messages.
+
+Fix: `scripts/run_rust_test.sh` now writes assistant responses back to `messages` after each agent run. Parses NDJSON output, collects all kind:1 non-tool events, inserts each as `role='assistant'` with `nostr_event_id = NULL` and `record_id = f"agent-resp-{root_id[:8]}-{seq}"`.
+
+Gotcha: `idx_messages_nostr_event_id` is a globally unique partial index `ON messages(nostr_event_id) WHERE nostr_event_id IS NOT NULL`. Synthetic rows must pass `NULL` to avoid INSERT OR IGNORE silently failing when the same synthetic string appears across conversations.
+
+**Bug fixed: ConsecutiveToolsWithoutTodoHeuristic re_engage was false**
+
+`crates/tenex-supervision/src/heuristics/consecutive_tools_without_todo.rs` had `re_engage: false`. In `supervisor.rs::check_post_completion()`, when `re_engage: false` the supervisor:
+1. Increments `retry_count` (consuming a retry slot)
+2. Sets `nudged_about_todos = true` (preventing future nudges)
+3. Returns `PostCompletionOutcome::Accept` (discarding the message)
+
+Net effect: the agent was never nudged, but the state marked it as having been nudged. Classic silent no-op.
+
+Fix: `re_engage: false → re_engage: true`.
+
+**Verified:**
+- Turn 1: agent runs 6 shell commands without todos → `consecutive-tools-without-todo` fires
+- Turn 2 (re-engagement): agent receives "You have made 6 tool calls without creating a todo list..." nudge
+- Turn 2 response: "I understand the reminder about using todos for complex tasks."
+- `conv=2 tools=6` — one nudge, one re-engagement (OncePerExecution enforced correctly)
+
+**Multi-turn history verified:**
+- Turn 1: "My favorite color is indigo" → agent acknowledged
+- Turn 2 (same root_id): "What is my favorite color?" → "indigo"
+- Both user and assistant messages now persist in `messages` table via harness write-back
+
+| Test | Result |
+|---|---|
+| ConsecutiveToolsWithoutTodo re-engagement (6 shells, no todos) | ✅ Agent receives nudge, conv=2 |
+| Multi-turn history recall (color = indigo) | ✅ Correctly recalled from messages table |
+| cargo test -p tenex-supervision (13 tests) | ✅ All pass |
 
 ---
 
