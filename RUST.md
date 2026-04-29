@@ -1,6 +1,6 @@
 # TENEX Rust Adoption Status
 
-_Last updated: 2026-04-29 (twentieth pass). Auto-maintained by scheduled debt check._
+_Last updated: 2026-04-29 (twenty-first pass). Auto-maintained by scheduled debt check._
 
 ---
 
@@ -71,7 +71,7 @@ Spawned by `tenex runtime` per conversation turn via `tenex-agent <agent.json>` 
 - **Delegation tools**: `delegate` (emit delegation intent), `delegate_crossproject` (cross-project delegation), `delegate_followup` (follow up on existing delegation), `self_delegate` (re-queue self with different context)
 - **Interaction tools**: `ask` (request clarification from user), `learn` (persist new fact to agent home)
 - **Project tools**: `project_list` (enumerate projects from base dir)
-- **RAG tools**: `rag_add_documents` (audience=self→agent collection, audience=project→project collection), `rag_search` (vector search) — all optional if embed not configured; `rag_collection_list` and `rag_collection_delete` removed (agents don't manage collections directly)
+- **RAG tools**: `rag_add_documents` (audience=self→agent collection, audience=project→project collection), `rag_search` (vector search) — all optional if embed not configured; `rag_collection_create`, `rag_collection_list`, and `rag_collection_delete` not ported to Rust (TS-only; agents don't manage collections directly in the Rust model)
 - **Skills tools**: `skill_list` (discover skills by scope) + `skills_set` (apply/remove per-conversation)
 - **Todo tool**: `todo_write` (create/update task list)
 - **Conversation tools**: `conversation_get` (retrieve message transcript by ID from SQLite store), `conversation_list` (list conversations with date range filter)
@@ -170,6 +170,7 @@ All previously listed gaps have been closed. Remaining TS-only tools not yet por
 | `report_publish` | TS-only | Publish a formatted report event. Not yet ported. |
 | `agents_write` | TS-only | Create/update agent records. Not yet ported. |
 | `rag_subscription_*` | TS-only | RAG subscription management. No Rust equivalent. |
+| `rag_collection_create`, `rag_collection_delete`, `rag_collection_list` | TS-only | RAG collection management. Not ported; Rust agents use audience-scoped collections implicitly. |
 
 Note: `conversation_get`, `conversation_list`, `kill` (scheduled tasks only), `schedule_task`, and `change_model` are now implemented in Rust. The Rust `kill` only cancels scheduled tasks — agent/shell kills require TS in-process state (RALRegistry, CooldownRegistry, AgentDispatchService). The Rust `change_model` accepts any model spec (`provider:model`, named preset) rather than the TS restriction to meta-model variant names.
 
@@ -199,6 +200,9 @@ This is intentional per the design doc ("write now, consume later") — the infr
 - Conversation history persistence (10 convs, 20 history entries) ✅
 - Supervision (worker todo block) ✅
 - FK bug fixed: ensure_conversation() on store open
+
+Resolved between twentieth and twenty-first passes:
+- **TS-only table gap**: `rag_collection_create`, `rag_collection_delete`, and `rag_collection_list` exist in TS but were absent from the "not yet ported" table. Added. Line 74 wording corrected from "removed" to "not ported to Rust" — the TS files still exist.
 
 Resolved between nineteenth and twentieth passes:
 - **Bug fix — `ConsecutiveToolsWithoutTodo` re_engage was false**: The heuristic consumed a retry slot and marked `nudged_about_todos = true`, then returned `Accept` — a silent no-op. Fix: `re_engage: false → re_engage: true`. End-to-end verified: 6 shell calls without todos → nudge fires → agent receives and acknowledges.
