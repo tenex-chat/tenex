@@ -3,7 +3,10 @@ use rig::{completion::ToolDefinition, tool::Tool};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::sync::Arc;
-use tenex_protocol::{AskIntent, AskQuestion, Intent, PrincipalKind, PrincipalRef};
+use tenex_protocol::{
+    AskIntent, AskQuestion, DelegationIntent, DelegationRequest, Intent, PrincipalKind,
+    PrincipalRef,
+};
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct AskQuestionInput {
@@ -29,13 +32,21 @@ pub struct AskError(String);
 pub struct AskTool {
     state: Arc<EmitState>,
     owner_pubkey: String,
+    /// When `Some`, route asks through this agent pubkey (hex) instead of
+    /// sending them directly to the owner.
+    escalation_pubkey: Option<String>,
 }
 
 impl AskTool {
-    pub fn new(state: Arc<EmitState>, owner_pubkey: String) -> Self {
+    pub fn new(
+        state: Arc<EmitState>,
+        owner_pubkey: String,
+        escalation_pubkey: Option<String>,
+    ) -> Self {
         Self {
             state,
             owner_pubkey,
+            escalation_pubkey,
         }
     }
 }
@@ -96,6 +107,44 @@ impl Tool for AskTool {
     }
 
     async fn call(&self, args: AskArgs) -> Result<String, AskError> {
+        let ral = self.state.meta.lock().unwrap().ral;
+        let ctx = self.state.build_ctx(ral);
+
+        if let Some(ref esc_pubkey_hex) = self.escalation_pubkey {
+            let pubkey = nostr::PublicKey::from_hex(esc_pubkey_hex)
+                .map_err(|e| AskError(format!("invalid escalation agent pubkey: {e}")))?;
+
+            let recipient = PrincipalRef::Nostr {
+                pubkey,
+                kind: PrincipalKind::Agent,
+                display_name: None,
+            };
+
+            let prompt = build_escalation_prompt(&args);
+
+            let delegation_intent = DelegationIntent {
+                items: vec![DelegationRequest {
+                    recipient,
+                    recipient_label: "@escalation-agent".to_string(),
+                    request: prompt,
+                    branch: None,
+                    followup_of: None,
+                }],
+            };
+
+            self.state
+                .channel
+                .send(Intent::Delegation(delegation_intent), &ctx)
+                .await
+                .map_err(|e| AskError(format!("failed to route ask to escalation agent: {e}")))?;
+            self.state.mark_pending_external_work();
+
+            return Ok(format!(
+                "Question '{}' routed to escalation agent. Stop here — wait for their reply.",
+                args.title
+            ));
+        }
+
         let pubkey = nostr::PublicKey::from_hex(&self.owner_pubkey)
             .map_err(|e| AskError(format!("invalid owner pubkey: {e}")))?;
 
@@ -122,9 +171,6 @@ impl Tool for AskTool {
             })
             .collect();
 
-        let ral = self.state.meta.lock().unwrap().ral;
-        let ctx = self.state.build_ctx(ral);
-
         let intent = AskIntent {
             title: args.title.clone(),
             context: args.context,
@@ -144,4 +190,33 @@ impl Tool for AskTool {
             args.title
         ))
     }
+}
+
+/// Build the escalation prompt forwarded to the escalation agent.
+///
+/// The escalation agent receives the full context and questions and can either
+/// answer them directly or escalate further to the human owner via its own
+/// `ask` call.
+fn build_escalation_prompt(args: &AskArgs) -> String {
+    let mut prompt = format!(
+        "# Question Escalation Request\n\n## {}\n\n**Context:**\n{}\n\n**Questions:**\n",
+        args.title, args.context
+    );
+
+    for (i, q) in args.questions.iter().enumerate() {
+        prompt.push_str(&format!("\n{}. [{}] {}\n   {}\n", i + 1, q.question_type, q.title, q.prompt));
+        if !q.options.is_empty() {
+            prompt.push_str(&format!("   Options: {}\n", q.options.join(", ")));
+        }
+    }
+
+    prompt.push_str(
+        "\n## Your Task\n\
+        1. Answer directly if you can make the decision\n\
+        2. Use ask() to escalate to the actual human if you need their input\n\
+        \n\
+        When responding, provide your answers in a clear format that addresses each question.",
+    );
+
+    prompt
 }

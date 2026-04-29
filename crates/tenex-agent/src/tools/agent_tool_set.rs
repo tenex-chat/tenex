@@ -46,6 +46,7 @@ pub(crate) struct ToolSet {
     pub(crate) project_agents: Arc<Vec<tenex_project::Agent>>,
     pub(crate) teams: Arc<Vec<tenex_project::Team>>,
     pub(crate) owner_pubkey: String,
+    pub(crate) escalation_pubkey: Option<String>,
     pub(crate) base_dir: PathBuf,
     pub(crate) allows_delegation: bool,
     pub(crate) conv_db_path: PathBuf,
@@ -212,6 +213,7 @@ impl ToolSet {
             Box::new(AskTool::new(
                 self.emit_state.clone(),
                 self.owner_pubkey.clone(),
+                self.escalation_pubkey.clone(),
             )),
         );
 

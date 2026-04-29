@@ -4,6 +4,7 @@ mod cassette_client;
 mod cassette_request;
 mod config;
 mod emit;
+mod escalation;
 mod home;
 mod hook;
 mod injections;
@@ -794,12 +795,15 @@ async fn run() -> Result<()> {
     );
 
     let agent_slug = agent_config.identity_name().to_string();
+    let escalation_pubkey =
+        escalation::resolve_escalation_pubkey(&base_dir, &project_agents);
     let suppress_response = Arc::new(AtomicBool::new(false));
     let tool_set = ToolSet {
         emit_state: emit_state.clone(),
         project_agents: project_agents.clone(),
         teams: teams.clone(),
         owner_pubkey: owner_pubkey_hex.to_string(),
+        escalation_pubkey,
         base_dir: base_dir.clone(),
         allows_delegation,
         conv_db_path: conv_db_path.clone(),
