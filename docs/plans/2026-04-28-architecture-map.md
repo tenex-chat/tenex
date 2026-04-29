@@ -128,6 +128,7 @@ The bun runtime is gone. Every component is small, single-purpose, and reads/wri
 | `tenex-project` | Project state: agents, metadata, skills, allowlists, MCP, signer trait | Spec ✅, building 🔧 |
 | `tenex-context` | LLM-facing projection: history → `messages[]`, context management, cache anchoring | Spec ✅ |
 | `tenex-identity` | `pubkey → IdentityView` via kind:0 + cache | Spec ✅ |
+| `tenex-telemetry` | Shared Rust OpenTelemetry/OTLP bootstrap, trace propagation helpers, and `tracing` subscriber setup | ✅ shipped |
 | `tenex-runtime` (lib parts) | Shared lockfile, tracing, config helpers used by every binary | Implicit; lands during umbrella restructure |
 
 ### Daemons (long-lived)

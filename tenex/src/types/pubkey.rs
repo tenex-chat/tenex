@@ -82,7 +82,6 @@ impl Pubkey {
     pub fn as_hex(&self) -> &str {
         &self.0
     }
-
 }
 
 impl fmt::Display for Pubkey {

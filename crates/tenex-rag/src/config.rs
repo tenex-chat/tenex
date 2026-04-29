@@ -1,3 +1,5 @@
+use std::path::{Path, PathBuf};
+
 use serde::Deserialize;
 use tenex_llm_config::resolver::load_providers;
 
@@ -10,8 +12,8 @@ struct EmbedDoc {
 }
 
 impl EmbedDoc {
-    fn load() -> Option<Self> {
-        let path = dirs_next::home_dir()?.join(".tenex/embed.json");
+    fn load(base_dir: &Path) -> Option<Self> {
+        let path = base_dir.join("embed.json");
         let content = std::fs::read_to_string(path).ok()?;
         serde_json::from_str(&content).ok()
     }
@@ -27,9 +29,12 @@ pub struct EmbedConfig {
 
 impl EmbedConfig {
     pub fn load() -> Option<Self> {
-        let doc = EmbedDoc::load()?;
-        let base_dir = dirs_next::home_dir()?.join(".tenex");
-        let providers = load_providers(&base_dir).ok()?;
+        Self::load_from_base_dir(&default_base_dir())
+    }
+
+    pub fn load_from_base_dir(base_dir: &Path) -> Option<Self> {
+        let doc = EmbedDoc::load(base_dir)?;
+        let providers = load_providers(base_dir).ok()?;
 
         let entry = providers.providers.get(&doc.provider);
         let api_key = entry
@@ -45,5 +50,49 @@ impl EmbedConfig {
             api_key,
             base_url,
         })
+    }
+}
+
+fn default_base_dir() -> PathBuf {
+    if let Ok(base) = std::env::var("TENEX_BASE_DIR") {
+        if !base.is_empty() {
+            return PathBuf::from(base);
+        }
+    }
+    dirs_next::home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".tenex")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn load_from_base_dir_reads_embed_and_providers_under_that_root() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("embed.json"),
+            r#"{"provider":"openai","model":"text-embedding-3-small"}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("providers.json"),
+            r#"{
+              "providers": {
+                "openai": {
+                  "apiKey": "sk-test",
+                  "baseUrl": "https://example.test/v1"
+                }
+              }
+            }"#,
+        )
+        .unwrap();
+
+        let config = EmbedConfig::load_from_base_dir(dir.path()).unwrap();
+        assert_eq!(config.provider, "openai");
+        assert_eq!(config.model, "text-embedding-3-small");
+        assert_eq!(config.api_key.as_deref(), Some("sk-test"));
+        assert_eq!(config.base_url.as_deref(), Some("https://example.test/v1"));
     }
 }

@@ -10,7 +10,7 @@ use nostr::JsonUtil;
 use nostr_sdk::prelude::*;
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter};
-use tracing::{info, warn};
+use tracing::{info, info_span, warn, Instrument};
 
 use tenex_conversations::{ConversationStore, NewMessage, Project as ConversationsProject};
 use tenex_project::{models::ProjectAgent, Agent, Project};
@@ -195,14 +195,25 @@ pub async fn run(args: RuntimeArgs) -> Result<()> {
                                     .await;
                                 }
 
+                                let dispatch_span = info_span!(
+                                    "tenex.runtime.dispatch",
+                                    event.id = %event.id.to_hex(),
+                                    event.pubkey = %event.pubkey.to_hex(),
+                                    conversation.id = %conv_id,
+                                    project.id = %meta.d_tag,
+                                    agent.slug = %agent.slug,
+                                    agent.pubkey = %agent.pubkey,
+                                );
                                 if let Err(e) = run_agent(
                                     &client,
                                     &event,
                                     &agent_json,
                                     &meta.d_tag,
+                                    &base_dir,
                                     &agent_binary,
                                     &store,
                                 )
+                                .instrument(dispatch_span)
                                 .await
                                 {
                                     warn!(event_id = short, agent = %agent.slug, error = %e, "agent run failed");
@@ -288,6 +299,7 @@ async fn run_agent(
     event: &Event,
     agent_json: &Path,
     project_id: &str,
+    base_dir: &Path,
     agent_binary: &Path,
     store: &Mutex<ConversationStore>,
 ) -> Result<()> {
@@ -324,14 +336,18 @@ async fn run_agent(
         )?;
     }
 
-    let mut child = tokio::process::Command::new(agent_binary)
+    let mut command = tokio::process::Command::new(agent_binary);
+    command
         .arg(agent_json)
         .env("TENEX_PROJECT_ID", project_id)
+        .env("TENEX_BASE_DIR", base_dir)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::inherit())
-        .spawn()
-        .context("failed to spawn tenex-agent")?;
+        .stderr(Stdio::inherit());
+    if let Some(traceparent) = tenex_telemetry::current_traceparent() {
+        command.env("TRACEPARENT", traceparent);
+    }
+    let mut child = command.spawn().context("failed to spawn tenex-agent")?;
 
     // Write the triggering event JSON to stdin; closing stdin signals EOF to the agent.
     {
@@ -353,6 +369,9 @@ async fn run_agent(
         }
         match Event::from_json(&line) {
             Ok(ev) => {
+                if !should_persist_agent_message(&ev, &conv_id) {
+                    continue;
+                }
                 {
                     let s = store.lock().unwrap();
                     let agent_ts = ev.created_at.as_secs() as i64;
@@ -396,6 +415,36 @@ async fn run_agent(
     }
 
     Ok(())
+}
+
+fn should_persist_agent_message(event: &Event, conversation_id: &str) -> bool {
+    if event.kind != Kind::TextNote {
+        return false;
+    }
+
+    let mut has_conversation_ref = false;
+    let mut has_recipient = false;
+
+    for tag in event.tags.iter() {
+        let parts = tag.as_slice();
+        let head = parts.first().map(|s| s.as_str()).unwrap_or("");
+        match head {
+            "e" => {
+                let tagged_event = parts.get(1).map(|s| s.as_str());
+                let marker = parts.get(3).map(|s| s.as_str());
+                if tagged_event == Some(conversation_id)
+                    && matches!(marker, Some("root") | Some("reply") | None | Some(""))
+                {
+                    has_conversation_ref = true;
+                }
+            }
+            "p" => has_recipient = true,
+            "tool" | "status" | "intent" | "reasoning" | "error" => return false,
+            _ => {}
+        }
+    }
+
+    has_conversation_ref && !has_recipient
 }
 
 fn conversation_id_from_event(event: &Event) -> String {
@@ -524,4 +573,77 @@ fn process_alive(pid: i32) -> bool {
     // EPERM means the process exists but we lack permission to signal it.
     let errno = unsafe { *libc::__errno_location() };
     errno == libc::EPERM
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn signed_event(kind: Kind, content: &str, tags: Vec<Tag>) -> Event {
+        let keys = Keys::generate();
+        EventBuilder::new(kind, content)
+            .tags(tags)
+            .sign_with_keys(&keys)
+            .unwrap()
+    }
+
+    fn root_id() -> String {
+        signed_event(Kind::TextNote, "root", Vec::new()).id.to_hex()
+    }
+
+    fn tag(parts: &[&str]) -> Tag {
+        Tag::parse(parts.iter().copied()).unwrap()
+    }
+
+    #[test]
+    fn persists_plain_conversation_event_for_current_root() {
+        let root = root_id();
+        let event = signed_event(
+            Kind::TextNote,
+            "visible reply",
+            vec![tag(&["e", &root, "", "root"])],
+        );
+
+        assert!(should_persist_agent_message(&event, &root));
+    }
+
+    #[test]
+    fn rejects_stream_delta_events() {
+        let root = root_id();
+        let event = signed_event(
+            Kind::Custom(24135),
+            "partial",
+            vec![tag(&["e", &root, "", "root"])],
+        );
+
+        assert!(!should_persist_agent_message(&event, &root));
+    }
+
+    #[test]
+    fn rejects_tool_use_events() {
+        let root = root_id();
+        let event = signed_event(
+            Kind::TextNote,
+            "",
+            vec![tag(&["e", &root, "", "root"]), tag(&["tool", "shell"])],
+        );
+
+        assert!(!should_persist_agent_message(&event, &root));
+    }
+
+    #[test]
+    fn rejects_delegation_events() {
+        let root = root_id();
+        let recipient = Keys::generate().public_key().to_hex();
+        let event = signed_event(
+            Kind::TextNote,
+            "@worker do this",
+            vec![
+                tag(&["e", &root, "", "root"]),
+                tag(&["p", recipient.as_str()]),
+            ],
+        );
+
+        assert!(!should_persist_agent_message(&event, &root));
+    }
 }

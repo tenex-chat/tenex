@@ -17,6 +17,7 @@ use std::sync::{Arc, Mutex};
 use rig::completion::ToolDefinition;
 use rig::tool::{ToolDyn, ToolError};
 use rig::wasm_compat::WasmBoxedFuture;
+use tracing::{info_span, Instrument};
 
 /// One captured tool invocation for a single agent turn.
 #[derive(Debug, Clone)]
@@ -90,7 +91,11 @@ impl ToolDyn for RecordingTool {
                 .map(|d| d.as_millis() as i64)
                 .unwrap_or(0);
 
-            let result = self.inner.call(args).await;
+            let result = self
+                .inner
+                .call(args)
+                .instrument(info_span!("tenex.agent.tool_call", tool.name = %tool_name))
+                .await;
 
             let (result_json, is_error) = match &result {
                 Ok(s) => {

@@ -177,7 +177,7 @@ Note: `conversation_get`, `conversation_list`, `conversation_search`, `kill` (sc
 
 ## Compilation Status
 
-**As of 2026-04-29 (twenty-ninth debt check pass): workspace compiles clean — zero errors, 281 warnings (tenex-agent: 0). `cargo test --workspace`: 1351 tests passing across all crates.**
+**As of 2026-04-29 (twenty-ninth debt check pass): workspace compiles clean — zero errors, 281 warnings (tenex-agent: 0). `cargo test --workspace`: 1356 tests passing across all crates.**
 
 **MILESTONE: Tool call/result history is now fully wired.** `RecordingTool` wrappers capture every tool invocation (call_id, args, result) into a shared `Arc<ToolRecorder>`. After each turn, records are written to `tool_messages` and the assistant `TurnRecord` carries the `tool_calls` slice. `projection.rs` interleaves `ToolResult` messages immediately after their parent assistant row (sorted by timestamp, agent-pubkey-filtered). The `CtxMessage::ToolResult` filter in `main.rs` is removed — providers now receive correctly paired `tool_use`→`tool_result` sequences.
 
@@ -209,7 +209,7 @@ Resolved between twenty-seventh and twenty-eighth passes:
 - **`conversation_search` description corrected**: Tool uses RAG/vector search (same `RagStore` as `rag_search`), not SQLite keyword search — RUST.md and note section updated.
 - **RUST_REPORT.md session 11**: `conversation_search` e2e verified (keyword and full-text modes, 3 unit tests passing).
 - **Architecture drift**: Clean. Both daemon delegations intact. No new TS bypasses.
-- **Test count**: 1351 (stable — some counts from parallel session fluctuation).
+- **Test count**: 1356 (up from 1351 — 5 new tests from tenex-context projection and strategy additions).
 
 Resolved between twenty-sixth and twenty-seventh passes:
 - **`agents_write` tool ported**: Pure file I/O against `~/.tenex/agents/<pubkey>.json` — no SQLite, no TS AgentProvisioningService dependency. Preserves unknown JSON fields across updates (category, eventId, mcpServers not clobbered). 441-line implementation + wired into `tenex-agent/src/main.rs`.

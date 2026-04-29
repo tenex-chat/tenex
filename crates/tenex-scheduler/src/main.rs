@@ -10,7 +10,6 @@ mod storage;
 use anyhow::{Context, Result};
 use chrono::Utc;
 use clap::{Parser, Subcommand};
-use tracing_subscriber::EnvFilter;
 use uuid::Uuid;
 
 use lockfile::Lockfile;
@@ -101,10 +100,10 @@ enum Command {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    init_tracing();
+    let telemetry = tenex_telemetry::init("tenex-scheduler");
 
     let cli = Cli::parse();
-    match cli.command.unwrap_or(Command::Run) {
+    let result = match cli.command.unwrap_or(Command::Run) {
         Command::Run => run_daemon().await,
         Command::Status => status(),
         Command::List { project } => list_tasks(project),
@@ -127,7 +126,9 @@ async fn main() -> Result<()> {
             from,
         } => add_oneoff_task(at, prompt, target, project, title, channel, from),
         Command::Rm { task_id } => rm_task(task_id),
-    }
+    };
+    telemetry.shutdown();
+    result
 }
 
 async fn run_daemon() -> Result<()> {
@@ -194,27 +195,18 @@ fn add_cron_task(
     channel: Option<String>,
     from: Option<String>,
 ) -> Result<()> {
-    let id = Uuid::new_v4().to_string();
-    let now = Utc::now().to_rfc3339();
-    let project_ref = build_project_ref(&project);
-
-    let task = ScheduledTask {
-        id: id.clone(),
+    let task = build_task(TaskArgs {
         title,
         schedule,
         prompt,
-        last_run: None,
-        next_run: None,
-        created_at: Some(now),
-        from_pubkey: from,
-        target_agent_slug: target,
-        project_id: project.clone(),
-        project_ref,
-        task_type: Some(TaskType::Cron),
+        target,
+        project: project.clone(),
+        channel,
+        from,
+        task_type: TaskType::Cron,
         execute_at: None,
-        target_channel: channel,
-    };
-
+    });
+    let id = task.id.clone();
     storage::add_task(&project, task)?;
     println!("added cron task {id} to project {project}");
     Ok(())
@@ -229,30 +221,52 @@ fn add_oneoff_task(
     channel: Option<String>,
     from: Option<String>,
 ) -> Result<()> {
-    let id = Uuid::new_v4().to_string();
-    let now = Utc::now().to_rfc3339();
-    let project_ref = build_project_ref(&project);
-
-    let task = ScheduledTask {
-        id: id.clone(),
+    let task = build_task(TaskArgs {
         title,
         schedule: at.clone(),
         prompt,
-        last_run: None,
-        next_run: None,
-        created_at: Some(now),
-        from_pubkey: from,
-        target_agent_slug: target,
-        project_id: project.clone(),
-        project_ref,
-        task_type: Some(TaskType::Oneoff),
+        target,
+        project: project.clone(),
+        channel,
+        from,
+        task_type: TaskType::Oneoff,
         execute_at: Some(at),
-        target_channel: channel,
-    };
-
+    });
+    let id = task.id.clone();
     storage::add_task(&project, task)?;
     println!("added one-off task {id} to project {project}");
     Ok(())
+}
+
+struct TaskArgs {
+    title: Option<String>,
+    schedule: String,
+    prompt: String,
+    target: String,
+    project: String,
+    channel: Option<String>,
+    from: Option<String>,
+    task_type: TaskType,
+    execute_at: Option<String>,
+}
+
+fn build_task(args: TaskArgs) -> ScheduledTask {
+    ScheduledTask {
+        id: Uuid::new_v4().to_string(),
+        title: args.title,
+        schedule: args.schedule,
+        prompt: args.prompt,
+        last_run: None,
+        next_run: None,
+        created_at: Some(Utc::now().to_rfc3339()),
+        from_pubkey: args.from,
+        target_agent_slug: args.target,
+        project_id: args.project.clone(),
+        project_ref: build_project_ref(&args.project),
+        task_type: Some(args.task_type),
+        execute_at: args.execute_at,
+        target_channel: args.channel,
+    }
 }
 
 fn rm_task(task_id: String) -> Result<()> {
@@ -280,13 +294,4 @@ fn truncate(s: &str, max: usize) -> String {
     } else {
         format!("{}…", &s[..max - 1])
     }
-}
-
-fn init_tracing() {
-    let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new("info,nostr_sdk=warn,nostr_relay_pool=warn"));
-    tracing_subscriber::fmt()
-        .with_env_filter(filter)
-        .with_writer(std::io::stderr)
-        .init();
 }

@@ -1,0 +1,18 @@
+[package]
+name = "tenex-telemetry"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1"
+dirs-next = "2"
+opentelemetry = "0.31"
+opentelemetry-otlp = { version = "0.31", default-features = false, features = ["http-proto", "reqwest-blocking-client", "trace"] }
+opentelemetry_sdk = { version = "0.31", features = ["rt-tokio"] }
+serde_json = "1"
+tracing = "0.1"
+tracing-opentelemetry = "0.32"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dev-dependencies]
+tempfile = "3"

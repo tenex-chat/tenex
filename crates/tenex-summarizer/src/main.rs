@@ -1,6 +1,5 @@
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use tracing_subscriber::EnvFilter;
 
 mod categories;
 mod config;
@@ -35,22 +34,15 @@ enum Command {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    init_tracing();
+    let telemetry = tenex_telemetry::init("tenex-summarizer");
 
     let cli = Cli::parse();
-    match cli.command.unwrap_or(Command::Run) {
+    let result = match cli.command.unwrap_or(Command::Run) {
         Command::Run => run().await,
         Command::Status => status(),
-    }
-}
-
-fn init_tracing() {
-    let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new("info,nostr_sdk=warn,nostr_relay_pool=warn"));
-    tracing_subscriber::fmt()
-        .with_env_filter(filter)
-        .with_writer(std::io::stderr)
-        .init();
+    };
+    telemetry.shutdown();
+    result
 }
 
 async fn run() -> Result<()> {

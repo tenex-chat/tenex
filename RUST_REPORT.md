@@ -397,6 +397,48 @@ Test: `conv=0 tools=1` — tool fired, zero conversation events emitted.
 
 ---
 
+### Run 12 — 2026-04-29 RecordingTool + tool_messages persistence + ToolResult projection
+
+**RecordingTool / ToolRecorder infrastructure**
+
+Added `crates/tenex-agent/src/tools/recording.rs`. Every `ToolDyn` is wrapped by `RecordingTool::wrap_dyn(t, recorder.clone())` in `build_recorded_tools`. On each call, `RecordingTool`:
+- Mints a UUID `call_id`
+- Captures `tool_name`, `args`, `result`, `is_error`, `timestamp_ms` into a shared `Arc<ToolRecorder>`
+- After the turn loop, main.rs calls `recorder.take_records()` and persists each record to the `tool_messages` table via `store.record_tool_message()`
+
+**ToolResult projection in multi-turn history**
+
+`tenex-context/src/projection.rs` reads both `messages` and `tool_messages` tables. It pairs each `tool_messages` row with the assistant message whose timestamp is closest-before the next user message boundary, reconstructing `tool_calls` on `Message::Assistant { tool_calls }` and emitting a `Message::ToolResult` immediately after. The history filter was updated from filtering both System AND ToolResult to filtering only System — ToolResult messages are now included in subsequent turns.
+
+**End-to-end verification**
+
+Turn 1 (root_id `dd11223344...`): Used `todo_write` to create todo `verify-recording / "Verify tool recording works"`. Confirmed `conv=3 tools=3`. SQLite inspection confirmed 3 `tool_messages` rows with correct `tool_name`, `call_input`, `result_output`.
+
+Turn 2 (same root_id, `history: 8 messages`): Asked "what was the ID and title of the todo you created? Answer from history only." Result: `tools=0 conv=1`. Agent answered correctly:
+- ID: `verify-recording`
+- Title: Verify tool recording works
+
+This confirms the full pipeline: `RecordingTool` captures calls → `tool_messages` persisted → projection pairs with assistant message by timestamp → `ToolResult` injected into turn 2 history → agent recalls tool results without re-invoking tools.
+
+**conversation_search rewritten to RAG**
+
+Previous implementation used SQLite keyword/full-text search. Replaced with pure RAG against the `"conversations"` collection. Added `project_id: Option<String>` parameter:
+- Default (no param / current project): uses `self.store` (current project's embeddings DB), no `project_id` in results
+- `project_id = ALL`: enumerates `~/.tenex/projects/*/embeddings.db`, opens each with the same `EmbedConfig`, searches `"conversations"` in each, merges + sorts by score, truncates to limit, includes `project_id` field in each result
+
+`EmbedConfig` extracted from closure in main.rs and stored in `AgentToolsInput` so `ConversationSearchTool` can open other projects' stores for the ALL mode.
+
+| Test | Result |
+|---|---|
+| RecordingTool wraps all tools | ✅ `tool_messages` rows persisted after turn |
+| tool_messages paired with assistant turn | ✅ SQLite shows 3 rows with correct names/args |
+| ToolResult in turn 2 history (history: 8 messages) | ✅ Agent recalled todo ID+title without tools |
+| conversation_search RAG mode (single project) | ✅ Semantic search against "conversations" collection |
+| conversation_search ALL mode | ✅ Cross-project enumeration with project_id in results |
+| cargo test --workspace | ✅ 1356 passed, 0 failed |
+
+---
+
 ## Open Items
 
 *(None — all tools tested and passing)*

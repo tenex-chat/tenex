@@ -14,7 +14,6 @@ mod utils;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use tracing_subscriber::EnvFilter;
 
 #[derive(Parser)]
 #[command(name = "tenex", version, about = "TENEX Command Line Interface")]
@@ -55,10 +54,10 @@ enum Command {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    init_tracing();
-
     let cli = Cli::parse();
-    match cli.command {
+    let telemetry =
+        tenex_telemetry::init_with_base_dir("tenex-daemon", command_base_dir(&cli.command));
+    let result = match cli.command {
         Command::Config(args) => config_cmd::run(args).await,
         Command::Onboard(args) => onboard::run(args).await,
         Command::Doctor(args) => doctor::run(args).await,
@@ -67,13 +66,17 @@ async fn main() -> Result<()> {
         Command::Cron(args) => cron_cmd::run(args).await,
         Command::Daemon(args) => daemon::run(args).await,
         Command::Runtime(args) => runtime_cmd::run(args).await,
-    }
+    };
+    telemetry.shutdown();
+    result
 }
 
-fn init_tracing() {
-    let filter =
-        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info,nostr_sdk=warn"));
-    tracing_subscriber::fmt().with_env_filter(filter).init();
+fn command_base_dir(command: &Command) -> Option<&std::path::Path> {
+    match command {
+        Command::Daemon(args) => args.base_dir.as_deref(),
+        Command::Runtime(args) => args.base_dir.as_deref(),
+        _ => None,
+    }
 }
 
 #[cfg(test)]

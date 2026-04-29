@@ -44,6 +44,8 @@ use tools::{
     ScheduleTaskTool, SelfDelegateTool, ShellTool, SkillListTool, SkillsSetTool, TodoItem,
     TodoStatus, TodoWriteTool, ToolRecorder,
 };
+use tracing::{info_span, Instrument};
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 /// Convert a `tenex_context::Message` to `rig::completion::Message` for passing
 /// as history to `stream_chat`. System messages are excluded at the call site
@@ -426,6 +428,17 @@ fn save_context_state(
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    let telemetry = tenex_telemetry::init("tenex-agent");
+    let root_span = info_span!("tenex.agent.process");
+    if let Some(parent) = tenex_telemetry::parent_context_from_env() {
+        let _ = root_span.set_parent(parent);
+    }
+    let result = run().instrument(root_span).await;
+    telemetry.shutdown();
+    result
+}
+
+async fn run() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 2 {
         anyhow::bail!(
@@ -725,12 +738,11 @@ async fn main() -> Result<()> {
     let skills_set_tool = SkillsSetTool::new(skill_ctx.clone(), self_applied_skills.clone());
 
     // Initialize RAG store for the embedding tools.
-    let embed_config: Option<EmbedConfig> = EmbedConfig::load();
+    let embed_config: Option<EmbedConfig> = EmbedConfig::load_from_base_dir(&base_dir);
     let rag_store: Option<Arc<RagStore>> = embed_config.as_ref().and_then(|cfg| {
-        let rag_base = dirs_next::home_dir()?.join(".tenex");
-        let db_path = rag_base
+        let db_path = base_dir
             .join("projects")
-            .join(&project_id)
+            .join(&project_meta.d_tag)
             .join("embeddings.db");
         match RagStore::open(&db_path, cfg) {
             Ok(store) => Some(Arc::new(store)),
@@ -892,76 +904,90 @@ async fn main() -> Result<()> {
         let recorder = ToolRecorder::new();
         let tools = build_recorded_tools(&agent_tools_input, recorder.clone());
 
-        let final_response = match resolved.provider.as_str() {
-            "openrouter" => {
-                let key = resolved
-                    .api_key
-                    .clone()
-                    .context("No OpenRouter API key found. Set OPENROUTER_API_KEY or add it to ~/.tenex/providers.json")?;
-                let client = openrouter::Client::new(&key)?;
-                run_agent!(
-                    client,
-                    &resolved.model,
-                    &system_prompt,
-                    &current_message,
-                    current_history,
-                    hook.clone(),
-                    tools
-                )
-            }
-            "openai" => {
-                let key = resolved
-                    .api_key
-                    .clone()
-                    .context("No OpenAI API key found. Set OPENAI_API_KEY or add it to ~/.tenex/providers.json")?;
-                let client = openai::CompletionsClient::builder().api_key(&key).build()?;
-                run_agent!(
-                    client,
-                    &resolved.model,
-                    &system_prompt,
-                    &current_message,
-                    current_history,
-                    hook.clone(),
-                    tools
-                )
-            }
-            "ollama" => {
-                let mut builder = ollama::Client::builder().api_key(Nothing);
-                if let Some(url) = &resolved.base_url {
-                    builder = builder.base_url(url);
-                }
-                let client = builder.build()?;
-                run_agent!(
-                    client,
-                    &resolved.model,
-                    &system_prompt,
-                    &current_message,
-                    current_history,
-                    hook.clone(),
-                    tools
-                )
-            }
-            _ => {
-                // Default: anthropic
-                let key = resolved.api_key.clone().with_context(|| {
-                    format!(
-                        "No API key found for provider '{}'. Set {}_API_KEY or add it to ~/.tenex/providers.json",
-                        resolved.provider,
-                        resolved.provider.to_uppercase().replace('-', "_")
+        let turn_span = info_span!(
+            "tenex.agent.turn",
+            agent.slug = %agent_slug,
+            agent.pubkey = %pubkey_hex,
+            conversation.id = %conversation_id,
+            project.id = %project_id,
+            llm.provider = %resolved.provider,
+            llm.model = %resolved.model,
+            history.messages = initial_history.len(),
+        );
+        let final_response = async {
+            let response = match resolved.provider.as_str() {
+                "openrouter" => {
+                    let key = resolved
+                        .api_key
+                        .clone()
+                        .context("No OpenRouter API key found. Set OPENROUTER_API_KEY or add it to ~/.tenex/providers.json")?;
+                    let client = openrouter::Client::new(&key)?;
+                    run_agent!(
+                        client,
+                        &resolved.model,
+                        &system_prompt,
+                        &current_message,
+                        current_history,
+                        hook.clone(),
+                        tools
                     )
-                })?;
-                let client = anthropic::Client::new(&key)?;
-                run_agent!(
-                    client,
-                    &resolved.model,
-                    &system_prompt,
-                    &current_message,
-                    current_history,
-                    hook.clone(),
-                    tools
-                )
-            }
-        };
+                }
+                "openai" => {
+                    let key = resolved
+                        .api_key
+                        .clone()
+                        .context("No OpenAI API key found. Set OPENAI_API_KEY or add it to ~/.tenex/providers.json")?;
+                    let client = openai::CompletionsClient::builder().api_key(&key).build()?;
+                    run_agent!(
+                        client,
+                        &resolved.model,
+                        &system_prompt,
+                        &current_message,
+                        current_history,
+                        hook.clone(),
+                        tools
+                    )
+                }
+                "ollama" => {
+                    let mut builder = ollama::Client::builder().api_key(Nothing);
+                    if let Some(url) = &resolved.base_url {
+                        builder = builder.base_url(url);
+                    }
+                    let client = builder.build()?;
+                    run_agent!(
+                        client,
+                        &resolved.model,
+                        &system_prompt,
+                        &current_message,
+                        current_history,
+                        hook.clone(),
+                        tools
+                    )
+                }
+                _ => {
+                    let key = resolved.api_key.clone().with_context(|| {
+                        format!(
+                            "No API key found for provider '{}'. Set {}_API_KEY or add it to ~/.tenex/providers.json",
+                            resolved.provider,
+                            resolved.provider.to_uppercase().replace('-', "_")
+                        )
+                    })?;
+                    let client = anthropic::Client::new(&key)?;
+                    run_agent!(
+                        client,
+                        &resolved.model,
+                        &system_prompt,
+                        &current_message,
+                        current_history,
+                        hook.clone(),
+                        tools
+                    )
+                }
+            };
+            Ok::<_, anyhow::Error>(response)
+        }
+        .instrument(turn_span)
+        .await?;
 
         let recorded_calls = recorder.take_records();
 
