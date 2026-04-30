@@ -11,12 +11,22 @@
 //! they require — without that linkage Anthropic/OpenAI reject the
 //! request with a 400.
 
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use serde_json::Value;
 use tenex_conversations::{ConversationStore, MessageQuery, MessageRecord, ToolMessage};
 
 use crate::types::{Message, ToolCall};
+
+/// Resolve a Nostr pubkey to a human-readable display name.
+///
+/// Used by [`project_messages`] to prefix user messages with `[name]`
+/// when a conversation has user-role messages from more than one
+/// distinct author. Implementations are typically thin wrappers around
+/// the host's `tenex-identity` Unix socket.
+pub trait DisplayNameResolver: Send + Sync {
+    fn display_name(&self, pubkey: &str) -> Option<String>;
+}
 
 /// Build the initial message vector from storage. Index 0 is always the
 /// system prompt.
@@ -25,8 +35,20 @@ pub(crate) fn project_messages(
     conversation_id: &str,
     agent_pubkey: &str,
     system_prompt: &str,
+    name_resolver: Option<&dyn DisplayNameResolver>,
 ) -> anyhow::Result<Vec<Message>> {
     let history = store.list_messages(conversation_id, MessageQuery::default())?;
+    // Attribution: when more than one distinct pubkey has authored a
+    // user-role message in this conversation, prefix each user message
+    // with `[name]` so the agent can disambiguate authors. Single-author
+    // conversations stay un-prefixed to keep simple cases clean.
+    let user_author_set: HashSet<&str> = history
+        .iter()
+        .filter(|r| r.role.as_deref() == Some("user"))
+        .map(|r| r.author_pubkey.as_str())
+        .collect();
+    let attribute_users = user_author_set.len() > 1 && name_resolver.is_some();
+    let mut name_cache: HashMap<String, String> = HashMap::new();
     // Only include tool messages owned by *this* agent. Conversations
     // can host multiple agents; splicing another agent's tool calls
     // into this projection would emit unmatched `tool_use` blocks.
@@ -64,9 +86,22 @@ pub(crate) fn project_messages(
             "system" => out.push(Message::System {
                 content: record.content.clone(),
             }),
-            "user" => out.push(Message::User {
-                content: record.content.clone(),
-            }),
+            "user" => {
+                let content = if attribute_users {
+                    let name = name_cache
+                        .entry(record.author_pubkey.clone())
+                        .or_insert_with(|| {
+                            name_resolver
+                                .and_then(|r| r.display_name(&record.author_pubkey))
+                                .unwrap_or_else(|| short_pubkey(&record.author_pubkey))
+                        })
+                        .clone();
+                    format!("[{name}] {}", record.content)
+                } else {
+                    record.content.clone()
+                };
+                out.push(Message::User { content });
+            }
             "assistant" => {
                 // Pair every tool call/result whose timestamp falls
                 // before the next user message with this assistant
@@ -245,6 +280,10 @@ fn next_record_timestamp_ms(history: &[MessageRecord], idx: usize) -> i64 {
 
 fn timestamp_ms(timestamp: Option<i64>) -> Option<i64> {
     timestamp.map(timestamp_value_ms)
+}
+
+fn short_pubkey(pubkey: &str) -> String {
+    pubkey.chars().take(8).collect()
 }
 
 fn timestamp_value_ms(timestamp: i64) -> i64 {

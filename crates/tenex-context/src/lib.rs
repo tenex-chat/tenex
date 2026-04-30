@@ -21,6 +21,7 @@ mod tokens;
 mod turn;
 pub mod types;
 
+pub use projection::DisplayNameResolver;
 pub use strategies::{
     default_stack, CompactionSummarizer, CompactionToolStrategy, ProjectionContext,
     RemindersStrategy, Strategy, ToolResultDecayStrategy,
@@ -50,6 +51,7 @@ pub async fn project(
     model_profile: &ModelProfile,
     tool_defs: &[ToolDef],
     summarizer: Option<std::sync::Arc<dyn CompactionSummarizer>>,
+    name_resolver: Option<&dyn DisplayNameResolver>,
 ) -> anyhow::Result<Projection> {
     tracing::trace!(
         conversation_id,
@@ -59,8 +61,13 @@ pub async fn project(
         "projecting conversation"
     );
 
-    let messages =
-        projection::project_messages(store, conversation_id, agent_pubkey, system_prompt)?;
+    let messages = projection::project_messages(
+        store,
+        conversation_id,
+        agent_pubkey,
+        system_prompt,
+        name_resolver,
+    )?;
     let telemetry = ProjectionTelemetry::default();
     let agent_todos = store
         .get_agent_context_state(conversation_id, agent_pubkey)

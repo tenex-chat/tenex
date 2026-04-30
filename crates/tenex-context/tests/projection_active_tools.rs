@@ -84,6 +84,7 @@ async fn active_tool_projects_as_pending_tool_pair_before_later_user_message() {
         &cacheable_profile(),
         &[],
         None,
+        None,
     )
     .await
     .expect("project");

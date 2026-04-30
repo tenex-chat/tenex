@@ -3,8 +3,8 @@
 
 use serde_json::json;
 use tenex_context::{
-    project, record_turn, BreakpointKind, CacheObservation, Message, ModelProfile, ToolDef,
-    TurnRecord,
+    project, record_turn, BreakpointKind, CacheObservation, DisplayNameResolver, Message,
+    ModelProfile, ToolDef, TurnRecord,
 };
 use tenex_conversations::{ConversationStore, NewMessage, NewToolMessage};
 
@@ -114,6 +114,7 @@ async fn basic_projection_emits_system_prompt_and_anchor() {
         &profile,
         &[],
         None,
+        None,
     )
     .await
     .expect("project");
@@ -182,6 +183,7 @@ async fn no_decay_tagging_preserves_load_skill_and_delegate_results() {
         &profile,
         &tool_defs,
         None,
+        None,
     )
     .await
     .expect("project");
@@ -246,6 +248,7 @@ async fn unknown_tool_results_are_decay_eligible() {
         "system",
         &profile,
         &[],
+        None,
         None,
     )
     .await
@@ -339,6 +342,7 @@ async fn no_prompt_cache_emits_no_message_stream_breakpoint() {
         &profile,
         &[],
         None,
+        None,
     )
     .await
     .expect("project");
@@ -358,4 +362,186 @@ async fn no_prompt_cache_emits_no_message_stream_breakpoint() {
         .iter()
         .any(|b| b.kind == BreakpointKind::SystemAnchor);
     assert!(has_system_anchor, "SystemAnchor still emitted");
+}
+
+// ── Author attribution ────────────────────────────────────────────────────────
+
+struct TestNameResolver(std::collections::HashMap<String, String>);
+
+impl DisplayNameResolver for TestNameResolver {
+    fn display_name(&self, pubkey: &str) -> Option<String> {
+        self.0.get(pubkey).cloned()
+    }
+}
+
+fn append_user_from(store: &ConversationStore, record_id: &str, author: &str, content: &str) {
+    let msg = NewMessage {
+        record_id: record_id.into(),
+        nostr_event_id: None,
+        author_pubkey: author.into(),
+        sender_pubkey: None,
+        ral: None,
+        message_type: "message".into(),
+        role: Some("user".into()),
+        content: content.into(),
+        timestamp: None,
+        targeted_pubkeys: None,
+        sender_principal: None,
+        targeted_principals: None,
+        tool_data: None,
+        delegation_marker: None,
+        human_readable: None,
+        transcript_tool_attributes: None,
+    };
+    store.append_message(CONVO_ID, &msg).expect("append");
+}
+
+#[tokio::test]
+async fn single_author_user_messages_are_not_prefixed() {
+    let store = open_store();
+    append_user(&store, "rec-1", "first");
+    append_user(&store, "rec-2", "second");
+
+    let resolver = TestNameResolver(
+        [(USER_PUBKEY.to_string(), "alice".to_string())]
+            .into_iter()
+            .collect(),
+    );
+
+    let projection = project(
+        &store,
+        CONVO_ID,
+        AGENT_PUBKEY,
+        "system",
+        &cacheable_profile(),
+        &[],
+        None,
+        Some(&resolver),
+    )
+    .await
+    .expect("project");
+
+    let users: Vec<&str> = projection
+        .messages
+        .iter()
+        .filter_map(|m| match m {
+            Message::User { content } => Some(content.as_str()),
+            _ => None,
+        })
+        .collect();
+
+    assert_eq!(users, vec!["first", "second"]);
+}
+
+#[tokio::test]
+async fn multi_author_user_messages_get_name_prefix() {
+    let store = open_store();
+    let alice = "alice-pubkey-aaaaaa";
+    let bob = "bob-pubkey-bbbbbb";
+    append_user_from(&store, "rec-1", alice, "hi from alice");
+    append_user_from(&store, "rec-2", bob, "and from bob");
+
+    let resolver = TestNameResolver(
+        [
+            (alice.to_string(), "alice".to_string()),
+            (bob.to_string(), "bob".to_string()),
+        ]
+        .into_iter()
+        .collect(),
+    );
+
+    let projection = project(
+        &store,
+        CONVO_ID,
+        AGENT_PUBKEY,
+        "system",
+        &cacheable_profile(),
+        &[],
+        None,
+        Some(&resolver),
+    )
+    .await
+    .expect("project");
+
+    let users: Vec<&str> = projection
+        .messages
+        .iter()
+        .filter_map(|m| match m {
+            Message::User { content } => Some(content.as_str()),
+            _ => None,
+        })
+        .collect();
+
+    assert_eq!(users, vec!["[alice] hi from alice", "[bob] and from bob"]);
+}
+
+#[tokio::test]
+async fn multi_author_falls_back_to_short_pubkey_when_resolver_misses() {
+    let store = open_store();
+    let alice = "alice-pubkey-aaaaaa";
+    let unknown = "unknown-pubkey-cccccc";
+    append_user_from(&store, "rec-1", alice, "known");
+    append_user_from(&store, "rec-2", unknown, "unknown");
+
+    let resolver = TestNameResolver(
+        [(alice.to_string(), "alice".to_string())]
+            .into_iter()
+            .collect(),
+    );
+
+    let projection = project(
+        &store,
+        CONVO_ID,
+        AGENT_PUBKEY,
+        "system",
+        &cacheable_profile(),
+        &[],
+        None,
+        Some(&resolver),
+    )
+    .await
+    .expect("project");
+
+    let users: Vec<&str> = projection
+        .messages
+        .iter()
+        .filter_map(|m| match m {
+            Message::User { content } => Some(content.as_str()),
+            _ => None,
+        })
+        .collect();
+
+    // First 8 chars of the unknown pubkey form the fallback.
+    assert_eq!(users, vec!["[alice] known", "[unknown-] unknown"]);
+}
+
+#[tokio::test]
+async fn multi_author_without_resolver_does_not_prefix() {
+    let store = open_store();
+    append_user_from(&store, "rec-1", "alice-pubkey", "one");
+    append_user_from(&store, "rec-2", "bob-pubkey", "two");
+
+    let projection = project(
+        &store,
+        CONVO_ID,
+        AGENT_PUBKEY,
+        "system",
+        &cacheable_profile(),
+        &[],
+        None,
+        None,
+    )
+    .await
+    .expect("project");
+
+    let users: Vec<&str> = projection
+        .messages
+        .iter()
+        .filter_map(|m| match m {
+            Message::User { content } => Some(content.as_str()),
+            _ => None,
+        })
+        .collect();
+
+    assert_eq!(users, vec!["one", "two"]);
 }
