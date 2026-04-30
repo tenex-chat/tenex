@@ -22,7 +22,7 @@ doctor                      Diagnose and repair TENEX state
 │   ├── refetch             Refetch and update all agent definitions from Nostr
 │   ├── orphans [--purge]   List agents not assigned to any project
 │   └── categorize [--dry-run]
-│                           Auto-categorize agents that lack an explicit or inferred category
+│                           Auto-categorize agents that lack a category
 ├── migrate                 Apply pending TENEX state migrations
 └── conversations           Conversation indexing diagnostics and repair
     ├── status              Check conversation indexing status

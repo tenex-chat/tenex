@@ -4,7 +4,7 @@
 The agent auto-categorization path is implemented in `src/agents/categorizeAgent.ts` and `src/agents/backfillAgentCategories.ts`.
 
 - `categorizeAgent()` builds a classification prompt, selects the categorization LLM config, and parses the model output into one of six supported agent categories.
-- `backfillAgentCategories()` scans canonical active agents, finds agents that have neither `category` nor `inferredCategory`, infers a category, and persists it through `AgentStorage.updateInferredCategory()`.
+- `backfillAgentCategories()` scans canonical active agents, finds agents that lack `category`, infers a category, and persists it through `AgentStorage.updateCategory()`.
 - Operator entrypoint: `doctor agents categorize` in `src/commands/doctor.ts`.
 - Related runtime trigger: `AgentDefinitionMonitor` also calls the same categorizer when a newly synced agent still lacks a category.
 
@@ -12,8 +12,7 @@ The agent auto-categorization path is implemented in `src/agents/categorizeAgent
 I created an isolated temporary agent store and seeded it with five agents:
 
 - 3 uncategorized agents
-- 1 agent with an explicit category
-- 1 agent with a preexisting inferred category
+- 2 agents with a preexisting category
 
 The categorizer was mocked to return deterministic outcomes:
 
@@ -25,13 +24,13 @@ I also forced one persistence failure on the `Review Bot` update path so the bac
 
 ## Initial State
 
-| Agent | category | inferredCategory | Expected treatment |
-| --- | --- | --- | --- |
-| Build Bot | unset | unset | categorize and persist |
-| Review Bot | unset | unset | categorize, then fail to persist |
-| Broken Bot | unset | unset | fail categorization |
-| Legacy Bot | `generalist` | unset | skip |
-| Inferred Bot | unset | `domain-expert` | skip |
+| Agent | category | Expected treatment |
+| --- | --- | --- |
+| Build Bot | unset | categorize and persist |
+| Review Bot | unset | categorize, then fail to persist |
+| Broken Bot | unset | fail categorization |
+| Legacy Bot | `generalist` | skip |
+| Expert Bot | `domain-expert` | skip |
 
 ## Actions Taken
 
@@ -42,8 +41,8 @@ I also forced one persistence failure on the `Review Bot` update path so the bac
 
 Captured runtime side effects during the run:
 
-- `Build Bot` persisted successfully with `inferredCategory: worker`
-- `Review Bot` inferred `reviewer` but failed persistence
+- `Build Bot` persisted successfully with `category: worker`
+- `Review Bot` was classified as `reviewer` but failed persistence
 - `Broken Bot` produced no category and was counted as a failure
 
 ## Results
@@ -55,23 +54,22 @@ Captured runtime side effects during the run:
 
 Observed storage state after the run:
 
-- `Build Bot` -> `inferredCategory: worker`
+- `Build Bot` -> `category: worker`
 - `Review Bot` -> still unset because persistence was forced to fail
-- `Legacy Bot` -> explicit `category: generalist` remained unchanged
-- `Inferred Bot` -> preexisting `inferredCategory: domain-expert` remained unchanged
+- `Legacy Bot` -> `category: generalist` remained unchanged
+- `Expert Bot` -> `category: domain-expert` remained unchanged
 - `Broken Bot` -> remained uncategorized
 
 ## Validation Checks
 
 - [x] Agent categories are properly assigned
-  - `Build Bot` was persisted with `inferredCategory: worker`.
+  - `Build Bot` was persisted with `category: worker`.
   - The assigned category is valid according to `VALID_CATEGORIES`.
 - [x] Category types match expected patterns
   - The assigned values were `worker` and `reviewer`, both valid category values.
   - `resolveCategory()` and `isValidCategory()` both accepted the persisted category.
 - [x] Service handles edge cases
   - Already categorized agent was skipped.
-  - Already inferred agent was skipped.
   - Unparsable categorization output was counted as a failure.
 - [x] Error handling works correctly
   - Persistence failure for `Review Bot` was counted as a failure without aborting the batch.
