@@ -132,7 +132,7 @@ export function parseNostrUser(input: string): { pubkey: string } | null {
 
 **Notes:** Tools stay stateless even when they are runtime-gated. Context-injected capabilities such as `send_message` belong in `src/tools/registry.ts` and must delegate transport work to services like `src/services/telegram/TelegramDeliveryService`. Within the conversation domain, canonical transcripts remain JSON in `ConversationStore`, while metadata-style reads belong on the per-project SQLite catalog in `ConversationCatalogService`. Prompt and tool code should query that catalog or `ConversationRegistry` compatibility APIs instead of reparsing transcript files.
 
-Teams are a local-only service concern. `src/services/teams/` loads JSON definitions from disk, normalizes membership, resolves team names to lead agents for delegation, and feeds prompt-facing team summaries into the prompt layer. Team scope itself is carried across Nostr via `["team", "..."]` tags, not via team objects in relay state.
+Teams are a local-only project concern. `crates/tenex-project/src/teams.rs` loads JSON definitions from disk (global `{base_dir}/teams.json` merged with per-project `{base_dir}/projects/{d_tag}/teams.json`, project entries overriding), normalizes membership so the team lead is always present, exposes `teams_for_agent` for delegation lookups, and renders the `<teams-context>` prompt fragment. Team scope itself is carried across Nostr via `["team", "..."]` tags, not via team objects in relay state.
 
 **Dependencies:** Everything below (layers 0-2)
 
@@ -170,7 +170,6 @@ services/
 │   ├── ExecutionTimingTracker.ts
 │   ├── types.ts
 │   └── index.ts
-├── teams/                # Local team definitions, prompt context, and delegate resolution
 ├── rag/                  # RAG domain
 │   ├── RAGService.ts
 │   ├── RAGDatabaseService.ts
@@ -211,12 +210,13 @@ When adding a new conversation-facing feature, decide explicitly which layer it 
 
 ### Teams
 
-Teams are local JSON-defined memberships that never become standalone Nostr entities. The runtime resolves them from disk through `src/services/teams/TeamService.ts`, which normalizes the team lead into membership, caches by file state, and resolves team names to lead pubkeys for delegation.
+Teams are local JSON-defined memberships that never become standalone Nostr entities. The runtime resolves them through `crates/tenex-project/src/teams.rs`:
 
+- `load_teams(base_dir, project_id)` reads the global `{base_dir}/teams.json` and merges in `{base_dir}/projects/{d_tag}/teams.json`, with project-specific entries overriding global ones of the same name. The team lead is always normalized into the members list.
+- `teams_for_agent(teams, agent_slug)` returns the teams an agent belongs to, used to drive delegation lookups.
+- `render_teams_context(member_teams, active_team)` produces the `<teams-context>` system-prompt fragment used by the prompt layer.
 - Team definitions stay local on disk and are not published as Nostr events.
 - Delegation events carry team scope through the `["team", "..."]` tag.
-- Prompt rendering uses the teams-aware project context plus the lightweight `src/prompts/fragments/teams-context` summary fragment.
-- Team names are resolved case-insensitively, with agent slugs still taking priority when a recipient string matches both.
 
 ---
 
@@ -497,4 +497,3 @@ When in doubt, **ask in PR review** or **check this document**.
 ## See Also
 - [CONTRIBUTING.md](./CONTRIBUTING.md) - Development workflow
 - [MODULE_INVENTORY.md](../MODULE_INVENTORY.md) - Current module list
-- [TESTING_STATUS.md](./TESTING_STATUS.md) - Testing guidelines
