@@ -239,9 +239,17 @@ async fn unknown_tool_results_are_decay_eligible() {
     }
 
     // Empty tool_defs: the tool is unknown.
-    let projection = project(&store, CONVO_ID, AGENT_PUBKEY, "system", &profile, &[], None)
-        .await
-        .expect("p");
+    let projection = project(
+        &store,
+        CONVO_ID,
+        AGENT_PUBKEY,
+        "system",
+        &profile,
+        &[],
+        None,
+    )
+    .await
+    .expect("p");
 
     let decayed = projection
         .messages
@@ -323,10 +331,17 @@ async fn no_prompt_cache_emits_no_message_stream_breakpoint() {
     append_user(&store, "rec-3", "third");
 
     let profile = no_cache_profile();
-    let projection =
-        project(&store, CONVO_ID, AGENT_PUBKEY, "system", &profile, &[], None)
-            .await
-            .expect("project");
+    let projection = project(
+        &store,
+        CONVO_ID,
+        AGENT_PUBKEY,
+        "system",
+        &profile,
+        &[],
+        None,
+    )
+    .await
+    .expect("project");
 
     assert!(projection.messages.len() > 1, "stream is non-trivial");
     let stream_anchors = projection

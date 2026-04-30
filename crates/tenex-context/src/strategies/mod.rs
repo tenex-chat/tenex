@@ -64,9 +64,7 @@ pub trait Strategy: Send + Sync {
 /// `summarizer` is used by the compaction strategy to produce semantic
 /// summaries. If `None`, compaction falls back to a deterministic
 /// placeholder.
-pub fn default_stack(
-    summarizer: Option<Arc<dyn CompactionSummarizer>>,
-) -> Vec<Box<dyn Strategy>> {
+pub fn default_stack(summarizer: Option<Arc<dyn CompactionSummarizer>>) -> Vec<Box<dyn Strategy>> {
     vec![
         Box::new(CompactionToolStrategy::new(summarizer)),
         Box::new(ToolResultDecayStrategy),

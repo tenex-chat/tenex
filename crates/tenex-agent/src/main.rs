@@ -47,7 +47,9 @@ use tenex_context::{
     BreakpointHint, BreakpointKind, CacheObservation, Message as CtxMessage, ModelProfile,
     ToolCall as CtxToolCall, ToolDef, TurnRecord,
 };
-use tenex_conversations::{AgentContextState, ConversationListFilter, ConversationStore, NewToolMessage};
+use tenex_conversations::{
+    AgentContextState, ConversationListFilter, ConversationStore, NewToolMessage,
+};
 use tenex_project::Project;
 use tenex_protocol::{
     nostr::{read_one_from_stdin, NostrChannel},
@@ -586,12 +588,13 @@ async fn run() -> Result<()> {
         };
 
     // Extract delegation parent conversation ID, if this agent was delegated to.
-    let delegation_parent_id: Option<String> =
-        envelope.metadata.delegation_parent_conversation.as_ref().map(
-            |conv_ref| match conv_ref {
-                ConversationRef::Nostr { root_event_id } => root_event_id.to_hex(),
-            },
-        );
+    let delegation_parent_id: Option<String> = envelope
+        .metadata
+        .delegation_parent_conversation
+        .as_ref()
+        .map(|conv_ref| match conv_ref {
+            ConversationRef::Nostr { root_event_id } => root_event_id.to_hex(),
+        });
 
     // Build conversation reminders overlay from the conversation store.
     let conversation_reminders: Option<tenex_system_prompt::ConversationRemindersForPrompt> =
@@ -605,7 +608,9 @@ async fn run() -> Result<()> {
             Ok(tasks) => tasks
                 .into_iter()
                 .map(|t| {
-                    let description = t.title.unwrap_or_else(|| t.prompt.chars().take(80).collect());
+                    let description = t
+                        .title
+                        .unwrap_or_else(|| t.prompt.chars().take(80).collect());
                     let next_run_ms = t.next_run.as_deref().and_then(|s| {
                         chrono::DateTime::parse_from_rfc3339(s)
                             .ok()
@@ -616,7 +621,10 @@ async fn run() -> Result<()> {
                         cron_expr: t.schedule,
                         description,
                         next_run_ms,
-                        is_oneoff: t.task_type.map(|ty| ty == tenex_scheduler::model::TaskType::Oneoff).unwrap_or(false),
+                        is_oneoff: t
+                            .task_type
+                            .map(|ty| ty == tenex_scheduler::model::TaskType::Oneoff)
+                            .unwrap_or(false),
                     }
                 })
                 .collect(),
@@ -808,10 +816,9 @@ async fn run() -> Result<()> {
             max_context_tokens: 200_000,
         };
         let tool_defs: Vec<ToolDef> = Vec::new();
-        let summarizer: Option<Arc<dyn tenex_context::CompactionSummarizer>> =
-            Some(Arc::new(compaction::LlmCompactionSummarizer::new(
-                Arc::new(resolved.clone()),
-            )));
+        let summarizer: Option<Arc<dyn tenex_context::CompactionSummarizer>> = Some(Arc::new(
+            compaction::LlmCompactionSummarizer::new(Arc::new(resolved.clone())),
+        ));
         match tenex_context::project(
             store,
             &conversation_id,

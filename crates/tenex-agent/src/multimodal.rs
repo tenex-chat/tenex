@@ -1,5 +1,7 @@
 use base64::Engine as _;
-use rig::completion::message::{DocumentSourceKind, Image, ImageMediaType, MimeType as _, UserContent};
+use rig::completion::message::{
+    DocumentSourceKind, Image, ImageMediaType, MimeType as _, UserContent,
+};
 use std::time::Duration;
 
 const MAX_IMAGE_BYTES: usize = 10 * 1024 * 1024;
@@ -109,9 +111,7 @@ async fn fetch_image(
     // Reject by Content-Length before downloading the body.
     if let Some(len) = response.content_length() {
         if len as usize > MAX_IMAGE_BYTES {
-            eprintln!(
-                "[tenex-agent] multimodal: image too large ({len} bytes) -- skipping {url}"
-            );
+            eprintln!("[tenex-agent] multimodal: image too large ({len} bytes) -- skipping {url}");
             return Ok(None);
         }
     }
@@ -128,7 +128,9 @@ async fn fetch_image(
         .or_else(|| infer_mime_from_url(url));
 
     let Some(media_type) = media_type else {
-        eprintln!("[tenex-agent] multimodal: unsupported or unknown media type for {url} -- skipping");
+        eprintln!(
+            "[tenex-agent] multimodal: unsupported or unknown media type for {url} -- skipping"
+        );
         return Ok(None);
     };
 

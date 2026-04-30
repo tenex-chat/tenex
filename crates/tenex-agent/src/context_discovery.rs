@@ -1,10 +1,11 @@
 use crate::config::ResolvedModel;
 use rig::providers::{anthropic, ollama, openai, openrouter};
 use rig::{client::CompletionClient, completion::Prompt};
+use std::cmp::Reverse;
 use std::collections::HashMap;
 use std::time::Duration;
-use tenex_rag::{RagStore, SearchResult};
 use tenex_rag::store::VectorStore;
+use tenex_rag::{RagStore, SearchResult};
 
 const SCORE_THRESHOLD: f32 = 0.65;
 const MAX_RESULTS: usize = 5;
@@ -57,7 +58,11 @@ pub async fn discover_context<S: VectorStore>(
         .into_values()
         .filter(|r| r.score >= SCORE_THRESHOLD)
         .collect();
-    filtered.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+    filtered.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
 
     // Step 4: Rerank with LLM if more than 3 results, then take top 5.
     if filtered.len() > 3 {
@@ -135,7 +140,7 @@ async fn rerank_results(
                     .enumerate()
                     .map(|(i, r)| (i, r, scores[i]))
                     .collect();
-                indexed.sort_by(|a, b| b.2.cmp(&a.2));
+                indexed.sort_by_key(|(_, _, score)| Reverse(*score));
                 indexed.into_iter().map(|(_, r, _)| r).collect()
             } else {
                 results
@@ -155,20 +160,24 @@ async fn rerank_results(
 /// Parse a JSON array of strings, stripping markdown fences if present.
 fn parse_query_array(text: &str) -> Option<Vec<String>> {
     let cleaned = strip_json_fences(text);
-    let value: serde_json::Value = serde_json::from_str(&cleaned).ok()?;
+    let value: serde_json::Value = serde_json::from_str(cleaned).ok()?;
     let arr = value.as_array()?;
     let queries: Vec<String> = arr
         .iter()
         .filter_map(|v| v.as_str().map(|s| s.trim().to_string()))
         .filter(|s| !s.is_empty())
         .collect();
-    if queries.is_empty() { None } else { Some(queries) }
+    if queries.is_empty() {
+        None
+    } else {
+        Some(queries)
+    }
 }
 
 /// Parse a JSON array of integers, returning None if count doesn't match expected.
 fn parse_score_array(text: &str, expected_len: usize) -> Option<Vec<u32>> {
     let cleaned = strip_json_fences(text);
-    let value: serde_json::Value = serde_json::from_str(&cleaned).ok()?;
+    let value: serde_json::Value = serde_json::from_str(cleaned).ok()?;
     let arr = value.as_array()?;
     if arr.len() != expected_len {
         return None;
@@ -206,7 +215,10 @@ async fn call_llm(resolved: &ResolvedModel, system: &str, user: String) -> anyho
                 .agent(&resolved.model)
                 .preamble(system)
                 .build();
-            agent.prompt(user).await.map_err(|e| anyhow::anyhow!("{e:?}"))?
+            agent
+                .prompt(user)
+                .await
+                .map_err(|e| anyhow::anyhow!("{e:?}"))?
         }
         "openai" => {
             let key = resolved
@@ -219,15 +231,25 @@ async fn call_llm(resolved: &ResolvedModel, system: &str, user: String) -> anyho
                 .agent(&resolved.model)
                 .preamble(system)
                 .build();
-            agent.prompt(user).await.map_err(|e| anyhow::anyhow!("{e:?}"))?
+            agent
+                .prompt(user)
+                .await
+                .map_err(|e| anyhow::anyhow!("{e:?}"))?
         }
         "ollama" => {
             let mut builder = ollama::Client::builder().api_key(Nothing);
             if let Some(url) = resolved.base_url.as_deref() {
                 builder = builder.base_url(url);
             }
-            let agent = builder.build()?.agent(&resolved.model).preamble(system).build();
-            agent.prompt(user).await.map_err(|e| anyhow::anyhow!("{e:?}"))?
+            let agent = builder
+                .build()?
+                .agent(&resolved.model)
+                .preamble(system)
+                .build();
+            agent
+                .prompt(user)
+                .await
+                .map_err(|e| anyhow::anyhow!("{e:?}"))?
         }
         _ => {
             let key = resolved
@@ -238,7 +260,10 @@ async fn call_llm(resolved: &ResolvedModel, system: &str, user: String) -> anyho
                 .agent(&resolved.model)
                 .preamble(system)
                 .build();
-            agent.prompt(user).await.map_err(|e| anyhow::anyhow!("{e:?}"))?
+            agent
+                .prompt(user)
+                .await
+                .map_err(|e| anyhow::anyhow!("{e:?}"))?
         }
     };
 

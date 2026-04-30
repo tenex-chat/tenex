@@ -97,27 +97,53 @@ pub fn humanize_cron(expr: &str) -> String {
     }
     // Daily at HH:MM
     if dom == "*" && month == "*" && dow == "*" {
-        let hh = hour.parse::<u8>().map(|h| format!("{h:02}")).unwrap_or_else(|_| hour.to_string());
-        let mm = minute.parse::<u8>().map(|m| format!("{m:02}")).unwrap_or_else(|_| minute.to_string());
+        let hh = hour
+            .parse::<u8>()
+            .map(|h| format!("{h:02}"))
+            .unwrap_or_else(|_| hour.to_string());
+        let mm = minute
+            .parse::<u8>()
+            .map(|m| format!("{m:02}"))
+            .unwrap_or_else(|_| minute.to_string());
         return format!("Daily at {hh}:{mm} UTC");
     }
     // Weekly on DOW at HH:MM
     if dom == "*" && month == "*" {
-        let days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+        let days = [
+            "Sunday",
+            "Monday",
+            "Tuesday",
+            "Wednesday",
+            "Thursday",
+            "Friday",
+            "Saturday",
+        ];
         let day_name = dow
             .parse::<usize>()
             .ok()
             .and_then(|i| days.get(i))
             .copied()
             .unwrap_or(dow);
-        let hh = hour.parse::<u8>().map(|h| format!("{h:02}")).unwrap_or_else(|_| hour.to_string());
-        let mm = minute.parse::<u8>().map(|m| format!("{m:02}")).unwrap_or_else(|_| minute.to_string());
+        let hh = hour
+            .parse::<u8>()
+            .map(|h| format!("{h:02}"))
+            .unwrap_or_else(|_| hour.to_string());
+        let mm = minute
+            .parse::<u8>()
+            .map(|m| format!("{m:02}"))
+            .unwrap_or_else(|_| minute.to_string());
         return format!("Every {day_name} at {hh}:{mm} UTC");
     }
     // Monthly on day N at HH:MM
     if month == "*" {
-        let hh = hour.parse::<u8>().map(|h| format!("{h:02}")).unwrap_or_else(|_| hour.to_string());
-        let mm = minute.parse::<u8>().map(|m| format!("{m:02}")).unwrap_or_else(|_| minute.to_string());
+        let hh = hour
+            .parse::<u8>()
+            .map(|h| format!("{h:02}"))
+            .unwrap_or_else(|_| hour.to_string());
+        let mm = minute
+            .parse::<u8>()
+            .map(|m| format!("{m:02}"))
+            .unwrap_or_else(|_| minute.to_string());
         return format!("Monthly on day {dom} at {hh}:{mm} UTC");
     }
 
@@ -493,10 +519,7 @@ fn render_conversation_reminders(reminders: &ConversationRemindersForPrompt) -> 
     if has_active {
         lines.push("Active conversations in this project:".to_string());
         for conv in &reminders.active_conversations {
-            let title = conv
-                .title
-                .as_deref()
-                .unwrap_or("(untitled)");
+            let title = conv.title.as_deref().unwrap_or("(untitled)");
             lines.push(format!(
                 "- {} [id: {}] — last activity {}",
                 title, conv.id_short, conv.last_active_human

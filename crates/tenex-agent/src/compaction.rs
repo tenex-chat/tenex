@@ -34,7 +34,10 @@ fn build_transcript(messages: &[Message]) -> String {
         .filter_map(|m| match m {
             Message::System { .. } => None,
             Message::User { content } => Some(format!("[user]\n{content}")),
-            Message::Assistant { content, tool_calls } => {
+            Message::Assistant {
+                content,
+                tool_calls,
+            } => {
                 let mut parts = vec![format!("[assistant]\n{content}")];
                 for tc in tool_calls {
                     parts.push(format!(
