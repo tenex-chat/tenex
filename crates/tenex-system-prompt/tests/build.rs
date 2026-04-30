@@ -31,6 +31,8 @@ fn minimal_input<'a>(home: &'a HomeDirectoryInfo<'a>) -> BuildSystemPromptInput<
         preloaded_skills_block: None,
         telegram_channel_bindings: &[],
         telegram_chat_context: None,
+        conversation_reminders: None,
+        scheduled_tasks: &[],
     }
 }
 
@@ -80,6 +82,8 @@ fn identical_inputs_produce_byte_identical_output() {
         preloaded_skills_block: None,
         telegram_channel_bindings: &[],
         telegram_chat_context: None,
+        conversation_reminders: None,
+        scheduled_tasks: &[],
     });
     let b = build_system_prompt(BuildSystemPromptInput {
         identity_name: "stable",
@@ -99,6 +103,8 @@ fn identical_inputs_produce_byte_identical_output() {
         preloaded_skills_block: None,
         telegram_channel_bindings: &[],
         telegram_chat_context: None,
+        conversation_reminders: None,
+        scheduled_tasks: &[],
     });
     assert_eq!(a, b);
 }
@@ -125,6 +131,8 @@ fn orchestrator_category_skips_env_vars() {
         preloaded_skills_block: None,
         telegram_channel_bindings: &[],
         telegram_chat_context: None,
+        conversation_reminders: None,
+        scheduled_tasks: &[],
     });
     assert!(!out.contains("<environment-variables>"));
     assert!(out.contains("Orchestrator Guidance"));
@@ -151,6 +159,8 @@ fn includes_root_agents_md_when_supplied() {
         preloaded_skills_block: None,
         telegram_channel_bindings: &[],
         telegram_chat_context: None,
+        conversation_reminders: None,
+        scheduled_tasks: &[],
     });
     assert!(out.contains("  <agents.md>\n# Project Rules\nUse repo conventions.\n  </agents.md>"));
 }
@@ -176,6 +186,8 @@ fn project_context_renders_project_base_relative_cwd() {
         preloaded_skills_block: None,
         telegram_channel_bindings: &[],
         telegram_chat_context: None,
+        conversation_reminders: None,
+        scheduled_tasks: &[],
     });
     assert!(out.contains("cwd: $PROJECT_BASE/src"), "output was: {out}");
     assert!(out.contains("root: $PROJECT_BASE"));
@@ -202,6 +214,8 @@ fn project_context_renders_exact_root_as_project_base() {
         preloaded_skills_block: None,
         telegram_channel_bindings: &[],
         telegram_chat_context: None,
+        conversation_reminders: None,
+        scheduled_tasks: &[],
     });
     assert!(out.contains("cwd: $PROJECT_BASE"), "output was: {out}");
     assert!(
@@ -231,6 +245,8 @@ fn project_context_does_not_rewrite_sibling_path() {
         preloaded_skills_block: None,
         telegram_channel_bindings: &[],
         telegram_chat_context: None,
+        conversation_reminders: None,
+        scheduled_tasks: &[],
     });
     assert!(out.contains("cwd: /home/u/other-proj"), "output was: {out}");
     assert!(!out.contains("cwd: $PROJECT_BASE"));
@@ -257,6 +273,8 @@ fn project_context_renders_project_id_and_conversation_id() {
         preloaded_skills_block: None,
         telegram_channel_bindings: &[],
         telegram_chat_context: None,
+        conversation_reminders: None,
+        scheduled_tasks: &[],
     });
     assert!(out.contains("ID: my-cool-project"), "output was: {out}");
     assert!(
@@ -291,6 +309,8 @@ fn project_context_renders_telegram_channel_bindings() {
         preloaded_skills_block: None,
         telegram_channel_bindings: &bindings,
         telegram_chat_context: None,
+        conversation_reminders: None,
+        scheduled_tasks: &[],
     });
     assert!(out.contains("<channels>"), "output was: {out}");
     assert!(

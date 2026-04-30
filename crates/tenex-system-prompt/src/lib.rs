@@ -17,6 +17,113 @@ use telegram::{render_telegram_chat_context, TELEGRAM_DELIVERY_RULES};
 pub use telegram::{TelegramChannelBinding, TelegramChatContextForPrompt};
 pub use tenex_supervision::types::AgentCategory;
 
+/// A single conversation shown in the reminders overlay.
+pub struct ConversationSummary {
+    /// First 8 hex chars of the conversation ID.
+    pub id_short: String,
+    /// Human-readable title, if available.
+    pub title: Option<String>,
+    /// Human-readable relative time string, e.g. "3 minutes ago".
+    pub last_active_human: String,
+}
+
+/// The delegation parent for the current conversation, if any.
+pub struct DelegationParentRef {
+    /// First 8 hex chars of the parent conversation ID.
+    pub id_short: String,
+    /// Human-readable title, if available.
+    pub title: Option<String>,
+}
+
+/// Data needed to render the `<conversation-reminders>` block.
+pub struct ConversationRemindersForPrompt {
+    /// Other active/recent conversations in this project (excludes current).
+    pub active_conversations: Vec<ConversationSummary>,
+    /// The parent conversation when this agent was delegated to.
+    pub delegation_parent: Option<DelegationParentRef>,
+}
+
+/// A scheduled task entry for rendering in the system prompt (Fragment 22).
+pub struct ScheduledTaskForPrompt {
+    pub id: String,
+    pub cron_expr: String,
+    pub description: String,
+    /// Unix timestamp (milliseconds) for the next scheduled run, if known.
+    pub next_run_ms: Option<i64>,
+    /// Whether this is a one-off task (true) or recurring (false).
+    pub is_oneoff: bool,
+}
+
+/// Convert a cron expression to a human-readable description.
+///
+/// Handles `@hourly`, `@daily`, `@weekly`, `@monthly` presets and the most
+/// common 5-field patterns. Falls back to the raw expression for anything
+/// unrecognised.
+pub fn humanize_cron(expr: &str) -> String {
+    match expr {
+        "@hourly" => return "Every hour".to_string(),
+        "@daily" | "@midnight" => return "Every day at 00:00 UTC".to_string(),
+        "@weekly" => return "Every Sunday at 00:00 UTC".to_string(),
+        "@monthly" => return "On the 1st of every month at 00:00 UTC".to_string(),
+        "@yearly" | "@annually" => return "On January 1st at 00:00 UTC".to_string(),
+        _ => {}
+    }
+
+    let parts: Vec<&str> = expr.split_whitespace().collect();
+    if parts.len() != 5 {
+        return expr.to_string();
+    }
+    let (minute, hour, dom, month, dow) = (parts[0], parts[1], parts[2], parts[3], parts[4]);
+
+    // Every minute
+    if minute == "*" && hour == "*" && dom == "*" && month == "*" && dow == "*" {
+        return "Every minute".to_string();
+    }
+    // Every N minutes
+    if let Some(n) = minute.strip_prefix("*/") {
+        if hour == "*" && dom == "*" && month == "*" && dow == "*" {
+            return format!("Every {n} minutes");
+        }
+    }
+    // Every N hours at minute M
+    if let Some(n) = hour.strip_prefix("*/") {
+        if dom == "*" && month == "*" && dow == "*" {
+            return format!("Every {n} hours at minute {minute}");
+        }
+    }
+    // Every hour at minute M
+    if hour == "*" && dom == "*" && month == "*" && dow == "*" {
+        return format!("Every hour at minute {minute}");
+    }
+    // Daily at HH:MM
+    if dom == "*" && month == "*" && dow == "*" {
+        let hh = hour.parse::<u8>().map(|h| format!("{h:02}")).unwrap_or_else(|_| hour.to_string());
+        let mm = minute.parse::<u8>().map(|m| format!("{m:02}")).unwrap_or_else(|_| minute.to_string());
+        return format!("Daily at {hh}:{mm} UTC");
+    }
+    // Weekly on DOW at HH:MM
+    if dom == "*" && month == "*" {
+        let days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+        let day_name = dow
+            .parse::<usize>()
+            .ok()
+            .and_then(|i| days.get(i))
+            .copied()
+            .unwrap_or(dow);
+        let hh = hour.parse::<u8>().map(|h| format!("{h:02}")).unwrap_or_else(|_| hour.to_string());
+        let mm = minute.parse::<u8>().map(|m| format!("{m:02}")).unwrap_or_else(|_| minute.to_string());
+        return format!("Every {day_name} at {hh}:{mm} UTC");
+    }
+    // Monthly on day N at HH:MM
+    if month == "*" {
+        let hh = hour.parse::<u8>().map(|h| format!("{h:02}")).unwrap_or_else(|_| hour.to_string());
+        let mm = minute.parse::<u8>().map(|m| format!("{m:02}")).unwrap_or_else(|_| minute.to_string());
+        return format!("Monthly on day {dom} at {hh}:{mm} UTC");
+    }
+
+    expr.to_string()
+}
+
 pub struct BuildSystemPromptInput<'a> {
     pub identity_name: &'a str,
     pub pubkey_hex: &'a str,
@@ -42,6 +149,10 @@ pub struct BuildSystemPromptInput<'a> {
     /// Telegram chat context for Fragment 33. `None` when the triggering event
     /// did not arrive via Telegram.
     pub telegram_chat_context: Option<TelegramChatContextForPrompt>,
+    /// Active/recent conversation overlay. `None` skips the block entirely.
+    pub conversation_reminders: Option<&'a ConversationRemindersForPrompt>,
+    /// Fragment 22: the agent's own scheduled tasks (recurring + one-off).
+    pub scheduled_tasks: &'a [ScheduledTaskForPrompt],
 }
 
 /// Build the full system prompt for an agent.
@@ -68,6 +179,8 @@ pub fn build_system_prompt(input: BuildSystemPromptInput<'_>) -> String {
         preloaded_skills_block,
         telegram_channel_bindings,
         telegram_chat_context,
+        conversation_reminders,
+        scheduled_tasks,
     } = input;
     let mut parts: Vec<String> = Vec::new();
 
@@ -295,5 +408,110 @@ Creating a todo list helps you stay organized, shows your progress to observers,
         parts.push(TELEGRAM_DELIVERY_RULES.to_string());
     }
 
+    // Fragment 22: Scheduled tasks
+    if !scheduled_tasks.is_empty() {
+        parts.push(render_scheduled_tasks(scheduled_tasks));
+    }
+
+    // Conversation reminders overlay (active/recent conversations + delegation parent)
+    if let Some(reminders) = conversation_reminders {
+        if let Some(rendered) = render_conversation_reminders(reminders) {
+            parts.push(rendered);
+        }
+    }
+
     parts.join("\n\n")
+}
+
+fn render_scheduled_tasks(tasks: &[ScheduledTaskForPrompt]) -> String {
+    let recurring: Vec<&ScheduledTaskForPrompt> = tasks.iter().filter(|t| !t.is_oneoff).collect();
+    let oneoff: Vec<&ScheduledTaskForPrompt> = tasks.iter().filter(|t| t.is_oneoff).collect();
+
+    let mut sections: Vec<String> = Vec::new();
+
+    if !recurring.is_empty() {
+        let lines: Vec<String> = recurring
+            .iter()
+            .map(|t| {
+                let human = humanize_cron(&t.cron_expr);
+                format!(
+                    "- **{}** [recurring]: {} (cron: `{}`)\n  ID: `{}`",
+                    t.description, human, t.cron_expr, t.id
+                )
+            })
+            .collect();
+        sections.push(format!("### Recurring Tasks\n{}", lines.join("\n\n")));
+    }
+
+    if !oneoff.is_empty() {
+        let lines: Vec<String> = oneoff
+            .iter()
+            .map(|t| {
+                let when = t
+                    .next_run_ms
+                    .map(|ms| {
+                        let secs = ms / 1000;
+                        format!("at unix timestamp {secs}")
+                    })
+                    .unwrap_or_else(|| "at unknown time".to_string());
+                format!(
+                    "- **{}** [one-off]: Executes {}\n  ID: `{}`",
+                    t.description, when, t.id
+                )
+            })
+            .collect();
+        sections.push(format!("### One-off Tasks\n{}", lines.join("\n\n")));
+    }
+
+    let total = tasks.len();
+    let summary = if total == 1 {
+        "1 scheduled task".to_string()
+    } else {
+        format!(
+            "{total} scheduled tasks ({} recurring, {} one-off)",
+            recurring.len(),
+            oneoff.len()
+        )
+    };
+
+    format!(
+        "<scheduled-tasks>\nYou have {summary} that will trigger automatically:\n\n{}\n\nUse `kill` to remove any task by ID.\n</scheduled-tasks>",
+        sections.join("\n\n")
+    )
+}
+
+fn render_conversation_reminders(reminders: &ConversationRemindersForPrompt) -> Option<String> {
+    let has_active = !reminders.active_conversations.is_empty();
+    let has_parent = reminders.delegation_parent.is_some();
+    if !has_active && !has_parent {
+        return None;
+    }
+
+    let mut lines: Vec<String> = Vec::new();
+    lines.push("<conversation-reminders>".to_string());
+
+    if has_active {
+        lines.push("Active conversations in this project:".to_string());
+        for conv in &reminders.active_conversations {
+            let title = conv
+                .title
+                .as_deref()
+                .unwrap_or("(untitled)");
+            lines.push(format!(
+                "- {} [id: {}] — last activity {}",
+                title, conv.id_short, conv.last_active_human
+            ));
+        }
+    }
+
+    if let Some(parent) = &reminders.delegation_parent {
+        let title = parent.title.as_deref().unwrap_or("(untitled)");
+        lines.push(format!(
+            "Delegation parent: {} [id: {}]",
+            title, parent.id_short
+        ));
+    }
+
+    lines.push("</conversation-reminders>".to_string());
+    Some(lines.join("\n"))
 }

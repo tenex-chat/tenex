@@ -185,6 +185,8 @@ async fn run() -> Result<()> {
             preloaded_skills_block: None,
             telegram_channel_bindings: &telegram_channel_bindings,
             telegram_chat_context: None,
+            conversation_reminders: None,
+            scheduled_tasks: &[],
         });
     let history = render_history(
         conv_store.as_ref(),
@@ -192,7 +194,8 @@ async fn run() -> Result<()> {
         &pubkey_hex,
         &system_prompt,
         &acp_config.backend,
-    );
+    )
+    .await;
     let prompt = render_acp_prompt(&system_prompt, &history, &envelope.content);
     let mcp_bridge = AcpMcpBridge::start(AcpMcpBridgeInput {
         base_dir: base_dir.clone(),
@@ -409,7 +412,7 @@ fn open_conversation_store(project_id: &str, conversation_id: &str) -> Option<Co
     }
 }
 
-fn render_history(
+async fn render_history(
     store: Option<&ConversationStore>,
     conversation_id: &str,
     agent_pubkey: &str,
@@ -435,7 +438,10 @@ fn render_history(
         system_prompt,
         &profile,
         &tool_defs,
-    ) {
+        None,
+    )
+    .await
+    {
         Ok(projection) => projection
             .messages
             .into_iter()

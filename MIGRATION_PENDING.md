@@ -196,7 +196,7 @@ Rust (`tenex-llm-config`) is a credential resolver only; all provider protocol w
 
 ### 9.2 Request Pipeline
 - [ ] **Message sanitizer middleware** — strips trailing assistant messages and empty-content messages before every API call to prevent provider rejections; Rust context projection has no equivalent validation
-- [ ] **Multimodal preparation** — URL-fetch + base64 encoding of images, Ollama vision model detection, provider-aware image format normalization; Rust has no image handling
+- ✅ **Multimodal preparation** — URL-fetch + base64 encoding of images from markdown `![](url)` and bare HTTPS URLs; images prepended to multipart user message for vision-capable providers (anthropic, openai, openrouter); Ollama vision model detection not ported (Ollama passes text only)
 - ✅ **Prompt cache breakpoint emission** — `BreakpointHint` emitted when `cached_input_tokens > 0`; `cache_creation_input_tokens` recorded as `written_tokens` in `CacheObservation`
 
 ### 9.3 Instruction Synthesis

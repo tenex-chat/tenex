@@ -2,6 +2,7 @@ mod agent_loop_hook;
 mod cassette;
 mod cassette_client;
 mod cassette_request;
+mod compaction;
 mod config;
 mod context_discovery;
 mod context_rig;
@@ -598,6 +599,33 @@ async fn run() -> Result<()> {
             build_conversation_reminders(store, &conversation_id, delegation_parent_id.as_deref())
         });
 
+    // Load scheduled tasks for Fragment 22.
+    let scheduled_tasks_for_prompt: Vec<tenex_system_prompt::ScheduledTaskForPrompt> =
+        match tenex_scheduler::storage::tasks_for_agent(&pubkey_hex) {
+            Ok(tasks) => tasks
+                .into_iter()
+                .map(|t| {
+                    let description = t.title.unwrap_or_else(|| t.prompt.chars().take(80).collect());
+                    let next_run_ms = t.next_run.as_deref().and_then(|s| {
+                        chrono::DateTime::parse_from_rfc3339(s)
+                            .ok()
+                            .map(|dt| dt.timestamp_millis())
+                    });
+                    tenex_system_prompt::ScheduledTaskForPrompt {
+                        id: t.id,
+                        cron_expr: t.schedule,
+                        description,
+                        next_run_ms,
+                        is_oneoff: t.task_type.map(|ty| ty == tenex_scheduler::model::TaskType::Oneoff).unwrap_or(false),
+                    }
+                })
+                .collect(),
+            Err(e) => {
+                eprintln!("[tenex-agent] Failed to load scheduled tasks: {e}");
+                Vec::new()
+            }
+        };
+
     // Build system prompt
     let mut system_prompt =
         tenex_system_prompt::build_system_prompt(tenex_system_prompt::BuildSystemPromptInput {
@@ -619,6 +647,7 @@ async fn run() -> Result<()> {
             telegram_channel_bindings: &telegram_channel_bindings,
             telegram_chat_context,
             conversation_reminders: conversation_reminders.as_ref(),
+            scheduled_tasks: &scheduled_tasks_for_prompt,
         });
 
     // Load persisted todos and inject them as a system reminder into the user message.
@@ -769,42 +798,45 @@ async fn run() -> Result<()> {
     // Project conversation history. The projection produces interleaved
     // assistant + tool-result messages; the system prompt is dropped here
     // because rig handles it via `preamble`.
-    let history: Vec<RigMessage> = conv_store
-        .as_ref()
-        .and_then(|store| {
-            let model_profile = ModelProfile {
-                provider: resolved.provider.clone(),
-                model_id: resolved.model.clone(),
-                prompt_cache: resolved.provider == "anthropic",
-                ephemeral_reminders: false,
-                image_support: false,
-                max_context_tokens: 200_000,
-            };
-            let tool_defs: Vec<ToolDef> = Vec::new();
-            match tenex_context::project(
-                store,
-                &conversation_id,
-                &pubkey_hex,
-                &system_prompt,
-                &model_profile,
-                &tool_defs,
-            ) {
-                Ok(projection) => {
-                    let msgs: Vec<RigMessage> = projection
-                        .messages
-                        .into_iter()
-                        .filter(|m| !matches!(m, CtxMessage::System { .. }))
-                        .map(ctx_msg_to_rig)
-                        .collect();
-                    Some(msgs)
-                }
-                Err(e) => {
-                    eprintln!("[tenex-agent] Context projection failed: {e}");
-                    None
-                }
+    let history: Vec<RigMessage> = if let Some(store) = conv_store.as_ref() {
+        let model_profile = ModelProfile {
+            provider: resolved.provider.clone(),
+            model_id: resolved.model.clone(),
+            prompt_cache: resolved.provider == "anthropic",
+            ephemeral_reminders: false,
+            image_support: false,
+            max_context_tokens: 200_000,
+        };
+        let tool_defs: Vec<ToolDef> = Vec::new();
+        let summarizer: Option<Arc<dyn tenex_context::CompactionSummarizer>> =
+            Some(Arc::new(compaction::LlmCompactionSummarizer::new(
+                Arc::new(resolved.clone()),
+            )));
+        match tenex_context::project(
+            store,
+            &conversation_id,
+            &pubkey_hex,
+            &system_prompt,
+            &model_profile,
+            &tool_defs,
+            summarizer,
+        )
+        .await
+        {
+            Ok(projection) => projection
+                .messages
+                .into_iter()
+                .filter(|m| !matches!(m, CtxMessage::System { .. }))
+                .map(ctx_msg_to_rig)
+                .collect(),
+            Err(e) => {
+                eprintln!("[tenex-agent] Context projection failed: {e}");
+                Vec::new()
             }
-        })
-        .unwrap_or_default();
+        }
+    } else {
+        Vec::new()
+    };
 
     let initial_history = history;
     eprintln!(
@@ -855,6 +887,20 @@ async fn run() -> Result<()> {
     // after the stream ends, even after `hook` is moved into the agent builder.
     let hook_handle = hook.clone();
 
+    // Prefetch images from the inbound envelope content for vision-capable providers.
+    // Fetched once so re-engagement turns (supervisor-generated text) do not trigger
+    // additional network calls.
+    let supports_vision = matches!(
+        resolved.provider.as_str(),
+        "anthropic" | "openai" | "openrouter"
+    );
+    let envelope_image_parts: Option<Vec<rig::completion::message::UserContent>> =
+        if supports_vision {
+            multimodal::prepare_multimodal_content(&envelope.content).await
+        } else {
+            None
+        };
+
     // current_message starts as the inbound user prompt; supervision may replace it with a
     // re-engagement prompt after each turn if pending todos remain.
     let mut current_message = user_message;
@@ -873,10 +919,39 @@ async fn run() -> Result<()> {
         let recorder = ToolRecorder::new();
         let tools = tool_set.build_for_turn(recorder.clone());
         let injected = injection_tracker.lock().unwrap().take_new_messages();
-        let turn_message = if let Some(injected) = injected {
+        let turn_message = if let Some(ref injected) = injected {
             format!("{current_message}\n\n{injected}")
         } else {
             current_message.clone()
+        };
+
+        // Build a multipart prompt when the envelope contained images that were
+        // successfully fetched. Images are prepended so vision providers see them
+        // before the text (preferred order). This applies to every turn, including
+        // re-engagement, so the original images remain visible as context.
+        let turn_prompt: RigMessage = {
+            use rig::completion::message::{Text, UserContent};
+            use rig::OneOrMany;
+            match &envelope_image_parts {
+                Some(image_parts) => {
+                    let mut parts: Vec<UserContent> = image_parts.clone();
+                    parts.push(UserContent::Text(Text {
+                        text: turn_message.clone(),
+                    }));
+                    RigMessage::User {
+                        content: OneOrMany::many(parts).unwrap_or_else(|_| {
+                            OneOrMany::one(UserContent::Text(Text {
+                                text: turn_message.clone(),
+                            }))
+                        }),
+                    }
+                }
+                None => RigMessage::User {
+                    content: OneOrMany::one(UserContent::Text(Text {
+                        text: turn_message.clone(),
+                    })),
+                },
+            }
         };
 
         let turn_span = info_span!(
@@ -902,7 +977,7 @@ async fn run() -> Result<()> {
                         client,
                         &resolved.model,
                         &system_prompt,
-                        &turn_message,
+                        turn_prompt.clone(),
                         current_history,
                         hook.clone(),
                         tools
@@ -921,7 +996,7 @@ async fn run() -> Result<()> {
                         client,
                         &resolved.model,
                         &system_prompt,
-                        &turn_message,
+                        turn_prompt.clone(),
                         current_history,
                         hook.clone(),
                         tools
@@ -937,7 +1012,7 @@ async fn run() -> Result<()> {
                         client,
                         &resolved.model,
                         &system_prompt,
-                        &turn_message,
+                        turn_prompt.clone(),
                         current_history,
                         hook.clone(),
                         tools
@@ -952,7 +1027,7 @@ async fn run() -> Result<()> {
                         client,
                         &resolved.model,
                         &system_prompt,
-                        &turn_message,
+                        turn_prompt.clone(),
                         current_history,
                         hook.clone(),
                         tools
@@ -980,7 +1055,7 @@ async fn run() -> Result<()> {
                             client,
                             &resolved.model,
                             &system_prompt,
-                            &turn_message,
+                            turn_prompt.clone(),
                             current_history,
                             hook.clone(),
                             tools
@@ -994,7 +1069,7 @@ async fn run() -> Result<()> {
                             client,
                             &resolved.model,
                             &system_prompt,
-                            &turn_message,
+                            turn_prompt.clone(),
                             current_history,
                             hook.clone(),
                             tools
