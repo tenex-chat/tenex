@@ -139,8 +139,10 @@ async fn run_daemon_async() -> AnyResult<()> {
             .await
             .with_context(|| format!("add relay {relay}"))?;
     }
-    client.connect().await;
 
+    // Bind the socket before connecting to relays so the parent process can
+    // confirm the daemon is up without racing against slow/unreachable relays.
+    // Relay connections complete asynchronously after serve() starts.
     let socket_path = paths::socket_path();
     if socket_path.exists() {
         let _ = fs::remove_file(&socket_path);
@@ -153,6 +155,7 @@ async fn run_daemon_async() -> AnyResult<()> {
         .with_context(|| format!("chmod 600 {}", socket_path.display()))?;
 
     eprintln!("[identity] listening on {}", socket_path.display());
+    client.connect().await;
     server::serve(listener, cache, client).await;
     Ok(())
 }
