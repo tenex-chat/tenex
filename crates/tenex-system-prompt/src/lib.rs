@@ -3,98 +3,19 @@
 //! The output string is the cache anchor for downstream LLM calls; identical
 //! inputs must yield byte-identical output.
 
+mod guidance;
+mod home;
+mod telegram;
+
+use guidance::{
+    AGENT_DIRECTED_MONITORING, DELEGATION_TIPS, DOMAIN_EXPERT_GUIDANCE, ORCHESTRATOR_GUIDANCE,
+    TODO_BEFORE_DELEGATION,
+};
+use home::render_home_directory;
+pub use home::{HomeDirectoryInfo, InjectedFile};
+use telegram::{render_telegram_chat_context, TELEGRAM_DELIVERY_RULES};
+pub use telegram::{TelegramChannelBinding, TelegramChatContextForPrompt};
 pub use tenex_supervision::types::AgentCategory;
-
-pub struct InjectedFile {
-    pub filename: String,
-    pub content: String,
-    pub truncated: bool,
-}
-
-pub struct HomeDirectoryInfo<'a> {
-    pub home_dir: &'a str,
-    pub file_count: &'a str,
-    pub injected_files: &'a [InjectedFile],
-}
-
-/// Minimal Telegram channel binding descriptor — enough for the `<channels>` system
-/// prompt block. Defined here so `tenex-system-prompt` does not need to depend on
-/// `tenex-telegram`.
-pub struct TelegramChannelBinding {
-    /// Canonical channel ID, e.g. `telegram:chat:12345` or
-    /// `telegram:group:-100987654321:topic:42`.
-    pub channel_id: String,
-    /// Chat-level ID (the numeric portion after `telegram:chat:` or
-    /// `telegram:group:`). Negative values indicate groups/supergroups; positive
-    /// values indicate private DMs.
-    pub chat_id: String,
-    /// Thread ID (forum topic), present only for `telegram:group:…:topic:…` keys.
-    pub thread_id: Option<String>,
-}
-
-impl TelegramChannelBinding {
-    /// Parse a canonical channel ID string into a `TelegramChannelBinding`.
-    /// Returns `None` if the format is unrecognised.
-    ///
-    /// Supported formats (from `tenex-telegram::session::SessionStore::channel_key`):
-    /// - `telegram:chat:<chat_id>`
-    /// - `telegram:group:<chat_id>:topic:<thread_id>`
-    pub fn parse(channel_id: &str) -> Option<Self> {
-        if let Some(rest) = channel_id.strip_prefix("telegram:group:") {
-            // telegram:group:<chat_id>:topic:<thread_id>
-            if let Some((chat_part, topic_part)) = rest.split_once(":topic:") {
-                return Some(Self {
-                    channel_id: channel_id.to_string(),
-                    chat_id: chat_part.to_string(),
-                    thread_id: Some(topic_part.to_string()),
-                });
-            }
-            // telegram:group:<chat_id> (no topic suffix — treat as group)
-            return Some(Self {
-                channel_id: channel_id.to_string(),
-                chat_id: rest.to_string(),
-                thread_id: None,
-            });
-        }
-        if let Some(rest) = channel_id.strip_prefix("telegram:chat:") {
-            return Some(Self {
-                channel_id: channel_id.to_string(),
-                chat_id: rest.to_string(),
-                thread_id: None,
-            });
-        }
-        None
-    }
-
-    /// Classify the channel as `"dm"`, `"topic"`, or `"group"`.
-    ///
-    /// DM: private chat where the chat_id is positive (does not start with `-`).
-    /// Topic: group + thread_id present.
-    /// Group: group chat without a thread_id.
-    pub fn channel_type(&self) -> &'static str {
-        if !self.chat_id.starts_with('-') {
-            "dm"
-        } else if self.thread_id.is_some() {
-            "topic"
-        } else {
-            "group"
-        }
-    }
-}
-
-/// Plain-data Telegram chat context passed into the system prompt builder.
-/// Defined here (rather than imported from `tenex-telegram`) so
-/// `tenex-system-prompt` has no dependency on the Telegram crate.
-pub struct TelegramChatContextForPrompt {
-    pub chat_title: Option<String>,
-    pub topic_title: Option<String>,
-    /// Pre-formatted administrator strings (display name + optional @handle +
-    /// optional [custom title]).
-    pub admin_names: Vec<String>,
-    pub member_count: Option<i64>,
-    /// Display names / handles of recently observed participants.
-    pub recently_seen: Vec<String>,
-}
 
 pub struct BuildSystemPromptInput<'a> {
     pub identity_name: &'a str,
@@ -122,128 +43,6 @@ pub struct BuildSystemPromptInput<'a> {
     /// did not arrive via Telegram.
     pub telegram_chat_context: Option<TelegramChatContextForPrompt>,
 }
-
-fn render_home_directory(info: &HomeDirectoryInfo) -> String {
-    let mut parts = vec![
-        "<home-directory>".to_string(),
-        format!(
-            "You have a personal home directory at: `{}`. This is *your* space to use as you see fit. The contents of this directory are persistent and private to you.",
-            info.home_dir
-        ),
-        String::new(),
-        format!("**Current contents:** {}", info.file_count),
-        String::new(),
-        "Use this space for notes, helper scripts, temporary files, or any personal workspace needs. Use descriptive names for your files so you can easily find them later.".to_string(),
-        String::new(),
-        "**Shell env files:** Shell sessions automatically load environment variables from `.env` files with precedence `agent > project > global`. Your nsec is in your home directory's `.env` file as `NSEC`. `.env` contents are NOT injected into your prompt. Reference them in shell commands with normal shell expansion such as `$NSEC` or `$OPENAI_API_KEY`.".to_string(),
-        String::new(),
-        "**Note on ~:** The shell `~` expands to the user's real home directory (via `$HOME`), NOT your agent home. To access your agent home directory in shell commands, use `$AGENT_HOME`.".to_string(),
-        String::new(),
-        "**Auto-injected files:** Files starting with `+` (e.g., `+NOTES.md`) are automatically injected into your system prompt on every execution. Keep `+` files **lean and poignant** — only include things you genuinely need at *every* execution (standing rules, critical reminders, active constraints). Do NOT use `+` files for: status reports, task logs, one-off findings, transient state, or detailed reference material. Instead, write that content in a regular (non-`+`) file and add a brief reference to it from your `+` file so you can read it when relevant. Keep each `+` file under **100 lines** — if it exceeds that, extract the detail into a non-`+` file and replace it with a pointer.".to_string(),
-    ];
-
-    if !info.injected_files.is_empty() {
-        parts.push(String::new());
-        parts.push("<memorized-files>".to_string());
-        for file in info.injected_files {
-            let truncated_attr = if file.truncated {
-                " truncated=\"true\""
-            } else {
-                ""
-            };
-            parts.push(format!(
-                "  <file name=\"{}\"{}>{}</file>",
-                file.filename, truncated_attr, file.content
-            ));
-        }
-        parts.push("</memorized-files>".to_string());
-    }
-
-    parts.push("</home-directory>".to_string());
-    parts.join("\n")
-}
-
-const ORCHESTRATOR_GUIDANCE: &str = "## Orchestrator Guidance
-
-You are an orchestrator. When the user says \"do X\", they are assigning responsibility for getting X done, not telling you that you personally must execute every step.
-
-- Your first job is to evaluate who should handle the work.
-- Prefer delegating execution to the most appropriate agent when another agent is better suited for the task.
-- Treat yourself as the coordinator responsible for routing, sequencing, and quality control.
-- Only do the work yourself when the task is genuinely orchestration work, delegation would add unnecessary overhead, or no better delegate exists.";
-
-const DOMAIN_EXPERT_GUIDANCE: &str = "## Domain Expert Guidance
-
-You are a domain expert. You do all work yourself — no exceptions.
-
-- **NEVER delegate.** You have no delegation capability. Do the work directly using your own knowledge and available tools.
-- **Refuse out-of-domain requests entirely.** If a request falls outside your domain of expertise, respond with exactly: \"I can't help with that — this is outside my domain of expertise.\" Do not attempt a partial answer, do not suggest who might help, do not pass it on. Just refuse.
-- Your job is to answer questions and complete tasks within your domain. Nothing else.";
-
-const DELEGATION_TIPS: &str = "## Delegation Tips
-
-Delegate what needs to be done, not how — provide context but trust the delegatee's expertise. Delegation is async: you are automatically re-invoked when the delegatee completes; `delegate_followup` is for additional context or clarifying questions only.";
-
-const TODO_BEFORE_DELEGATION: &str = "## Todo List
-
-When delegating tasks, a todo list helps you track progress and stay organized.
-
-- Use `todo_write()` to outline your workflow plan before or after delegating
-- Include anticipated delegations so progress is visible
-- Mark your current task as in_progress when delegating";
-
-const TELEGRAM_DELIVERY_RULES: &str = "## Telegram Delivery Rules
-- To send a Telegram voice reply, output the reserved marker `[[telegram_voice:/absolute/path/to/file.ogg]]` on its own line.
-- Use an absolute local path only, and emit the marker only when the file already exists and is ready to send.
-- Prefer an `.ogg` voice-note file for this marker.
-- If you include prose outside the marker, TENEX will send the voice message first and then send the remaining text as a normal Telegram message.
-- Never explain the marker, quote it back to the user, or include more than one `telegram_voice` marker in the same reply.";
-
-fn render_telegram_chat_context(ctx: &TelegramChatContextForPrompt) -> String {
-    let mut detail_lines: Vec<String> = Vec::new();
-
-    if let Some(title) = &ctx.chat_title {
-        detail_lines.push(format!("- Chat title: {title}"));
-    }
-
-    if let Some(topic) = &ctx.topic_title {
-        detail_lines.push(format!("- Topic: {topic}"));
-    }
-
-    if let Some(count) = ctx.member_count {
-        detail_lines.push(format!("- Member count (Telegram API snapshot): {count}"));
-    }
-
-    if !ctx.admin_names.is_empty() {
-        detail_lines.push(format!(
-            "- Administrators (Telegram API snapshot): {}",
-            ctx.admin_names.join(", ")
-        ));
-    }
-
-    if !ctx.recently_seen.is_empty() {
-        detail_lines.push(format!(
-            "- Recently seen participants (TENEX-local observations): {}",
-            ctx.recently_seen.join(", ")
-        ));
-    }
-
-    if detail_lines.is_empty() {
-        return String::new();
-    }
-
-    let mut lines = vec!["## Telegram Chat Context".to_string()];
-    lines.extend(detail_lines);
-    lines.join("\n")
-}
-
-const AGENT_DIRECTED_MONITORING: &str = "## Monitoring Delegated Work
-
-Delegation is **asynchronous**: after you call `delegate`, stop for the turn. The system automatically re-invokes you when the delegatee completes and returns their response.
-
-- **Do not poll or wait** — there is no progress-check tool available. Stop after delegating and let the runtime re-invoke you.
-- **Mid-flight corrections**: If you realise a delegatee needs clarification before they finish, use `delegate_followup` with the delegation event ID returned by `delegate`.
-- **On re-invocation**: you will receive the delegatee's completion as your next message. Review it, update your todo list, and proceed with the next step.";
 
 /// Build the full system prompt for an agent.
 ///
