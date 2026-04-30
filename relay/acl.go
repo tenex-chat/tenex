@@ -310,6 +310,13 @@ func (a *ACL) pruneExpiredDeferredLocked(now time.Time) {
 				kept = append(kept, sub)
 			}
 		}
+		// Clear the tail of the backing array so dropped entries' websocket,
+		// context, and filter pointers become unreachable and GC-eligible.
+		// Without this, reusing subs[:0] keeps those pointers alive in the
+		// underlying array until the slot is later overwritten.
+		for i := len(kept); i < len(subs); i++ {
+			subs[i] = deferredSub{}
+		}
 		if len(kept) == 0 {
 			delete(a.deferred, pk)
 		} else {
