@@ -949,9 +949,14 @@ async fn run() -> Result<()> {
         resolved.provider.as_str(),
         "anthropic" | "openai" | "openrouter"
     );
+    // `file://` image URLs are only honoured when they live under one of these
+    // trusted cache prefixes — otherwise an inbound event could read arbitrary
+    // local files. The Telegram bridge writes here when it caches inbound
+    // photos; add new trusted producers to this list.
+    let allowed_file_prefixes = vec![base_dir.join("data").join("telegram-media")];
     let envelope_image_parts: Option<Vec<rig::completion::message::UserContent>> =
         if supports_vision {
-            multimodal::prepare_multimodal_content(&envelope.content).await
+            multimodal::prepare_multimodal_content(&envelope.content, &allowed_file_prefixes).await
         } else {
             None
         };

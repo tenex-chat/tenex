@@ -3,6 +3,7 @@ use base64::Engine as _;
 use rig::completion::message::{
     DocumentSourceKind, Image, ImageMediaType, MimeType as _, UserContent,
 };
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 const MAX_IMAGE_BYTES: usize = 10 * 1024 * 1024;
@@ -13,8 +14,11 @@ const FETCH_TIMEOUT_SECS: u64 = 15;
 /// image blocks (no text block).
 ///
 /// Supports `https://`, `http://`, and `file://` URL schemes. `file://` reads
-/// the bytes from the local filesystem — used for cached Telegram media that
-/// must not leak the bot token via an outbound URL.
+/// the bytes from the local filesystem and is gated on `allowed_file_prefixes`
+/// — only paths starting with one of these prefixes (and free of `..`
+/// components) are fetched. Inbound event content is partially user-controlled,
+/// so an unrestricted `file://` reader would let an attacker exfiltrate
+/// arbitrary local files into the LLM prompt.
 ///
 /// The caller is responsible for appending the text content after the returned
 /// image blocks so that the final message order is: [images, text].
@@ -24,7 +28,10 @@ const FETCH_TIMEOUT_SECS: u64 = 15;
 ///
 /// Returns `None` when no images were found or successfully fetched so the
 /// caller can continue with a plain string prompt.
-pub async fn prepare_multimodal_content(content: &str) -> Option<Vec<UserContent>> {
+pub async fn prepare_multimodal_content(
+    content: &str,
+    allowed_file_prefixes: &[PathBuf],
+) -> Option<Vec<UserContent>> {
     let urls = extract_image_urls(content);
     if urls.is_empty() {
         return None;
@@ -38,7 +45,7 @@ pub async fn prepare_multimodal_content(content: &str) -> Option<Vec<UserContent
     let mut parts: Vec<UserContent> = Vec::new();
 
     for url in urls {
-        match fetch_image(&client, &url).await {
+        match fetch_image(&client, &url, allowed_file_prefixes).await {
             Ok(Some((data, media_type))) => {
                 let encoded = base64::engine::general_purpose::STANDARD.encode(&data);
                 let rig_media_type = ImageMediaType::from_mime_type(&media_type);
@@ -102,15 +109,27 @@ fn extract_image_urls(content: &str) -> Vec<String> {
 async fn fetch_image(
     client: &reqwest::Client,
     url: &str,
+    allowed_file_prefixes: &[PathBuf],
 ) -> Result<Option<(Vec<u8>, String)>> {
     if let Some(path) = url.strip_prefix("file://") {
-        return fetch_local_image(path);
+        return fetch_local_image(path, allowed_file_prefixes);
     }
     fetch_http_image(client, url).await
 }
 
-fn fetch_local_image(path: &str) -> Result<Option<(Vec<u8>, String)>> {
-    let bytes = std::fs::read(path).with_context(|| format!("read {path}"))?;
+fn fetch_local_image(
+    path: &str,
+    allowed_file_prefixes: &[PathBuf],
+) -> Result<Option<(Vec<u8>, String)>> {
+    let validated = match validate_local_path(path, allowed_file_prefixes) {
+        Ok(p) => p,
+        Err(reason) => {
+            eprintln!("[tenex-agent] multimodal: rejecting file:// URL {path}: {reason}");
+            return Ok(None);
+        }
+    };
+    let bytes = std::fs::read(&validated)
+        .with_context(|| format!("read {}", validated.display()))?;
     if bytes.len() > MAX_IMAGE_BYTES {
         eprintln!(
             "[tenex-agent] multimodal: image too large ({} bytes) -- skipping {path}",
@@ -127,6 +146,25 @@ fn fetch_local_image(path: &str) -> Result<Option<(Vec<u8>, String)>> {
         bytes.len()
     );
     Ok(Some((bytes, media_type.to_string())))
+}
+
+/// Validate a `file://` URL's path: must be absolute, must not contain `..`
+/// components, and must start with one of the allowed prefixes. Returns the
+/// path on success or an explanatory message on rejection.
+fn validate_local_path(path: &str, allowed_prefixes: &[PathBuf]) -> Result<PathBuf, &'static str> {
+    let p = Path::new(path);
+    if !p.is_absolute() {
+        return Err("path is not absolute");
+    }
+    if p.components()
+        .any(|c| matches!(c, std::path::Component::ParentDir))
+    {
+        return Err("path contains `..`");
+    }
+    if !allowed_prefixes.iter().any(|prefix| p.starts_with(prefix)) {
+        return Err("path is outside the allowed file:// prefixes");
+    }
+    Ok(p.to_path_buf())
 }
 
 async fn fetch_http_image(

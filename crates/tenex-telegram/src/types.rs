@@ -89,6 +89,7 @@ pub struct TelegramChat {
 #[derive(Debug, Clone, Deserialize)]
 pub struct TelegramVoice {
     pub file_id: String,
+    pub file_unique_id: Option<String>,
     pub mime_type: Option<String>,
     pub duration: Option<i64>,
 }
@@ -96,6 +97,7 @@ pub struct TelegramVoice {
 #[derive(Debug, Clone, Deserialize)]
 pub struct TelegramAudio {
     pub file_id: String,
+    pub file_unique_id: Option<String>,
     pub mime_type: Option<String>,
     pub duration: Option<i64>,
     pub file_name: Option<String>,

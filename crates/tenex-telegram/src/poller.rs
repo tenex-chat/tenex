@@ -14,7 +14,7 @@ use crate::pending_selection_store::{PendingProjectOption, PendingSelectionStore
 use crate::runtime_client::{dispatch_via_runtime, DispatchOutcome};
 use crate::selection::{parse_project_selection, project_selection_prompt};
 use crate::session::SessionStore;
-use crate::types::{TelegramBotCommand, TelegramMessage, TelegramPhotoSize};
+use crate::types::{TelegramBotCommand, TelegramMessage};
 
 const POLL_TIMEOUT_SECS: u64 = 20;
 const POLL_LIMIT: u32 = 50;
@@ -131,8 +131,9 @@ impl Poller {
         let thread_id = msg.message_thread_id.map(|t| t.to_string());
         let channel_id = SessionStore::channel_key(&chat_id, thread_id.as_deref());
 
-        // A Telegram message can carry text, a photo with optional caption, or
-        // both. Bail only when there is nothing the agent can act on.
+        // A Telegram message can carry text, a photo (with optional caption),
+        // a voice note, or an audio file. Bail only when there is nothing the
+        // agent can act on.
         let text_str = msg
             .text
             .as_deref()
@@ -151,17 +152,32 @@ impl Poller {
             .and_then(|sizes| sizes.iter().max_by_key(|p| p.width * p.height))
             .cloned();
 
-        if text_str.is_none() && caption_str.is_none() && largest_photo.is_none() {
+        if text_str.is_none()
+            && caption_str.is_none()
+            && largest_photo.is_none()
+            && msg.voice.is_none()
+            && msg.audio.is_none()
+        {
             return Ok(());
         }
 
         // Effective user text. Caption (if any) substitutes for body when the
-        // message is photo-only with caption; otherwise we use a placeholder
-        // so the conversation log reads coherently.
+        // message has no body of its own; otherwise we pick a placeholder that
+        // names what kind of media arrived so the conversation log reads
+        // coherently.
+        let placeholder = if largest_photo.is_some() {
+            "[photo]"
+        } else if msg.voice.is_some() {
+            "[voice]"
+        } else if msg.audio.is_some() {
+            "[audio]"
+        } else {
+            ""
+        };
         let text = text_str
             .clone()
             .or_else(|| caption_str.clone())
-            .unwrap_or_else(|| "[photo]".to_string());
+            .unwrap_or_else(|| placeholder.to_string());
 
         let is_new = text == "/new" || text.starts_with("/new ") || text.starts_with("/new@");
         if is_new {
@@ -200,10 +216,13 @@ impl Poller {
             return Ok(());
         };
 
-        // Fetch the largest photo to a local cache; fall back to text-only on
-        // error so a transient Telegram failure does not drop the whole turn.
+        // Fetch any inbound media to the local cache. On failure we log and
+        // dispatch with whatever made it through rather than dropping the turn.
         let image_urls: Vec<String> = if let Some(photo) = largest_photo.as_ref() {
-            match self.cache_telegram_photo(photo).await {
+            match self
+                .cache_telegram_file(&photo.file_id, &photo.file_unique_id, "jpg")
+                .await
+            {
                 Ok(path) => vec![format!("file://{}", path.display())],
                 Err(error) => {
                     warn!(
@@ -218,6 +237,48 @@ impl Poller {
             Vec::new()
         };
 
+        // Voice/audio: cache to disk and surface as a text annotation on the
+        // user message. Multimodal LLMs can't consume audio directly; surfacing
+        // the path lets the agent route the file to a transcription tool.
+        let mut audio_annotations: Vec<String> = Vec::new();
+        if let Some(voice) = msg.voice.as_ref() {
+            let unique = voice.file_unique_id.as_deref().unwrap_or(&voice.file_id);
+            match self
+                .cache_telegram_file(&voice.file_id, unique, "ogg")
+                .await
+            {
+                Ok(path) => {
+                    audio_annotations.push(format!("[voice: file://{}]", path.display()))
+                }
+                Err(error) => warn!(
+                    error = %error,
+                    file_id = %voice.file_id,
+                    "failed to cache Telegram voice; dispatching without audio link"
+                ),
+            }
+        }
+        if let Some(audio) = msg.audio.as_ref() {
+            let unique = audio.file_unique_id.as_deref().unwrap_or(&audio.file_id);
+            match self
+                .cache_telegram_file(&audio.file_id, unique, "mp3")
+                .await
+            {
+                Ok(path) => {
+                    audio_annotations.push(format!("[audio: file://{}]", path.display()))
+                }
+                Err(error) => warn!(
+                    error = %error,
+                    file_id = %audio.file_id,
+                    "failed to cache Telegram audio; dispatching without audio link"
+                ),
+            }
+        }
+        let text_with_audio = if audio_annotations.is_empty() {
+            text.clone()
+        } else {
+            format!("{text} {}", audio_annotations.join(" "))
+        };
+
         let synthesized = synthesize_telegram_event(TelegramEventInput {
             agent_pubkey: &self.registration.pubkey,
             project: &project,
@@ -230,7 +291,7 @@ impl Poller {
             message_id: &message_id,
             thread_id: thread_id.as_deref(),
             channel_id: &channel_id,
-            text: &text,
+            text: &text_with_audio,
             image_urls: &image_urls,
         })?;
 
@@ -430,27 +491,31 @@ impl Poller {
         }
     }
 
-    /// Resolve a Telegram photo via `getFile`, download its bytes, and cache
-    /// them under `<base_dir>/data/telegram-media/<file_unique_id>.<ext>`.
+    /// Resolve a Telegram `file_id` via `getFile`, download its bytes, and
+    /// cache them under `<base_dir>/data/telegram-media/<unique_id>.<ext>`.
     /// Returns the absolute path on disk; the caller wraps it in a `file://`
-    /// URL for the agent's multimodal pipeline. Re-uses the cached file when
-    /// the same `file_unique_id` is delivered again (Telegram guarantees
-    /// uniqueness across bots and chats).
-    async fn cache_telegram_photo(&self, photo: &TelegramPhotoSize) -> Result<PathBuf> {
+    /// URL. The extension is taken from the Telegram-reported `file_path` when
+    /// present, falling back to `default_ext` (e.g. "jpg" for photos, "ogg"
+    /// for voice). Re-uses the cached file when the same `unique_id` is
+    /// delivered again.
+    async fn cache_telegram_file(
+        &self,
+        file_id: &str,
+        unique_id: &str,
+        default_ext: &str,
+    ) -> Result<PathBuf> {
         use anyhow::Context;
-        let info = self.client.get_file(&photo.file_id).await?;
-        let file_path = info
-            .file_path
-            .context("getFile returned no file_path for photo")?;
+        let info = self.client.get_file(file_id).await?;
+        let file_path = info.file_path.context("getFile returned no file_path")?;
         let ext = std::path::Path::new(&file_path)
             .extension()
             .and_then(|e| e.to_str())
-            .unwrap_or("jpg");
+            .unwrap_or(default_ext);
         let cache_dir = self.base_dir.join("data").join("telegram-media");
         tokio::fs::create_dir_all(&cache_dir)
             .await
             .with_context(|| format!("create cache dir {}", cache_dir.display()))?;
-        let dest = cache_dir.join(format!("{}.{}", photo.file_unique_id, ext));
+        let dest = cache_dir.join(format!("{unique_id}.{ext}"));
         if !dest.exists() {
             let bytes = self.client.download_file_bytes(&file_path).await?;
             tokio::fs::write(&dest, &bytes)
