@@ -74,6 +74,9 @@ pub(super) async fn dispatch_notification(
             agent_json,
             allow_driver_preempt: false,
             completion_recipient_pubkey,
+            // MCP-driven dispatches synthesize an event from a server
+            // notification, not from an external Nostr author.
+            is_external: false,
             response_tee: None,
         },
     )

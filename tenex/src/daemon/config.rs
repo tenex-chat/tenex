@@ -19,6 +19,10 @@ const DEFAULT_RELAYS: &[&str] = &["wss://relay.tenex.chat"];
 pub struct Config {
     pub whitelisted_pubkeys: Vec<String>,
     pub relays: Vec<String>,
+    /// See `TenexConfigDoc::route_unauthorized_authors` — defaults to
+    /// false. Controls whether external-author kind:1 events that match
+    /// a project's `#a` tag are eligible for firewall + dispatch.
+    pub route_unauthorized_authors: bool,
 }
 
 /// Load `<base_dir>/config.json` and apply daemon-startup invariants.
@@ -44,5 +48,6 @@ pub fn load(base_dir: &Path) -> Result<Config> {
     Ok(Config {
         whitelisted_pubkeys,
         relays,
+        route_unauthorized_authors: doc.route_unauthorized_authors(),
     })
 }

@@ -19,6 +19,7 @@ serde_json = { version = "1", features = ["preserve_order"] }
 anyhow = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tenex-accounting = { path = "../crates/tenex-accounting" }
 tenex-telemetry = { path = "../crates/tenex-telemetry" }
 libc = "0.2"
 shell-words = "1"
@@ -41,3 +42,4 @@ tenex-project = { path = "../crates/tenex-project" }
 tenex-conversations = { path = "../crates/tenex-conversations" }
 tenex-agent-registry = { path = "../crates/tenex-agent-registry" }
 tenex-protocol = { path = "../crates/tenex-protocol" }
+tenex-firewall = { path = "../crates/tenex-firewall" }

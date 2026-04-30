@@ -55,6 +55,7 @@ pub enum RoleKey {
     PromptCompilation,
     Categorization,
     ContextDiscovery,
+    Firewall,
 }
 
 impl RoleKey {
@@ -67,6 +68,7 @@ impl RoleKey {
             Self::PromptCompilation => "promptCompilation",
             Self::Categorization => "categorization",
             Self::ContextDiscovery => "contextDiscovery",
+            Self::Firewall => "firewall",
         }
     }
 
@@ -79,6 +81,7 @@ impl RoleKey {
             Self::PromptCompilation => "Prompt Compilation",
             Self::Categorization => "Categorization",
             Self::ContextDiscovery => "Context Discovery",
+            Self::Firewall => "Firewall",
         }
     }
 
@@ -104,18 +107,22 @@ impl RoleKey {
             Self::ContextDiscovery => {
                 "Plans proactive memory searches — choose a cheap, fast model with reliable JSON output"
             }
+            Self::Firewall => {
+                "Screens kind:1 events from non-whitelisted authors before they reach agents — choose a fast local model (e.g. Ollama)"
+            }
         }
     }
 }
 
 /// Fixed display order — matches `MODEL_ROLES` (`roles.ts:22-29`).
-pub const ROLES: [RoleKey; 6] = [
+pub const ROLES: [RoleKey; 7] = [
     RoleKey::Default,
     RoleKey::Summarization,
     RoleKey::Supervision,
     RoleKey::PromptCompilation,
     RoleKey::Categorization,
     RoleKey::ContextDiscovery,
+    RoleKey::Firewall,
 ];
 
 /// Pure model — no terminal I/O.
@@ -507,6 +514,10 @@ mod tests {
             RoleKey::ContextDiscovery.recommendation(),
             "Plans proactive memory searches — choose a cheap, fast model with reliable JSON output",
         );
+        assert_eq!(
+            RoleKey::Firewall.recommendation(),
+            "Screens kind:1 events from non-whitelisted authors before they reach agents — choose a fast local model (e.g. Ollama)",
+        );
     }
 
     #[test]
@@ -521,6 +532,7 @@ mod tests {
                 "promptCompilation",
                 "categorization",
                 "contextDiscovery",
+                "firewall",
             ]
         );
     }

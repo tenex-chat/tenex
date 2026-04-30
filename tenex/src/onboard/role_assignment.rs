@@ -252,6 +252,7 @@ fn get_role(doc: &LlmsDoc, role: RoleKey) -> Option<&str> {
         RoleKey::PromptCompilation => doc.prompt_compilation(),
         RoleKey::Categorization => doc.categorization(),
         RoleKey::ContextDiscovery => doc.context_discovery(),
+        RoleKey::Firewall => doc.firewall(),
     }
 }
 
@@ -264,6 +265,7 @@ fn set_role(doc: &mut LlmsDoc, role: RoleKey, value: &str) {
         RoleKey::PromptCompilation => doc.set_prompt_compilation(owned),
         RoleKey::Categorization => doc.set_categorization(owned),
         RoleKey::ContextDiscovery => doc.set_context_discovery(owned),
+        RoleKey::Firewall => doc.set_firewall(owned),
     }
 }
 

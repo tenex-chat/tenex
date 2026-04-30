@@ -38,6 +38,7 @@ const ROLE_KEYS: &[&str] = &[
     "promptCompilation",
     "categorization",
     "contextDiscovery",
+    "firewall",
 ];
 
 #[derive(Debug, Clone, Default)]
@@ -130,6 +131,14 @@ impl LlmsDoc {
 
     pub fn set_context_discovery(&mut self, name: Option<String>) {
         self.set_role("contextDiscovery", name);
+    }
+
+    pub fn firewall(&self) -> Option<&str> {
+        self.role("firewall")
+    }
+
+    pub fn set_firewall(&mut self, name: Option<String>) {
+        self.set_role("firewall", name);
     }
 
     fn role(&self, key: &str) -> Option<&str> {
@@ -551,7 +560,7 @@ mod tests {
     #[test]
     fn role_accessors_round_trip() {
         let doc = parse(
-            br#"{"configurations":{},"default":"a","summarization":"b","supervision":"c","promptCompilation":"d","categorization":"e","contextDiscovery":"f"}"#,
+            br#"{"configurations":{},"default":"a","summarization":"b","supervision":"c","promptCompilation":"d","categorization":"e","contextDiscovery":"f","firewall":"g"}"#,
         );
         assert_eq!(doc.default_config(), Some("a"));
         assert_eq!(doc.summarization(), Some("b"));
@@ -559,6 +568,7 @@ mod tests {
         assert_eq!(doc.prompt_compilation(), Some("d"));
         assert_eq!(doc.categorization(), Some("e"));
         assert_eq!(doc.context_discovery(), Some("f"));
+        assert_eq!(doc.firewall(), Some("g"));
     }
 
     #[test]

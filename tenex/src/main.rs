@@ -1,3 +1,4 @@
+mod accounting_cmd;
 mod agent_cmd;
 mod config_cmd;
 mod cron_cmd;
@@ -52,6 +53,9 @@ enum Command {
     /// kind:1 events to the right agent, publish completions.
     Runtime(runtime_cmd::RuntimeArgs),
 
+    /// Inspect and serve the LLM accounting store.
+    Accounting(accounting_cmd::AccountingArgs),
+
     /// Internal foreground whitelist process supervised by `tenex daemon`.
     #[command(name = "whitelist-run", hide = true)]
     WhitelistRun(WhitelistRunArgs),
@@ -91,6 +95,7 @@ async fn main() -> Result<()> {
         Command::Cron(args) => cron_cmd::run(args).await,
         Command::Daemon(args) => daemon::run(args).await,
         Command::Runtime(args) => runtime_cmd::run(args).await,
+        Command::Accounting(args) => accounting_cmd::run(args).await,
         Command::WhitelistRun(args) => {
             if let Some(base_dir) = args.base_dir {
                 std::env::set_var("TENEX_BASE_DIR", base_dir);

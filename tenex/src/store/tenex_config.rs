@@ -152,6 +152,19 @@ impl TenexConfigDoc {
             .insert("blossomServerUrl".into(), Value::String(url));
     }
 
+    /// `routeUnauthorizedAuthors`: when true, kind:1 events from authors
+    /// outside `whitelistedPubkeys` that match a project's `#a` tag are
+    /// run through the firewall LLM and, if accepted, dispatched to an
+    /// agent (with an `is_external` disclosure flag in the envelope).
+    /// When false (default), such events are persisted to the
+    /// conversation store but never dispatched.
+    pub fn route_unauthorized_authors(&self) -> bool {
+        self.raw
+            .get("routeUnauthorizedAuthors")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+    }
+
     /// Read `logging.level`. Source: `TenexConfigSchema:149-153`.
     pub fn logging_level(&self) -> Option<String> {
         self.raw
