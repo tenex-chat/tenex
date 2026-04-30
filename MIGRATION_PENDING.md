@@ -100,8 +100,8 @@ Pre-tool and post-completion contexts are missing fields that the two unimplemen
 - [ ] `suppress-publish` correction action — suppress turn publication
 
 ### 4.5 Behavioral Differences
-- [ ] `ConsecutiveToolsWithoutTodoHeuristic`: TypeScript sets `reEngage: false` (nudge only); Rust sets `re_engage: true` (actually re-engages the agent loop — different semantics)
-- [ ] `WorkerTodoBeforeFileOrShellHeuristic`: TypeScript protects 11 tools (includes `home_read`, `home_write`, `home_edit`, `home_glob`, `home_grep`); Rust protects 6 tools
+- ✅ `ConsecutiveToolsWithoutTodoHeuristic`: TypeScript sets `reEngage: false` (nudge only); Rust sets `re_engage: true` (actually re-engages the agent loop — different semantics)
+- ✅ `WorkerTodoBeforeFileOrShellHeuristic`: TypeScript protects 11 tools (includes `home_read`, `home_write`, `home_edit`, `home_glob`, `home_grep`); Rust protects 6 tools
 
 ### 4.6 Missing Infrastructure
 - 🚫 `HeuristicRegistry` singleton — won't port (Rust's static dispatch of known heuristics makes a runtime registry unnecessary)
