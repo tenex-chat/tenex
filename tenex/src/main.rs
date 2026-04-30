@@ -108,9 +108,12 @@ fn normalize_base_dir_env() {
         return;
     };
     // An empty `TENEX_BASE_DIR=` is documented to fall through to
-    // `$HOME/.tenex` in `resolve_base_dir`. Don't pre-empt that fallback by
-    // rewriting the env to the current directory.
+    // `$HOME/.tenex`. Drop the empty value entirely so every helper that
+    // reads the env var (not just `resolve_base_dir`) lands on the same
+    // default, instead of some treating empty as cwd while others fall
+    // through to `$HOME/.tenex` and the parent/child sockets diverge.
     if value.is_empty() {
+        std::env::remove_var("TENEX_BASE_DIR");
         return;
     }
     let path = PathBuf::from(&value);
