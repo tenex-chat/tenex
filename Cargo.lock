@@ -3146,6 +3146,7 @@ dependencies = [
  "nix",
  "nostr",
  "nostr-sdk",
+ "parking_lot",
  "rusqlite",
  "serde",
  "serde_json",

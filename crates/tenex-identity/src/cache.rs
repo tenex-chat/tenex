@@ -1,7 +1,7 @@
 use std::path::Path;
-use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use parking_lot::Mutex;
 use rusqlite::{params, Connection};
 
 use crate::error::Result;
@@ -50,7 +50,7 @@ impl IdentityCache {
     /// Returns `None` if the pubkey is absent or if the row is stale.
     pub fn get_cached(&self, pubkey: &str) -> Result<Option<IdentityView>> {
         let threshold = now_secs() - CACHE_TTL_SECS;
-        let conn = self.conn.lock().expect("identity cache mutex poisoned");
+        let conn = self.conn.lock();
         let result = conn.query_row(
             "SELECT pubkey, display_name, name, nip05, picture, banner,
                     about, lud16, event_id, created_at, fetched_at
@@ -69,7 +69,7 @@ impl IdentityCache {
     /// Returns the cached row regardless of staleness (used for stale-while-revalidate).
     /// Returns `None` only when the pubkey is absent entirely.
     pub fn get_any(&self, pubkey: &str) -> Result<Option<IdentityView>> {
-        let conn = self.conn.lock().expect("identity cache mutex poisoned");
+        let conn = self.conn.lock();
         let result = conn.query_row(
             "SELECT pubkey, display_name, name, nip05, picture, banner,
                     about, lud16, event_id, created_at, fetched_at
@@ -88,7 +88,7 @@ impl IdentityCache {
     /// Upsert an identity row. `view.fetched_at` is used as-is; callers are
     /// responsible for setting it to the current time when inserting fresh data.
     pub fn upsert(&self, view: &IdentityView) -> Result<()> {
-        let conn = self.conn.lock().expect("identity cache mutex poisoned");
+        let conn = self.conn.lock();
         conn.execute(
             "INSERT INTO identities
                 (pubkey, display_name, name, nip05, picture, banner,
@@ -124,7 +124,7 @@ impl IdentityCache {
 
     /// Returns the total number of cached rows.
     pub fn count(&self) -> Result<i64> {
-        let conn = self.conn.lock().expect("identity cache mutex poisoned");
+        let conn = self.conn.lock();
         let n: i64 = conn.query_row("SELECT COUNT(*) FROM identities", [], |r| r.get(0))?;
         Ok(n)
     }
