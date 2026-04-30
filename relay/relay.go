@@ -458,7 +458,9 @@ func instrumentQueryEvents(
 		subID := ""
 		func() {
 			defer func() {
-				_ = recover()
+				if r := recover(); r != nil {
+					log.Printf("[relay] panic recovering subscription id (ip=%s): %v", ip, r)
+				}
 			}()
 			subID = khatru.GetSubscriptionID(ctx)
 		}()
