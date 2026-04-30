@@ -54,7 +54,7 @@ Organized by functional area. Items marked ✅ are already at parity; items mark
 - ✅ **Fragment 34 — Telegram Delivery Rules**: `[[telegram_voice:…]]` marker syntax documentation
 
 ### 2.2 Missing Dynamic Context Injection
-- [ ] **Proactive RAG Context** — `ContextDiscoveryService`-powered semantic search injection (score ≥ 0.65, max 5 snippets per turn); mentioned in spec but not implemented in Rust code
+- ✅ **Proactive RAG Context** — RAG search at score ≥ 0.65, up to 5 snippets injected into the system prompt each turn (implemented in `tenex-agent/src/main.rs`); LLM query planner and reranker from `ContextDiscoveryService` are not ported
 - [ ] **Conversation Reminders** — active/recent conversation context overlay (streaming conversations, delegation parent refs, human-readable durations)
 - [ ] **Effective Instructions (Lesson Synthesis)** — `PromptCompilerService` merges base instructions with lessons; Rust intentionally uses a different approach (`+INDEX.md` file), but LLM-synthesized multi-lesson synthesis is absent
 
@@ -129,10 +129,10 @@ Pre-tool and post-completion contexts are missing fields that the two unimplemen
 ## 6. RAG Integration (`tenex-rag`)
 
 ### 6.1 Search Capability Gaps
-- [ ] Free-form collection names in `rag_search`: TypeScript accepts any collection name or provider name; Rust hardcodes `conversations`, `project_{id}`, `agent_{pubkey}`
+- 🚫 Free-form collection names in `rag_search` — won't port (Rust's fixed collection names are the intentional design)
 - ✅ `prompt` parameter in `rag_search` — LLM-focused extraction from results
 - [ ] Scope-aware search (global / project / personal) via `RAGCollectionRegistry`
-- [ ] Multiple specialized search providers: `ConversationSearchProvider`, `LessonSearchProvider`, `GenericCollectionSearchProvider`
+- 🚫 Multiple specialized search providers (`ConversationSearchProvider`, `LessonSearchProvider`, `GenericCollectionSearchProvider`) — won't port
 - 🚫 `UnifiedSearchService` — won't port (Rust `rag_search` is the single search surface; provider multiplexing not needed)
 - [ ] `ContextDiscoveryService` — proactive per-turn context discovery with optional LLM query planner and LLM reranker; emits pointer-only reminder hints
 
@@ -197,7 +197,7 @@ Rust (`tenex-llm-config`) is a credential resolver only; all provider protocol w
 ### 9.2 Request Pipeline
 - [ ] **Message sanitizer middleware** — strips trailing assistant messages and empty-content messages before every API call to prevent provider rejections; Rust context projection has no equivalent validation
 - [ ] **Multimodal preparation** — URL-fetch + base64 encoding of images, Ollama vision model detection, provider-aware image format normalization; Rust has no image handling
-- [ ] **Prompt cache breakpoint emission** — TypeScript detects `cachedInputTokens` / `cacheReadTokens` to anchor durable reminder overlays; Rust context types carry `BreakpointHint` structs but nothing emits them
+- ✅ **Prompt cache breakpoint emission** — `BreakpointHint` emitted when `cached_input_tokens > 0`; `cache_creation_input_tokens` recorded as `written_tokens` in `CacheObservation`
 
 ### 9.3 Instruction Synthesis
 - [ ] **`PromptCompilerService`** — LLM-synthesized agent instructions: compiles base instructions + lessons + lesson comments into compiled instructions; persists scoped disk cache at `~/.tenex/agents/prompts/<project-dTag>/`; publishes updated kind:0 profile after compilation. Rust agents use static instructions only.
