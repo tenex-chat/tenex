@@ -1,7 +1,5 @@
-use std::sync::{
-    atomic::{AtomicU64, Ordering},
-    Arc, Mutex,
-};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use crate::emit::EmitState;
 use crate::runtime_state::RuntimeStateHandle;
@@ -13,6 +11,17 @@ use tenex_supervision::{
     supervisor::Supervisor,
     types::{AgentCategory, TodoEntry, TodoStatus as SupTodoStatus},
 };
+use tokio::sync::mpsc;
+
+/// Maximum time a streaming delta may sit in the buffer before being published.
+/// Sentence-terminating punctuation flushes earlier; this caps latency for
+/// agents that emit long sentences or no terminators at all.
+const FLUSH_INTERVAL: Duration = Duration::from_millis(250);
+
+enum DeltaSignal {
+    Delta(String),
+    EndTurn,
+}
 
 fn to_supervision_entries(items: &[TodoItem]) -> Vec<TodoEntry> {
     items
@@ -37,8 +46,9 @@ pub struct EmitHook {
     agent_category: Option<AgentCategory>,
     /// Accumulates text for the current streaming turn; cleared after each turn.
     accumulated_text: Arc<Mutex<String>>,
-    /// Monotonic counter reset to 0 at the start of each new LLM turn.
-    sequence: Arc<AtomicU64>,
+    /// Sender into the background buffer task that batches deltas into
+    /// sentence- or 250ms-bounded chunks before publishing.
+    delta_tx: mpsc::UnboundedSender<DeltaSignal>,
     /// Holds the completed text and RAL for the most recent turn, not yet emitted.
     /// Intermediate turns are emitted when the next turn starts; the final turn
     /// is emitted by main.rs (with usage from FinalResponse).
@@ -54,13 +64,15 @@ impl EmitHook {
         agent_category: Option<AgentCategory>,
         runtime_state: Option<RuntimeStateHandle>,
     ) -> Self {
+        let (delta_tx, delta_rx) = mpsc::unbounded_channel();
+        tokio::spawn(run_delta_buffer(state.clone(), delta_rx));
         Self {
             state,
             supervisor,
             todos,
             agent_category,
             accumulated_text: Arc::new(Mutex::new(String::new())),
-            sequence: Arc::new(AtomicU64::new(0)),
+            delta_tx,
             pending: Arc::new(Mutex::new(None)),
             runtime_state,
         }
@@ -79,27 +91,14 @@ impl<M: CompletionModel> PromptHook<M> for EmitHook {
         text_delta: &str,
         _aggregated_text: &str,
     ) -> impl std::future::Future<Output = HookAction> + Send {
-        let seq = self.sequence.fetch_add(1, Ordering::Relaxed) + 1;
         {
             let mut acc = self.accumulated_text.lock().unwrap();
             acc.push_str(text_delta);
         }
-        let delta = text_delta.to_string();
-        let ctx = {
-            let meta = self.state.meta.lock().unwrap();
-            self.state.build_ctx(meta.ral)
-        };
-        let channel = self.state.channel.clone();
-        async move {
-            let intent = StreamTextDeltaIntent {
-                delta,
-                sequence: seq,
-            };
-            if let Err(e) = channel.send(Intent::StreamTextDelta(intent), &ctx).await {
-                eprintln!("[tenex-agent] warn: stream delta emit failed: {e}");
-            }
-            HookAction::cont()
-        }
+        let _ = self
+            .delta_tx
+            .send(DeltaSignal::Delta(text_delta.to_string()));
+        async { HookAction::cont() }
     }
 
     fn on_completion_call(
@@ -122,7 +121,7 @@ impl<M: CompletionModel> PromptHook<M> for EmitHook {
         _response: &<M as CompletionModel>::StreamingResponse,
     ) -> impl std::future::Future<Output = HookAction> + Send {
         let content = std::mem::take(&mut *self.accumulated_text.lock().unwrap());
-        self.sequence.store(0, Ordering::Relaxed);
+        let _ = self.delta_tx.send(DeltaSignal::EndTurn);
 
         let ral = {
             let mut meta = self.state.meta.lock().unwrap();
@@ -218,5 +217,78 @@ impl<M: CompletionModel> PromptHook<M> for EmitHook {
             }
             ToolCallHookAction::cont()
         }
+    }
+}
+
+/// Background task that batches per-token deltas into sentence- or
+/// 250ms-bounded chunks before publishing them as `StreamTextDeltaIntent`
+/// events. Owned 1:1 with an `EmitHook`; exits when all hook clones drop.
+async fn run_delta_buffer(state: Arc<EmitState>, mut rx: mpsc::UnboundedReceiver<DeltaSignal>) {
+    let mut buf = String::new();
+    let mut started: Option<Instant> = None;
+    let mut sequence: u64 = 0;
+
+    loop {
+        let next = match started {
+            Some(start) => {
+                let remaining = FLUSH_INTERVAL.saturating_sub(start.elapsed());
+                match tokio::time::timeout(remaining, rx.recv()).await {
+                    Ok(opt) => opt,
+                    Err(_) => {
+                        sequence += 1;
+                        flush_chunk(&mut buf, sequence, &state).await;
+                        started = None;
+                        continue;
+                    }
+                }
+            }
+            None => rx.recv().await,
+        };
+
+        match next {
+            Some(DeltaSignal::Delta(d)) => {
+                if started.is_none() {
+                    started = Some(Instant::now());
+                }
+                let has_terminator = d.chars().any(|c| matches!(c, '.' | '!' | '?' | '\n'));
+                buf.push_str(&d);
+                if has_terminator {
+                    sequence += 1;
+                    flush_chunk(&mut buf, sequence, &state).await;
+                    started = None;
+                }
+            }
+            Some(DeltaSignal::EndTurn) => {
+                if !buf.is_empty() {
+                    sequence += 1;
+                    flush_chunk(&mut buf, sequence, &state).await;
+                }
+                started = None;
+                sequence = 0;
+            }
+            None => {
+                if !buf.is_empty() {
+                    sequence += 1;
+                    flush_chunk(&mut buf, sequence, &state).await;
+                }
+                return;
+            }
+        }
+    }
+}
+
+async fn flush_chunk(buf: &mut String, sequence: u64, state: &Arc<EmitState>) {
+    let delta = std::mem::take(buf);
+    let ctx = {
+        let meta = state.meta.lock().unwrap();
+        state.build_ctx(meta.ral)
+    };
+    let intent = StreamTextDeltaIntent { delta, sequence };
+    if let Err(e) = state
+        .channel
+        .send(Intent::StreamTextDelta(intent), &ctx)
+        .await
+    {
+        eprintln!("[tenex-agent] warn: stream delta emit failed: {e}");
     }
 }
