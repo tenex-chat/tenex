@@ -75,17 +75,10 @@ pub enum Request {
 }
 
 // ── Responses ─────────────────────────────────────────────────────────────────
-
-#[derive(Debug, Serialize)]
-pub struct AckResponse {
-    pub ok: bool,
-}
-
-#[derive(Debug, Serialize)]
-pub struct ErrorResponse {
-    pub ok: bool,
-    pub error: String,
-}
+//
+// Ack (`{"ok": true}`) and Error (`{"ok": false, "error": "..."}`) responses
+// are constructed inline via `serde_json::json!` rather than from named
+// structs — they're trivial and always succeed without going through serde.
 
 /// A fully resolved standard (non-meta) LLM config.
 ///

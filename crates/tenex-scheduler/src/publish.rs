@@ -57,7 +57,14 @@ impl Publisher {
         tags.push(parse_tag(&["scheduled-task", &task.id])?);
 
         if task.is_oneoff() {
-            let iso = task.execute_at.as_deref().unwrap_or(&task.schedule);
+            // Storage validation guarantees one-off tasks carry executeAt;
+            // anything else here is a programmer error in the load path.
+            let iso = task.execute_at.as_deref().with_context(|| {
+                format!(
+                    "one-off task '{}' missing executeAt at publish time",
+                    task.id
+                )
+            })?;
             tags.push(parse_tag(&["scheduled-task-execute-at", iso])?);
         } else {
             tags.push(parse_tag(&["scheduled-task-cron", &task.schedule])?);
