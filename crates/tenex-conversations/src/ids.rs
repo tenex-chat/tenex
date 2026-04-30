@@ -3,8 +3,8 @@
 //! Mirrors the TS rules in `src/types/project-ids.ts` (`tryExtractDTagFromAddress`)
 //! and `src/services/scheduling/storage.ts` (`normalizeProjectIdForRuntime`):
 //!
-//! - If the input matches `31933:<64-lowercase-hex-pubkey>:<dTag>`, return
-//!   everything after the second colon.
+//! - If the input matches `31933:<64-hex-pubkey>:<dTag>`, return everything
+//!   after the second colon.
 //! - Otherwise, return the input unchanged (treated as a bare dTag).
 
 use crate::error::{ConversationsError, Result};
@@ -19,11 +19,7 @@ fn try_extract_dtag(value: &str) -> Option<&str> {
     if kind != PROJECT_ADDRESS_KIND {
         return None;
     }
-    if pubkey.len() != 64
-        || !pubkey
-            .bytes()
-            .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
-    {
+    if pubkey.len() != 64 || !pubkey.bytes().all(|b| b.is_ascii_hexdigit()) {
         return None;
     }
     Some(d_tag)
@@ -80,10 +76,10 @@ mod tests {
     }
 
     #[test]
-    fn uppercase_hex_returns_input_as_dtag() {
+    fn uppercase_hex_coordinate_extracts_dtag() {
         let pk = "A".repeat(64);
         let coord = format!("31933:{pk}:my-project");
-        assert_eq!(normalize_project_id(&coord).unwrap(), coord);
+        assert_eq!(normalize_project_id(&coord).unwrap(), "my-project");
     }
 
     #[test]
