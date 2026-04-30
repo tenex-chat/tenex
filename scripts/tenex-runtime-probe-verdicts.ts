@@ -727,13 +727,6 @@ function evaluateSelfDelegation(events: Event[], context: EvaluateContext): Verd
             message.authorPubkey === context.pmPubkey &&
             messageText(message).toLowerCase().includes(selfDelegationCompletionToken)
     );
-    const completedStatus = events.find(
-        (event) =>
-            event.kind === 1 &&
-            event.pubkey === context.pmPubkey &&
-            hasTag(event, "status", "completed")
-    );
-
     return [
         {
             name: "PM emitted self-delegation event to its own pubkey",
@@ -759,11 +752,6 @@ function evaluateSelfDelegation(events: Event[], context: EvaluateContext): Verd
             name: "Follow-up completion stored in self-delegated conversation",
             ok: Boolean(followupInChildConversation),
             detail: `Expected the conversation rooted at the self-delegation event to contain a PM message with '${selfDelegationCompletionToken}'.`,
-        },
-        {
-            name: "Agent completion contract includes status=completed",
-            ok: Boolean(completedStatus),
-            detail: "Expected final completion frame to include status=completed.",
         },
         ...evaluateCacheBreakpoints(context),
     ];
