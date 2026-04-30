@@ -3121,6 +3121,7 @@ dependencies = [
  "libc",
  "nostr",
  "nostr-sdk",
+ "parking_lot",
  "rusqlite",
  "serde",
  "serde_json",
@@ -3244,6 +3245,7 @@ dependencies = [
  "async-trait",
  "dirs-next",
  "hex",
+ "parking_lot",
  "reqwest 0.12.28",
  "rusqlite",
  "serde",
@@ -3253,6 +3255,7 @@ dependencies = [
  "tenex-llm-config",
  "thiserror 2.0.18",
  "tokio",
+ "tracing",
 ]
 
 [[package]]

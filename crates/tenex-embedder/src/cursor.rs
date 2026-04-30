@@ -1,11 +1,18 @@
-//! Walk-forward cursor: how far we've scanned the relay, in seconds
-//! since epoch. One row per `(relay_url, scope_a_tags_hash)` so changing
-//! the project scope starts a fresh walk.
+//! Walk-backward cursor: the oldest `created_at` (in Unix seconds)
+//! we've reached on each relay during a backfill walk. One row per
+//! `(relay_url, scope_a_tags_hash)` so a scope change starts a fresh
+//! walk rather than skipping events that would now match.
+//!
+//! The persisted value is monotonically *decreasing* across writes —
+//! every page successfully fetched moves the boundary further back in
+//! time, so on conflict we keep the smaller of the two values. This
+//! makes restarts idempotent: a crash, restart, or transient relay
+//! failure resumes from where we last persisted, not from `now`.
 
 use std::path::Path;
-use std::sync::Mutex;
 
 use anyhow::{Context, Result};
+use parking_lot::Mutex;
 use rusqlite::{params, Connection, OptionalExtension};
 use sha2::{Digest, Sha256};
 
@@ -37,7 +44,7 @@ impl CursorStore {
     }
 
     pub fn get(&self, relay_url: &str, scope_hash: &str) -> Result<Option<i64>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         let row = conn
             .query_row(
                 "SELECT since_secs FROM relay_cursor WHERE relay_url = ?1 AND scope_hash = ?2",
@@ -50,12 +57,12 @@ impl CursorStore {
     }
 
     pub fn put(&self, relay_url: &str, scope_hash: &str, since_secs: i64) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         conn.execute(
             "INSERT INTO relay_cursor(relay_url, scope_hash, since_secs)
              VALUES (?1, ?2, ?3)
              ON CONFLICT(relay_url, scope_hash) DO UPDATE SET
-                 since_secs = MAX(since_secs, excluded.since_secs)",
+                 since_secs = MIN(since_secs, excluded.since_secs)",
             params![relay_url, scope_hash, since_secs],
         )
         .context("upsert relay_cursor")?;
@@ -63,7 +70,7 @@ impl CursorStore {
     }
 
     pub fn reset(&self, relay_url: &str, scope_hash: &str) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         conn.execute(
             "DELETE FROM relay_cursor WHERE relay_url = ?1 AND scope_hash = ?2",
             params![relay_url, scope_hash],
@@ -112,11 +119,24 @@ mod tests {
     }
 
     #[test]
-    fn put_takes_max_when_lower_arrives() {
+    fn put_takes_min_when_lower_arrives() {
+        // Walking backward, every page lowers the boundary. The cursor
+        // must keep the smaller (older) value on conflict.
         let (s, _d) = open_temp();
         s.put("wss://r", "h", 200).unwrap();
         s.put("wss://r", "h", 100).unwrap();
-        assert_eq!(s.get("wss://r", "h").unwrap(), Some(200));
+        assert_eq!(s.get("wss://r", "h").unwrap(), Some(100));
+    }
+
+    #[test]
+    fn put_ignores_higher_value_after_lower_persisted() {
+        // A late "we got back to 500" arriving after we already
+        // persisted "we got back to 100" must not move the cursor
+        // forward in time.
+        let (s, _d) = open_temp();
+        s.put("wss://r", "h", 100).unwrap();
+        s.put("wss://r", "h", 500).unwrap();
+        assert_eq!(s.get("wss://r", "h").unwrap(), Some(100));
     }
 
     #[test]
