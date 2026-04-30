@@ -149,8 +149,11 @@ fn fetch_local_image(
 }
 
 /// Validate a `file://` URL's path: must be absolute, must not contain `..`
-/// components, and must start with one of the allowed prefixes. Returns the
-/// path on success or an explanatory message on rejection.
+/// components, must canonicalize successfully, and the canonical form must
+/// start with one of the (already canonical) allowed prefixes. Canonicalizing
+/// resolves symlinks and equivalent absolute forms so that two paths pointing
+/// at the same physical file always normalize the same way regardless of the
+/// caller's cwd.
 fn validate_local_path(path: &str, allowed_prefixes: &[PathBuf]) -> Result<PathBuf, &'static str> {
     let p = Path::new(path);
     if !p.is_absolute() {
@@ -161,10 +164,14 @@ fn validate_local_path(path: &str, allowed_prefixes: &[PathBuf]) -> Result<PathB
     {
         return Err("path contains `..`");
     }
-    if !allowed_prefixes.iter().any(|prefix| p.starts_with(prefix)) {
+    let canon = std::fs::canonicalize(p).map_err(|_| "canonicalize failed")?;
+    if !allowed_prefixes
+        .iter()
+        .any(|prefix| canon.starts_with(prefix))
+    {
         return Err("path is outside the allowed file:// prefixes");
     }
-    Ok(p.to_path_buf())
+    Ok(canon)
 }
 
 async fn fetch_http_image(
