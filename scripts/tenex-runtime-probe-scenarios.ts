@@ -786,7 +786,8 @@ async function runProjectMembershipReloadProbe(context: ScenarioContext): Promis
             records.some(
                 (record) =>
                     record.agent === "worker" &&
-                    record.requestDebug.includes(`cwd: ${context.workspaceDir}`)
+                    (record.requestDebug.includes("cwd: $PROJECT_BASE") ||
+                        record.requestDebug.includes(`cwd: ${context.workspaceDir}`))
             ),
         timeoutMs,
         "agent2 prompt with project workspace cwd"

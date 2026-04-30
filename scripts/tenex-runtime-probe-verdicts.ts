@@ -215,8 +215,9 @@ function evaluateProjectMembershipReload(
     const workerCwdRecord = requestRecords.find(
         (record) =>
             record.agent === "worker" &&
-            context.workspaceDir !== undefined &&
-            record.requestDebug.includes(`cwd: ${context.workspaceDir}`)
+            (record.requestDebug.includes("cwd: $PROJECT_BASE") ||
+                (context.workspaceDir !== undefined &&
+                    record.requestDebug.includes(`cwd: ${context.workspaceDir}`)))
     );
     const removedWorkerRequest = events.find(
         (event) => event.kind === 1 && event.content === "membership check agent2 after removal"

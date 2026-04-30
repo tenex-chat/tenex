@@ -203,9 +203,9 @@ pub fn lookup_dirs(ctx: &SkillLookupCtx) -> Vec<(PathBuf, SkillScope)> {
     if builtin.exists() {
         dirs.push((builtin, SkillScope::BuiltIn));
     } else {
-        // Dev fallback: source tree relative to this crate's manifest directory
+        // Dev fallback: bundled skill definitions shipped with this crate
         let dev_builtin =
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../src/skills/built-in");
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("skills/built-in");
         if dev_builtin.exists() {
             dirs.push((dev_builtin, SkillScope::BuiltIn));
         }
