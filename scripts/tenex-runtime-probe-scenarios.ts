@@ -11,6 +11,11 @@ import {
     runShellKillDuplicateProbe,
     shellKillDuplicateMockScenario,
 } from "./tenex-runtime-probe-shell-scenario";
+import {
+    runTodoStopProbe,
+    todoStopMockScenario,
+    todoStopPmInstructions,
+} from "./tenex-runtime-probe-todo-stop";
 
 export const availableScenarios = [
     "delegation-basic",
@@ -27,6 +32,7 @@ export const availableScenarios = [
     "root-agents-md",
     "nested-agents-md",
     "conversation-reminders",
+    "todo-stop",
 ] as const;
 
 export type ScenarioName = (typeof availableScenarios)[number];
@@ -165,6 +171,9 @@ export function scenarioProjectDtag(name: ScenarioName): string {
     if (name === "conversation-reminders") {
         return "probe-conversation-reminders";
     }
+    if (name === "todo-stop") {
+        return "probe-todo-stop";
+    }
     return "probe-fs-read-adjustment";
 }
 
@@ -207,6 +216,9 @@ export function pmInstructions(name: ScenarioName): string {
     }
     if (name === "conversation-reminders") {
         return "This scenario verifies that active project conversations appear as context. When asked to list active conversations, confirm what you observe by responding: conversation reminders observed.";
+    }
+    if (name === "todo-stop") {
+        return todoStopPmInstructions;
     }
     return "Use fs_read one file at a time. If the user corrects the requested total, follow the latest total before finishing.";
 }
@@ -501,6 +513,10 @@ export function mockScenario(name: ScenarioName): unknown {
         };
     }
 
+    if (name === "todo-stop") {
+        return todoStopMockScenario();
+    }
+
     const mockDelayMs = Number(process.env.TENEX_PROBE_MOCK_DELAY_MS ?? 750);
     return {
         defaultDelayMs: mockDelayMs,
@@ -556,6 +572,8 @@ export async function runScenario(name: ScenarioName, context: ScenarioContext):
         await runNestedAgentsMdProbe(context);
     } else if (name === "conversation-reminders") {
         await runConversationRemindersProbe(context);
+    } else if (name === "todo-stop") {
+        await runTodoStopProbe(context);
     } else {
         await runFsReadAdjustmentProbe(context);
     }
