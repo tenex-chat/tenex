@@ -48,7 +48,7 @@ Organized by functional area. Items marked ✅ are already at parity; items mark
 - [ ] **Fragment 05 — Delegation Chain**: multi-agent workflow hierarchy visualization for active turn
 - [ ] **Fragment 18 — No-Response Guidance**: Telegram silent-completion mode instructions
 - 🚫 **Fragment 20 — Voice Mode**: TTS-specific formatting guidance — won't port (voice mode is not implemented in the Rust stack)
-- [ ] **Fragment 22 — Scheduled Tasks**: display agent's own scheduled tasks with human-readable cron expressions
+- ✅ **Fragment 22 — Scheduled Tasks**: display agent's own scheduled tasks with human-readable cron expressions
 - [ ] **Fragment 28 — Agent-Directed Monitoring**: guidance on monitoring delegated work and using `delegate_followup` for mid-flight corrections (spec references but is not implemented in Rust code)
 - ✅ **Fragment 33 — Telegram Chat Context**: chat title, topic title, admin list, member count, recently seen participants (requires `TelegramChatContextService`)
 - ✅ **Fragment 34 — Telegram Delivery Rules**: `[[telegram_voice:…]]` marker syntax documentation

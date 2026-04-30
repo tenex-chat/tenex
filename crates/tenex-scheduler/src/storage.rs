@@ -104,3 +104,16 @@ pub fn all_tasks() -> Result<Vec<(String, ScheduledTask)>> {
     }
     Ok(result)
 }
+
+/// All tasks for a given agent pubkey across all projects.
+pub fn tasks_for_agent(agent_pubkey: &str) -> Result<Vec<ScheduledTask>> {
+    let mut result = Vec::new();
+    for d_tag in list_project_dtags()? {
+        for task in load_tasks(&d_tag)? {
+            if task.from_pubkey.as_deref() == Some(agent_pubkey) {
+                result.push(task);
+            }
+        }
+    }
+    Ok(result)
+}
