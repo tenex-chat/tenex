@@ -13,6 +13,7 @@ use std::collections::HashMap;
 
 use crate::strategies::{ProjectionContext, Strategy};
 use crate::types::{Message, ToolDef};
+use async_trait::async_trait;
 
 const NAME: &str = "tool_result_decay";
 
@@ -23,12 +24,13 @@ const KEEP_RECENT_RESULTS: usize = 3;
 #[derive(Default)]
 pub struct ToolResultDecayStrategy;
 
+#[async_trait]
 impl Strategy for ToolResultDecayStrategy {
     fn name(&self) -> &'static str {
         NAME
     }
 
-    fn apply(&self, ctx: &mut ProjectionContext<'_>) -> anyhow::Result<()> {
+    async fn apply(&self, ctx: &mut ProjectionContext<'_>) -> anyhow::Result<()> {
         let preserve = build_preserve_lookup(ctx.tool_defs);
 
         // First pass: identify decay-eligible positions, oldest-first.

@@ -22,8 +22,8 @@ mod turn;
 pub mod types;
 
 pub use strategies::{
-    default_stack, CompactionToolStrategy, ProjectionContext, RemindersStrategy, Strategy,
-    ToolResultDecayStrategy,
+    default_stack, CompactionSummarizer, CompactionToolStrategy, ProjectionContext,
+    RemindersStrategy, Strategy, ToolResultDecayStrategy,
 };
 pub use types::{
     BreakpointHint, BreakpointKind, CacheObservation, Message, ModelProfile, Projection,
@@ -39,13 +39,17 @@ use tenex_conversations::ConversationStore;
 /// `tool_defs` is consulted by the decay strategy to resolve the
 /// `preserve_results` flag for tool results in history; it is not
 /// rendered.
-pub fn project(
+/// `summarizer` is an optional LLM-backed compaction summarizer. When
+/// provided, the compaction strategy generates a semantic 8-section
+/// summary instead of a deterministic placeholder.
+pub async fn project(
     store: &ConversationStore,
     conversation_id: &str,
     agent_pubkey: &str,
     system_prompt: &str,
     model_profile: &ModelProfile,
     tool_defs: &[ToolDef],
+    summarizer: Option<std::sync::Arc<dyn CompactionSummarizer>>,
 ) -> anyhow::Result<Projection> {
     tracing::trace!(
         conversation_id,
@@ -72,8 +76,8 @@ pub fn project(
         agent_todos,
     };
 
-    for strat in default_stack() {
-        strat.apply(&mut ctx)?;
+    for strat in default_stack(summarizer) {
+        strat.apply(&mut ctx).await?;
     }
 
     let cache_breakpoints = compute_breakpoints(&ctx.messages, model_profile);
