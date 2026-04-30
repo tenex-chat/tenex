@@ -29,18 +29,10 @@
 
 use std::io::{self, Write};
 
-use crossterm::cursor::{MoveToColumn, MoveUp};
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use crossterm::style::{Attribute, Color, Print, ResetColor, SetAttribute, SetForegroundColor};
-use crossterm::terminal::{Clear, ClearType};
-use crossterm::{queue, QueueableCommand};
+use super::prompt_shared::*;
 use indexmap::IndexMap;
 
 use crate::tui::glyphs;
-
-// Palette aliases sourced from the shared theme module.
-const AMBER: Color = crate::tui::theme::INQUIRER_AMBER_CROSSTERM;
-const ANSI214_ACCENT: Color = crate::tui::theme::DISPLAY_ACCENT_CROSSTERM;
 
 /// Width of the rule rendered between variant rows and the action rows.
 /// Source: `variant-list-prompt.ts:133` (40 `─` chars).
@@ -109,7 +101,7 @@ pub enum VariantInput {
 
 impl VariantInput {
     pub fn from_key_event(ev: KeyEvent) -> Self {
-        if ev.modifiers.contains(KeyModifiers::CONTROL) && matches!(ev.code, KeyCode::Char('c')) {
+        if is_ctrl_c(&ev) {
             return VariantInput::CtrlC;
         }
         match ev.code {

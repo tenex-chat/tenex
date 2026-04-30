@@ -27,18 +27,10 @@
 
 use std::io::{self, Write};
 
-use crossterm::cursor::{MoveToColumn, MoveUp};
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
-use crossterm::style::{Attribute, Color, Print, ResetColor, SetAttribute, SetForegroundColor};
-use crossterm::terminal::{self, Clear, ClearType};
-use crossterm::{queue, QueueableCommand};
+use super::prompt_shared::*;
 
 use super::raw_mode::RawMode;
 use crate::tui::glyphs;
-
-// Palette aliases sourced from the shared theme module.
-const AMBER: Color = crate::tui::theme::INQUIRER_AMBER_CROSSTERM;
-const ANSI214_ACCENT: Color = crate::tui::theme::DISPLAY_ACCENT_CROSSTERM;
 
 /// Width of the rule rendered between the Done row and the agent list.
 /// Source: `AgentManager.ts:142` (52 `─` chars).
@@ -88,7 +80,7 @@ pub enum AgentInput {
 
 impl AgentInput {
     pub fn from_key_event(ev: KeyEvent) -> Self {
-        if ev.modifiers.contains(KeyModifiers::CONTROL) && matches!(ev.code, KeyCode::Char('c')) {
+        if is_ctrl_c(&ev) {
             return AgentInput::CtrlC;
         }
         match ev.code {

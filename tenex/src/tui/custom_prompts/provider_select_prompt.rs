@@ -39,11 +39,7 @@
 
 use std::io::{self, Write};
 
-use crossterm::cursor::{MoveToColumn, MoveUp};
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
-use crossterm::style::{Attribute, Color, Print, ResetColor, SetAttribute, SetForegroundColor};
-use crossterm::terminal::{Clear, ClearType};
-use crossterm::{queue, QueueableCommand};
+use super::prompt_shared::*;
 use indexmap::IndexMap;
 
 use super::raw_mode::RawMode;
@@ -166,7 +162,7 @@ impl InputKey {
     /// Translate a crossterm `KeyEvent` into the prompt's input vocabulary.
     /// Unknown keys map to [`InputKey::Other`] which the state machine ignores.
     pub fn from_key_event(ev: KeyEvent) -> Self {
-        if ev.modifiers.contains(KeyModifiers::CONTROL) && matches!(ev.code, KeyCode::Char('c')) {
+        if is_ctrl_c(&ev) {
             return InputKey::CtrlC;
         }
         match ev.code {
@@ -525,13 +521,7 @@ fn format_key_info(value: &ApiKeyValue) -> String {
 // I/O loop
 // =========================================================================
 
-// Palette aliases sourced from the shared theme module.
-const AMBER: Color = crate::tui::theme::INQUIRER_AMBER_CROSSTERM;
-const ANSI214_ACCENT: Color = crate::tui::theme::DISPLAY_ACCENT_CROSSTERM;
-const ANSI114_SELECTED: Color = crate::tui::theme::DISPLAY_SELECTED_CROSSTERM;
-
 /// Result of running [`provider_select_prompt`]. The screen layer pattern-
-/// matches: `Done` persists, `Cancelled` aborts, `NeedKey` opens a separate
 /// password prompt, applies the entered key, then re-enters this prompt
 /// with the augmented `state`.
 #[derive(Debug, Clone)]

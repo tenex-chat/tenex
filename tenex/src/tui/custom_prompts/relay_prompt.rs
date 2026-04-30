@@ -16,11 +16,7 @@
 
 use std::io::{self, Write};
 
-use crossterm::cursor::{MoveToColumn, MoveUp};
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
-use crossterm::style::{Attribute, Color, Print, ResetColor, SetAttribute, SetForegroundColor};
-use crossterm::terminal::{Clear, ClearType};
-use crossterm::{queue, QueueableCommand};
+use super::prompt_shared::*;
 
 use super::raw_mode::RawMode;
 use crate::tui::glyphs;
@@ -30,7 +26,6 @@ const DEFAULT_INPUT_PLACEHOLDER: &str = "Type a relay URL";
 
 // Truecolor `#FFC107` from the shared theme module — single source of
 // truth for the inquirer-amber palette across all bespoke prompts.
-const AMBER: Color = crate::tui::theme::INQUIRER_AMBER_CROSSTERM;
 
 /// One row in the prompt: either a fixed choice with a `value`, or the
 /// free-text `Input` row.
@@ -126,7 +121,7 @@ impl RelayState {
         let last_idx = items.len().saturating_sub(1);
 
         match key.code {
-            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            KeyCode::Char('c') if is_ctrl_c(&key) => {
                 return KeyOutcome::Cancel;
             }
             KeyCode::Esc => return KeyOutcome::Cancel,

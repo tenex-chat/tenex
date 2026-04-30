@@ -31,18 +31,10 @@
 use std::collections::HashMap;
 use std::io::{self, Write};
 
-use crossterm::cursor::{MoveToColumn, MoveUp};
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
-use crossterm::style::{Attribute, Color, Print, ResetColor, SetAttribute, SetForegroundColor};
-use crossterm::terminal::{Clear, ClearType};
-use crossterm::{queue, QueueableCommand};
+use super::prompt_shared::*;
 
 use super::raw_mode::RawMode;
 use crate::tui::glyphs;
-
-// Palette aliases sourced from the shared theme module.
-const AMBER: Color = crate::tui::theme::INQUIRER_AMBER_CROSSTERM;
-const ANSI214_ACCENT: Color = crate::tui::theme::DISPLAY_ACCENT_CROSSTERM;
 
 /// Width of the rule rendered between Done and the config rows.
 /// Source: `LLMConfigEditor.ts:136` (40 `─`).
@@ -103,7 +95,7 @@ pub enum LlmMenuInput {
 
 impl LlmMenuInput {
     pub fn from_key_event(ev: KeyEvent) -> Self {
-        if ev.modifiers.contains(KeyModifiers::CONTROL) && matches!(ev.code, KeyCode::Char('c')) {
+        if is_ctrl_c(&ev) {
             return LlmMenuInput::CtrlC;
         }
         match ev.code {

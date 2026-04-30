@@ -22,6 +22,7 @@
 pub mod agent_select_prompt;
 pub mod help_row;
 pub mod llm_menu_prompt;
+pub mod prompt_shared;
 pub mod provider_select_prompt;
 pub mod raw_mode;
 pub mod relay_prompt;

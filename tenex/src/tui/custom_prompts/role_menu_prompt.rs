@@ -22,22 +22,11 @@
 
 use std::io::{self, Write};
 
-use crossterm::cursor::{MoveToColumn, MoveUp};
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
-use crossterm::style::{Attribute, Color, Print, ResetColor, SetAttribute, SetForegroundColor};
-use crossterm::terminal::{Clear, ClearType};
-use crossterm::{queue, QueueableCommand};
+use super::prompt_shared::*;
 use indexmap::IndexMap;
 
 use super::raw_mode::RawMode;
 use crate::tui::glyphs;
-
-// Palette aliases sourced from the shared theme module — single
-// source of truth for the inquirer-amber + display-palette colours
-// used across all bespoke prompts.
-const AMBER: Color = crate::tui::theme::INQUIRER_AMBER_CROSSTERM;
-const ANSI214_ACCENT: Color = crate::tui::theme::DISPLAY_ACCENT_CROSSTERM;
-const ANSI240_MUTED: Color = crate::tui::theme::DISPLAY_MUTED_CROSSTERM;
 
 /// Width of the rule rendered between role rows and the Done row.
 /// Source: `roles.ts:191`.
@@ -156,7 +145,7 @@ pub enum RoleInput {
 
 impl RoleInput {
     pub fn from_key_event(ev: KeyEvent) -> Self {
-        if ev.modifiers.contains(KeyModifiers::CONTROL) && matches!(ev.code, KeyCode::Char('c')) {
+        if is_ctrl_c(&ev) {
             return RoleInput::CtrlC;
         }
         match ev.code {

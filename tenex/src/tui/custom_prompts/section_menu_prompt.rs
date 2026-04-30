@@ -25,20 +25,13 @@
 
 use std::io::{self, Write};
 
-use crossterm::cursor::{MoveToColumn, MoveUp};
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
-use crossterm::style::{Attribute, Color, Print, SetAttribute, SetForegroundColor};
-use crossterm::terminal::{Clear, ClearType};
-use crossterm::{queue, QueueableCommand};
+use super::prompt_shared::*;
 
 use super::raw_mode::RawMode;
 use crate::tui::glyphs;
 
 // Truecolor `#FFC107` — sourced from the canonical
 // `crate::tui::theme::INQUIRER_AMBER_CROSSTERM` constant so all bespoke
-// prompts share a single source of truth. Local `const` re-export keeps
-// existing call sites short.
-const AMBER: Color = crate::tui::theme::INQUIRER_AMBER_CROSSTERM;
 
 /// One selectable menu entry.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -77,7 +70,7 @@ pub enum SectionMenuInput {
 
 impl SectionMenuInput {
     pub fn from_key_event(ev: KeyEvent) -> Self {
-        if ev.modifiers.contains(KeyModifiers::CONTROL) && matches!(ev.code, KeyCode::Char('c')) {
+        if is_ctrl_c(&ev) {
             return SectionMenuInput::CtrlC;
         }
         match ev.code {
