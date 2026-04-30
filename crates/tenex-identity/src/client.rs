@@ -20,3 +20,11 @@ pub fn connect_with_retry(path: &Path, attempts: u32, delay: Duration) -> Result
         last_err.map(|e| e.to_string()).unwrap_or_default()
     ))
 }
+
+/// Poll the identity daemon socket until it accepts connections or the timeout expires.
+pub fn wait_until_ready(timeout: Duration) -> Result<()> {
+    let socket = crate::paths::socket_path();
+    let delay = Duration::from_millis(50);
+    let attempts = (timeout.as_millis() / delay.as_millis()).max(1) as u32;
+    connect_with_retry(&socket, attempts, delay).map(|_| ())
+}

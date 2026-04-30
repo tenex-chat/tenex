@@ -9,10 +9,14 @@
 //! TTL-based freshness: rows older than 24 h are considered stale.
 //! On a stale hit the cached row is returned immediately and a background
 //! task silently refetches. On a miss the fetch is synchronous.
+//!
+//! The daemon is started as a supervised subprocess by `tenex daemon` via
+//! the hidden `tenex identity-run` subcommand; the fork-based approach was
+//! removed because forking inside a multi-threaded tokio runtime deadlocks
+//! on the libc environment mutex.
 
 pub mod cache;
 mod client;
-mod daemonize;
 pub mod error;
 pub mod fetch;
 pub mod model;
@@ -23,6 +27,7 @@ pub mod schema;
 pub mod server;
 
 pub use cache::IdentityCache;
+pub use client::wait_until_ready;
 pub use error::{IdentityError, Result};
 pub use fetch::fetch_identity;
 pub use model::IdentityView;
@@ -32,7 +37,6 @@ pub use resolve::resolve;
 use std::fs;
 use std::os::unix::io::AsRawFd;
 use std::sync::Arc;
-use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result as AnyResult};
 use nostr_sdk::Client;
@@ -40,47 +44,8 @@ use serde::Deserialize;
 
 const DEFAULT_RELAYS: &[&str] = &["wss://relay.damus.io", "wss://relay.nostr.band"];
 
-/// Ensure an identity daemon is bound to the runtime socket. If one is already
-/// running, this is a quick connect-and-close. Otherwise, double-fork a fresh
-/// daemon and wait for it to bind, then close the probe connection.
-pub fn ensure_running() -> AnyResult<()> {
-    let _probe = ensure_daemon_then_connect()?;
-    Ok(())
-}
-
-fn ensure_daemon_then_connect() -> AnyResult<std::os::unix::net::UnixStream> {
-    let socket = paths::socket_path();
-
-    if let Ok(stream) = std::os::unix::net::UnixStream::connect(&socket) {
-        return Ok(stream);
-    }
-
-    fs::create_dir_all(paths::default_base_dir()).context("create identity base dir")?;
-
-    match daemonize::spawn_daemon()? {
-        daemonize::Role::Daemon => run_daemon_role(),
-        daemonize::Role::Caller => {
-            client::connect_with_retry(&socket, 60, Duration::from_millis(50))
-                .context("connect to freshly-spawned identity daemon")
-        }
-    }
-}
-
-fn run_daemon_role() -> ! {
-    if let Err(e) = daemonize::detach_stdio(&paths::log_path()) {
-        eprintln!("identity daemon: detach_stdio failed: {e:#}");
-        std::process::exit(1);
-    }
-    match run_daemon_sync() {
-        Ok(()) => std::process::exit(0),
-        Err(e) => {
-            eprintln!("identity daemon: {e:#}");
-            std::process::exit(1);
-        }
-    }
-}
-
 /// Synchronous entry point that builds a tokio runtime and runs the async daemon.
+/// Called from the `tenex identity-run` subcommand binary.
 pub fn run_daemon_sync() -> AnyResult<()> {
     if tokio::runtime::Handle::try_current().is_ok() {
         return std::thread::spawn(run_daemon_on_new_runtime)

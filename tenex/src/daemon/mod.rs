@@ -97,7 +97,7 @@ pub async fn run(args: DaemonArgs) -> Result<()> {
 
     // Bootstrap the identity daemon. Runtime code relies on this service for
     // pubkey display names; fail startup if the socket cannot be reached.
-    if let Err(e) = tenex_identity::ensure_running().context("starting required identity daemon") {
+    if let Err(e) = start_identity_service(&supervisor).await {
         supervisor.shutdown().await;
         return Err(e);
     }
@@ -213,6 +213,22 @@ async fn start_whitelist_service(
 
     tenex_whitelist::wait_until_ready(Duration::from_secs(5))
         .context("waiting for whitelist daemon readiness")
+}
+
+async fn start_identity_service(supervisor: &supervisor::Supervisor) -> Result<()> {
+    let exe = std::env::current_exe().context("resolve current tenex executable")?;
+    supervisor
+        .boot_command(
+            "tenex-identity".to_string(),
+            vec![
+                exe.to_string_lossy().into_owned(),
+                "identity-run".to_string(),
+            ],
+        )
+        .await;
+
+    tenex_identity::wait_until_ready(Duration::from_secs(30))
+        .context("waiting for identity daemon readiness")
 }
 
 async fn wait_for_signal() {

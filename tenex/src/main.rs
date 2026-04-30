@@ -55,6 +55,10 @@ enum Command {
     /// Internal foreground whitelist process supervised by `tenex daemon`.
     #[command(name = "whitelist-run", hide = true)]
     WhitelistRun(WhitelistRunArgs),
+
+    /// Internal foreground identity daemon process supervised by `tenex daemon`.
+    #[command(name = "identity-run", hide = true)]
+    IdentityRun,
 }
 
 #[derive(Args)]
@@ -84,6 +88,7 @@ async fn main() -> Result<()> {
             }
             tenex_whitelist::run_foreground()
         }
+        Command::IdentityRun => tenex_identity::run_daemon_sync(),
     };
     telemetry.shutdown();
     result
@@ -94,6 +99,7 @@ fn command_base_dir(command: &Command) -> Option<&std::path::Path> {
         Command::Daemon(args) => args.base_dir.as_deref(),
         Command::Runtime(args) => args.base_dir.as_deref(),
         Command::WhitelistRun(args) => args.base_dir.as_deref(),
+        Command::IdentityRun => None,
         _ => None,
     }
 }
