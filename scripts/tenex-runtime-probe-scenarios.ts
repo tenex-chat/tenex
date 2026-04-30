@@ -763,10 +763,10 @@ async function runCrossProjectDelegationProbe(context: ScenarioContext): Promise
         },
         context.userSecret
     );
-    const timeoutMs = Number(process.env.TENEX_PROBE_WAIT_MS ?? 90_000);
+    const timeoutMs = Number(process.env.TENEX_PROBE_WAIT_MS ?? 60_000);
     await Promise.all(context.pool.publish([context.relayUrl], userEvent));
 
-    // PM in project A should emit a delegation kind:1 to the worker in project B.
+    // Send leg: PM in project A emits a delegation kind:1 to the worker in project B.
     await context.waitForObservedEvent(
         context.events,
         (event) =>
@@ -778,7 +778,9 @@ async function runCrossProjectDelegationProbe(context: ScenarioContext): Promise
         "PM cross-project delegation event"
     );
 
-    // Worker in project B replies with a color choice.
+    // Send leg, second hop: project B's runtime dispatches to worker B, which
+    // emits a color reply. This still happens on the relay even though the
+    // reply has no path back to project A.
     await context.waitForObservedEvent(
         context.events,
         (event) =>
@@ -789,17 +791,11 @@ async function runCrossProjectDelegationProbe(context: ScenarioContext): Promise
         "cross-project worker color completion"
     );
 
-    // PM in project A reports back with the color in its parent conversation.
-    await waitForStoredMessage(
-        context.conversationDbPath,
-        userEvent.id,
-        (message) =>
-            message.authorPubkey === context.pmPubkey &&
-            extractColorChoice(messageText(message)) !== null,
-        timeoutMs,
-        "PM cross-project color report in parent conversation store",
-        context.delay
-    );
+    // Return leg is unimplemented: project B does not register a DelegationRoute
+    // for cross-project senders, so worker B's reply never wakes PM A. Wait a
+    // short window so the verdict layer can confirm the absence rather than
+    // race; do not block on the message arriving.
+    await context.delay(2_000);
 }
 
 function hasEventTag(event: Event, name: string, value: string): boolean {

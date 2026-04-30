@@ -187,7 +187,14 @@ const pmWorkingDirectory =
 
 writeJson(path.join(projectDir, "event.json"), projectEvent);
 writeJson(path.join(baseDir, "config.json"), {
-    whitelistedPubkeys: [user.pubkey, owner.pubkey, backend.pubkey],
+    // For cross-project delegation, project B receives kind:1 events authored
+    // by project A's agents. Project B's runtime would otherwise classify
+    // those as external authors and refuse to dispatch (routeUnauthorizedAuthors
+    // defaults to false). Whitelisting the source project's PM mirrors a real
+    // deployment where the operator opts every cross-project author in.
+    whitelistedPubkeys: isCrossProjectScenario
+        ? [user.pubkey, owner.pubkey, backend.pubkey, pm.pubkey]
+        : [user.pubkey, owner.pubkey, backend.pubkey],
     tenexPrivateKey: bytesToHex(backend.secret),
     projectsBase: projectsBaseDir,
     relays: [relayUrl],

@@ -800,6 +800,9 @@ function evaluateCrossProjectDelegation(events: Event[], context: EvaluateContex
     );
 
     return [
+        // Send leg: PM A emits a cross-project delegation that reaches project B's
+        // runtime, which dispatches it to worker B; worker B emits a completion.
+        // This leg is fully wired and is the assertion that should stay green.
         {
             name: "PM emitted cross-project delegation event to worker",
             ok: Boolean(delegation),
@@ -815,17 +818,24 @@ function evaluateCrossProjectDelegation(events: Event[], context: EvaluateContex
             ok: Boolean(workerCompletion),
             detail: "Expected worker kind:1 from project B containing a color word.",
         },
+        // Return leg: project B's runtime never registers a DelegationRoute for
+        // the cross-project send because `fresh_delegation_target` rejects
+        // authors not in the local project agent set
+        // (tenex/src/runtime_cmd/mod.rs:1690). Without the route, worker B's
+        // completion has no way back to PM A's runtime. Until cross-project
+        // route registration is implemented, these two verdicts are expected
+        // to fail and serve as a regression alarm if/when it is fixed.
         {
             name: "Store recorded cross-project worker completion in parent conversation",
             ok: Boolean(storedWorkerCompletion),
-            detail: "Expected parent conversation transcript to contain the cross-project worker color completion.",
+            detail: "Cross-project completion routing is not yet wired: project B's runtime does not register a DelegationRoute for senders outside its agent set, so the worker reply never reaches project A.",
         },
         {
             name: "PM reported cross-project worker color in parent conversation",
             ok: Boolean(pmReport && workerColor && extractColorChoice(messageText(pmReport)) === workerColor),
             detail: pmReport
                 ? `PM color ${extractColorChoice(messageText(pmReport)) ?? "<none>"} did not match worker color ${workerColor ?? "<none>"}.`
-                : "Expected parent transcript PM follow-up that repeats the cross-project worker color.",
+                : "Cross-project completion routing is not yet wired: PM A is never re-invoked because the route never registered (see runtime_cmd/mod.rs:1686 fresh_delegation_target).",
         },
         ...evaluateCacheBreakpoints(context),
     ];
