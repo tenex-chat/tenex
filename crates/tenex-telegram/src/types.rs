@@ -44,9 +44,29 @@ pub struct TelegramMessage {
     pub from: Option<TelegramUser>,
     pub chat: TelegramChat,
     pub text: Option<String>,
+    pub caption: Option<String>,
     pub voice: Option<TelegramVoice>,
     pub audio: Option<TelegramAudio>,
+    pub photo: Option<Vec<TelegramPhotoSize>>,
     pub message_thread_id: Option<i64>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct TelegramPhotoSize {
+    pub file_id: String,
+    pub file_unique_id: String,
+    pub width: i64,
+    pub height: i64,
+    pub file_size: Option<i64>,
+}
+
+/// Result of `getFile`. `file_path` is what we feed to `file_download_url`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct TelegramFile {
+    pub file_id: String,
+    pub file_unique_id: String,
+    pub file_size: Option<i64>,
+    pub file_path: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

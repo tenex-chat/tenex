@@ -14,7 +14,7 @@ use crate::pending_selection_store::{PendingProjectOption, PendingSelectionStore
 use crate::runtime_client::{dispatch_via_runtime, DispatchOutcome};
 use crate::selection::{parse_project_selection, project_selection_prompt};
 use crate::session::SessionStore;
-use crate::types::{TelegramBotCommand, TelegramMessage};
+use crate::types::{TelegramBotCommand, TelegramMessage, TelegramPhotoSize};
 
 const POLL_TIMEOUT_SECS: u64 = 20;
 const POLL_LIMIT: u32 = 50;
@@ -131,10 +131,37 @@ impl Poller {
         let thread_id = msg.message_thread_id.map(|t| t.to_string());
         let channel_id = SessionStore::channel_key(&chat_id, thread_id.as_deref());
 
-        let text = match &msg.text {
-            Some(t) => t.trim().to_string(),
-            None => return Ok(()),
-        };
+        // A Telegram message can carry text, a photo with optional caption, or
+        // both. Bail only when there is nothing the agent can act on.
+        let text_str = msg
+            .text
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string);
+        let caption_str = msg
+            .caption
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string);
+        let largest_photo = msg
+            .photo
+            .as_ref()
+            .and_then(|sizes| sizes.iter().max_by_key(|p| p.width * p.height))
+            .cloned();
+
+        if text_str.is_none() && caption_str.is_none() && largest_photo.is_none() {
+            return Ok(());
+        }
+
+        // Effective user text. Caption (if any) substitutes for body when the
+        // message is photo-only with caption; otherwise we use a placeholder
+        // so the conversation log reads coherently.
+        let text = text_str
+            .clone()
+            .or_else(|| caption_str.clone())
+            .unwrap_or_else(|| "[photo]".to_string());
 
         let is_new = text == "/new" || text.starts_with("/new ") || text.starts_with("/new@");
         if is_new {
@@ -173,6 +200,24 @@ impl Poller {
             return Ok(());
         };
 
+        // Fetch the largest photo to a local cache; fall back to text-only on
+        // error so a transient Telegram failure does not drop the whole turn.
+        let image_urls: Vec<String> = if let Some(photo) = largest_photo.as_ref() {
+            match self.cache_telegram_photo(photo).await {
+                Ok(path) => vec![format!("file://{}", path.display())],
+                Err(error) => {
+                    warn!(
+                        error = %error,
+                        file_id = %photo.file_id,
+                        "failed to cache Telegram photo; dispatching text-only"
+                    );
+                    Vec::new()
+                }
+            }
+        } else {
+            Vec::new()
+        };
+
         let synthesized = synthesize_telegram_event(TelegramEventInput {
             agent_pubkey: &self.registration.pubkey,
             project: &project,
@@ -186,6 +231,7 @@ impl Poller {
             thread_id: thread_id.as_deref(),
             channel_id: &channel_id,
             text: &text,
+            image_urls: &image_urls,
         })?;
 
         let event_id = synthesized.event.id.to_hex();
@@ -382,6 +428,36 @@ impl Poller {
                 Ok(None)
             }
         }
+    }
+
+    /// Resolve a Telegram photo via `getFile`, download its bytes, and cache
+    /// them under `<base_dir>/data/telegram-media/<file_unique_id>.<ext>`.
+    /// Returns the absolute path on disk; the caller wraps it in a `file://`
+    /// URL for the agent's multimodal pipeline. Re-uses the cached file when
+    /// the same `file_unique_id` is delivered again (Telegram guarantees
+    /// uniqueness across bots and chats).
+    async fn cache_telegram_photo(&self, photo: &TelegramPhotoSize) -> Result<PathBuf> {
+        use anyhow::Context;
+        let info = self.client.get_file(&photo.file_id).await?;
+        let file_path = info
+            .file_path
+            .context("getFile returned no file_path for photo")?;
+        let ext = std::path::Path::new(&file_path)
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("jpg");
+        let cache_dir = self.base_dir.join("data").join("telegram-media");
+        tokio::fs::create_dir_all(&cache_dir)
+            .await
+            .with_context(|| format!("create cache dir {}", cache_dir.display()))?;
+        let dest = cache_dir.join(format!("{}.{}", photo.file_unique_id, ext));
+        if !dest.exists() {
+            let bytes = self.client.download_file_bytes(&file_path).await?;
+            tokio::fs::write(&dest, &bytes)
+                .await
+                .with_context(|| format!("write {}", dest.display()))?;
+        }
+        Ok(dest)
     }
 
     fn project_by_id(&self, project_id: &str) -> Option<ProjectRoute> {

@@ -23,6 +23,10 @@ pub struct TelegramEventInput<'a> {
     pub thread_id: Option<&'a str>,
     pub channel_id: &'a str,
     pub text: &'a str,
+    /// URLs for inbound media (e.g. `file://` paths to cached Telegram photos).
+    /// Appended to the event content as markdown image references so the
+    /// agent's multimodal pipeline picks them up.
+    pub image_urls: &'a [String],
 }
 
 pub struct SynthesizedTelegramEvent {
@@ -88,7 +92,10 @@ pub fn synthesize_telegram_event(
             .map(|u| format!("@{u}"))
             .unwrap_or_else(|| input.sender_id.to_string())
     );
-    let content = format!("{user_info} {}", input.text);
+    let mut content = format!("{user_info} {}", input.text);
+    for url in input.image_urls {
+        content.push_str(&format!("\n\n![photo]({url})"));
+    }
     let event = EventBuilder::new(Kind::TextNote, content)
         .tags(tags)
         .sign_with_keys(input.backend_keys)

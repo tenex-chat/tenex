@@ -3,7 +3,8 @@ use serde::Serialize;
 
 use crate::types::{
     parse_response, TelegramBotCommand, TelegramBotInfo, TelegramChatInfo,
-    TelegramChatMemberAdministrator, TelegramForumTopic, TelegramMessage, TelegramUpdate,
+    TelegramChatMemberAdministrator, TelegramFile, TelegramForumTopic, TelegramMessage,
+    TelegramUpdate,
 };
 
 #[derive(Clone)]
@@ -273,6 +274,34 @@ impl BotClient {
     /// URL to download a file previously obtained via getFile.
     pub fn file_download_url(&self, file_path: &str) -> String {
         format!("{}/file/bot{}/{}", self.base_url, self.token, file_path)
+    }
+
+    /// Resolve a `file_id` to a downloadable `file_path` via `getFile`.
+    pub async fn get_file(&self, file_id: &str) -> Result<TelegramFile> {
+        let resp = self
+            .http
+            .get(self.url("getFile"))
+            .query(&[("file_id", file_id)])
+            .send()
+            .await
+            .context("getFile request")?;
+        let body = resp.text().await.context("getFile body")?;
+        parse_response::<TelegramFile>(&body).context("getFile parse")
+    }
+
+    /// Download the bytes of a file previously obtained via `getFile`.
+    pub async fn download_file_bytes(&self, file_path: &str) -> Result<Vec<u8>> {
+        let url = self.file_download_url(file_path);
+        let resp = self
+            .http
+            .get(&url)
+            .send()
+            .await
+            .context("file download request")?;
+        if !resp.status().is_success() {
+            anyhow::bail!("file download returned status {}", resp.status());
+        }
+        Ok(resp.bytes().await.context("file download body")?.to_vec())
     }
 }
 

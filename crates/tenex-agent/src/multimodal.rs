@@ -1,3 +1,4 @@
+use anyhow::{Context, Result};
 use base64::Engine as _;
 use rig::completion::message::{
     DocumentSourceKind, Image, ImageMediaType, MimeType as _, UserContent,
@@ -7,9 +8,13 @@ use std::time::Duration;
 const MAX_IMAGE_BYTES: usize = 10 * 1024 * 1024;
 const FETCH_TIMEOUT_SECS: u64 = 15;
 
-/// Scan `content` for image URLs (markdown `![...](url)` or bare HTTPS URLs
-/// ending in a common image extension), fetch each one, base64-encode it, and
-/// return a `Vec<UserContent>` with only image blocks (no text block).
+/// Scan `content` for image URLs (markdown `![...](url)` or bare image URLs),
+/// fetch each one, base64-encode it, and return a `Vec<UserContent>` with only
+/// image blocks (no text block).
+///
+/// Supports `https://`, `http://`, and `file://` URL schemes. `file://` reads
+/// the bytes from the local filesystem — used for cached Telegram media that
+/// must not leak the bot token via an outbound URL.
 ///
 /// The caller is responsible for appending the text content after the returned
 /// image blocks so that the final message order is: [images, text].
@@ -61,15 +66,15 @@ pub async fn prepare_multimodal_content(content: &str) -> Option<Vec<UserContent
 /// Extract deduplicated image URLs from message content.
 ///
 /// Recognises two forms:
-/// - Markdown images: `![alt text](https://...)`
-/// - Bare HTTPS URLs ending in `.jpg`, `.jpeg`, `.png`, `.gif`, or `.webp`
-///   (with optional query string).
+/// - Markdown images: `![alt text](url)` for http/https/file schemes
+/// - Bare http/https/file URLs ending in `.jpg`, `.jpeg`, `.png`, `.gif`, or
+///   `.webp` (with optional query string).
 fn extract_image_urls(content: &str) -> Vec<String> {
     let mut seen = std::collections::HashSet::new();
     let mut urls = Vec::new();
 
     // Markdown image syntax: ![alt](url)
-    let md_re = regex::Regex::new(r"!\[[^\]]*\]\((https?://[^)]+)\)").unwrap();
+    let md_re = regex::Regex::new(r"!\[[^\]]*\]\(((?:https?|file)://[^)]+)\)").unwrap();
     for cap in md_re.captures_iter(content) {
         if let Some(m) = cap.get(1) {
             let url = m.as_str().to_string();
@@ -79,11 +84,11 @@ fn extract_image_urls(content: &str) -> Vec<String> {
         }
     }
 
-    // Bare HTTPS image URLs (no quotes or whitespace; optional query string).
-    // Use a non-raw string so we can avoid quoting issues.
-    let bare_re =
-        regex::Regex::new("https?://[^\\s<>\"']+\\.(?:jpe?g|png|gif|webp)(?:\\?[^\\s<>\"']*)?")
-            .unwrap();
+    // Bare image URLs (no quotes or whitespace; optional query string).
+    let bare_re = regex::Regex::new(
+        "(?:https?|file)://[^\\s<>\"']+\\.(?:jpe?g|png|gif|webp)(?:\\?[^\\s<>\"']*)?",
+    )
+    .unwrap();
     for m in bare_re.find_iter(content) {
         let url = m.as_str().to_string();
         if seen.insert(url.clone()) {
@@ -97,8 +102,38 @@ fn extract_image_urls(content: &str) -> Vec<String> {
 async fn fetch_image(
     client: &reqwest::Client,
     url: &str,
-) -> Result<Option<(Vec<u8>, String)>, reqwest::Error> {
-    let response = client.get(url).send().await?;
+) -> Result<Option<(Vec<u8>, String)>> {
+    if let Some(path) = url.strip_prefix("file://") {
+        return fetch_local_image(path);
+    }
+    fetch_http_image(client, url).await
+}
+
+fn fetch_local_image(path: &str) -> Result<Option<(Vec<u8>, String)>> {
+    let bytes = std::fs::read(path).with_context(|| format!("read {path}"))?;
+    if bytes.len() > MAX_IMAGE_BYTES {
+        eprintln!(
+            "[tenex-agent] multimodal: image too large ({} bytes) -- skipping {path}",
+            bytes.len()
+        );
+        return Ok(None);
+    }
+    let Some(media_type) = infer_mime_from_url(path) else {
+        eprintln!("[tenex-agent] multimodal: unknown media type for {path} -- skipping");
+        return Ok(None);
+    };
+    eprintln!(
+        "[tenex-agent] multimodal: prepared {} bytes ({media_type}) from {path}",
+        bytes.len()
+    );
+    Ok(Some((bytes, media_type.to_string())))
+}
+
+async fn fetch_http_image(
+    client: &reqwest::Client,
+    url: &str,
+) -> Result<Option<(Vec<u8>, String)>> {
+    let response = client.get(url).send().await.context("http get")?;
 
     if !response.status().is_success() {
         eprintln!(
@@ -134,7 +169,7 @@ async fn fetch_image(
         return Ok(None);
     };
 
-    let bytes = response.bytes().await?.to_vec();
+    let bytes = response.bytes().await.context("http body")?.to_vec();
 
     if bytes.len() > MAX_IMAGE_BYTES {
         eprintln!(
