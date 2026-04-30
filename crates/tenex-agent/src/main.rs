@@ -3,6 +3,7 @@ mod cassette;
 mod cassette_client;
 mod cassette_request;
 mod config;
+mod context_rig;
 mod emit;
 mod escalation;
 mod home;
@@ -15,6 +16,7 @@ mod project_instructions;
 mod runtime_control;
 mod runtime_state;
 mod runtime_state_json;
+mod shell_task_reminder;
 mod skills;
 mod stdio_home;
 mod tools;
@@ -24,21 +26,20 @@ use anyhow::{Context, Result};
 use cassette::CassetteRecorder;
 use cassette_client::RecordingClient;
 use config::{LlmsConfig, ResolvedModel};
+use context_rig::ctx_msg_to_rig;
 use emit::{EmitState, EmitStateArgs};
 use hook::EmitHook;
 use injections::MessageInjectionTracker;
 use progress_monitor::RIG_AGENT_TURN_FUSE;
 use rig::client::Nothing;
-use rig::completion::message::{ToolResult, ToolResultContent, UserContent};
-use rig::completion::{AssistantContent, Message as RigMessage};
+use rig::completion::Message as RigMessage;
 use rig::providers::{anthropic, ollama, openai, openrouter};
-use rig::OneOrMany;
 use runtime_state::RuntimeStateHandle;
+use shell_task_reminder::render_active_shell_tasks_reminder;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc, Mutex,
 };
-use std::time::{SystemTime, UNIX_EPOCH};
 use tenex_context::{
     BreakpointHint, BreakpointKind, CacheObservation, Message as CtxMessage, ModelProfile,
     ToolCall as CtxToolCall, ToolDef, TurnRecord,
@@ -48,9 +49,8 @@ use tenex_project::Project;
 use tenex_protocol::{
     nostr::{read_one_from_stdin, NostrChannel},
     sink::StdoutNdjsonSink,
-    Channel, CompletionIntent, ConversationIntent, ConversationRef, Intent, ListShellTasksRequest,
-    LlmUsage, MessageRef, PrincipalKind, PrincipalRef, ProjectRef, RuntimeControlRequest,
-    RuntimeControlResponse,
+    Channel, CompletionIntent, ConversationIntent, ConversationRef, Intent, LlmUsage, MessageRef,
+    PrincipalKind, PrincipalRef, ProjectRef,
 };
 use tenex_rag::{EmbedConfig, RagStore};
 use tenex_supervision::heuristics::default_supervisor;
@@ -62,63 +62,6 @@ use tools::{
 };
 use tracing::{info_span, Instrument};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
-
-/// Convert a `tenex_context::Message` to `rig::completion::Message` for passing
-/// as history to `stream_chat`. System messages are excluded at the call site
-/// (preamble handles them).
-fn ctx_msg_to_rig(msg: CtxMessage) -> RigMessage {
-    use rig::completion::message::{Text, ToolCall as RigToolCall, ToolFunction};
-
-    match msg {
-        CtxMessage::System { content } => RigMessage::System { content },
-        CtxMessage::User { content } => RigMessage::User {
-            content: OneOrMany::one(UserContent::Text(Text { text: content })),
-        },
-        CtxMessage::Assistant {
-            content,
-            tool_calls,
-        } => {
-            let mut parts: Vec<AssistantContent> = Vec::new();
-            if !content.is_empty() {
-                parts.push(AssistantContent::Text(Text { text: content }));
-            }
-            for tc in tool_calls {
-                parts.push(AssistantContent::ToolCall(RigToolCall::new(
-                    tc.id,
-                    ToolFunction::new(tc.name, tc.arguments),
-                )));
-            }
-            if parts.is_empty() {
-                parts.push(AssistantContent::Text(Text {
-                    text: String::new(),
-                }));
-            }
-            let content = if parts.len() == 1 {
-                OneOrMany::one(parts.remove(0))
-            } else {
-                OneOrMany::many(parts).unwrap_or_else(|_| {
-                    OneOrMany::one(AssistantContent::Text(Text {
-                        text: String::new(),
-                    }))
-                })
-            };
-            RigMessage::Assistant { id: None, content }
-        }
-        CtxMessage::ToolResult {
-            tool_call_id,
-            content,
-            ..
-        } => RigMessage::User {
-            content: OneOrMany::one(UserContent::ToolResult(ToolResult {
-                id: tool_call_id,
-                call_id: None,
-                content: OneOrMany::one(ToolResultContent::Text(rig::completion::message::Text {
-                    text: content,
-                })),
-            })),
-        },
-    }
-}
 
 /// Build and run the agent with all tools attached, streaming the response.
 /// Tools are passed as a single `Vec<Box<dyn ToolDyn>>` already wrapped by
@@ -247,46 +190,6 @@ fn save_context_state(
     if let Err(e) = store.upsert_agent_context_state(&state) {
         eprintln!("[tenex-agent] Failed to save agent context state: {e}");
     }
-}
-
-async fn render_active_shell_tasks_reminder(
-    project_id: &str,
-    conversation_id: &str,
-    agent_pubkey: &str,
-) -> Option<String> {
-    let socket = runtime_control::socket_path()?;
-    let request = RuntimeControlRequest::ListShellTasks(ListShellTasksRequest {
-        project_id: project_id.to_string(),
-        conversation_id: conversation_id.to_string(),
-        agent_pubkey: agent_pubkey.to_string(),
-    });
-    let response = runtime_control::request(socket, request).await.ok()?;
-    let RuntimeControlResponse::ShellTasks(tasks) = response else {
-        return None;
-    };
-    if tasks.tasks.is_empty() {
-        return None;
-    }
-
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0);
-    let lines = tasks
-        .tasks
-        .into_iter()
-        .map(|task| {
-            let age = ((now - task.started_at_ms).max(0) / 1000).to_string();
-            format!(
-                "- {} ({:?}) running {}s, pid {}, output {}, command: {}",
-                task.task_id, task.mode, age, task.pid, task.output_file, task.command
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
-    Some(format!(
-        "<system-reminder type=\"active-shell-tasks\">\nActive shell tasks from this agent in this conversation can be stopped with kill(target=<task id>, reason=<reason>).\n{lines}\n</system-reminder>"
-    ))
 }
 
 #[tokio::main]
@@ -1169,7 +1072,10 @@ async fn run() -> Result<()> {
                 break 'agent_loop;
             }
             PostCompletionOutcome::ReEngage { message } => {
-                use rig::completion::message::Text;
+                use rig::completion::message::{Text, UserContent};
+                use rig::completion::AssistantContent;
+                use rig::OneOrMany;
+
                 re_engage_history.push(RigMessage::User {
                     content: OneOrMany::one(UserContent::Text(Text {
                         text: current_message,
