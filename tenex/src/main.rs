@@ -107,6 +107,12 @@ fn normalize_base_dir_env() {
     let Ok(value) = std::env::var("TENEX_BASE_DIR") else {
         return;
     };
+    // An empty `TENEX_BASE_DIR=` is documented to fall through to
+    // `$HOME/.tenex` in `resolve_base_dir`. Don't pre-empt that fallback by
+    // rewriting the env to the current directory.
+    if value.is_empty() {
+        return;
+    }
     let path = PathBuf::from(&value);
     if path.is_absolute() {
         return;
