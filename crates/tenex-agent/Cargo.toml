@@ -12,10 +12,12 @@ name = "tenex-agent-acp"
 path = "src/acp_main.rs"
 
 [dependencies]
+tenex-accounting = { path = "../tenex-accounting" }
 tenex-project = { path = "../tenex-project" }
 tenex-agent-registry = { path = "../tenex-agent-registry" }
 tenex-conversations = { path = "../tenex-conversations" }
 tenex-context = { path = "../tenex-context" }
+tenex-identity = { path = "../tenex-identity" }
 tenex-protocol = { path = "../tenex-protocol", default-features = false }
 tenex-llm-config = { path = "../tenex-llm-config" }
 tenex-mcp = { path = "../tenex-mcp" }

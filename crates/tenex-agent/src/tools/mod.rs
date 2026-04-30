@@ -10,7 +10,6 @@ pub mod delegate;
 pub mod delegate_crossproject;
 pub mod delegate_followup;
 mod delegate_followup_resolution;
-pub mod find_skills;
 pub mod fs;
 pub mod kill;
 pub mod learn;
@@ -32,7 +31,6 @@ pub mod todo;
 
 pub(crate) use agent_tool_set::ToolSet;
 pub use delegate::DelegateTool;
-pub use find_skills::FindSkillsTool;
 pub use mcp::McpProxyTool;
 pub use rag_add_documents::RagAddDocumentsTool;
 pub use rag_search::RagSearchTool;
