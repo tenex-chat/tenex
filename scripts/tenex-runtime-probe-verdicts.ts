@@ -13,6 +13,7 @@ import {
     agentConfigUpdateSkills,
     convReminderCompletionText,
     convReminderProbeMessage,
+    crossProjectDelegationUserRequest,
     delegationUserRequest,
     delegationWorkerCompletionText,
     extractColorChoice,
@@ -25,6 +26,8 @@ import {
     nestedAgentsMdReadInstruction,
     nestedAgentsMdRootInstruction,
     rootAgentsMdInstruction,
+    selfDelegationCompletionToken,
+    selfDelegationUserRequest,
     type MockRequestRecord,
     type ScenarioName,
     worktreeAgentsMdInstruction,
@@ -38,6 +41,7 @@ type EvaluateContext = {
     pmPubkey: string;
     workerPubkey: string;
     modelName: string;
+    llmProvider: "mock" | "ollama" | "anthropic" | "cassette";
     conversationDbPath: string;
     mcpProbeRecords?: Array<Record<string, unknown>>;
     workspaceDir?: string;
@@ -53,6 +57,12 @@ export function evaluate(
 
     if (name === "delegation-basic") {
         return [...commonVerdicts, ...evaluateDelegation(events, context)];
+    }
+    if (name === "delegation-self") {
+        return [...commonVerdicts, ...evaluateSelfDelegation(events, context)];
+    }
+    if (name === "delegation-crossproject") {
+        return [...commonVerdicts, ...evaluateCrossProjectDelegation(events, context)];
     }
     if (name === "same-agent-concurrency") {
         return [...commonVerdicts, ...evaluateSameAgentConcurrency(events, context)];
@@ -682,8 +692,162 @@ function evaluateDelegation(events: Event[], context: EvaluateContext): Verdict[
     ];
 }
 
+function evaluateSelfDelegation(events: Event[], context: EvaluateContext): Verdict[] {
+    const initialUserEvent = events.find(
+        (event) => event.kind === 1 && event.content === selfDelegationUserRequest
+    );
+    // PM publishes a delegation kind:1 with its own pubkey as the recipient.
+    const selfDelegation = events.find(
+        (event) =>
+            event.kind === 1 &&
+            event.pubkey === context.pmPubkey &&
+            hasTag(event, "p", context.pmPubkey) &&
+            !hasTag(event, "tool")
+    );
+    // PM also publishes a tool=self_delegate frame.
+    const selfDelegateTool = events.find(
+        (event) =>
+            event.kind === 1 &&
+            event.pubkey === context.pmPubkey &&
+            hasTag(event, "tool", "self_delegate")
+    );
+    // Follow-up invocation produces a completion containing the token.
+    const followupCompletion = events.find(
+        (event) =>
+            event.kind === 1 &&
+            event.pubkey === context.pmPubkey &&
+            !hasTag(event, "tool") &&
+            event.content.toLowerCase().includes(selfDelegationCompletionToken)
+    );
+    const selfDelegationConversation = selfDelegation
+        ? readConversationTranscript(context.conversationDbPath, selfDelegation.id)
+        : emptyTranscript("<missing-self-delegation>");
+    const followupInChildConversation = selfDelegationConversation.messages.find(
+        (message) =>
+            message.authorPubkey === context.pmPubkey &&
+            messageText(message).toLowerCase().includes(selfDelegationCompletionToken)
+    );
+    const completedStatus = events.find(
+        (event) =>
+            event.kind === 1 &&
+            event.pubkey === context.pmPubkey &&
+            hasTag(event, "status", "completed")
+    );
+
+    return [
+        {
+            name: "PM emitted self-delegation event to its own pubkey",
+            ok: Boolean(selfDelegation),
+            detail: "Expected kind:1 from PM with p-tag targeting PM's own pubkey and no tool tag.",
+        },
+        {
+            name: "PM emitted self_delegate tool event",
+            ok: Boolean(selfDelegateTool),
+            detail: "Expected kind:1 from PM with tool=self_delegate.",
+        },
+        {
+            name: "Self-delegation triggered a fresh PM invocation",
+            ok: Boolean(initialUserEvent && selfDelegation && selfDelegation.id !== initialUserEvent.id),
+            detail: "Expected self-delegation to create a new conversation root distinct from the initial user event.",
+        },
+        {
+            name: "Follow-up invocation produced completion containing the requested token",
+            ok: Boolean(followupCompletion),
+            detail: `Expected PM completion containing '${selfDelegationCompletionToken}' from the follow-up invocation.`,
+        },
+        {
+            name: "Follow-up completion stored in self-delegated conversation",
+            ok: Boolean(followupInChildConversation),
+            detail: `Expected the conversation rooted at the self-delegation event to contain a PM message with '${selfDelegationCompletionToken}'.`,
+        },
+        {
+            name: "Agent completion contract includes status=completed",
+            ok: Boolean(completedStatus),
+            detail: "Expected final completion frame to include status=completed.",
+        },
+        ...evaluateCacheBreakpoints(context),
+    ];
+}
+
+function evaluateCrossProjectDelegation(events: Event[], context: EvaluateContext): Verdict[] {
+    const initialUserEvent = events.find(
+        (event) => event.kind === 1 && event.content === crossProjectDelegationUserRequest
+    );
+    const delegation = events.find(
+        (event) =>
+            event.kind === 1 &&
+            event.pubkey === context.pmPubkey &&
+            hasTag(event, "p", context.workerPubkey) &&
+            !hasTag(event, "tool")
+    );
+    const delegateTool = events.find(
+        (event) =>
+            event.kind === 1 &&
+            event.pubkey === context.pmPubkey &&
+            hasTag(event, "tool", "delegate_crossproject")
+    );
+    const workerCompletion = events.find(
+        (event) =>
+            event.kind === 1 &&
+            event.pubkey === context.workerPubkey &&
+            includesColorChoice(event.content)
+    );
+    const parentTranscript = initialUserEvent
+        ? readConversationTranscript(context.conversationDbPath, initialUserEvent.id)
+        : emptyTranscript("<missing-parent>");
+    const storedWorkerCompletion = parentTranscript.messages.find(
+        (message) =>
+            message.authorPubkey === context.workerPubkey &&
+            includesColorChoice(messageText(message))
+    );
+    const workerColor = storedWorkerCompletion
+        ? extractColorChoice(messageText(storedWorkerCompletion))
+        : workerCompletion
+        ? extractColorChoice(workerCompletion.content)
+        : null;
+    const pmReport = parentTranscript.messages.find(
+        (message) =>
+            message.authorPubkey === context.pmPubkey &&
+            extractColorChoice(messageText(message)) !== null
+    );
+
+    return [
+        {
+            name: "PM emitted cross-project delegation event to worker",
+            ok: Boolean(delegation),
+            detail: "Expected kind:1 from PM with p-tag targeting the cross-project worker.",
+        },
+        {
+            name: "PM emitted delegate_crossproject tool event",
+            ok: Boolean(delegateTool),
+            detail: "Expected kind:1 from PM with tool=delegate_crossproject.",
+        },
+        {
+            name: "Cross-project worker emitted color completion",
+            ok: Boolean(workerCompletion),
+            detail: "Expected worker kind:1 from project B containing a color word.",
+        },
+        {
+            name: "Store recorded cross-project worker completion in parent conversation",
+            ok: Boolean(storedWorkerCompletion),
+            detail: "Expected parent conversation transcript to contain the cross-project worker color completion.",
+        },
+        {
+            name: "PM reported cross-project worker color in parent conversation",
+            ok: Boolean(pmReport && workerColor && extractColorChoice(messageText(pmReport)) === workerColor),
+            detail: pmReport
+                ? `PM color ${extractColorChoice(messageText(pmReport)) ?? "<none>"} did not match worker color ${workerColor ?? "<none>"}.`
+                : "Expected parent transcript PM follow-up that repeats the cross-project worker color.",
+        },
+        ...evaluateCacheBreakpoints(context),
+    ];
+}
+
 function evaluateCacheBreakpoints(context: EvaluateContext): Verdict[] {
-    if (context.modelName === "mock") {
+    // Prompt caching is an Anthropic-specific feature. Other providers
+    // (ollama, mock, cassette replay) never emit cache_creation_input_tokens,
+    // so gating on provider keeps the probe meaningful where it applies.
+    if (context.llmProvider !== "anthropic") {
         return [];
     }
     const states = readAgentContextStates(context.conversationDbPath);

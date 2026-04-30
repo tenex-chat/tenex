@@ -19,6 +19,8 @@ import {
 
 export const availableScenarios = [
     "delegation-basic",
+    "delegation-self",
+    "delegation-crossproject",
     "same-agent-concurrency",
     "fs-read-adjustment",
     "mcp-tool-basic",
@@ -51,6 +53,15 @@ export type MockRequestRecord = {
 
 export const delegationUserRequest =
     "Please delegate to worker and ask them to choose one random color. Tell me what they picked.";
+export const selfDelegationUserRequest =
+    "Use the self_delegate tool to schedule a follow-on for yourself. The follow-on request must be exactly: Reply with the single word done. Do not perform the work this turn; just call self_delegate and stop.";
+export const selfDelegationFollowupRequest =
+    "Reply with the single word done.";
+export const selfDelegationCompletionToken = "done";
+export const crossProjectDelegationUserRequest =
+    "Use delegate_crossproject to ask worker in project 'probe-crossproject-b' to choose one random color. Then report the color to me.";
+export const crossProjectProjectADtag = "probe-crossproject-a";
+export const crossProjectProjectBDtag = "probe-crossproject-b";
 export const acpDelegationMcpUserRequest =
     "Use the TENEX MCP delegate tool, not the backend Task tool, to ask worker to choose one random color.";
 export const delegationWorkerPrompt =
@@ -135,6 +146,12 @@ export function scenarioProjectDtag(name: ScenarioName): string {
     if (name === "delegation-basic") {
         return "probe-delegation";
     }
+    if (name === "delegation-self") {
+        return "probe-self-delegation";
+    }
+    if (name === "delegation-crossproject") {
+        return crossProjectProjectADtag;
+    }
     if (name === "same-agent-concurrency") {
         return "probe-concurrency";
     }
@@ -180,6 +197,12 @@ export function scenarioProjectDtag(name: ScenarioName): string {
 export function pmInstructions(name: ScenarioName): string {
     if (name === "delegation-basic") {
         return "This is a delegation probe. Do not call todo_write. On the first turn, call only delegate to worker with the random-color task. Do not ask for clarification. The delegate tool result is not the worker's answer; never invent or choose a color yourself. If you get a same-turn response after calling delegate, say only: Delegation started. When the worker replies with a color, do not call tools and do not delegate again; repeat the exact color word in one final sentence: The worker picked <exact worker color>.";
+    }
+    if (name === "delegation-self") {
+        return "This is a self-delegation probe. Do not call todo_write. On the first user turn, call self_delegate exactly once with request set to the verbatim text 'Reply with the single word done.' Do not produce the answer this turn — emit only the tool call. When you are re-invoked from your own self-delegation, do not call any tools and do not call self_delegate again; reply with exactly: done.";
+    }
+    if (name === "delegation-crossproject") {
+        return "This is a cross-project delegation probe. Do not call todo_write. On the first turn call delegate_crossproject exactly once with project_id='probe-crossproject-b', recipient='worker', and a request that asks the recipient to choose one random color and report it. Do not invent a color yourself. When the cross-project worker replies with a color, do not call tools and do not delegate again; reply with exactly: The worker picked <exact worker color>.";
     }
     if (name === "same-agent-concurrency") {
         return "Use shell when asked to run sleep commands, and account for active tool reminders.";
@@ -548,6 +571,10 @@ export function mockScenario(name: ScenarioName): unknown {
 export async function runScenario(name: ScenarioName, context: ScenarioContext): Promise<void> {
     if (name === "delegation-basic") {
         await runDelegationProbe(context);
+    } else if (name === "delegation-self") {
+        await runSelfDelegationProbe(context);
+    } else if (name === "delegation-crossproject") {
+        await runCrossProjectDelegationProbe(context);
     } else if (name === "same-agent-concurrency") {
         await runSameAgentConcurrencyProbe(context);
     } else if (name === "mcp-tool-basic") {
@@ -683,6 +710,94 @@ async function runDelegationProbe(context: ScenarioContext): Promise<void> {
             extractColorChoice(messageText(message)) === workerColor,
         timeoutMs,
         "PM color report in parent conversation store",
+        context.delay
+    );
+}
+
+async function runSelfDelegationProbe(context: ScenarioContext): Promise<void> {
+    const userEvent = context.sign(
+        {
+            kind: 1,
+            created_at: context.now(),
+            content: selfDelegationUserRequest,
+            tags: [["a", context.projectRef]],
+        },
+        context.userSecret
+    );
+    const timeoutMs = Number(process.env.TENEX_PROBE_WAIT_MS ?? 60_000);
+    await Promise.all(context.pool.publish([context.relayUrl], userEvent));
+
+    // PM should publish a kind:1 with p-tag = its own pubkey AND a tool=self_delegate event.
+    await context.waitForObservedEvent(
+        context.events,
+        (event) =>
+            event.kind === 1 &&
+            event.pubkey === context.pmPubkey &&
+            hasEventTag(event, "p", context.pmPubkey) &&
+            !hasAnyEventTag(event, "tool"),
+        timeoutMs,
+        "PM self-delegation event"
+    );
+
+    // The follow-up invocation should produce a completion containing 'done' in a
+    // distinct (child) conversation, written to the conversation store.
+    await waitForStoredMessage(
+        context.conversationDbPath,
+        userEvent.id,
+        (message) =>
+            message.authorPubkey === context.pmPubkey &&
+            messageText(message).toLowerCase().includes(selfDelegationCompletionToken),
+        timeoutMs,
+        "PM follow-up completion in self-delegated conversation store",
+        context.delay
+    );
+}
+
+async function runCrossProjectDelegationProbe(context: ScenarioContext): Promise<void> {
+    const userEvent = context.sign(
+        {
+            kind: 1,
+            created_at: context.now(),
+            content: crossProjectDelegationUserRequest,
+            tags: [["a", context.projectRef]],
+        },
+        context.userSecret
+    );
+    const timeoutMs = Number(process.env.TENEX_PROBE_WAIT_MS ?? 90_000);
+    await Promise.all(context.pool.publish([context.relayUrl], userEvent));
+
+    // PM in project A should emit a delegation kind:1 to the worker in project B.
+    await context.waitForObservedEvent(
+        context.events,
+        (event) =>
+            event.kind === 1 &&
+            event.pubkey === context.pmPubkey &&
+            hasEventTag(event, "p", context.workerPubkey) &&
+            !hasAnyEventTag(event, "tool"),
+        timeoutMs,
+        "PM cross-project delegation event"
+    );
+
+    // Worker in project B replies with a color choice.
+    await context.waitForObservedEvent(
+        context.events,
+        (event) =>
+            event.kind === 1 &&
+            event.pubkey === context.workerPubkey &&
+            includesColorChoice(event.content),
+        timeoutMs,
+        "cross-project worker color completion"
+    );
+
+    // PM in project A reports back with the color in its parent conversation.
+    await waitForStoredMessage(
+        context.conversationDbPath,
+        userEvent.id,
+        (message) =>
+            message.authorPubkey === context.pmPubkey &&
+            extractColorChoice(messageText(message)) !== null,
+        timeoutMs,
+        "PM cross-project color report in parent conversation store",
         context.delay
     );
 }

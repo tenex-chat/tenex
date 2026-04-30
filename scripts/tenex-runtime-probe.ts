@@ -163,6 +163,18 @@ const user = keypair();
 const backend = keypair();
 const pm = keypair();
 const worker = keypair();
+// For cross-project delegation, the second project has its own worker keypair
+// and an additional dtag. The runtime is per-project, so we spawn a second
+// runtime process that watches projectB's dtag against the same relay/baseDir.
+const isCrossProjectScenario = scenarioName === "delegation-crossproject";
+const projectBDtag = "probe-crossproject-b";
+const projectBWorker = isCrossProjectScenario ? keypair() : null;
+const projectBDir = path.join(baseDir, "projects", projectBDtag);
+const projectBWorkspaceDir = path.join(projectsBaseDir, projectBDtag);
+if (isCrossProjectScenario) {
+    mkdirSync(projectBDir, { recursive: true });
+    mkdirSync(projectBWorkspaceDir, { recursive: true });
+}
 
 const initialProjectAgentPubkeys =
     scenarioName === "project-membership-reload"
@@ -262,6 +274,36 @@ writeJson(path.join(agentsDir, `${worker.pubkey}.json`), {
     ...(scenarioName === "acp-worker-basic" && acpProbe ? { runtime: acpProbe } : {}),
 });
 
+let projectBEvent: Event | null = null;
+if (isCrossProjectScenario && projectBWorker) {
+    projectBEvent = sign(
+        {
+            kind: 31933,
+            created_at: now(),
+            content: "",
+            tags: [
+                ["d", projectBDtag],
+                ["title", "TENEX cross-project probe (B)"],
+                ["client", "tenex-runtime-probe"],
+                ["p", projectBWorker.pubkey],
+            ],
+        },
+        owner.secret
+    );
+    writeJson(path.join(projectBDir, "event.json"), projectBEvent);
+    writeJson(path.join(agentsDir, `${projectBWorker.pubkey}.json`), {
+        name: "Probe Worker B",
+        slug: "worker",
+        nsec: nip19.nsecEncode(projectBWorker.secret),
+        category: "worker",
+        description: "Cross-project worker for project B",
+        working_directory: projectBWorkspaceDir,
+        instructions:
+            "Complete cross-project delegated tasks. If asked to choose a random color, never call no_response; reply with exactly one lowercase color word and no punctuation.",
+        default: { model: llmModelName },
+    });
+}
+
 const mockScenarioPath = path.join(runDir, "mock-llm.json");
 if (llm.mode === "mock") {
     writeJson(mockScenarioPath, mockScenario(scenarioName));
@@ -327,6 +369,19 @@ const runtimeProc = spawnLogged(
 );
 
 await waitForOutput(runtimeProc, "subscriptions active", 15_000);
+if (isCrossProjectScenario && projectBEvent) {
+    const runtimeBProc = spawnLogged(
+        "runtime-b",
+        tenexBin,
+        ["runtime", projectBDtag, "--base-dir", baseDir],
+        {
+            cwd: repoRoot,
+            env: runtimeEnv(llm, mockScenarioPath, requestRecordPath, cassetteRecordPath),
+        }
+    );
+    await waitForOutput(runtimeBProc, "subscriptions active", 15_000);
+    await Promise.all(pool.publish([relayUrl], projectBEvent));
+}
 await Promise.all(pool.publish([relayUrl], projectEvent));
 let scenarioError: unknown = null;
 try {
@@ -340,7 +395,7 @@ try {
         agentsDir,
         conversationDbPath: convDbPath,
         pmPubkey: pm.pubkey,
-        workerPubkey: worker.pubkey,
+        workerPubkey: isCrossProjectScenario && projectBWorker ? projectBWorker.pubkey : worker.pubkey,
         userSecret: user.secret,
         requestRecordPath,
         sign,
@@ -403,8 +458,9 @@ const requestRecords = [
 const mcpProbeRecords = mcpProbe ? readJsonLines(mcpProbe.logPath) : [];
 const verdicts = evaluate(scenarioName, mergedEvents, requestRecords, {
     pmPubkey: pm.pubkey,
-    workerPubkey: worker.pubkey,
+    workerPubkey: isCrossProjectScenario && projectBWorker ? projectBWorker.pubkey : worker.pubkey,
     modelName: llmModelName,
+    llmProvider: llm.mode,
     conversationDbPath: convDbPath,
     mcpProbeRecords,
     workspaceDir,
