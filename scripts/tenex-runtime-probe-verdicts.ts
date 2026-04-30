@@ -1018,8 +1018,7 @@ function evaluateMcpResource(
     const readResultRequest = requestRecords.find(
         (record) =>
             record.agent === "pm" &&
-            record.requestDebug.includes(mcpResourceContentText) &&
-            record.toolCalls?.includes("mcp_subscribe")
+            record.requestDebug.includes(mcpResourceContentText)
     );
     const updateRequest = requestRecords.find(
         (record) =>

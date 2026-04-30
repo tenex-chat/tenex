@@ -179,7 +179,7 @@ export function pmInstructions(name: ScenarioName): string {
         return "Use the MCP probe tool when asked for project-scoped MCP validation.";
     }
     if (name === "mcp-resource-basic") {
-        return "Use MCP resource tools to list, read, then subscribe to the probe resource. After a subscription update arrives, answer with the exact final probe phrase.";
+        return `Use MCP resource tools to list, read, then subscribe to the probe resource. Do not call todo_write. Do not call no_response. After receiving a system-reminder of type mcp-resource-updated, reply with exactly this sentence verbatim and nothing else: "${mcpResourceFinalText}"`;
     }
     if (name === "acp-worker-basic") {
         return "This scenario targets the ACP worker directly; remain idle unless directly mentioned.";
@@ -793,13 +793,14 @@ async function runMcpResourceProbe(context: ScenarioContext): Promise<void> {
         context.userSecret
     );
     await Promise.all(context.pool.publish([context.relayUrl], userEvent));
+    const waitMs = Number(process.env.TENEX_PROBE_WAIT_MS ?? 12_000);
     await context.waitForObservedEvent(
         context.events,
         (event) =>
             event.pubkey === context.pmPubkey &&
             event.kind === 1 &&
             hasTag(event, "tool", "mcp_subscribe"),
-        12_000,
+        waitMs,
         "MCP resource subscription tool event"
     );
     await context.waitForObservedEvent(
@@ -808,7 +809,7 @@ async function runMcpResourceProbe(context: ScenarioContext): Promise<void> {
             event.pubkey === context.pmPubkey &&
             event.kind === 1 &&
             event.content.includes(mcpResourceFinalText),
-        Number(process.env.TENEX_PROBE_WAIT_MS ?? 12_000),
+        waitMs,
         "MCP resource subscription update completion"
     );
 }

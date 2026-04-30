@@ -11,10 +11,10 @@ Organized by functional area. Items marked ✅ are already at parity; items mark
 
 ### 1.1 Fully Missing Tools (TypeScript-only)
 - ✅ `send_message` — proactive Telegram delivery to bound channels (note: agent won't know channel IDs until Fragment 08 injects Telegram bindings into the system prompt)
-- [ ] `mcp_list_resources` — discover available MCP resources and resource templates from configured servers
-- [ ] `mcp_resource_read` — fetch content from an MCP resource, with URI template expansion
-- [ ] `mcp_subscribe` — create persistent subscriptions to MCP resource update notifications
-- [ ] `mcp_subscription_stop` — cancel an active MCP resource subscription
+- ✅ `mcp_list_resources` — discover available MCP resources and resource templates from configured servers
+- ✅ `mcp_resource_read` — fetch content from an MCP resource, with URI template expansion
+- ✅ `mcp_subscribe` — create persistent subscriptions to MCP resource update notifications
+- ✅ `mcp_subscription_stop` — cancel an active MCP resource subscription
 - 🚫 `rag_subscription_create` — won't port (RAG subscriptions are a TypeScript-only abstraction)
 - 🚫 `rag_subscription_delete` — won't port
 - 🚫 `rag_subscription_get` — won't port

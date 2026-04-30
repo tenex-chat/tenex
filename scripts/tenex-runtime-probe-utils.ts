@@ -48,7 +48,15 @@ export function readRequestRecords(file: string): MockRequestRecord[] {
         .filter((line) => line.trim().length > 0)
         .flatMap((line) => {
             try {
-                return [JSON.parse(line) as MockRequestRecord];
+                const record = JSON.parse(line) as MockRequestRecord & {
+                    toolCalls?: Array<string | { name: string }>;
+                };
+                if (Array.isArray(record.toolCalls)) {
+                    record.toolCalls = record.toolCalls.map((toolCall) =>
+                        typeof toolCall === "string" ? toolCall : toolCall.name
+                    );
+                }
+                return [record as MockRequestRecord];
             } catch {
                 return [];
             }
