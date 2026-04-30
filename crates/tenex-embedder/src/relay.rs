@@ -20,7 +20,9 @@ use nostr::event::Event;
 use nostr_sdk::prelude::*;
 use tracing::{debug, warn};
 
-use tenex_protocol::event_filter::{conversation_id_from_event, is_conversation_event};
+use tenex_protocol::event_filter::{
+    conversation_id_from_event, is_conversation_event, CONVERSATION_KINDS_RAW,
+};
 
 const FETCH_TIMEOUT_SECS: u64 = 30;
 
@@ -58,7 +60,12 @@ impl Relay {
         until_secs: i64,
         page_limit: usize,
     ) -> Result<Page> {
-        let mut filter = Filter::new().kind(Kind::TextNote).limit(page_limit);
+        let kinds: Vec<Kind> = CONVERSATION_KINDS_RAW
+            .iter()
+            .copied()
+            .map(Kind::from)
+            .collect();
+        let mut filter = Filter::new().kinds(kinds.clone()).limit(page_limit);
         if until_secs > 0 {
             filter = filter.until(Timestamp::from(until_secs as u64));
         }
@@ -79,7 +86,10 @@ impl Relay {
             .fetch_events(filter, Duration::from_secs(FETCH_TIMEOUT_SECS))
             .await
             .context("relay pass A fetch")?;
-        debug!(pass_a_count = pass_a.len(), "relay fetch_page: pass A complete");
+        debug!(
+            pass_a_count = pass_a.len(),
+            "relay fetch_page: pass A complete"
+        );
 
         let mut by_id: HashSet<String> = HashSet::new();
         let mut events: Vec<Event> = Vec::new();
@@ -105,7 +115,7 @@ impl Relay {
 
         if !root_ids.is_empty() {
             let fill_filter = Filter::new()
-                .kind(Kind::TextNote)
+                .kinds(kinds.clone())
                 .events(root_ids.into_iter());
             match self
                 .client

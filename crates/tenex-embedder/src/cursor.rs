@@ -19,8 +19,8 @@ impl CursorStore {
             std::fs::create_dir_all(parent)
                 .with_context(|| format!("create dir {}", parent.display()))?;
         }
-        let conn = Connection::open(path)
-            .with_context(|| format!("open cursor db {}", path.display()))?;
+        let conn =
+            Connection::open(path).with_context(|| format!("open cursor db {}", path.display()))?;
         conn.execute_batch(
             "PRAGMA journal_mode=WAL;
              CREATE TABLE IF NOT EXISTS relay_cursor (

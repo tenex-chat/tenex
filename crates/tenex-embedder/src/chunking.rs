@@ -44,7 +44,10 @@ pub fn window(items: &[TranscriptItem]) -> Vec<Chunk> {
 
         let seq_start = items_in_chunk.first().map(|i| i.sequence).unwrap_or(0);
         let seq_end = items_in_chunk.last().map(|i| i.sequence).unwrap_or(0);
-        let start_ts = items_in_chunk.first().map(|i| i.timestamp_secs).unwrap_or(0);
+        let start_ts = items_in_chunk
+            .first()
+            .map(|i| i.timestamp_secs)
+            .unwrap_or(0);
         let end_ts = items_in_chunk.last().map(|i| i.timestamp_secs).unwrap_or(0);
 
         chunks.push(Chunk {
@@ -198,7 +201,8 @@ mod tests {
 
     #[test]
     fn chunk_index_is_monotonic_from_zero() {
-        let items: Vec<TranscriptItem> = (1..=200i64).map(|s| item(s, s, &"x".repeat(50))).collect();
+        let items: Vec<TranscriptItem> =
+            (1..=200i64).map(|s| item(s, s, &"x".repeat(50))).collect();
         let chunks = window(&items);
         for (expected, c) in chunks.iter().enumerate() {
             assert_eq!(c.chunk_index, expected as i64);

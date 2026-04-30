@@ -56,7 +56,9 @@ impl<'a> EmbedTarget<'a> {
         conversation_id: &str,
         chunk_index: i64,
     ) -> Result<usize> {
-        self.rag.delete_by_id(&chunk_id(conversation_id, chunk_index)).await
+        self.rag
+            .delete_by_id(&chunk_id(conversation_id, chunk_index))
+            .await
     }
 
     pub async fn delete_all_for_conversation(&self, conversation_id: &str) -> Result<usize> {

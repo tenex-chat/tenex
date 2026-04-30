@@ -38,13 +38,16 @@ impl Accumulator {
     }
 
     pub fn ingest_all<I: IntoIterator<Item = Event>>(&mut self, events: I) -> usize {
-        events.into_iter().filter(|_| true).fold(0, |acc, e| {
-            if self.ingest(e) {
-                acc + 1
-            } else {
-                acc
-            }
-        })
+        events.into_iter().filter(|_| true).fold(
+            0,
+            |acc, e| {
+                if self.ingest(e) {
+                    acc + 1
+                } else {
+                    acc
+                }
+            },
+        )
     }
 
     pub fn conversation_ids(&self) -> Vec<String> {
@@ -82,7 +85,9 @@ mod tests {
     fn ingest_dedupes_repeated_events() {
         let mut acc = Accumulator::new();
         let k = Keys::generate();
-        let event = EventBuilder::new(Kind::TextNote, "hi").sign_with_keys(&k).unwrap();
+        let event = EventBuilder::new(Kind::TextNote, "hi")
+            .sign_with_keys(&k)
+            .unwrap();
         assert!(acc.ingest(event.clone()));
         assert!(!acc.ingest(event));
         assert_eq!(acc.dedupe_count(), 1);
@@ -92,7 +97,9 @@ mod tests {
     fn groups_events_by_conversation_root_id() {
         let mut acc = Accumulator::new();
         let k = Keys::generate();
-        let root = EventBuilder::new(Kind::TextNote, "root").sign_with_keys(&k).unwrap();
+        let root = EventBuilder::new(Kind::TextNote, "root")
+            .sign_with_keys(&k)
+            .unwrap();
         let root_id = root.id.to_hex();
 
         let reply_tag = nostr::Tag::parse(["e", &root_id, "", "root"]).unwrap();

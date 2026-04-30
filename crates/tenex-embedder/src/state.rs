@@ -33,8 +33,8 @@ impl StateStore {
             std::fs::create_dir_all(parent)
                 .with_context(|| format!("create dir {}", parent.display()))?;
         }
-        let conn = Connection::open(path)
-            .with_context(|| format!("open state db {}", path.display()))?;
+        let conn =
+            Connection::open(path).with_context(|| format!("open state db {}", path.display()))?;
         conn.execute_batch(
             "PRAGMA journal_mode=WAL;
              PRAGMA busy_timeout=5000;

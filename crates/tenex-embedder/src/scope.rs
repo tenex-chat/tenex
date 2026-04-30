@@ -55,8 +55,8 @@ struct EventDoc {
 
 pub fn derive(base_dir: &Path) -> Result<Scope> {
     let config_path = base_dir.join("config.json");
-    let config_bytes = std::fs::read(&config_path)
-        .with_context(|| format!("read {}", config_path.display()))?;
+    let config_bytes =
+        std::fs::read(&config_path).with_context(|| format!("read {}", config_path.display()))?;
     let config: ConfigDoc = serde_json::from_slice(&config_bytes)
         .with_context(|| format!("parse {}", config_path.display()))?;
     if config.whitelisted_pubkeys.is_empty() {

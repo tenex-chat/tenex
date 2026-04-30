@@ -123,10 +123,7 @@ pub async fn run(opts: BackfillOptions) -> Result<()> {
     // ---- Phase 1: walk back, accumulate ----
     let walk_bar = ProgressBar::new_spinner();
     walk_bar.set_style(
-        ProgressStyle::with_template(
-            "{spinner} {prefix:.cyan} relay={msg}  events={pos}",
-        )
-        .unwrap(),
+        ProgressStyle::with_template("{spinner} {prefix:.cyan} relay={msg}  events={pos}").unwrap(),
     );
     walk_bar.set_prefix("walking");
     walk_bar.enable_steady_tick(std::time::Duration::from_millis(120));
@@ -196,6 +193,70 @@ pub async fn run(opts: BackfillOptions) -> Result<()> {
         conversations = conv_ids.len(),
         "phase 1 complete: relay walk"
     );
+
+    // Per-project event distribution. An event may carry multiple a-tags;
+    // we count it under each.
+    {
+        use std::collections::{BTreeMap, HashMap};
+        let mut by_project: HashMap<String, (usize, std::collections::HashSet<String>)> =
+            HashMap::new();
+        let mut by_week: BTreeMap<i64, (usize, std::collections::HashSet<String>)> =
+            BTreeMap::new();
+        for conv_id in &conv_ids {
+            for ev in acc.events_for(conv_id) {
+                let secs = ev.created_at.as_secs() as i64;
+                let week_start = monday_of_week_secs(secs);
+                let entry = by_week
+                    .entry(week_start)
+                    .or_insert_with(|| (0, std::collections::HashSet::new()));
+                entry.0 += 1;
+                entry.1.insert(conv_id.clone());
+
+                for tag in ev.tags.iter() {
+                    let parts = tag.as_slice();
+                    if parts.first().map(String::as_str) == Some("a") {
+                        if let Some(value) = parts.get(1) {
+                            if a_tags.iter().any(|t| t == value) {
+                                let entry = by_project
+                                    .entry(value.clone())
+                                    .or_insert_with(|| (0, std::collections::HashSet::new()));
+                                entry.0 += 1;
+                                entry.1.insert(conv_id.clone());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        let mut rows: Vec<(String, usize, usize)> = by_project
+            .into_iter()
+            .map(|(k, (events, convs))| (k, events, convs.len()))
+            .collect();
+        rows.sort_by(|a, b| b.1.cmp(&a.1));
+        eprintln!("\nPer-project event distribution (events / conversations):");
+        for (a_tag, events, convs) in rows.iter().take(50) {
+            let label = a_tag.split(':').nth(2).unwrap_or(a_tag.as_str());
+            eprintln!("  {events:6}  {convs:4}  {label}");
+        }
+        let zero_count = a_tags
+            .iter()
+            .filter(|t| !rows.iter().any(|(k, _, _)| k == *t))
+            .count();
+        if zero_count > 0 {
+            eprintln!("  ({zero_count} owned projects with zero events on this relay)");
+        }
+
+        // Per-week event distribution (UTC, week starting Monday).
+        let max_events = by_week.values().map(|(n, _)| *n).max().unwrap_or(1) as f32;
+        eprintln!("\nPer-week event distribution (UTC, week starting Monday):");
+        eprintln!("  {:<14} {:>6}  {:>5}  bar", "week of", "events", "convs");
+        for (week_start, (events, convs)) in by_week.iter() {
+            let bar_len = ((*events as f32 / max_events) * 40.0).round() as usize;
+            let bar: String = "#".repeat(bar_len);
+            let label = ymd_string(*week_start);
+            eprintln!("  {label:<14} {events:>6}  {:>5}  {bar}", convs.len());
+        }
+    }
 
     if opts.dry_run {
         info!("dry-run; not embedding");
@@ -267,4 +328,38 @@ fn now_secs() -> i64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0)
+}
+
+const SECS_PER_DAY: i64 = 86_400;
+
+/// Return the unix-seconds timestamp of 00:00 UTC on the Monday of
+/// the week containing `secs`. 1970-01-01 was a Thursday, so days
+/// since epoch shift by 3 to make Monday=0.
+fn monday_of_week_secs(secs: i64) -> i64 {
+    let days = secs.div_euclid(SECS_PER_DAY);
+    let dow_mon0 = ((days + 3).rem_euclid(7)) as i64; // Mon=0..Sun=6
+    let monday_days = days - dow_mon0;
+    monday_days * SECS_PER_DAY
+}
+
+/// Format a unix-seconds (UTC) timestamp as `YYYY-MM-DD`.
+/// Implements Howard Hinnant's `civil_from_days` algorithm inline so we
+/// don't pull in a date crate just for one debug print.
+fn ymd_string(secs: i64) -> String {
+    let days = secs.div_euclid(SECS_PER_DAY);
+    let z = days + 719_468;
+    let era = if z >= 0 {
+        z / 146_097
+    } else {
+        (z - 146_096) / 146_097
+    };
+    let doe = (z - era * 146_097) as i64;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = if m <= 2 { y + 1 } else { y };
+    format!("{:04}-{:02}-{:02}", year, m, d)
 }

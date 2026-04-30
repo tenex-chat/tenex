@@ -159,6 +159,13 @@ impl Processor {
                     )
                     .await
                     .context("embed chunk")?;
+                crate::accounting::record_chunk(
+                    conversation_id.to_string(),
+                    chunk.chunk_index,
+                    body.len() as i64,
+                    (body.len() as u64) / 4, // rough token estimate (4 chars/token)
+                    None,
+                );
                 self.pacer.reset_failures().await;
                 embedded += 1;
             }

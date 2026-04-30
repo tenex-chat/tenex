@@ -9,6 +9,7 @@
 //! the doc still references the older `conversation.db`-as-source
 //! design and is being revised).
 
+pub mod accounting;
 pub mod accumulator;
 pub mod backfill;
 pub mod chunking;
