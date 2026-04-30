@@ -27,7 +27,7 @@ Canonical spec: `docs/RUST-AGENT-SPEC.md`. Fleet context: `docs/plans/2026-04-28
 - **Completion only when work is actually done.** The final stdout line is a signed completion unless the turn started pending external work; pending-work text is emitted as a non-notifying conversation frame.
 - **Root event ID derivation** (`src/nostr.rs`): first `["e", id, _, "root"]` tag → else first `["e", id, ...]` tag → else the triggering event's own ID.
 - **Project context via `tenex-project`.** Agent definitions, model resolution, and project metadata come from `tenex-project::Project`. Do not parse agent JSON files directly.
-- **Tools in `src/tools/`.** Static tools live as separate files in this directory and are registered in `main.rs` via the `run_agent!` macro. Core tools include shell, filesystem and home-filesystem tools, todo, delegation and follow-up delegation, ask/no-response, conversation lookup, RAG, skills, learning, reports, scheduling, project listing, model changes, agent config writes, and MCP proxy tools.
+- **Tools in `src/tools/`.** Static tools live as separate files in this directory and are registered in `main.rs` via the `run_agent!` macro. Core tools include shell, filesystem and home-filesystem tools, todo, delegation and follow-up delegation, ask/no-response, conversation lookup, RAG, skills, learning, reports, scheduling, project listing, model changes, agent config writes, and MCP proxy tools. Project filesystem reads/globs use `src/tools/agents_md.rs` to append newly encountered nested `AGENTS.md` files as system reminders.
 - **No relay connections.** This binary never opens a relay. Signing and publishing happen only to stdout.
 
 ## How to approach changes

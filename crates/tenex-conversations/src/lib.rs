@@ -11,6 +11,7 @@
 //!
 //! Schema is the contract. Versioned migrations live in [`schema`].
 
+pub mod discovery;
 pub mod error;
 pub mod ids;
 pub mod migration;
@@ -20,6 +21,7 @@ pub mod project;
 pub mod schema;
 pub mod store;
 
+pub use discovery::{discover_projects, discover_projects_default, ProjectRef};
 pub use error::{ConversationsError, Result};
 pub use ids::normalize_project_id;
 pub use model::{

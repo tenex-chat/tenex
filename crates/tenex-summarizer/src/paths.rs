@@ -21,10 +21,6 @@ pub fn providers_file() -> PathBuf {
     base_dir().join("providers.json")
 }
 
-pub fn projects_dir() -> PathBuf {
-    base_dir().join("projects")
-}
-
 pub fn pid_file() -> PathBuf {
     base_dir().join("summarizer.pid")
 }

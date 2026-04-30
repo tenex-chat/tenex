@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result};
 use nostr_sdk::prelude::*;
 use tracing::warn;
 
@@ -12,9 +12,6 @@ pub(super) async fn dispatch_notification(
     subscription: &McpSubscription,
     content: &str,
 ) -> Result<()> {
-    let Some(keys) = shared.backend_keys.as_ref() else {
-        bail!("backend keys unavailable for MCP subscription notification");
-    };
     let agent = shared
         .agent_snapshot()
         .agents
@@ -52,7 +49,7 @@ pub(super) async fn dispatch_notification(
     ];
     let event = EventBuilder::new(Kind::TextNote, body)
         .tags(tags)
-        .sign_with_keys(keys)
+        .sign_with_keys(&shared.backend_keys)
         .context("sign MCP subscription notification")?;
 
     mark_seen(&shared.seen, event.id);

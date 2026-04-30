@@ -6,7 +6,7 @@ use sha2::{Digest, Sha256};
 use crate::config::EmbedConfig;
 use crate::embed::EmbeddingClient;
 use crate::sqlite_store::SqliteStore;
-use crate::store::{VectorMatch, VectorStore};
+use crate::store::{ChunkMeta, VectorMatch, VectorStore};
 
 #[derive(Debug, Clone)]
 pub struct SearchResult {
@@ -15,6 +15,12 @@ pub struct SearchResult {
     pub content: String,
     pub title: Option<String>,
     pub score: f32,
+    pub source_kind: Option<String>,
+    pub source_id: Option<String>,
+    pub seq_start: Option<i64>,
+    pub seq_end: Option<i64>,
+    pub chunk_index: Option<i64>,
+    pub meta_json: Option<serde_json::Value>,
 }
 
 impl From<VectorMatch> for SearchResult {
@@ -25,6 +31,12 @@ impl From<VectorMatch> for SearchResult {
             content: m.content,
             title: m.title,
             score: m.score,
+            source_kind: m.source_kind,
+            source_id: m.source_id,
+            seq_start: m.seq_start,
+            seq_end: m.seq_end,
+            chunk_index: m.chunk_index,
+            meta_json: m.meta_json,
         }
     }
 }
@@ -43,9 +55,9 @@ impl RagStore<SqliteStore> {
 }
 
 impl<S: VectorStore> RagStore<S> {
-    /// Embed and store a document. The ID is derived from the collection name
-    /// and a hash of the content so identical content upserts cleanly.
-    /// Returns the assigned document ID.
+    /// Embed and store a document with a content-derived ID. Used by
+    /// agent-facing tools (`rag_add_documents`) where the writer doesn't
+    /// track stable IDs. Identical content upserts cleanly.
     pub async fn index(
         &self,
         content: &str,
@@ -59,9 +71,26 @@ impl<S: VectorStore> RagStore<S> {
 
         let vector = self.embed.embed(content).await?;
         self.store
-            .upsert(&id, collection, content, title, &vector)
+            .upsert(&id, collection, content, title, &vector, &ChunkMeta::default())
             .await?;
         Ok(id)
+    }
+
+    /// Embed and store a document with a caller-supplied stable ID and
+    /// source metadata. Used by `tenex-embedder` for source-keyed chunks
+    /// that may need bulk invalidation.
+    pub async fn put(
+        &self,
+        id: &str,
+        collection: &str,
+        content: &str,
+        title: Option<&str>,
+        meta: &ChunkMeta,
+    ) -> Result<()> {
+        let vector = self.embed.embed(content).await?;
+        self.store
+            .upsert(id, collection, content, title, &vector, meta)
+            .await
     }
 
     pub async fn search(
@@ -81,5 +110,29 @@ impl<S: VectorStore> RagStore<S> {
 
     pub async fn delete_collection(&self, collection: &str) -> Result<usize> {
         self.store.delete_collection(collection).await
+    }
+
+    pub async fn delete_by_source(
+        &self,
+        source_kind: &str,
+        source_id: &str,
+    ) -> Result<usize> {
+        self.store.delete_by_source(source_kind, source_id).await
+    }
+
+    pub async fn delete_by_id(&self, id: &str) -> Result<usize> {
+        self.store.delete_by_id(id).await
+    }
+
+    pub async fn list_chunks_for_source(
+        &self,
+        source_kind: &str,
+        source_id: &str,
+    ) -> Result<Vec<SearchResult>> {
+        let matches = self
+            .store
+            .list_chunks_for_source(source_kind, source_id)
+            .await?;
+        Ok(matches.into_iter().map(SearchResult::from).collect())
     }
 }

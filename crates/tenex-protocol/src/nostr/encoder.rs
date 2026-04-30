@@ -285,6 +285,7 @@ fn encode_publish_article(
 ) -> Result<EventBuilder, EncodeError> {
     let mut builder = EventBuilder::new(kinds::custom(kinds::LONG_FORM_ARTICLE), &intent.content);
     builder = builder.tag(tag(["d", &intent.d_tag])?);
+    builder = builder.tag(tag(["title", &intent.title])?);
     builder = builder.tag(tag(["document", &intent.document_tag])?);
     builder = builder.tag(project_a_tag(&ctx.project)?);
     Ok(builder)

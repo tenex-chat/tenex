@@ -1,20 +1,12 @@
 //! Conversation storage adapter for the per-project `conversation.db` file.
 
 use std::fs;
-use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 use serde::Deserialize;
-use tenex_conversations::{ConversationStore, MessageQuery, MessageRecord};
+use tenex_conversations::{ConversationStore, MessageQuery, MessageRecord, ProjectRef};
 
 use crate::paths;
-
-#[derive(Debug, Clone)]
-pub struct ProjectRef {
-    pub d_tag: String,
-    pub root: PathBuf,
-    pub conversation_db: PathBuf,
-}
 
 #[derive(Debug, Clone)]
 pub struct CandidateRow {
@@ -41,37 +33,9 @@ impl ProjectEvent {
     }
 }
 
-/// Enumerate projects under `~/.tenex/projects/` that have the project event
-/// and the canonical conversation database.
+/// Enumerate projects under the host's TENEX base directory.
 pub fn discover_projects() -> Result<Vec<ProjectRef>> {
-    let root = paths::projects_dir();
-    if !root.exists() {
-        return Ok(Vec::new());
-    }
-    let mut out = Vec::new();
-    for entry in fs::read_dir(&root).with_context(|| format!("read {}", root.display()))? {
-        let entry = entry?;
-        if !entry.file_type()?.is_dir() {
-            continue;
-        }
-        let dir = entry.path();
-        let d_tag = match dir.file_name().and_then(|s| s.to_str()) {
-            Some(s) => s.to_string(),
-            None => continue,
-        };
-        let event = dir.join("event.json");
-        let conversation_db = dir.join(tenex_conversations::paths::CONVERSATION_DB_FILENAME);
-        if !event.exists() || !conversation_db.exists() {
-            continue;
-        }
-        out.push(ProjectRef {
-            d_tag,
-            root: dir,
-            conversation_db,
-        });
-    }
-    out.sort_by(|a, b| a.d_tag.cmp(&b.d_tag));
-    Ok(out)
+    tenex_conversations::discover_projects(&paths::base_dir())
 }
 
 pub fn load_project_event(project: &ProjectRef) -> Result<ProjectEvent> {

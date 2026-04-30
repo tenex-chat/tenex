@@ -19,7 +19,6 @@ const DEFAULT_RELAYS: &[&str] = &["wss://relay.tenex.chat"];
 pub struct Config {
     pub whitelisted_pubkeys: Vec<String>,
     pub relays: Vec<String>,
-    pub tenex_private_key: Option<String>,
 }
 
 /// Load `<base_dir>/config.json` and apply daemon-startup invariants.
@@ -45,6 +44,5 @@ pub fn load(base_dir: &Path) -> Result<Config> {
     Ok(Config {
         whitelisted_pubkeys,
         relays,
-        tenex_private_key: doc.tenex_private_key(),
     })
 }

@@ -427,6 +427,19 @@ func historicalQuerySignature(filter nostr.Filter) string {
 	b.WriteString("|l:")
 	b.WriteString(fmt.Sprintf("%d", filter.Limit))
 
+	// Time bounds must be part of the signature: paginated walks reuse
+	// the same kinds/authors/tags/limit but with different `since` /
+	// `until` cursors. Excluding them caused the replay guard to flag
+	// each page-2+ request as a duplicate and silently zero the limit.
+	if filter.Since != nil {
+		b.WriteString("|s:")
+		b.WriteString(fmt.Sprintf("%d", *filter.Since))
+	}
+	if filter.Until != nil {
+		b.WriteString("|u:")
+		b.WriteString(fmt.Sprintf("%d", *filter.Until))
+	}
+
 	return b.String()
 }
 

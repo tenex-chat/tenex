@@ -10,6 +10,7 @@ use crate::emit::EmitState;
 use crate::injections::MessageInjectionTracker;
 use crate::runtime_state::RuntimeStateHandle;
 
+use super::agents_md::AgentsMdReminderState;
 use super::agents_write::AgentsWriteTool;
 use super::ask::AskTool;
 use super::change_model::ChangeModelTool;
@@ -65,6 +66,7 @@ pub(crate) struct ToolSet {
     pub(crate) rag_store: Option<Arc<RagStore>>,
     pub(crate) embed_config: Option<EmbedConfig>,
     pub(crate) working_dir: String,
+    pub(crate) agents_md: Arc<AgentsMdReminderState>,
     pub(crate) shell_env: Vec<(String, String)>,
     pub(crate) granted_tools: HashSet<String>,
     pub(crate) todos: Arc<Mutex<Vec<TodoItem>>>,
@@ -132,7 +134,10 @@ impl ToolSet {
             &mut tools,
             &recorder,
             "fs_read",
-            Box::new(FsReadTool::new(self.working_dir.clone())),
+            Box::new(FsReadTool::new(
+                self.working_dir.clone(),
+                self.agents_md.clone(),
+            )),
             Box::new(HomeFsReadTool::new(agent_home_str.clone())),
         );
 
@@ -164,7 +169,10 @@ impl ToolSet {
             &mut tools,
             &recorder,
             "fs_glob",
-            Box::new(FsGlobTool::new(self.working_dir.clone())),
+            Box::new(FsGlobTool::new(
+                self.working_dir.clone(),
+                self.agents_md.clone(),
+            )),
             Box::new(HomeFsGlobTool::new(agent_home_str.clone())),
         );
 

@@ -13,6 +13,7 @@ pub struct ReportPublishError(String);
 #[derive(Debug, Deserialize, Serialize)]
 pub struct ReportPublishArgs {
     pub path: String,
+    pub title: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -157,9 +158,13 @@ impl Tool for ReportPublishTool {
                     "path": {
                         "type": "string",
                         "description": "Absolute or project-relative path to a markdown file or directory."
+                    },
+                    "title": {
+                        "type": "string",
+                        "description": "NIP-23 article title published as the 'title' tag."
                     }
                 },
-                "required": ["path"]
+                "required": ["path", "title"]
             }),
         }
     }
@@ -201,6 +206,7 @@ impl Tool for ReportPublishTool {
             let intent = PublishArticleIntent {
                 d_tag: file.d_tag.clone(),
                 document_tag: file.document_tag.clone(),
+                title: args.title.clone(),
                 content,
             };
 

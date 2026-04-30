@@ -48,6 +48,7 @@ struct RuntimeCtx<'a> {
 
 pub async fn run(
     cfg: Config,
+    backend_keys: Keys,
     supervisor: Supervisor,
     pending_boot_prefixes: Vec<String>,
 ) -> Result<JoinHandle<()>> {
@@ -67,7 +68,7 @@ pub async fn run(
         return Err(anyhow!("no valid whitelisted pubkeys"));
     }
 
-    let client = Client::default();
+    let client = Client::new(backend_keys);
     for relay in &cfg.relays {
         if let Err(e) = client.add_relay(relay.as_str()).await {
             warn!(relay, error = %e, "add_relay failed");

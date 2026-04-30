@@ -5,7 +5,8 @@ use anyhow::{Context, Result};
 use async_trait::async_trait;
 use rusqlite::Connection;
 
-use crate::store::{VectorMatch, VectorStore};
+use crate::schema;
+use crate::store::{ChunkMeta, VectorMatch, VectorStore};
 
 pub struct SqliteStore {
     conn: Mutex<Connection>,
@@ -18,23 +19,16 @@ impl SqliteStore {
                 .with_context(|| format!("create dir {}", parent.display()))?;
         }
 
-        let conn = Connection::open(path)
+        let mut conn = Connection::open(path)
             .with_context(|| format!("open embeddings DB at {}", path.display()))?;
 
         conn.execute_batch(
             "PRAGMA journal_mode=WAL;
-             PRAGMA busy_timeout=5000;
-             CREATE TABLE IF NOT EXISTS doc_meta (
-               id          TEXT PRIMARY KEY,
-               collection  TEXT NOT NULL,
-               content     TEXT NOT NULL,
-               title       TEXT,
-               vector_blob BLOB NOT NULL,
-               created_at  INTEGER NOT NULL
-             );
-             CREATE INDEX IF NOT EXISTS idx_collection ON doc_meta(collection);",
+             PRAGMA busy_timeout=5000;",
         )
-        .context("initialize embeddings DB schema")?;
+        .context("set sqlite pragmas")?;
+
+        schema::ensure_schema(&mut conn).context("apply embeddings.db schema")?;
 
         Ok(Self {
             conn: Mutex::new(conn),
@@ -51,6 +45,7 @@ impl VectorStore for SqliteStore {
         content: &str,
         title: Option<&str>,
         vector: &[f32],
+        meta: &ChunkMeta,
     ) -> Result<()> {
         let blob = floats_to_bytes(vector);
         let now = std::time::SystemTime::now()
@@ -58,17 +53,44 @@ impl VectorStore for SqliteStore {
             .unwrap_or_default()
             .as_secs() as i64;
 
+        let meta_json = match &meta.meta_json {
+            Some(v) => Some(v.to_string()),
+            None => None,
+        };
+
         let conn = self.conn.lock().unwrap();
         conn.execute(
-            "INSERT INTO doc_meta (id, collection, content, title, vector_blob, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+            "INSERT INTO doc_meta (
+                 id, collection, content, title, vector_blob, created_at,
+                 source_kind, source_id, seq_start, seq_end, chunk_index, meta_json
+             )
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
              ON CONFLICT(id) DO UPDATE SET
                collection  = excluded.collection,
                content     = excluded.content,
                title       = excluded.title,
                vector_blob = excluded.vector_blob,
-               created_at  = excluded.created_at",
-            rusqlite::params![id, collection, content, title, blob, now],
+               created_at  = excluded.created_at,
+               source_kind = excluded.source_kind,
+               source_id   = excluded.source_id,
+               seq_start   = excluded.seq_start,
+               seq_end     = excluded.seq_end,
+               chunk_index = excluded.chunk_index,
+               meta_json   = excluded.meta_json",
+            rusqlite::params![
+                id,
+                collection,
+                content,
+                title,
+                blob,
+                now,
+                meta.source_kind,
+                meta.source_id,
+                meta.seq_start,
+                meta.seq_end,
+                meta.chunk_index,
+                meta_json,
+            ],
         )
         .with_context(|| format!("upsert doc '{id}'"))?;
 
@@ -83,7 +105,8 @@ impl VectorStore for SqliteStore {
     ) -> Result<Vec<VectorMatch>> {
         let placeholders: Vec<String> = (1..=collections.len()).map(|i| format!("?{i}")).collect();
         let sql = format!(
-            "SELECT id, collection, content, title, vector_blob
+            "SELECT id, collection, content, title, vector_blob,
+                    source_kind, source_id, seq_start, seq_end, chunk_index, meta_json
              FROM doc_meta
              WHERE collection IN ({})",
             placeholders.join(", ")
@@ -97,7 +120,21 @@ impl VectorStore for SqliteStore {
             .map(|c| c as &dyn rusqlite::ToSql)
             .collect();
 
-        let rows: Vec<(String, String, String, Option<String>, Vec<u8>)> = stmt
+        type Row = (
+            String,
+            String,
+            String,
+            Option<String>,
+            Vec<u8>,
+            Option<String>,
+            Option<String>,
+            Option<i64>,
+            Option<i64>,
+            Option<i64>,
+            Option<String>,
+        );
+
+        let rows: Vec<Row> = stmt
             .query_map(params.as_slice(), |row| {
                 Ok((
                     row.get(0)?,
@@ -105,6 +142,12 @@ impl VectorStore for SqliteStore {
                     row.get(2)?,
                     row.get(3)?,
                     row.get(4)?,
+                    row.get(5)?,
+                    row.get(6)?,
+                    row.get(7)?,
+                    row.get(8)?,
+                    row.get(9)?,
+                    row.get(10)?,
                 ))
             })
             .context("execute search query")?
@@ -116,17 +159,40 @@ impl VectorStore for SqliteStore {
 
         let mut scored: Vec<VectorMatch> = rows
             .into_iter()
-            .filter_map(|(id, collection, content, title, blob)| {
-                let doc_vec = bytes_to_floats(&blob);
-                let score = cosine_similarity(query_vector, &doc_vec)?;
-                Some(VectorMatch {
+            .filter_map(
+                |(
                     id,
                     collection,
                     content,
                     title,
-                    score,
-                })
-            })
+                    blob,
+                    source_kind,
+                    source_id,
+                    seq_start,
+                    seq_end,
+                    chunk_index,
+                    meta_json_str,
+                )| {
+                    let doc_vec = bytes_to_floats(&blob);
+                    let score = cosine_similarity(query_vector, &doc_vec)?;
+                    let meta_json = meta_json_str
+                        .as_deref()
+                        .and_then(|s| serde_json::from_str(s).ok());
+                    Some(VectorMatch {
+                        id,
+                        collection,
+                        content,
+                        title,
+                        score,
+                        source_kind,
+                        source_id,
+                        seq_start,
+                        seq_end,
+                        chunk_index,
+                        meta_json,
+                    })
+                },
+            )
             .collect();
 
         scored.sort_by(|a, b| {
@@ -160,6 +226,118 @@ impl VectorStore for SqliteStore {
             )
             .with_context(|| format!("delete collection '{collection}'"))?;
         Ok(n)
+    }
+
+    async fn delete_by_source(
+        &self,
+        source_kind: &str,
+        source_id: &str,
+    ) -> anyhow::Result<usize> {
+        let conn = self.conn.lock().unwrap();
+        let n = conn
+            .execute(
+                "DELETE FROM doc_meta WHERE source_kind = ?1 AND source_id = ?2",
+                rusqlite::params![source_kind, source_id],
+            )
+            .with_context(|| format!("delete by source '{source_kind}/{source_id}'"))?;
+        Ok(n)
+    }
+
+    async fn delete_by_id(&self, id: &str) -> anyhow::Result<usize> {
+        let conn = self.conn.lock().unwrap();
+        let n = conn
+            .execute(
+                "DELETE FROM doc_meta WHERE id = ?1",
+                rusqlite::params![id],
+            )
+            .with_context(|| format!("delete by id '{id}'"))?;
+        Ok(n)
+    }
+
+    async fn list_chunks_for_source(
+        &self,
+        source_kind: &str,
+        source_id: &str,
+    ) -> anyhow::Result<Vec<VectorMatch>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, collection, content, title,
+                        source_kind, source_id, seq_start, seq_end, chunk_index, meta_json
+                 FROM doc_meta
+                 WHERE source_kind = ?1 AND source_id = ?2
+                 ORDER BY chunk_index IS NULL, chunk_index ASC, id ASC",
+            )
+            .context("prepare list_chunks_for_source")?;
+
+        type Row = (
+            String,
+            String,
+            String,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            Option<i64>,
+            Option<i64>,
+            Option<i64>,
+            Option<String>,
+        );
+
+        let rows: Vec<Row> = stmt
+            .query_map(rusqlite::params![source_kind, source_id], |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                    row.get(5)?,
+                    row.get(6)?,
+                    row.get(7)?,
+                    row.get(8)?,
+                    row.get(9)?,
+                ))
+            })
+            .context("execute list_chunks_for_source")?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        let out = rows
+            .into_iter()
+            .map(
+                |(
+                    id,
+                    collection,
+                    content,
+                    title,
+                    source_kind,
+                    source_id,
+                    seq_start,
+                    seq_end,
+                    chunk_index,
+                    meta_json_str,
+                )| {
+                    let meta_json = meta_json_str
+                        .as_deref()
+                        .and_then(|s| serde_json::from_str(s).ok());
+                    VectorMatch {
+                        id,
+                        collection,
+                        content,
+                        title,
+                        // Score is undefined when listing without a query; use 0.0.
+                        score: 0.0,
+                        source_kind,
+                        source_id,
+                        seq_start,
+                        seq_end,
+                        chunk_index,
+                        meta_json,
+                    }
+                },
+            )
+            .collect();
+        Ok(out)
     }
 }
 

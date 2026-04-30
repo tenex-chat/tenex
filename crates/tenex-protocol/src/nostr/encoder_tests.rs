@@ -126,6 +126,7 @@ fn publish_article_emits_kind_30023_with_required_tags() {
     let intent = crate::intent::PublishArticleIntent {
         d_tag: "notes/2024-01-01".into(),
         document_tag: "notes".into(),
+        title: "My Notes".into(),
         content: "# Hello\nWorld".into(),
     };
     let builders = NostrEncoder::encode(&Intent::PublishArticle(intent), &ctx).expect("encode");
@@ -134,6 +135,7 @@ fn publish_article_emits_kind_30023_with_required_tags() {
     assert!(tags
         .iter()
         .any(|t| t[0] == "d" && t[1] == "notes/2024-01-01"));
+    assert!(tags.iter().any(|t| t[0] == "title" && t[1] == "My Notes"));
     assert!(tags.iter().any(|t| t[0] == "document" && t[1] == "notes"));
     assert!(tags
         .iter()

@@ -154,6 +154,8 @@ pub struct PublishArticleIntent {
     /// Human-readable document grouping — filename without extension, or
     /// directory base name when publishing a directory recursively.
     pub document_tag: String,
+    /// NIP-23 article title.
+    pub title: String,
     pub content: String,
 }
 

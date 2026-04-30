@@ -26,11 +26,13 @@
 
 pub mod channel;
 pub mod context;
+pub mod event_filter;
 pub mod intent;
 pub mod nostr;
 pub mod refs;
 pub mod runtime_control;
 pub mod sink;
+pub mod transcript;
 
 pub use channel::{Channel, ChannelError, InboundEnvelope, InboundMetadata, InboundSource};
 pub use context::EncodingContext;

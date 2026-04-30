@@ -1,37 +1,30 @@
 //! `tenex config relays` — configure Nostr relay connections.
 //!
-//! Source: `src/commands/config/relays.ts:9-122`. Single-shot interaction
-//! (no menu loop): list current state, ask for one action, perform it,
-//! return. The caller (the top-level config menu) is responsible for the
-//! outer "show again on return" loop.
+//! Single-shot interaction (no menu loop): list current state, ask for one
+//! action, perform it, return. The caller (the top-level config menu) is
+//! responsible for the outer "show again on return" loop.
 //!
-//! Behaviours (TS lines cited inline in tests):
-//!
-//! - **Listing** (`:18-35`): print `Relays:` heading then either
-//!   `No relays configured.` (dim) or each relay as `● <url>` (cyan
-//!   bullet); same shape for `Identity relays (for kind:0 events):` with
-//!   the `wss://purplepag.es (default)` line when none are configured.
-//! - **Add** / **Add identity** (`:51-99`): one input prompt validated by
-//!   [`crate::types::relay::validate_config_screen`] (prefix-check matches
-//!   `:57-63` byte-for-byte), trim, append, save, success line.
-//! - **Remove** / **Remove identity** (`:68-114`): if the corresponding
-//!   list is empty, print the dim "nothing to remove" line; otherwise
-//!   pick from a `select` and filter out, save, success line.
+//! Identity resolution (kind:0 fetches by `tenex-identity`) always uses
+//! [`IDENTITY_PINNED_RELAY`] in addition to the configured `relays`. This
+//! is enforced inside the identity daemon itself; the UI surfaces it as a
+//! static info line so users understand where kind:0 traffic goes.
 
 use anyhow::{anyhow, Result};
 
 use crate::store::tenex_config::TenexConfigDoc;
 use crate::tui::prompts;
 
-const DEFAULT_IDENTITY_RELAY: &str = "wss://purplepag.es";
+/// Pinned relay for kind:0 identity events — always connected by
+/// `tenex-identity` regardless of config. Mirrors the constant of the
+/// same name in `crates/tenex-identity/src/lib.rs`.
+const IDENTITY_PINNED_RELAY: &str = "wss://purplepag.es";
 
 /// Run the relays submenu once. Returns immediately on Cancel.
 pub fn run(base_dir: &std::path::Path) -> Result<()> {
     let mut doc = TenexConfigDoc::load(base_dir)?;
     let relays = doc.relays();
-    let identity_relays = doc.identity_relays();
 
-    render_listing(&relays, &identity_relays);
+    render_listing(&relays);
 
     let action = match prompts::select("What do you want to do?", actions()).prompt() {
         Ok(a) => a,
@@ -43,20 +36,12 @@ pub fn run(base_dir: &std::path::Path) -> Result<()> {
     match action.value {
         ActionValue::Add => add_relay(base_dir, &mut doc, relays)?,
         ActionValue::Remove => remove_relay(base_dir, &mut doc, relays)?,
-        ActionValue::AddIdentity => add_identity_relay(base_dir, &mut doc, identity_relays)?,
-        ActionValue::RemoveIdentity => remove_identity_relay(base_dir, &mut doc, identity_relays)?,
         ActionValue::Back => {}
     }
     Ok(())
 }
 
-/// Print the listing block. Source: `:18-35`.
-///
-/// TS embeds the leading `\n` AND the 2/4-space indent INSIDE each
-/// chalk.dim wrap, e.g. `chalk.dim("\n  Relays:")`. Mirror byte-for-
-/// byte: include the same whitespace inside the dim'd payload so the
-/// wire ANSI sequence matches TS exactly.
-fn render_listing(relays: &[String], identity_relays: &[String]) {
+fn render_listing(relays: &[String]) {
     use crate::tui::theme::{chalk_cyan, chalk_dim};
     let cyan_bullet = chalk_cyan("●");
     println!("{}", chalk_dim("\n  Relays:"));
@@ -68,17 +53,12 @@ fn render_listing(relays: &[String], identity_relays: &[String]) {
         }
     }
 
-    println!("{}", chalk_dim("\n  Identity relays (for kind:0 events):"));
-    if identity_relays.is_empty() {
-        println!(
-            "{}",
-            chalk_dim(&format!("    {DEFAULT_IDENTITY_RELAY} (default)")),
-        );
-    } else {
-        for r in identity_relays {
-            println!("    {cyan_bullet} {r}");
-        }
-    }
+    println!(
+        "{}",
+        chalk_dim(&format!(
+            "\n  Identity events (kind:0) always go to {IDENTITY_PINNED_RELAY}."
+        )),
+    );
     println!();
 }
 
@@ -105,8 +85,6 @@ fn remove_relay(
     existing: Vec<String>,
 ) -> Result<()> {
     if existing.is_empty() {
-        // TS at relays.ts:70 — `chalk.dim("  Nothing to remove.")`
-        // with the leading 2-space indent INSIDE the dim wrap.
         println!("{}", crate::tui::theme::chalk_dim("  Nothing to remove."));
         return Ok(());
     }
@@ -118,51 +96,6 @@ fn remove_relay(
     doc.set_relays(updated);
     doc.save(base_dir)?;
     crate::tui::display::config_success("Relay removed.");
-    Ok(())
-}
-
-fn add_identity_relay(
-    base_dir: &std::path::Path,
-    doc: &mut TenexConfigDoc,
-    existing: Vec<String>,
-) -> Result<()> {
-    let trimmed = match prompt_relay_url("Identity relay URL (ws:// or wss://):") {
-        Some(t) => t,
-        None => return Ok(()),
-    };
-    let mut updated = existing;
-    updated.push(trimmed);
-    doc.set_identity_relays(updated);
-    doc.save(base_dir)?;
-    crate::tui::display::config_success("Identity relay added.");
-    Ok(())
-}
-
-fn remove_identity_relay(
-    base_dir: &std::path::Path,
-    doc: &mut TenexConfigDoc,
-    existing: Vec<String>,
-) -> Result<()> {
-    if existing.is_empty() {
-        // TS at relays.ts:102 — `chalk.dim(\`  No custom identity relays
-        // configured (using default: ${DEFAULT_IDENTITY_RELAY}).\`)`
-        // with the leading 2-space indent INSIDE the dim wrap.
-        println!(
-            "{}",
-            crate::tui::theme::chalk_dim(&format!(
-                "  No custom identity relays configured (using default: {DEFAULT_IDENTITY_RELAY})."
-            )),
-        );
-        return Ok(());
-    }
-    let chosen = match prompt_select_relay("Remove which identity relay?", &existing) {
-        Some(s) => s,
-        None => return Ok(()),
-    };
-    let updated: Vec<String> = existing.into_iter().filter(|r| r != &chosen).collect();
-    doc.set_identity_relays(updated);
-    doc.save(base_dir)?;
-    crate::tui::display::config_success("Identity relay removed.");
     Ok(())
 }
 
@@ -184,8 +117,6 @@ fn prompt_select_relay(message: &str, options: &[String]) -> Option<String> {
 enum ActionValue {
     Add,
     Remove,
-    AddIdentity,
-    RemoveIdentity,
     Back,
 }
 
@@ -212,14 +143,6 @@ fn actions() -> Vec<ActionItem> {
             value: ActionValue::Remove,
         },
         ActionItem {
-            label: "Add an identity relay",
-            value: ActionValue::AddIdentity,
-        },
-        ActionItem {
-            label: "Remove an identity relay",
-            value: ActionValue::RemoveIdentity,
-        },
-        ActionItem {
             label: "Back",
             value: ActionValue::Back,
         },
@@ -231,19 +154,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn actions_match_ts_verbatim_in_order() {
+    fn actions_in_order() {
         let acts = actions();
         let labels: Vec<&str> = acts.iter().map(|a| a.label).collect();
-        assert_eq!(
-            labels,
-            vec![
-                "Add a relay",
-                "Remove a relay",
-                "Add an identity relay",
-                "Remove an identity relay",
-                "Back",
-            ]
-        );
+        assert_eq!(labels, vec!["Add a relay", "Remove a relay", "Back"]);
     }
 
     #[test]
@@ -251,36 +165,26 @@ mod tests {
         let acts = actions();
         assert_eq!(acts[0].value, ActionValue::Add);
         assert_eq!(acts[1].value, ActionValue::Remove);
-        assert_eq!(acts[2].value, ActionValue::AddIdentity);
-        assert_eq!(acts[3].value, ActionValue::RemoveIdentity);
-        assert_eq!(acts[4].value, ActionValue::Back);
+        assert_eq!(acts[2].value, ActionValue::Back);
     }
 
     #[test]
-    fn default_identity_relay_constant_pinned() {
-        assert_eq!(DEFAULT_IDENTITY_RELAY, "wss://purplepag.es");
+    fn identity_pinned_relay_constant_pinned() {
+        assert_eq!(IDENTITY_PINNED_RELAY, "wss://purplepag.es");
     }
 
-    /// Pin the cyan-bullet byte sequence used in the relay listing.
-    /// TS at relays.ts:23,32 emits `chalk.cyan("●")` → `\x1b[36m●\x1b[39m`.
-    /// `theme::chalk_cyan(text)` (raw SGR 36 + SGR 39) matches that
-    /// byte-for-byte; the previous console::Style.cyan().apply_to(...)
-    /// would close with SGR 0 instead.
     #[test]
-    fn cyan_bullet_byte_sequence_matches_ts_chalk() {
-        assert_eq!(crate::tui::theme::chalk_cyan("●"), "\x1b[36m●\x1b[39m",);
+    fn cyan_bullet_byte_sequence() {
+        assert_eq!(crate::tui::theme::chalk_cyan("●"), "\x1b[36m●\x1b[39m");
     }
 
     #[test]
     fn add_persists_relay_to_config_json() {
         let base = unique_temp();
         let mut doc = TenexConfigDoc::load(&base).unwrap();
-        // Pre-populate with one relay.
         doc.set_relays(vec!["wss://existing.example".to_owned()]);
         doc.save(&base).unwrap();
 
-        // Simulate the add path's persistence directly (the prompt is
-        // stripped — this verifies the side effect that follows it).
         let mut doc = TenexConfigDoc::load(&base).unwrap();
         let mut relays = doc.relays();
         relays.push("wss://added.example".to_owned());
@@ -306,7 +210,6 @@ mod tests {
         ]);
         doc.save(&base).unwrap();
 
-        // Drive the post-prompt side effect: filter out "wss://b.example".
         let mut doc = TenexConfigDoc::load(&base).unwrap();
         let updated: Vec<String> = doc
             .relays()
@@ -325,35 +228,12 @@ mod tests {
     }
 
     #[test]
-    fn add_identity_relay_persists_to_identity_relays_field() {
-        let base = unique_temp();
-        let mut doc = TenexConfigDoc::load(&base).unwrap();
-        doc.set_identity_relays(vec![]);
-        doc.save(&base).unwrap();
-
-        let mut doc = TenexConfigDoc::load(&base).unwrap();
-        let mut ir = doc.identity_relays();
-        ir.push("wss://purplepag.es".to_owned());
-        doc.set_identity_relays(ir);
-        doc.save(&base).unwrap();
-
-        let reloaded = TenexConfigDoc::load(&base).unwrap();
-        assert_eq!(reloaded.identity_relays(), vec!["wss://purplepag.es"]);
-        cleanup(&base);
-    }
-
-    #[test]
-    fn remove_when_list_empty_is_a_noop_and_does_not_save_corrupt_data() {
-        // The TS source prints "Nothing to remove." and does NOT call
-        // saveGlobalConfig (`:69-71`). Mirror that — exercise the empty
-        // path indirectly by verifying the underlying state stays intact.
+    fn remove_when_list_empty_is_a_noop() {
         let base = unique_temp();
         let mut doc = TenexConfigDoc::load(&base).unwrap();
         doc.set_version(7);
         doc.save(&base).unwrap();
 
-        // Run the inner branch directly — no I/O, just check that nothing
-        // would have been mutated.
         let doc = TenexConfigDoc::load(&base).unwrap();
         let relays = doc.relays();
         assert!(relays.is_empty());

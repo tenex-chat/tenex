@@ -3,7 +3,7 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 use nostr_sdk::Keys;
-use tracing::{info, warn};
+use tracing::info;
 
 /// Write the supervisor's backend pubkey to `<base_dir>/whitelist/pubkeys.txt`.
 ///
@@ -14,21 +14,11 @@ use tracing::{info, warn};
 ///
 /// Atomic via tmp + rename so the whitelist daemon's fs watcher never
 /// observes a partial write.
-pub fn write_backend_pubkey(base_dir: &Path, secret_key: Option<&str>) -> Result<()> {
+pub fn write_backend_pubkey(base_dir: &Path, keys: &Keys) -> Result<()> {
     let dir = base_dir.join("whitelist");
     fs::create_dir_all(&dir).with_context(|| format!("create {}", dir.display()))?;
 
     let final_path = dir.join("pubkeys.txt");
-
-    let Some(sk) = secret_key else {
-        warn!(
-            path = %final_path.display(),
-            "tenexPrivateKey absent in config.json; skipping backend pubkey export",
-        );
-        return Ok(());
-    };
-
-    let keys = Keys::parse(sk).context("parse tenexPrivateKey")?;
     let pubkey_hex = keys.public_key().to_hex();
 
     let tmp_path = dir.join(format!("pubkeys.txt.tmp-{}", std::process::id()));

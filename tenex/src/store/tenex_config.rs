@@ -143,14 +143,6 @@ impl TenexConfigDoc {
         set_string_array(&mut self.raw, "relays", relays);
     }
 
-    pub fn identity_relays(&self) -> Vec<String> {
-        string_array(&self.raw, "identityRelays")
-    }
-
-    pub fn set_identity_relays(&mut self, relays: Vec<String>) {
-        set_string_array(&mut self.raw, "identityRelays", relays);
-    }
-
     pub fn blossom_server_url(&self) -> Option<String> {
         string_field(&self.raw, "blossomServerUrl")
     }

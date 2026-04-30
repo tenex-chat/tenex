@@ -67,8 +67,10 @@ pub async fn run(args: DaemonArgs) -> Result<()> {
     );
 
     let _lock = lockfile::Lockfile::acquire(&base_dir).context("acquiring daemon lockfile")?;
+    let backend_keys = crate::nostr_pub::backend_signer::ensure_backend_keys(&base_dir)
+        .context("loading daemon signer")?;
 
-    whitelist_export::write_backend_pubkey(&base_dir, cfg.tenex_private_key.as_deref())
+    whitelist_export::write_backend_pubkey(&base_dir, &backend_keys)
         .context("publish backend pubkey for whitelist daemon")?;
 
     let boot_argv = if let Some(cmd) = args.ts {
@@ -150,7 +152,7 @@ pub async fn run(args: DaemonArgs) -> Result<()> {
     if !args.boot.is_empty() {
         info!(prefixes = ?args.boot, "queued --boot prefixes; awaiting matching project discovery");
     }
-    let mut nostr_handle = nostr::run(cfg, supervisor.clone(), args.boot).await?;
+    let mut nostr_handle = nostr::run(cfg, backend_keys, supervisor.clone(), args.boot).await?;
 
     // Publish the installed-agent inventory (kind:24011) immediately and then
     // every 30 seconds so Nostr clients always have a fresh view of what agents

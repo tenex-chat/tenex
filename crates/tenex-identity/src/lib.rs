@@ -39,10 +39,15 @@ use std::os::unix::io::AsRawFd;
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context, Result as AnyResult};
-use nostr_sdk::Client;
+use nostr_sdk::{Client, Keys};
 use serde::Deserialize;
 
-const DEFAULT_RELAYS: &[&str] = &["wss://relay.damus.io", "wss://relay.nostr.band"];
+const DEFAULT_RELAYS: &[&str] = &["wss://relay.tenex.chat"];
+
+/// Always-on relay for kind:0 identity resolution. Appended to every relay
+/// list — purplepag.es specializes in kind:0 metadata distribution, so we
+/// connect there regardless of user configuration.
+const IDENTITY_PINNED_RELAY: &str = "wss://purplepag.es";
 
 /// Synchronous entry point that builds a tokio runtime and runs the async daemon.
 /// Called from the `tenex identity-run` subcommand binary.
@@ -97,8 +102,12 @@ async fn run_daemon_async() -> AnyResult<()> {
             .with_context(|| format!("open identity cache at {}", db_path.display()))?,
     );
 
-    let client = Client::default();
-    for relay in &load_relays() {
+    let config = load_config();
+    let client = match config.tenex_private_key.as_deref() {
+        Some(secret) => Client::new(Keys::parse(secret).context("parse tenexPrivateKey")?),
+        None => Client::default(),
+    };
+    for relay in &resolve_relays(&config) {
         client
             .add_relay(relay.as_str())
             .await
@@ -142,18 +151,28 @@ fn try_lock(fd: i32) -> AnyResult<bool> {
 struct TenexConfig {
     #[serde(default)]
     relays: Vec<String>,
+    #[serde(default, rename = "tenexPrivateKey")]
+    tenex_private_key: Option<String>,
 }
 
-fn load_relays() -> Vec<String> {
+fn load_config() -> TenexConfig {
     let config_path = paths::default_base_dir().join("config.json");
-    let bytes = match fs::read(&config_path) {
-        Ok(b) => b,
-        Err(_) => return DEFAULT_RELAYS.iter().map(|s| s.to_string()).collect(),
-    };
-    let cfg: TenexConfig = serde_json::from_slice(&bytes).unwrap_or_default();
-    if cfg.relays.is_empty() {
+    fs::read(&config_path)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+        .unwrap_or_default()
+}
+
+fn resolve_relays(config: &TenexConfig) -> Vec<String> {
+    let configured: Vec<String> = if config.relays.is_empty() {
         DEFAULT_RELAYS.iter().map(|s| s.to_string()).collect()
     } else {
-        cfg.relays
+        config.relays.clone()
+    };
+
+    let mut out = configured;
+    if !out.iter().any(|r| r == IDENTITY_PINNED_RELAY) {
+        out.push(IDENTITY_PINNED_RELAY.to_owned());
     }
+    out
 }

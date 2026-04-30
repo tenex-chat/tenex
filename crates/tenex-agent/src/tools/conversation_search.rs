@@ -94,62 +94,12 @@ impl Tool for ConversationSearchTool {
             Run `tenex config embed` to set up an embedding provider.";
 
         let limit = args.limit.unwrap_or(10) as usize;
-        let scope = args.project_id.as_deref().unwrap_or("");
-        let search_all = scope.eq_ignore_ascii_case("ALL");
 
-        if search_all {
-            let embed_config = match &self.embed_config {
-                Some(c) => c,
-                None => return Ok(no_embed_msg.to_string()),
-            };
-
-            let projects_dir = self.base_dir.join("projects");
-            let entries = std::fs::read_dir(&projects_dir)
-                .map_err(|e| ConversationSearchError(format!("cannot read projects dir: {e}")))?;
-
-            let mut all_results: Vec<ConvSearchResult> = Vec::new();
-
-            for entry in entries.flatten() {
-                let db_path = entry.path().join("embeddings.db");
-                if !db_path.exists() {
-                    continue;
-                }
-                let project_id = entry.file_name().to_string_lossy().into_owned();
-                let store = match RagStore::open(&db_path, embed_config) {
-                    Ok(s) => s,
-                    Err(_) => continue,
-                };
-                let results = match store.search(&args.query, &["conversations"], limit).await {
-                    Ok(r) => r,
-                    Err(_) => continue,
-                };
-                for r in results {
-                    all_results.push(ConvSearchResult {
-                        score: (r.score * 100.0).round() / 100.0,
-                        content: r.content,
-                        title: r.title,
-                        id: r.id,
-                        project_id: Some(project_id.clone()),
-                    });
-                }
-            }
-
-            if all_results.is_empty() {
-                return Ok(format!("No conversations found matching '{}'.", args.query));
-            }
-
-            all_results.sort_by(|a, b| {
-                b.score
-                    .partial_cmp(&a.score)
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            });
-            all_results.truncate(limit);
-
-            return serde_json::to_string_pretty(&all_results)
-                .map_err(|e| ConversationSearchError(format!("serialize results: {e}")));
-        }
-
-        // Single-project search (current project or explicit match).
+        // The embedder now writes to a single global ~/.tenex/embeddings.db.
+        // The legacy per-project routing (and the explicit `ALL` mode) is
+        // collapsed here — the store is shared. The `project_id` arg is
+        // accepted for back-compat but ignored; future work may filter by
+        // project via chunk meta_json.
         let store = match &self.store {
             Some(s) => s,
             None => return Ok(no_embed_msg.to_string()),

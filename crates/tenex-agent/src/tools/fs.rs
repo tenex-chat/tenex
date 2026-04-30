@@ -5,8 +5,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 use tokio::process::Command;
+
+use super::agents_md::AgentsMdReminderState;
 
 #[derive(Debug, thiserror::Error)]
 #[error("{0}")]
@@ -81,11 +83,15 @@ pub struct FsReadArgs {
 
 pub struct FsReadTool {
     working_dir: String,
+    agents_md: Arc<AgentsMdReminderState>,
 }
 
 impl FsReadTool {
-    pub fn new(working_dir: String) -> Self {
-        Self { working_dir }
+    pub(crate) fn new(working_dir: String, agents_md: Arc<AgentsMdReminderState>) -> Self {
+        Self {
+            working_dir,
+            agents_md,
+        }
     }
 }
 
@@ -131,10 +137,12 @@ impl Tool for FsReadTool {
                 .map(|e| format!("  - {e}"))
                 .collect::<Vec<_>>()
                 .join("\n");
-            return Ok(format!(
+            let mut out = format!(
                 "Directory listing for {}:\n{listing}\n\nTo read a specific file, pass its absolute path.",
                 path.display()
-            ));
+            );
+            out.push_str(&self.agents_md.reminder_for_path(&path));
+            return Ok(out);
         }
 
         let content = fs::read_to_string(&path)
@@ -174,6 +182,7 @@ impl Tool for FsReadTool {
             ));
         }
 
+        out.push_str(&self.agents_md.reminder_for_path(&path));
         Ok(out)
     }
 }
@@ -334,11 +343,15 @@ pub struct FsGlobArgs {
 
 pub struct FsGlobTool {
     working_dir: String,
+    agents_md: Arc<AgentsMdReminderState>,
 }
 
 impl FsGlobTool {
-    pub fn new(working_dir: String) -> Self {
-        Self { working_dir }
+    pub(crate) fn new(working_dir: String, agents_md: Arc<AgentsMdReminderState>) -> Self {
+        Self {
+            working_dir,
+            agents_md,
+        }
     }
 }
 
@@ -375,7 +388,7 @@ impl Tool for FsGlobTool {
             format!("{}/{}", self.working_dir, args.pattern)
         };
 
-        let mut all_paths: Vec<String> = Vec::new();
+        let mut all_paths: Vec<(String, PathBuf)> = Vec::new();
         for entry in
             glob(&full_pattern).map_err(|e| FsError(format!("Invalid glob pattern: {e}")))?
         {
@@ -384,43 +397,50 @@ impl Tool for FsGlobTool {
                     if !has_excluded_segment(&path) {
                         let rel = make_relative(&path, &self.working_dir);
                         if path.is_dir() {
-                            all_paths.push(format!("{rel}/"));
+                            all_paths.push((format!("{rel}/"), path));
                         } else {
-                            all_paths.push(rel);
+                            all_paths.push((rel, path));
                         }
                     }
                 }
                 Err(e) => eprintln!("fs_glob: {e}"),
             }
         }
-        all_paths.sort();
+        all_paths.sort_by(|left, right| left.0.cmp(&right.0));
 
         let effective_limit = if head_limit == 0 {
             usize::MAX
         } else {
             head_limit
         };
-        let paginated: Vec<&str> = all_paths
+        let paginated: Vec<&(String, PathBuf)> = all_paths
             .iter()
             .skip(offset)
             .take(effective_limit)
-            .map(String::as_str)
             .collect();
 
         if paginated.is_empty() {
             return Ok(format!("No matches found for pattern: {}", args.pattern));
         }
 
-        let body = paginated.join("\n");
+        let mut body = paginated
+            .iter()
+            .map(|entry| entry.0.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
         let has_more = head_limit > 0 && (offset + paginated.len()) < all_paths.len();
         if has_more {
-            Ok(format!(
+            body = format!(
                 "{body}\n\n[Truncated: showing {} results after offset; additional files omitted]",
                 paginated.len()
-            ))
-        } else {
-            Ok(body)
+            );
         }
+        body.push_str(
+            &self
+                .agents_md
+                .reminder_for_paths(paginated.iter().map(|entry| entry.1.as_path())),
+        );
+        Ok(body)
     }
 }
 

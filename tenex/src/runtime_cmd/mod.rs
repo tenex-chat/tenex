@@ -58,7 +58,7 @@ pub struct RuntimeArgs {
 #[derive(Clone)]
 struct RuntimeShared {
     client: Client,
-    backend_keys: Option<Keys>,
+    backend_keys: Keys,
     project_addr: String,
     whitelisted_pubkeys: Vec<String>,
     project_id: String,
@@ -343,7 +343,9 @@ pub async fn run(args: RuntimeArgs) -> Result<()> {
         anyhow::bail!("no valid whitelisted pubkeys in config");
     }
 
-    let client = Client::default();
+    let backend_keys =
+        backend_signer::ensure_backend_keys(&base_dir).context("loading runtime relay signer")?;
+    let client = Client::new(backend_keys.clone());
     for relay in &cfg.relays {
         if let Err(e) = client.add_relay(relay.as_str()).await {
             warn!(relay, error = %e, "add_relay failed");
@@ -360,14 +362,6 @@ pub async fn run(args: RuntimeArgs) -> Result<()> {
     let owner_key = PublicKey::from_hex(owner_pubkey)
         .with_context(|| format!("invalid project owner pubkey '{}'", owner_pubkey))?;
     let project_addr = format!("31933:{}:{}", owner_pubkey, meta.d_tag);
-
-    let backend_keys = match backend_signer::ensure_backend_keys(&base_dir) {
-        Ok(keys) => Some(keys),
-        Err(e) => {
-            warn!(error = %e, "backend keys unavailable; status events (24010/24133) will not be published");
-            None
-        }
-    };
 
     let subscription_ids = RuntimeSubscriptionIds::new(&meta.d_tag);
     subscribe_runtime_filters(
@@ -388,43 +382,41 @@ pub async fn run(args: RuntimeArgs) -> Result<()> {
     let agent_snapshot_state = Arc::new(RwLock::new(agent_snapshot.clone()));
 
     // Publish project status (kind:24010) immediately and every 30 seconds.
-    if let Some(ref keys) = backend_keys {
-        let client_status = client.clone();
-        let keys_status = keys.clone();
-        let meta_status = meta.clone();
-        let agent_snapshot_status = agent_snapshot_state.clone();
-        let base_dir_status = base_dir.clone();
-        let whitelist_status = cfg.whitelisted_pubkeys.clone();
-        tokio::spawn(async move {
-            let mut interval = tokio::time::interval(Duration::from_secs(30));
-            loop {
-                interval.tick().await;
-                let snapshot = agent_snapshot_status.read().unwrap().clone();
-                let models_status = match crate::store::llms::LlmsDoc::load(&base_dir_status) {
-                    Ok(llms) => project_status::collect_model_access(&llms, &snapshot.agents),
-                    Err(e) => {
-                        warn!(error = %e, "24010 model tag collection failed");
-                        Vec::new()
-                    }
-                };
-                match project_status::build_project_status_event(
-                    &keys_status,
-                    &meta_status,
-                    &snapshot.agents,
-                    &snapshot.project_agents,
-                    &models_status,
-                    &whitelist_status,
-                ) {
-                    Ok(event) => {
-                        if let Err(e) = client_status.send_event(&event).await {
-                            warn!(error = %e, "24010 publish failed");
-                        }
-                    }
-                    Err(e) => warn!(error = %e, "24010 build failed"),
+    let client_status = client.clone();
+    let keys_status = backend_keys.clone();
+    let meta_status = meta.clone();
+    let agent_snapshot_status = agent_snapshot_state.clone();
+    let base_dir_status = base_dir.clone();
+    let whitelist_status = cfg.whitelisted_pubkeys.clone();
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(30));
+        loop {
+            interval.tick().await;
+            let snapshot = agent_snapshot_status.read().unwrap().clone();
+            let models_status = match crate::store::llms::LlmsDoc::load(&base_dir_status) {
+                Ok(llms) => project_status::collect_model_access(&llms, &snapshot.agents),
+                Err(e) => {
+                    warn!(error = %e, "24010 model tag collection failed");
+                    Vec::new()
                 }
+            };
+            match project_status::build_project_status_event(
+                &keys_status,
+                &meta_status,
+                &snapshot.agents,
+                &snapshot.project_agents,
+                &models_status,
+                &whitelist_status,
+            ) {
+                Ok(event) => {
+                    if let Err(e) = client_status.send_event(&event).await {
+                        warn!(error = %e, "24010 publish failed");
+                    }
+                }
+                Err(e) => warn!(error = %e, "24010 build failed"),
             }
-        });
-    }
+        }
+    });
 
     let agent_binary = find_agent_binary();
     let agent_acp_binary = find_agent_acp_binary();
@@ -974,9 +966,6 @@ async fn load_agent_snapshot_after_change(
 }
 
 async fn publish_project_status_now(shared: &RuntimeShared, meta: &ProjectMetadata) {
-    let Some(keys) = shared.backend_keys.as_ref() else {
-        return;
-    };
     let snapshot = shared.agent_snapshot();
     let models_status = match crate::store::llms::LlmsDoc::load(&shared.base_dir) {
         Ok(llms) => project_status::collect_model_access(&llms, &snapshot.agents),
@@ -986,7 +975,7 @@ async fn publish_project_status_now(shared: &RuntimeShared, meta: &ProjectMetada
         }
     };
     match project_status::build_project_status_event(
-        keys,
+        &shared.backend_keys,
         meta,
         &snapshot.agents,
         &snapshot.project_agents,
@@ -1379,9 +1368,6 @@ fn ensure_child_object<'a>(
 }
 
 async fn publish_active_status(shared: &RuntimeShared, conv_id: &str) {
-    let Some(keys) = shared.backend_keys.as_ref() else {
-        return;
-    };
     let active = {
         let coordinator = shared.coordinator.lock().unwrap();
         coordinator.active_agent_pubkeys()
@@ -1389,7 +1375,7 @@ async fn publish_active_status(shared: &RuntimeShared, conv_id: &str) {
     let refs: Vec<&str> = active.iter().map(String::as_str).collect();
     send_operations_status(
         &shared.client,
-        keys,
+        &shared.backend_keys,
         conv_id,
         &shared.project_addr,
         &shared.whitelisted_pubkeys,

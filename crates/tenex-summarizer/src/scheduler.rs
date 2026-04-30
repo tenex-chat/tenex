@@ -17,7 +17,9 @@ use tracing::{debug, error, info, warn};
 use crate::categories;
 use crate::config::Config;
 use crate::publish::Publisher;
-use crate::source::{self, MetadataUpdate, ProjectEvent, ProjectRef};
+use tenex_conversations::ProjectRef;
+
+use crate::source::{self, MetadataUpdate, ProjectEvent};
 use crate::state::SummaryStateStore;
 use crate::summarize::{self, Summary};
 
