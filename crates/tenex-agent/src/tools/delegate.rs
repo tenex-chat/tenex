@@ -13,6 +13,7 @@ use tenex_protocol::{
 pub struct DelegateArgs {
     pub recipient: String,
     pub prompt: String,
+    pub branch: Option<String>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -66,7 +67,7 @@ impl Tool for DelegateTool {
     async fn definition(&self, _prompt: String) -> ToolDefinition {
         ToolDefinition {
             name: Self::NAME.to_string(),
-            description: "Delegate a task to another agent by slug, or to a whole team by team name. The agent (or team lead) receives your message and will reply when done. Stop after delegating — do not take further actions this turn.".to_string(),
+            description: "Delegate a task to another agent by slug, or to a whole team by team name. The agent (or team lead) receives your message and will reply when done. Optionally specify a branch to have the agent work in a dedicated git worktree. Stop after delegating — do not take further actions this turn.".to_string(),
             parameters: json!({
                 "type": "object",
                 "properties": {
@@ -77,6 +78,10 @@ impl Tool for DelegateTool {
                     "prompt": {
                         "type": "string",
                         "description": "The task and full context for the delegated agent"
+                    },
+                    "branch": {
+                        "type": "string",
+                        "description": "Optional git branch name. When provided, a worktree is created at .worktrees/<branch> and the agent works there."
                     }
                 },
                 "required": ["recipient", "prompt"]
@@ -124,7 +129,7 @@ impl Tool for DelegateTool {
                 recipient: recipient.clone(),
                 recipient_label: format!("@{}", args.recipient),
                 request: args.prompt.clone(),
-                branch: None,
+                branch: args.branch.clone(),
                 followup_of: None,
             }],
         };

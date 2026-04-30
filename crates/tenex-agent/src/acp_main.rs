@@ -88,17 +88,16 @@ async fn run() -> Result<()> {
         PrincipalRef::Nostr { pubkey, .. } => pubkey.to_hex(),
     };
 
-    let working_dir = agent_config
+    let project_root = agent_config
         .working_directory
         .as_deref()
-        .map(String::from)
+        .map(std::path::PathBuf::from)
         .unwrap_or_else(|| {
-            std::env::current_dir()
-                .map(|p| p.display().to_string())
-                .unwrap_or_else(|_| ".".to_string())
+            std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
         });
-    let project_root =
-        std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(&working_dir));
+    let (resolved_working_dir, current_branch) =
+        tenex_project::resolve_working_dir(&project_root, envelope.metadata.branch.as_deref());
+    let working_dir = resolved_working_dir.display().to_string();
     let root_agents_md = project_instructions::read_root_agents_md(&project_root);
 
     let project = Project::open_default(&project_id)
@@ -166,6 +165,15 @@ async fn run() -> Result<()> {
             .collect()
     };
 
+    let acp_worktrees: Vec<tenex_project::WorktreeInfo> =
+        match tenex_project::list_worktrees(&project_root) {
+            Ok(wts) => wts,
+            Err(e) => {
+                eprintln!("[tenex-agent-acp] Failed to list worktrees: {e}");
+                Vec::new()
+            }
+        };
+
     let system_prompt =
         tenex_system_prompt::build_system_prompt(tenex_system_prompt::BuildSystemPromptInput {
             identity_name: agent_config.identity_name(),
@@ -187,6 +195,8 @@ async fn run() -> Result<()> {
             telegram_chat_context: None,
             conversation_reminders: None,
             scheduled_tasks: &[],
+            current_branch: current_branch.as_deref(),
+            worktrees: &acp_worktrees,
         });
     let history = render_history(
         conv_store.as_ref(),
@@ -286,7 +296,7 @@ async fn run() -> Result<()> {
         execution_time_ms: None,
         llm_runtime_ms: None,
         llm_runtime_total_ms: None,
-        branch: None,
+        branch: current_branch.clone(),
         team: envelope.metadata.team.clone(),
     };
     let mut stream_sequence = 0_u64;
@@ -366,7 +376,7 @@ async fn run() -> Result<()> {
         execution_time_ms: None,
         llm_runtime_ms: None,
         llm_runtime_total_ms: None,
-        branch: None,
+        branch: current_branch,
         team: envelope.metadata.team.clone(),
     };
     let metadata = Some(LlmMetadata {

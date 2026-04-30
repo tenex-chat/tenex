@@ -52,6 +52,10 @@ pub struct BuildSystemPromptInput<'a> {
     pub conversation_reminders: Option<&'a ConversationRemindersForPrompt>,
     /// Fragment 22: the agent's own scheduled tasks (recurring + one-off).
     pub scheduled_tasks: &'a [ScheduledTaskForPrompt],
+    /// Current git branch for this agent's working directory.
+    pub current_branch: Option<&'a str>,
+    /// All worktrees for this project (from `git worktree list`).
+    pub worktrees: &'a [tenex_project::git::WorktreeInfo],
 }
 
 /// Build the full system prompt for an agent.
@@ -80,6 +84,8 @@ pub fn build_system_prompt(input: BuildSystemPromptInput<'_>) -> String {
         telegram_chat_context,
         conversation_reminders,
         scheduled_tasks,
+        current_branch,
+        worktrees,
     } = input;
     let mut parts: Vec<String> = Vec::new();
 
@@ -186,6 +192,22 @@ Your nsec and other secrets are in $AGENT_HOME/.env (auto-loaded in shell sessio
         ctx_parts.push("  <workspace>".to_string());
         if project_base_path.is_some() {
             ctx_parts.push("    root: $PROJECT_BASE".to_string());
+        }
+        if let Some(branch) = current_branch {
+            ctx_parts.push(format!("    current-branch: {branch}"));
+        }
+        let other_worktrees: Vec<&tenex_project::git::WorktreeInfo> =
+            worktrees.iter().filter(|w| !w.is_main).collect();
+        if !other_worktrees.is_empty() {
+            ctx_parts.push("    other worktrees:".to_string());
+            for wt in &other_worktrees {
+                let path_str = wt.path.to_str().unwrap_or_default();
+                let rel = relativize(path_str);
+                match &wt.branch {
+                    Some(b) => ctx_parts.push(format!("      - {rel} (branch: {b})")),
+                    None => ctx_parts.push(format!("      - {rel} (detached)")),
+                }
+            }
         }
         ctx_parts.push(format!("    cwd: {}", relativize(working_dir)));
         ctx_parts.push("  </workspace>".to_string());
@@ -320,4 +342,104 @@ Creating a todo list helps you stay organized, shows your progress to observers,
     }
 
     parts.join("\n\n")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn minimal_input<'a>(
+        home_info: &'a HomeDirectoryInfo<'a>,
+        current_branch: Option<&'a str>,
+        worktrees: &'a [tenex_project::git::WorktreeInfo],
+    ) -> BuildSystemPromptInput<'a> {
+        BuildSystemPromptInput {
+            identity_name: "test-agent",
+            pubkey_hex: "deadbeefdeadbeef",
+            category_str: None,
+            category: None,
+            instructions: None,
+            working_dir: "/repo/src",
+            project_base_path: Some("/repo"),
+            project_meta: None,
+            project_id: None,
+            conversation_id: None,
+            root_agents_md: None,
+            agents: &[],
+            teams_fragment: "",
+            home: home_info,
+            preloaded_skills_block: None,
+            telegram_channel_bindings: &[],
+            telegram_chat_context: None,
+            conversation_reminders: None,
+            scheduled_tasks: &[],
+            current_branch,
+            worktrees,
+        }
+    }
+
+    fn dummy_home() -> HomeDirectoryInfo<'static> {
+        HomeDirectoryInfo {
+            home_dir: "/home/agent",
+            file_count: "0 files",
+            injected_files: &[],
+        }
+    }
+
+    #[test]
+    fn workspace_no_branch_no_worktrees() {
+        let home = dummy_home();
+        let prompt = build_system_prompt(minimal_input(&home, None, &[]));
+        assert!(prompt.contains("root: $PROJECT_BASE"));
+        assert!(prompt.contains("cwd: $PROJECT_BASE/src"));
+        assert!(!prompt.contains("current-branch"));
+        assert!(!prompt.contains("other worktrees"));
+    }
+
+    #[test]
+    fn workspace_branch_no_other_worktrees() {
+        let home = dummy_home();
+        let prompt = build_system_prompt(minimal_input(&home, Some("main"), &[]));
+        assert!(prompt.contains("current-branch: main"));
+        assert!(!prompt.contains("other worktrees"));
+        assert!(prompt.contains("cwd: $PROJECT_BASE/src"));
+    }
+
+    #[test]
+    fn workspace_branch_with_other_worktrees() {
+        use std::path::PathBuf;
+        let home = dummy_home();
+        let worktrees = vec![
+            tenex_project::git::WorktreeInfo {
+                path: PathBuf::from("/repo"),
+                branch: Some("main".to_string()),
+                commit: "aaa".to_string(),
+                is_main: true,
+            },
+            tenex_project::git::WorktreeInfo {
+                path: PathBuf::from("/repo/.worktrees/feature_auth"),
+                branch: Some("feature/auth".to_string()),
+                commit: "bbb".to_string(),
+                is_main: false,
+            },
+            tenex_project::git::WorktreeInfo {
+                path: PathBuf::from("/repo/.worktrees/bugfix_typo"),
+                branch: Some("bugfix/typo".to_string()),
+                commit: "ccc".to_string(),
+                is_main: false,
+            },
+        ];
+        let prompt = build_system_prompt(minimal_input(&home, Some("main"), &worktrees));
+        assert!(prompt.contains("current-branch: main"));
+        assert!(prompt.contains("other worktrees:"));
+        assert!(prompt.contains("$PROJECT_BASE/.worktrees/feature_auth (branch: feature/auth)"));
+        assert!(prompt.contains("$PROJECT_BASE/.worktrees/bugfix_typo (branch: bugfix/typo)"));
+        // cwd is last inside the <workspace> block
+        let workspace_start = prompt.find("<workspace>").unwrap();
+        let workspace_end = prompt.find("</workspace>").unwrap();
+        let workspace_block = &prompt[workspace_start..workspace_end];
+        let cwd_pos = workspace_block.find("cwd:").unwrap();
+        let other_pos = workspace_block.find("other worktrees:").unwrap();
+        assert!(cwd_pos > other_pos, "cwd must appear after other worktrees");
+    }
 }

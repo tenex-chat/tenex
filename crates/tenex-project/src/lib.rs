@@ -7,6 +7,7 @@
 //! or a bare dTag; normalization happens at the API boundary in [`id`].
 
 pub mod error;
+pub mod git;
 pub mod id;
 mod identity;
 pub mod models;
@@ -16,6 +17,10 @@ pub mod signer;
 pub mod teams;
 
 pub use error::{Error, Result};
+pub use git::{
+    create_worktree, current_branch, list_worktrees, parse_worktree_list, resolve_working_dir,
+    GitError, WorktreeInfo, WorktreeMetadata, WorktreeMetadataStore,
+};
 pub use id::{normalize_project_id, ProjectDTag};
 pub use models::{Agent, ProjectAgent, ProjectMetadata};
 pub use project::Project;

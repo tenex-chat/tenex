@@ -34,6 +34,9 @@ pub struct EmitState {
     pub model: String,
     /// Team scope from the inbound event's `["team", ...]` tag.
     pub team: Option<String>,
+    /// Git branch this agent is running on. Forwarded to all outbound events
+    /// via `EncodingContext.branch` → `forward_branch_team`.
+    pub current_branch: Option<String>,
     pub meta: Arc<Mutex<AgentMeta>>,
     pending_external_work: Arc<AtomicBool>,
 }
@@ -47,6 +50,8 @@ pub struct EmitStateArgs {
     pub completion_recipient: Option<PrincipalRef>,
     pub model: String,
     pub team: Option<String>,
+    /// Git branch this agent is running on. Forwarded to all outbound events.
+    pub current_branch: Option<String>,
 }
 
 impl EmitState {
@@ -60,6 +65,7 @@ impl EmitState {
             completion_recipient: args.completion_recipient,
             model: args.model,
             team: args.team,
+            current_branch: args.current_branch,
             meta: Arc::new(Mutex::new(AgentMeta::new())),
             pending_external_work: Arc::new(AtomicBool::new(false)),
         }
@@ -97,7 +103,7 @@ impl EmitState {
             execution_time_ms: None,
             llm_runtime_ms: None,
             llm_runtime_total_ms: None,
-            branch: None,
+            branch: self.current_branch.clone(),
             team,
         }
     }

@@ -27,7 +27,7 @@ mod tools;
 use agent_loop_hook::AgentLoopHook;
 use anyhow::{Context, Result};
 use cassette::CassetteRecorder;
-use cassette_client::RecordingClient;
+use cassette_client::{RecordingClient, RecordingModel};
 use config::{LlmsConfig, ResolvedModel};
 use context_rig::ctx_msg_to_rig;
 use emit::{EmitState, EmitStateArgs};
@@ -72,16 +72,34 @@ use tracing_opentelemetry::OpenTelemetrySpanExt;
 /// Tools are passed as a single `Vec<Box<dyn ToolDyn>>` already wrapped by
 /// [`RecordingTool`] so every call rig dispatches lands in the shared
 /// [`ToolRecorder`] for post-turn persistence.
+// run_agent!(client, model, system, message, history, hook, tools)
+// run_agent!(client, model, system, message, history, hook, tools, |m| m.with_automatic_caching())
+//
+// The optional seventh argument is a closure applied to the completion model before building the
+// agent. Use it to configure provider-specific options (e.g. Anthropic prompt caching). The
+// default is the identity closure, which leaves the model unchanged.
 macro_rules! run_agent {
-    ($client:expr, $model:expr, $system:expr, $message:expr, $history:expr, $hook:expr, $tools:expr) => {{
+    ($client:expr, $model:expr, $system:expr, $message:expr, $history:expr, $hook:expr, $tools:expr) => {
+        run_agent!(
+            $client,
+            $model,
+            $system,
+            $message,
+            $history,
+            $hook,
+            $tools,
+            |m| m
+        )
+    };
+    ($client:expr, $model:expr, $system:expr, $message:expr, $history:expr, $hook:expr, $tools:expr, $model_config:expr) => {{
         use ::futures::StreamExt as _;
+        use ::rig::agent::AgentBuilder;
         use ::rig::client::CompletionClient as _;
         use ::rig::streaming::StreamingChat as _;
 
-        let __review_model = $client.completion_model($model.to_string());
-        let __hook = AgentLoopHook::new($hook, __review_model);
-        let mut __stream = $client
-            .agent($model)
+        let __model = ($model_config)($client.completion_model($model.to_string()));
+        let __hook = AgentLoopHook::new($hook, __model.clone());
+        let mut __stream = AgentBuilder::new(__model)
             .preamble($system)
             .max_tokens(16384)
             .default_max_turns(RIG_AGENT_TURN_FUSE)
@@ -312,18 +330,20 @@ async fn run() -> Result<()> {
         PrincipalRef::Nostr { pubkey, .. } => pubkey.to_hex(),
     };
 
-    // Resolve working directory
-    let working_dir = agent_config
+    // Resolve working directory and current branch.
+    // The project_root is the canonical base path; working_dir may differ when
+    // a worktree is created for the branch carried in the triggering event.
+    let project_root = agent_config
         .working_directory
         .as_deref()
-        .map(String::from)
+        .map(std::path::PathBuf::from)
         .unwrap_or_else(|| {
-            std::env::current_dir()
-                .map(|p| p.display().to_string())
-                .unwrap_or_else(|_| ".".to_string())
+            std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
         });
-    let project_root =
-        std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(&working_dir));
+    let (resolved_working_dir, resolved_current_branch) =
+        tenex_project::resolve_working_dir(&project_root, envelope.metadata.branch.as_deref());
+    let working_dir = resolved_working_dir.display().to_string();
+    let current_branch = resolved_current_branch;
     let root_agents_md = project_instructions::read_root_agents_md(&project_root);
 
     // Open project and load context used for prompts + delegate tool.
@@ -522,7 +542,7 @@ async fn run() -> Result<()> {
     // Pre-fetch and render preloaded skills for the system prompt.
     let preloaded_skills = skills::fetch_skills(&all_skill_ids, &skill_ctx);
 
-    // Determine which fs_* tools are granted via skill frontmatter (tools: field).
+    // Determine which tool names are granted via skill frontmatter (tools: field).
     let granted_tools: std::collections::HashSet<String> = preloaded_skills
         .iter()
         .filter_map(|s| s.frontmatter.as_ref())
@@ -634,6 +654,15 @@ async fn run() -> Result<()> {
             }
         };
 
+    let git_worktrees: Vec<tenex_project::WorktreeInfo> =
+        match tenex_project::list_worktrees(&project_root) {
+            Ok(wts) => wts,
+            Err(e) => {
+                eprintln!("[tenex-agent] Failed to list worktrees: {e}");
+                Vec::new()
+            }
+        };
+
     // Build system prompt
     let mut system_prompt =
         tenex_system_prompt::build_system_prompt(tenex_system_prompt::BuildSystemPromptInput {
@@ -656,6 +685,8 @@ async fn run() -> Result<()> {
             telegram_chat_context,
             conversation_reminders: conversation_reminders.as_ref(),
             scheduled_tasks: &scheduled_tasks_for_prompt,
+            current_branch: current_branch.as_deref(),
+            worktrees: &git_worktrees,
         });
 
     // Load persisted todos and inject them as a system reminder into the user message.
@@ -695,6 +726,7 @@ async fn run() -> Result<()> {
         completion_recipient,
         model: model_string.clone(),
         team: envelope.metadata.team.clone(),
+        current_branch: current_branch.clone(),
     }));
 
     // Parse category as supervision type (used by both hook and delegation check).
@@ -854,6 +886,7 @@ async fn run() -> Result<()> {
     let agent_slug = agent_config.identity_name().to_string();
     let escalation_pubkey = escalation::resolve_escalation_pubkey(&base_dir, &project_agents);
     let suppress_response = Arc::new(AtomicBool::new(false));
+    let agents_md = Arc::new(tools::agents_md::AgentsMdReminderState::new(project_root));
     let tool_set = ToolSet {
         emit_state: emit_state.clone(),
         project_agents: project_agents.clone(),
@@ -875,6 +908,7 @@ async fn run() -> Result<()> {
         rag_store: rag_store.clone(),
         embed_config: embed_config.clone(),
         working_dir: working_dir.clone(),
+        agents_md,
         shell_env: shell_env.clone(),
         granted_tools,
         todos: todos.clone(),
@@ -978,8 +1012,10 @@ async fn run() -> Result<()> {
                         .api_key
                         .clone()
                         .context("No OpenRouter API key found in ~/.tenex/providers.json")?;
-                    let client =
-                        RecordingClient::new(openrouter::Client::new(&key)?, cassette_recorder.clone());
+                    let client = RecordingClient::new(
+                        openrouter::Client::new(&key)?,
+                        cassette_recorder.clone(),
+                    );
                     run_agent!(
                         client,
                         &resolved.model,
@@ -1064,7 +1100,13 @@ async fn run() -> Result<()> {
                             turn_prompt.clone(),
                             current_history,
                             hook.clone(),
-                            tools
+                            tools,
+                            |m: RecordingModel<
+                                anthropic::completion::CompletionModel<
+                                    reqwest_middleware::ClientWithMiddleware,
+                                >,
+                            >| m
+                                .map_inner(|inner| inner.with_automatic_caching())
                         )
                     } else {
                         let client = RecordingClient::new(
@@ -1078,7 +1120,10 @@ async fn run() -> Result<()> {
                             turn_prompt.clone(),
                             current_history,
                             hook.clone(),
-                            tools
+                            tools,
+                            |m: RecordingModel<anthropic::completion::CompletionModel>| {
+                                m.map_inner(|inner| inner.with_automatic_caching())
+                            }
                         )
                     }
                 }
