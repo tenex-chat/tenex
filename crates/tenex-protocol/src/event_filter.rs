@@ -28,11 +28,24 @@ use nostr::{Alphabet, SingleLetterTag, TagKind};
 /// conversation transcript.
 const REJECTED_HEAD_TAGS: &[&str] = &["tool", "intent", "reasoning", "error"];
 
+/// Event kinds that participate in TENEX conversation transcripts.
+/// - 1: kind:1 TextNote — used by the current runtime.
+/// - 11: NIP-22 conversation root.
+/// - 1111: NIP-22 comment / reply.
+/// Earlier TENEX runtimes published as kind:11 / kind:1111; the
+/// embedder needs both so historical conversations can be read.
+pub const CONVERSATION_KINDS_RAW: &[u16] = &[1, 11, 1111];
+
+fn is_conversation_kind(k: nostr::Kind) -> bool {
+    let n = k.as_u16();
+    CONVERSATION_KINDS_RAW.iter().any(|&v| v == n)
+}
+
 /// `true` iff `event` is a candidate for inclusion in a conversation
 /// transcript. The caller has already filtered by `#a` / `#e` at the
 /// relay; this predicate enforces the per-event content rules.
 pub fn is_conversation_event(event: &Event) -> bool {
-    if event.kind != nostr::Kind::TextNote {
+    if !is_conversation_kind(event.kind) {
         return false;
     }
     if event.content.trim().is_empty() {
@@ -94,21 +107,27 @@ mod tests {
     #[test]
     fn empty_content_is_rejected() {
         let k = keys();
-        let event = EventBuilder::new(nostr::Kind::TextNote, "").sign_with_keys(&k).unwrap();
+        let event = EventBuilder::new(nostr::Kind::TextNote, "")
+            .sign_with_keys(&k)
+            .unwrap();
         assert!(!is_conversation_event(&event));
     }
 
     #[test]
     fn whitespace_only_content_is_rejected() {
         let k = keys();
-        let event = EventBuilder::new(nostr::Kind::TextNote, "   \n\t  ").sign_with_keys(&k).unwrap();
+        let event = EventBuilder::new(nostr::Kind::TextNote, "   \n\t  ")
+            .sign_with_keys(&k)
+            .unwrap();
         assert!(!is_conversation_event(&event));
     }
 
     #[test]
     fn wrong_kind_is_rejected() {
         let k = keys();
-        let event = EventBuilder::new(nostr::Kind::Custom(31933), "hi").sign_with_keys(&k).unwrap();
+        let event = EventBuilder::new(nostr::Kind::Custom(31933), "hi")
+            .sign_with_keys(&k)
+            .unwrap();
         assert!(!is_conversation_event(&event));
     }
 

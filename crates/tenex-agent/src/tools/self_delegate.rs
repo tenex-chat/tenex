@@ -3,7 +3,10 @@ use rig::{completion::ToolDefinition, tool::Tool};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::sync::Arc;
-use tenex_protocol::{DelegationIntent, DelegationRequest, Intent, PrincipalKind, PrincipalRef};
+use tenex_protocol::{
+    DelegationIntent, DelegationRequest, Intent, MessageRef, PrincipalKind, PrincipalRef,
+    ToolUseIntent,
+};
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct SelfDelegateArgs {
@@ -70,21 +73,44 @@ impl Tool for SelfDelegateTool {
                 recipient,
                 recipient_label: "@self".to_string(),
                 request: args.request.clone(),
-                branch: args.branch,
+                branch: args.branch.clone(),
                 followup_of: None,
             }],
         };
 
-        self.state
+        let refs = self
+            .state
             .channel
             .send(Intent::Delegation(intent), &ctx)
             .await
             .map_err(|e| SelfDelegateError(format!("failed to emit self-delegation: {e}")))?;
         self.state.mark_pending_external_work();
 
-        Ok(
-            "Self-delegation queued. Stop here — do not take further actions this turn."
-                .to_string(),
-        )
+        let delegation_ref = refs
+            .into_iter()
+            .next()
+            .ok_or_else(|| SelfDelegateError("self-delegation produced no event".into()))?;
+        let delegation_event_id = match &delegation_ref {
+            MessageRef::Nostr { event_id } => event_id.to_hex(),
+        };
+
+        let args_json = serde_json::to_string(&args).unwrap_or_default();
+        let tool_use_intent = ToolUseIntent {
+            tool_name: Self::NAME.to_string(),
+            content: String::new(),
+            args_json: Some(args_json),
+            referenced_messages: vec![delegation_ref],
+            usage: None,
+        };
+
+        self.state
+            .channel
+            .send(Intent::ToolUse(tool_use_intent), &ctx)
+            .await
+            .map_err(|e| SelfDelegateError(format!("failed to emit tool-use event: {e}")))?;
+
+        Ok(format!(
+            "Self-delegation queued. Delegation event ID: {delegation_event_id}. Stop here — do not take further actions this turn."
+        ))
     }
 }

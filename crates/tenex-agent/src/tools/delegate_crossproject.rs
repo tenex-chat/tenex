@@ -4,7 +4,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::sync::Arc;
 use tenex_project::Project;
-use tenex_protocol::{DelegationIntent, DelegationRequest, Intent, PrincipalKind, PrincipalRef};
+use tenex_protocol::{
+    DelegationIntent, DelegationRequest, Intent, MessageRef, PrincipalKind, PrincipalRef,
+    ProjectRef, ToolUseIntent,
+};
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct DelegateCrossProjectArgs {
@@ -72,6 +75,34 @@ impl Tool for DelegateCrossProjectTool {
             DelegateCrossProjectError(format!("failed to open project '{}': {e}", args.project_id))
         })?;
 
+        let metadata = project
+            .metadata()
+            .map_err(|e| {
+                DelegateCrossProjectError(format!(
+                    "failed to read metadata for '{}': {e}",
+                    args.project_id
+                ))
+            })?
+            .ok_or_else(|| {
+                DelegateCrossProjectError(format!(
+                    "no project event for '{}' — cannot resolve owner pubkey",
+                    args.project_id
+                ))
+            })?;
+        let owner_hex = metadata.owner_pubkey.ok_or_else(|| {
+            DelegateCrossProjectError(format!(
+                "project '{}' has no owner pubkey",
+                args.project_id
+            ))
+        })?;
+        let owner_pubkey = nostr::PublicKey::from_hex(&owner_hex).map_err(|e| {
+            DelegateCrossProjectError(format!("invalid project owner pubkey: {e}"))
+        })?;
+        let target_project = ProjectRef {
+            author: owner_pubkey,
+            d_tag: metadata.d_tag,
+        };
+
         let agents = project.agents().map_err(|e| {
             DelegateCrossProjectError(format!(
                 "failed to read agents for '{}': {e}",
@@ -102,28 +133,56 @@ impl Tool for DelegateCrossProjectTool {
         };
 
         let ral = self.state.meta.lock().unwrap().ral;
-        let ctx = self.state.build_ctx(ral);
+        let source_ctx = self.state.build_ctx(ral);
+        let target_ctx = self
+            .state
+            .build_ctx_with_project(ral, target_project);
 
         let intent = DelegationIntent {
             items: vec![DelegationRequest {
                 recipient,
                 recipient_label: format!("@{}", args.recipient),
                 request: args.request.clone(),
-                branch: args.branch,
+                branch: args.branch.clone(),
                 followup_of: None,
             }],
         };
 
-        self.state
+        let refs = self
+            .state
             .channel
-            .send(Intent::Delegation(intent), &ctx)
+            .send(Intent::Delegation(intent), &target_ctx)
             .await
             .map_err(|e| DelegateCrossProjectError(format!("failed to emit delegation: {e}")))?;
         self.state.mark_pending_external_work();
 
+        let delegation_ref = refs.into_iter().next().ok_or_else(|| {
+            DelegateCrossProjectError("delegation produced no event".into())
+        })?;
+        let delegation_event_id = match &delegation_ref {
+            MessageRef::Nostr { event_id } => event_id.to_hex(),
+        };
+
+        let args_json = serde_json::to_string(&args).unwrap_or_default();
+        let tool_use_intent = ToolUseIntent {
+            tool_name: Self::NAME.to_string(),
+            content: String::new(),
+            args_json: Some(args_json),
+            referenced_messages: vec![delegation_ref],
+            usage: None,
+        };
+
+        self.state
+            .channel
+            .send(Intent::ToolUse(tool_use_intent), &source_ctx)
+            .await
+            .map_err(|e| {
+                DelegateCrossProjectError(format!("failed to emit tool-use event: {e}"))
+            })?;
+
         Ok(format!(
-            "Delegated to @{} in project '{}'. Stop here — do not take further actions this turn.",
-            args.recipient, args.project_id
+            "Delegated to @{} in project '{}'. Delegation event ID: {}. Stop here — do not take further actions this turn.",
+            args.recipient, args.project_id, delegation_event_id
         ))
     }
 }
