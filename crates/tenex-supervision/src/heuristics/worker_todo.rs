@@ -2,7 +2,17 @@ use crate::heuristic::PreToolHeuristic;
 use crate::types::{AgentCategory, PreToolContext};
 
 const PROTECTED_TOOLS: &[&str] = &[
-    "shell", "fs_read", "fs_write", "fs_edit", "fs_glob", "fs_grep",
+    "shell",
+    "fs_read",
+    "fs_write",
+    "fs_edit",
+    "fs_glob",
+    "fs_grep",
+    "home_read",
+    "home_write",
+    "home_edit",
+    "home_glob",
+    "home_grep",
 ];
 
 pub struct WorkerTodoHeuristic;

@@ -65,14 +65,14 @@ impl PostCompletionHeuristic for PendingTodosHeuristic {
         "pending-todos"
     }
 
-    fn check(&self, ctx: &PostCompletionContext) -> Option<Detection> {
+    fn check(&self, ctx: &PostCompletionContext<'_>) -> Option<Detection> {
         if ctx.todos.is_empty() {
             return None;
         }
         if ctx.pending_delegation_count > 0 {
             return None;
         }
-        if is_explicit_todo_list_only_request(&ctx.triggering_message) {
+        if is_explicit_todo_list_only_request(ctx.triggering_message) {
             return None;
         }
         let active: Vec<&str> = ctx
@@ -108,13 +108,13 @@ mod tests {
     use super::*;
     use crate::types::{TodoEntry, TodoStatus};
 
-    fn ctx(todos: Vec<TodoEntry>, delegations: usize) -> PostCompletionContext {
+    fn ctx(todos: &[TodoEntry], delegations: usize) -> PostCompletionContext<'_> {
         PostCompletionContext {
             todos,
-            tool_calls_made: vec![],
+            tool_calls_made: &[],
             nudged_about_todos: false,
             pending_delegation_count: delegations,
-            triggering_message: "do the thing".to_string(),
+            triggering_message: "do the thing",
         }
     }
 
@@ -131,7 +131,7 @@ mod tests {
                 status: TodoStatus::Done,
             },
         ];
-        let detection = h.check(&ctx(todos, 0));
+        let detection = h.check(&ctx(&todos, 0));
         assert!(detection.is_some());
         let d = detection.unwrap();
         assert!(d.re_engage);
@@ -146,7 +146,7 @@ mod tests {
             id: "t1".to_string(),
             status: TodoStatus::Pending,
         }];
-        assert!(h.check(&ctx(todos, 1)).is_none());
+        assert!(h.check(&ctx(&todos, 1)).is_none());
     }
 
     #[test]
@@ -162,13 +162,13 @@ mod tests {
                 status: TodoStatus::Skipped,
             },
         ];
-        assert!(h.check(&ctx(todos, 0)).is_none());
+        assert!(h.check(&ctx(&todos, 0)).is_none());
     }
 
     #[test]
     fn suppressed_when_no_todos() {
         let h = PendingTodosHeuristic;
-        assert!(h.check(&ctx(vec![], 0)).is_none());
+        assert!(h.check(&ctx(&[], 0)).is_none());
     }
 
     #[test]
@@ -178,8 +178,8 @@ mod tests {
             id: "t1".to_string(),
             status: TodoStatus::Pending,
         }];
-        let mut ctx = ctx(todos, 0);
-        ctx.triggering_message = "setup a todo list with 3 items and stop".to_string();
+        let mut ctx = ctx(&todos, 0);
+        ctx.triggering_message = "setup a todo list with 3 items and stop";
         assert!(h.check(&ctx).is_none());
     }
 
@@ -190,8 +190,8 @@ mod tests {
             id: "t1".to_string(),
             status: TodoStatus::Pending,
         }];
-        let mut ctx = ctx(todos, 0);
-        ctx.triggering_message = "setup a todo list and then complete the tasks".to_string();
+        let mut ctx = ctx(&todos, 0);
+        ctx.triggering_message = "setup a todo list and then complete the tasks";
         assert!(h.check(&ctx).is_some());
     }
 }

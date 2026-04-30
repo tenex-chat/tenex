@@ -62,12 +62,12 @@ pub struct TodoEntry {
     pub status: TodoStatus,
 }
 
-pub struct PostCompletionContext {
-    pub todos: Vec<TodoEntry>,
-    pub tool_calls_made: Vec<String>,
+pub struct PostCompletionContext<'a> {
+    pub todos: &'a [TodoEntry],
+    pub tool_calls_made: &'a [String],
     pub nudged_about_todos: bool,
     pub pending_delegation_count: usize,
-    pub triggering_message: String,
+    pub triggering_message: &'a str,
 }
 
 pub struct PreToolContext<'a> {

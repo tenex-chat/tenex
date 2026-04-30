@@ -10,7 +10,7 @@ impl PostCompletionHeuristic for ConsecutiveToolsWithoutTodoHeuristic {
         "consecutive-tools-without-todo"
     }
 
-    fn check(&self, ctx: &PostCompletionContext) -> Option<Detection> {
+    fn check(&self, ctx: &PostCompletionContext<'_>) -> Option<Detection> {
         if !ctx.todos.is_empty() {
             return None;
         }
@@ -32,7 +32,7 @@ impl PostCompletionHeuristic for ConsecutiveToolsWithoutTodoHeuristic {
             heuristic_name: self.name(),
             message,
             enforcement: EnforcementMode::OncePerExecution,
-            re_engage: true,
+            re_engage: false,
         })
     }
 }
@@ -42,53 +42,56 @@ mod tests {
     use super::*;
     use crate::types::TodoEntry;
 
-    fn ctx(tool_count: usize, has_todos: bool, nudged: bool) -> PostCompletionContext {
+    fn ctx<'a>(
+        todos: &'a [TodoEntry],
+        tool_calls_made: &'a [String],
+        nudged: bool,
+    ) -> PostCompletionContext<'a> {
         PostCompletionContext {
-            todos: if has_todos {
-                vec![TodoEntry {
-                    id: "t1".to_string(),
-                    status: crate::types::TodoStatus::Pending,
-                }]
-            } else {
-                vec![]
-            },
-            tool_calls_made: (0..tool_count).map(|i| format!("shell-{i}")).collect(),
+            todos,
+            tool_calls_made,
             nudged_about_todos: nudged,
             pending_delegation_count: 0,
-            triggering_message: "do work".to_string(),
+            triggering_message: "do work",
         }
+    }
+
+    fn tool_calls(count: usize) -> Vec<String> {
+        (0..count).map(|i| format!("shell-{i}")).collect()
     }
 
     #[test]
     fn fires_after_threshold_with_no_todos() {
         let h = ConsecutiveToolsWithoutTodoHeuristic;
-        assert!(h.check(&ctx(TOOL_CALL_THRESHOLD, false, false)).is_some());
-        assert!(h
-            .check(&ctx(TOOL_CALL_THRESHOLD + 5, false, false))
-            .is_some());
+        let threshold_calls = tool_calls(TOOL_CALL_THRESHOLD);
+        assert!(h.check(&ctx(&[], &threshold_calls, false)).is_some());
+
+        let extra_calls = tool_calls(TOOL_CALL_THRESHOLD + 5);
+        assert!(h.check(&ctx(&[], &extra_calls, false)).is_some());
     }
 
     #[test]
     fn does_not_fire_below_threshold() {
         let h = ConsecutiveToolsWithoutTodoHeuristic;
-        assert!(h
-            .check(&ctx(TOOL_CALL_THRESHOLD - 1, false, false))
-            .is_none());
+        let calls = tool_calls(TOOL_CALL_THRESHOLD - 1);
+        assert!(h.check(&ctx(&[], &calls, false)).is_none());
     }
 
     #[test]
     fn does_not_fire_when_todos_exist() {
         let h = ConsecutiveToolsWithoutTodoHeuristic;
-        assert!(h
-            .check(&ctx(TOOL_CALL_THRESHOLD + 2, true, false))
-            .is_none());
+        let todos = vec![TodoEntry {
+            id: "t1".to_string(),
+            status: crate::types::TodoStatus::Pending,
+        }];
+        let calls = tool_calls(TOOL_CALL_THRESHOLD + 2);
+        assert!(h.check(&ctx(&todos, &calls, false)).is_none());
     }
 
     #[test]
     fn does_not_fire_when_already_nudged() {
         let h = ConsecutiveToolsWithoutTodoHeuristic;
-        assert!(h
-            .check(&ctx(TOOL_CALL_THRESHOLD + 2, false, true))
-            .is_none());
+        let calls = tool_calls(TOOL_CALL_THRESHOLD + 2);
+        assert!(h.check(&ctx(&[], &calls, true)).is_none());
     }
 }

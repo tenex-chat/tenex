@@ -8,7 +8,15 @@ const MAX_RETRIES: u32 = 3;
 
 pub enum PostCompletionOutcome {
     Accept,
-    ReEngage { message: String },
+    /// Inject a nudge message into the next turn's context without triggering
+    /// a full re-engagement loop. The caller should surface the message as a
+    /// low-priority system reminder and then complete normally.
+    InjectMessage {
+        message: String,
+    },
+    ReEngage {
+        message: String,
+    },
 }
 
 pub struct Supervisor {
@@ -69,11 +77,11 @@ impl Supervisor {
         }
 
         let ctx = PostCompletionContext {
-            todos,
-            tool_calls_made: self.tool_calls_made.clone(),
+            todos: &todos,
+            tool_calls_made: &self.tool_calls_made,
             nudged_about_todos: self.nudged_about_todos,
             pending_delegation_count,
-            triggering_message,
+            triggering_message: &triggering_message,
         };
 
         for h in &self.post_heuristics {
@@ -96,7 +104,9 @@ impl Supervisor {
                     message: detection.message,
                 };
             }
-            return PostCompletionOutcome::Accept;
+            return PostCompletionOutcome::InjectMessage {
+                message: detection.message,
+            };
         }
 
         PostCompletionOutcome::Accept
