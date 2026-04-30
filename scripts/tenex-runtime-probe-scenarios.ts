@@ -247,6 +247,16 @@ export function pmInstructions(name: ScenarioName): string {
 }
 
 export function mockScenario(name: ScenarioName): unknown {
+    // The two delegation probes that re-enter the runtime through delegation
+    // routing (self_delegate, delegate_crossproject) depend on real LLM
+    // tool-calling behavior. A mock cassette can't drive those code paths
+    // realistically, and a silent fall-through to the fs-read fixture would
+    // produce confusing, misleading verdicts. Fail loudly instead.
+    if (name === "delegation-self" || name === "delegation-crossproject") {
+        throw new Error(
+            `${name} requires a live LLM provider. Re-run with --llm ollama (or anthropic).`
+        );
+    }
     if (name === "delegation-basic") {
         return {
             responses: [

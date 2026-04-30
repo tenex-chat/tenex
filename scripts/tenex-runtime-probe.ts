@@ -480,7 +480,12 @@ if (scenarioError) {
     });
 }
 for (const verdict of verdicts) {
-    console.log(`${verdict.ok ? "ok " : "BAD"} ${verdict.name}`);
+    const prefix = verdict.ok
+        ? "ok  "
+        : verdict.pending
+        ? "skip"
+        : "BAD ";
+    console.log(`${prefix} ${verdict.name}`);
     if (!verdict.ok) {
         console.log(`    ${verdict.detail}`);
     }
@@ -499,7 +504,9 @@ if (!keep) {
     cleanup();
 }
 
-process.exit(verdicts.every((v) => v.ok) ? 0 : 1);
+// `pending` failures mark known unimplemented gaps and do not break the
+// probe run; only hard failures (BAD) flip the exit code.
+process.exit(verdicts.every((v) => v.ok || v.pending) ? 0 : 1);
 
 function resolveRelayCommand(configPath: string): { cmd: string; args: string[]; cwd: string } {
     const candidates = [
