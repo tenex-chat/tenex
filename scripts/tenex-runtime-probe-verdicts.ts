@@ -30,6 +30,7 @@ import {
     worktreeAgentsMdInstruction,
 } from "./tenex-runtime-probe-scenarios";
 import { evaluateShellKillDuplicate } from "./tenex-runtime-probe-shell-verdicts";
+import { evaluateTodoStop } from "./tenex-runtime-probe-todo-stop";
 
 type Verdict = { name: string; ok: boolean; detail: string };
 
@@ -96,6 +97,9 @@ export function evaluate(
     }
     if (name === "conversation-reminders") {
         return [...commonVerdicts, ...evaluateConversationReminders(events, requestRecords, context)];
+    }
+    if (name === "todo-stop") {
+        return [...commonVerdicts, ...evaluateTodoStop(events, requestRecords, context)];
     }
     return [...commonVerdicts, ...evaluateFsReadAdjustment(events, requestRecords, context)];
 }
@@ -684,34 +688,44 @@ function evaluateCacheBreakpoints(context: EvaluateContext): Verdict[] {
     }
     const states = readAgentContextStates(context.conversationDbPath);
 
-    // Prerequisite: did any turn write tokens to the cache?
-    // Without cache_control markers in the request rig does not request caching,
-    // so cache_creation_input_tokens is 0 and no hit can ever occur.
-    const anyWritten = states.some((s) => {
-        if (!s.compactionStateJson) return false;
+    const writtenTotal = states.reduce((acc, s) => {
+        if (!s.compactionStateJson) return acc;
         try {
             const p = JSON.parse(s.compactionStateJson) as {
                 cache_observed?: { written_tokens?: number };
             };
-            return (p.cache_observed?.written_tokens ?? 0) > 0;
+            return acc + (p.cache_observed?.written_tokens ?? 0);
         } catch {
-            return false;
+            return acc;
         }
-    });
-
-    if (!anyWritten) {
-        // rig 0.35 does not add cache_control markers to Anthropic requests by default.
-        // Until that is fixed upstream (or we patch rig), cache verdicts cannot be checked.
-        return [
-            {
-                name: "Prompt cache write observed (prerequisite for BreakpointHint)",
-                ok: false,
-                detail:
-                    "cache_creation_input_tokens=0 for all turns — rig does not send cache_control markers, so Anthropic never caches. BreakpointHint verdicts skipped.",
-            },
-        ];
+    }, 0);
+    const hitTotal = states.reduce((acc, s) => {
+        if (!s.compactionStateJson) return acc;
+        try {
+            const p = JSON.parse(s.compactionStateJson) as {
+                cache_observed?: { hit_tokens?: number };
+            };
+            return acc + (p.cache_observed?.hit_tokens ?? 0);
+        } catch {
+            return acc;
+        }
+    }, 0);
+    const writeVerdict: Verdict = {
+        name: "Prompt cache write observed (cache_creation_input_tokens > 0)",
+        ok: writtenTotal > 0,
+        detail:
+            writtenTotal > 0
+                ? `Total cache_creation_input_tokens across turns: ${writtenTotal}.`
+                : "cache_creation_input_tokens=0 for every turn. Either the prompt is below the model threshold or cache_control markers were not emitted.",
+    };
+    if (writtenTotal === 0) {
+        return [writeVerdict];
     }
 
+    // Cache reads only show up on the second-or-later prefix repetition,
+    // so single-turn scenarios pass the write check but not the hit check.
+    // We do not gate on hits here; instead we surface them informationally
+    // so multi-turn scenarios can confirm the read path lights up.
     const anchored = states.find((s) => s.cacheAnchored);
     const withHints = states.find((s) => {
         if (!s.compactionStateJson) return false;
@@ -725,6 +739,15 @@ function evaluateCacheBreakpoints(context: EvaluateContext): Verdict[] {
         }
     });
     return [
+        writeVerdict,
+        {
+            name: "Prompt cache read observed (cached_input_tokens > 0)",
+            ok: hitTotal > 0,
+            detail:
+                hitTotal > 0
+                    ? `Total cached_input_tokens across turns: ${hitTotal}.`
+                    : "cached_input_tokens=0 for every turn. Expected for one-turn scenarios; multi-turn scenarios should hit on the second turn.",
+        },
         {
             name: "Prompt cache hit recorded (cache_anchored=true)",
             ok: Boolean(anchored),
