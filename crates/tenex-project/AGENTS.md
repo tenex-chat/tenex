@@ -37,6 +37,11 @@ project-local state. Conversation rows are stored in SQLite; agents are not.
 - `agent_by_slug(slug)` → `Option<Agent>`
 - `project_agents()` → `Vec<ProjectAgent>` (membership + flags)
 
+Team helpers:
+- `load_teams(base_dir, project_id)` reads global and project-specific `teams.json`; `project_id` may be a NIP-33 coordinate or bare dTag.
+- `teams_for_agent(teams, slug)` filters team membership for one agent.
+- `render_teams_context(member_teams, active_team)` renders the prompt fragment.
+
 Key types: `Agent`, `ProjectAgent`, `ProjectMetadata`, `Signer`, `NsecSigner`, `SignerScheme`.
 
 ## How to approach changes

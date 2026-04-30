@@ -1,6 +1,8 @@
 use serde::Deserialize;
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+
+use crate::normalize_project_id;
 
 /// A resolved team entry — members always includes team_lead.
 #[derive(Debug, Clone)]
@@ -33,10 +35,16 @@ pub fn load_teams(base_dir: &Path, project_id: Option<&str>) -> Vec<Team> {
     insert_teams_file(&mut map, base_dir.join("teams.json"));
 
     if let Some(id) = project_id {
-        insert_teams_file(
-            &mut map,
-            base_dir.join("projects").join(id).join("teams.json"),
-        );
+        match normalize_project_id(id) {
+            Ok(d_tag) => insert_teams_file(
+                &mut map,
+                base_dir
+                    .join("projects")
+                    .join(d_tag.as_str())
+                    .join("teams.json"),
+            ),
+            Err(err) => tracing::warn!(project_id = id, error = %err, "skipping project teams"),
+        }
     }
 
     let mut teams: Vec<Team> = map.into_values().collect();
@@ -44,12 +52,22 @@ pub fn load_teams(base_dir: &Path, project_id: Option<&str>) -> Vec<Team> {
     teams
 }
 
-fn insert_teams_file(map: &mut HashMap<String, Team>, path: PathBuf) {
-    let Ok(content) = std::fs::read_to_string(path) else {
-        return;
+fn insert_teams_file(map: &mut HashMap<String, Team>, path: impl AsRef<Path>) {
+    let path = path.as_ref();
+    let content = match std::fs::read_to_string(path) {
+        Ok(content) => content,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return,
+        Err(err) => {
+            tracing::warn!(path = %path.display(), error = %err, "failed to read teams file");
+            return;
+        }
     };
-    let Ok(file) = serde_json::from_str::<TeamsFile>(&content) else {
-        return;
+    let file = match serde_json::from_str::<TeamsFile>(&content) {
+        Ok(file) => file,
+        Err(err) => {
+            tracing::warn!(path = %path.display(), error = %err, "failed to parse teams file");
+            return;
+        }
     };
 
     for (name, def) in file.teams {
@@ -123,4 +141,50 @@ pub fn render_teams_context(member_teams: &[&Team], active_team: Option<&str>) -
 
     lines.push("</teams-context>".to_string());
     lines.join("\n")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const OWNER_PK: &str = "c506be742732723deaaf8260d2b43d75d33420c601c05a9e1fa3b7986cc1b957";
+
+    fn write_teams(path: &Path, contents: &str) {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, contents).unwrap();
+    }
+
+    #[test]
+    fn project_coordinate_loads_project_specific_teams() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_teams(
+            &tmp.path().join("projects/my-project/teams.json"),
+            r#"{"teams":{"Core":{"description":"Project team","teamLead":"lead","members":["worker"]}}}"#,
+        );
+
+        let teams = load_teams(tmp.path(), Some(&format!("31933:{OWNER_PK}:my-project")));
+
+        assert_eq!(teams.len(), 1);
+        assert_eq!(teams[0].name, "Core");
+        assert_eq!(teams[0].members, vec!["lead", "worker"]);
+    }
+
+    #[test]
+    fn project_teams_override_global_teams() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_teams(
+            &tmp.path().join("teams.json"),
+            r#"{"teams":{"Core":{"description":"Global","teamLead":"global-lead","members":[]}}}"#,
+        );
+        write_teams(
+            &tmp.path().join("projects/my-project/teams.json"),
+            r#"{"teams":{"Core":{"description":"Project","teamLead":"project-lead","members":["worker"]}}}"#,
+        );
+
+        let teams = load_teams(tmp.path(), Some("my-project"));
+
+        assert_eq!(teams.len(), 1);
+        assert_eq!(teams[0].description, "Project");
+        assert_eq!(teams[0].members, vec!["project-lead", "worker"]);
+    }
 }
