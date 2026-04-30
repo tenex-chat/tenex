@@ -1,0 +1,20 @@
+[package]
+name = "tenex-firewall"
+version = "0.1.0"
+edition = "2021"
+description = "LLM-based gate that screens kind:1 events from non-whitelisted authors before they reach project agents."
+
+[lib]
+name = "tenex_firewall"
+path = "src/lib.rs"
+
+[dependencies]
+tenex-llm-config = { path = "../tenex-llm-config" }
+tokio = { version = "1.40", features = ["time"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+schemars = "1"
+anyhow = "1"
+thiserror = "2"
+tracing = "0.1"
+rig-core = "0.35"
