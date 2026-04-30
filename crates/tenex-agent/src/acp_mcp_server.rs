@@ -107,12 +107,12 @@ fn build_tools(context: &AcpMcpContext) -> Result<Vec<Box<dyn ToolDyn>>> {
         expose_tool(
             Box::new(SelfDelegateTool::new(state.clone())),
             state.clone(),
-            false,
+            true,
         ),
         expose_tool(
             Box::new(DelegateCrossProjectTool::new(state.clone())),
             state.clone(),
-            false,
+            true,
         ),
         expose_tool(
             Box::new(DelegateFollowupTool::new(

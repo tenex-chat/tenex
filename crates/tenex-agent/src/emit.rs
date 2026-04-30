@@ -107,4 +107,13 @@ impl EmitState {
             team,
         }
     }
+
+    /// Build an encoding context, overriding the project a-tag. Used by the
+    /// cross-project delegate tool — the outbound delegation must carry the
+    /// target project's coordinate, not the source project's.
+    pub fn build_ctx_with_project(&self, ral: u32, project: ProjectRef) -> EncodingContext {
+        let mut ctx = self.build_ctx(ral);
+        ctx.project = project;
+        ctx
+    }
 }

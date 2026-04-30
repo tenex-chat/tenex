@@ -37,6 +37,14 @@ pub async fn discover_context<S: VectorStore>(
         vec![query.to_string()]
     };
 
+    tracing::info!(
+        target: "rag.context_discovery.planner",
+        word_count,
+        use_planner,
+        query_count = queries.len(),
+        "context discovery planner decision"
+    );
+
     // Step 2: Search with each query and deduplicate by document ID.
     let mut by_id: HashMap<String, SearchResult> = HashMap::new();
     for q in &queries {
@@ -54,6 +62,7 @@ pub async fn discover_context<S: VectorStore>(
     }
 
     // Step 3: Filter at threshold and sort by score descending.
+    let raw_count = by_id.len();
     let mut filtered: Vec<SearchResult> = by_id
         .into_values()
         .filter(|r| r.score >= SCORE_THRESHOLD)
@@ -63,6 +72,7 @@ pub async fn discover_context<S: VectorStore>(
             .partial_cmp(&a.score)
             .unwrap_or(std::cmp::Ordering::Equal)
     });
+    let filtered_count = filtered.len();
 
     // Step 4: Rerank with LLM if more than 3 results, then take top 5.
     if filtered.len() > 3 {
@@ -70,6 +80,17 @@ pub async fn discover_context<S: VectorStore>(
     }
 
     filtered.truncate(MAX_RESULTS);
+
+    let top_score = filtered.first().map(|r| r.score);
+    tracing::info!(
+        target: "rag.context_discovery.retrieval",
+        raw_count,
+        filtered_count,
+        returned_count = filtered.len(),
+        top_score = top_score.map(|s| s as f64),
+        "context discovery retrieval outcome"
+    );
+
     filtered
 }
 

@@ -65,8 +65,8 @@ use tenex_supervision::heuristics::default_supervisor;
 use tenex_supervision::supervisor::PostCompletionOutcome;
 use tenex_supervision::types::{TodoEntry as SupTodoEntry, TodoStatus as SupTodoStatus};
 use tools::{
-    DelegateTool, FindSkillsTool, McpProxyTool, RagAddDocumentsTool, RagSearchTool, SkillListTool,
-    SkillsSetTool, TodoItem, TodoStatus, ToolRecorder, ToolSet,
+    DelegateTool, McpProxyTool, RagAddDocumentsTool, RagSearchTool, SkillListTool, SkillsSetTool,
+    TodoItem, TodoStatus, ToolRecorder, ToolSet,
 };
 use tracing::{info_span, Instrument};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
@@ -825,7 +825,6 @@ async fn run() -> Result<()> {
 
     let skill_list_tool = SkillListTool::new(skill_ctx.clone());
     let skills_set_tool = SkillsSetTool::new(skill_ctx.clone(), self_applied_skills.clone());
-    let find_skills_tool = FindSkillsTool::new(skill_ctx.clone());
     let mcp_proxy_tools = load_mcp_proxy_tools()?;
 
     // Initialize RAG store for the embedding tools.
@@ -982,7 +981,6 @@ async fn run() -> Result<()> {
         todos: todos.clone(),
         skill_list: skill_list_tool.clone(),
         skills_set: skills_set_tool.clone(),
-        find_skills: find_skills_tool.clone(),
         mcp_proxy_tools,
         delegate: delegate_tool.clone(),
         rag_add_documents: rag_add_documents.clone(),
