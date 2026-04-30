@@ -247,9 +247,7 @@ impl Poller {
                 .cache_telegram_file(&voice.file_id, unique, "ogg")
                 .await
             {
-                Ok(path) => {
-                    audio_annotations.push(format!("[voice: file://{}]", path.display()))
-                }
+                Ok(path) => audio_annotations.push(format!("[voice: file://{}]", path.display())),
                 Err(error) => warn!(
                     error = %error,
                     file_id = %voice.file_id,
@@ -263,9 +261,7 @@ impl Poller {
                 .cache_telegram_file(&audio.file_id, unique, "mp3")
                 .await
             {
-                Ok(path) => {
-                    audio_annotations.push(format!("[audio: file://{}]", path.display()))
-                }
+                Ok(path) => audio_annotations.push(format!("[audio: file://{}]", path.display())),
                 Err(error) => warn!(
                     error = %error,
                     file_id = %audio.file_id,

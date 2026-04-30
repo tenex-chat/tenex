@@ -48,14 +48,36 @@ mod project_ids;
 /// 2. `$TENEX_BASE_DIR` environment variable (non-empty).
 /// 3. `$HOME/.tenex` (matches TS `getTenexBasePath()` at `src/constants.ts:22-23`).
 pub fn resolve_base_dir(override_path: Option<PathBuf>) -> PathBuf {
-    if let Some(p) = override_path {
-        return p;
-    }
-    if let Ok(p) = std::env::var("TENEX_BASE_DIR") {
-        if !p.is_empty() {
-            return PathBuf::from(p);
+    let raw = if let Some(p) = override_path {
+        p
+    } else if let Ok(p) = std::env::var("TENEX_BASE_DIR") {
+        if p.is_empty() {
+            default_home_base()
+        } else {
+            PathBuf::from(p)
         }
-    }
+    } else {
+        default_home_base()
+    };
+    absolutize(raw)
+}
+
+fn default_home_base() -> PathBuf {
     let home = std::env::var("HOME").unwrap_or_default();
     PathBuf::from(home).join(".tenex")
+}
+
+/// Anchor a relative base dir to the current working directory once at
+/// resolution time, then keep it stable forever after. The daemon supervisor
+/// propagates this to children as `TENEX_BASE_DIR`; if it were left relative,
+/// each child would re-resolve it against its own cwd and end up at a
+/// different physical directory.
+fn absolutize(p: PathBuf) -> PathBuf {
+    if p.is_absolute() {
+        return p;
+    }
+    match std::env::current_dir() {
+        Ok(cwd) => cwd.join(p),
+        Err(_) => p,
+    }
 }

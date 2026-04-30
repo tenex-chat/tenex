@@ -128,8 +128,8 @@ fn fetch_local_image(
             return Ok(None);
         }
     };
-    let bytes = std::fs::read(&validated)
-        .with_context(|| format!("read {}", validated.display()))?;
+    let bytes =
+        std::fs::read(&validated).with_context(|| format!("read {}", validated.display()))?;
     if bytes.len() > MAX_IMAGE_BYTES {
         eprintln!(
             "[tenex-agent] multimodal: image too large ({} bytes) -- skipping {path}",

@@ -71,6 +71,15 @@ struct WhitelistRunArgs {
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
+
+    // Normalize the TENEX base dir to an absolute path at process entry so
+    // every descendant we spawn (telegram poller, runtime, agent, …) resolves
+    // it identically regardless of the cwd it ends up running in. Without
+    // this, a relative `--base-dir`/`TENEX_BASE_DIR` would land at different
+    // physical directories per child, which silently breaks anything that
+    // relies on a shared cache (e.g. the Telegram media gate).
+    normalize_base_dir_env();
+
     let telemetry =
         tenex_telemetry::init_with_base_dir("tenex-daemon", command_base_dir(&cli.command));
     let result = match cli.command {
@@ -92,6 +101,20 @@ async fn main() -> Result<()> {
     };
     telemetry.shutdown();
     result
+}
+
+fn normalize_base_dir_env() {
+    let Ok(value) = std::env::var("TENEX_BASE_DIR") else {
+        return;
+    };
+    let path = PathBuf::from(&value);
+    if path.is_absolute() {
+        return;
+    }
+    let Ok(cwd) = std::env::current_dir() else {
+        return;
+    };
+    std::env::set_var("TENEX_BASE_DIR", cwd.join(path));
 }
 
 fn command_base_dir(command: &Command) -> Option<&std::path::Path> {
