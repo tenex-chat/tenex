@@ -215,11 +215,8 @@ mod tests {
     fn future_version_is_rejected() {
         let mut conn = open_in_memory();
         ensure_schema(&mut conn).unwrap();
-        conn.execute(
-            "UPDATE meta SET value='999' WHERE key='schema_version'",
-            [],
-        )
-        .unwrap();
+        conn.execute("UPDATE meta SET value='999' WHERE key='schema_version'", [])
+            .unwrap();
         let err = ensure_schema(&mut conn).unwrap_err();
         assert!(err.to_string().contains("newer than supported"));
     }

@@ -98,6 +98,7 @@ pub fn load_llms(base_dir: &Path) -> Result<LlmDocs> {
         "promptCompilation",
         "categorization",
         "contextDiscovery",
+        "firewall",
     ];
     let mut roles = IndexMap::new();
     for &key in ROLE_KEYS {
@@ -188,7 +189,7 @@ pub fn resolve_config(
 
 /// Build a `StandardConfigResponse` by joining the config object with its
 /// provider's credentials.
-pub(crate) fn resolve_standard(
+pub fn resolve_standard(
     config_name: &str,
     config: &Value,
     providers: &ProviderDocs,

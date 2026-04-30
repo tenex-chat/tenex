@@ -228,11 +228,7 @@ impl VectorStore for SqliteStore {
         Ok(n)
     }
 
-    async fn delete_by_source(
-        &self,
-        source_kind: &str,
-        source_id: &str,
-    ) -> anyhow::Result<usize> {
+    async fn delete_by_source(&self, source_kind: &str, source_id: &str) -> anyhow::Result<usize> {
         let conn = self.conn.lock().unwrap();
         let n = conn
             .execute(
@@ -246,10 +242,7 @@ impl VectorStore for SqliteStore {
     async fn delete_by_id(&self, id: &str) -> anyhow::Result<usize> {
         let conn = self.conn.lock().unwrap();
         let n = conn
-            .execute(
-                "DELETE FROM doc_meta WHERE id = ?1",
-                rusqlite::params![id],
-            )
+            .execute("DELETE FROM doc_meta WHERE id = ?1", rusqlite::params![id])
             .with_context(|| format!("delete by id '{id}'"))?;
         Ok(n)
     }

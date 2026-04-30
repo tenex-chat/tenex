@@ -71,7 +71,14 @@ impl<S: VectorStore> RagStore<S> {
 
         let vector = self.embed.embed(content).await?;
         self.store
-            .upsert(&id, collection, content, title, &vector, &ChunkMeta::default())
+            .upsert(
+                &id,
+                collection,
+                content,
+                title,
+                &vector,
+                &ChunkMeta::default(),
+            )
             .await?;
         Ok(id)
     }
@@ -112,11 +119,7 @@ impl<S: VectorStore> RagStore<S> {
         self.store.delete_collection(collection).await
     }
 
-    pub async fn delete_by_source(
-        &self,
-        source_kind: &str,
-        source_id: &str,
-    ) -> Result<usize> {
+    pub async fn delete_by_source(&self, source_kind: &str, source_id: &str) -> Result<usize> {
         self.store.delete_by_source(source_kind, source_id).await
     }
 

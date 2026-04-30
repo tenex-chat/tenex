@@ -69,7 +69,14 @@ async fn upsert_then_search_returns_match() {
     let (store, _f) = temp_store();
     let v = unit_vec(4, 0);
     store
-        .upsert("doc1", "col_a", "hello world", Some("Title"), &v, &empty_meta())
+        .upsert(
+            "doc1",
+            "col_a",
+            "hello world",
+            Some("Title"),
+            &v,
+            &empty_meta(),
+        )
         .await
         .unwrap();
 
@@ -242,7 +249,10 @@ async fn upsert_persists_chunk_meta_and_search_returns_it() {
     assert_eq!(m.seq_end, Some(40));
     assert_eq!(m.chunk_index, Some(0));
     assert_eq!(
-        m.meta_json.as_ref().and_then(|j| j.get("parent_conversation_id")).and_then(|v| v.as_str()),
+        m.meta_json
+            .as_ref()
+            .and_then(|j| j.get("parent_conversation_id"))
+            .and_then(|v| v.as_str()),
         Some("p")
     );
 }

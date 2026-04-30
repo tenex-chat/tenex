@@ -87,7 +87,9 @@ mod tests {
 
     fn make_event(content: &str, kind: Kind) -> (Event, Keys) {
         let keys = Keys::generate();
-        let event = EventBuilder::new(kind, content).sign_with_keys(&keys).unwrap();
+        let event = EventBuilder::new(kind, content)
+            .sign_with_keys(&keys)
+            .unwrap();
         (event, keys)
     }
 

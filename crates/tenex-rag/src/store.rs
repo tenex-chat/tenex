@@ -56,11 +56,7 @@ pub trait VectorStore: Send + Sync {
     async fn delete_collection(&self, collection: &str) -> anyhow::Result<usize>;
 
     /// Remove every document with the given (`source_kind`, `source_id`).
-    async fn delete_by_source(
-        &self,
-        source_kind: &str,
-        source_id: &str,
-    ) -> anyhow::Result<usize>;
+    async fn delete_by_source(&self, source_kind: &str, source_id: &str) -> anyhow::Result<usize>;
 
     /// Remove a single document by its primary key. Returns the number
     /// of rows deleted (0 or 1).
