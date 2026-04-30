@@ -19,6 +19,7 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 
+pub mod install;
 pub mod manager_actions;
 pub mod manager_logic;
 pub mod openclaw_preview;
@@ -45,6 +46,11 @@ pub enum AgentCommand {
     Delete {
         /// Agent public key
         pubkey: String,
+    },
+    /// Install an agent or team from a Nostr event (kind:4199 or kind:34199)
+    Install {
+        /// nevent1 bech32 reference to the agent or team definition event
+        nevent: String,
     },
     /// Open the interactive agent manager
     Manage,
@@ -81,6 +87,10 @@ pub async fn run(args: AgentArgs) -> Result<()> {
     match args.command {
         None | Some(AgentCommand::Manage) => run_manage().await,
         Some(AgentCommand::Delete { pubkey }) => run_delete(&pubkey).await,
+        Some(AgentCommand::Install { nevent }) => {
+            let base_dir = crate::store::resolve_base_dir(None);
+            install::run(&base_dir, &nevent).await
+        }
         Some(AgentCommand::Import(import)) => run_import(import).await,
     }
 }
