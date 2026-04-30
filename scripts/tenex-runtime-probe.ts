@@ -63,6 +63,7 @@ const launcherRelayDir = "/home/pablo/Work/tenex-launcher/relay";
 const cliArgs = process.argv.slice(2);
 const scenarioName = (positionalArgs(cliArgs)[0] ?? "delegation-basic") as ScenarioName;
 const keep = cliArgs.includes("--keep");
+const verbose = cliArgs.includes("--verbose");
 const llm = parseProbeLlmOptions(cliArgs);
 
 if (!availableScenarios.includes(scenarioName)) {
@@ -201,20 +202,25 @@ writeJson(path.join(baseDir, "config.json"), {
     telemetry: { enabled: false },
 });
 const llmConfigurations: Record<string, unknown> =
-    llm.mode === "ollama"
-        ? {
-              [llmModelName]: { provider: "ollama", model: llm.ollamaModel },
-              [agentConfigUpdateModelName]: { provider: "ollama", model: llm.ollamaModel },
-          }
-        : llm.mode === "anthropic"
-        ? {
-              [llmModelName]: { provider: "anthropic", model: llm.anthropicModel },
-              [agentConfigUpdateModelName]: { provider: "anthropic", model: llm.anthropicModel },
-          }
-        : {
-              mock: { provider: "mock", model: scenarioName },
-              [agentConfigUpdateModelName]: { provider: "mock", model: scenarioName },
-          };
+   llm.mode === "ollama"
+       ? {
+             [llmModelName]: { provider: "ollama", model: llm.ollamaModel },
+             [agentConfigUpdateModelName]: { provider: "ollama", model: llm.ollamaModel },
+         }
+       : llm.mode === "anthropic"
+       ? {
+             [llmModelName]: { provider: "anthropic", model: llm.anthropicModel },
+             [agentConfigUpdateModelName]: { provider: "anthropic", model: llm.anthropicModel },
+         }
+    : llm.mode === "openrouter"
+    ? {
+          [llmModelName]: { provider: "openrouter", model: llm.openrouterModel },
+          [agentConfigUpdateModelName]: { provider: "openrouter", model: llm.openrouterModel },
+      }
+       : {
+             mock: { provider: "mock", model: scenarioName },
+             [agentConfigUpdateModelName]: { provider: "mock", model: scenarioName },
+         };
 if (acpProbe) {
     llmConfigurations[acpProbeModelName] = acpProbe;
 }
@@ -232,9 +238,15 @@ writeJson(path.join(baseDir, "providers.json"), {
                   },
               }
             : llm.mode === "anthropic"
+           ? {
+                 anthropic: {
+                     apiKey: llm.anthropicApiKey ?? "",
+                 },
+             }
+            : llm.mode === "openrouter"
             ? {
-                  anthropic: {
-                      apiKey: llm.anthropicApiKey ?? "",
+                  openrouter: {
+                      apiKeys: [{ key: llm.openrouterApiKey ?? "none" }],
                   },
               }
             : { mock: { apiKeys: [{ key: "none" }] } },
@@ -341,6 +353,9 @@ console.log(`baseDir : ${baseDir}`);
 console.log(`relay   : ${relayUrl}`);
 if (llm.mode === "ollama" || llm.mode === "anthropic" || llm.recordCassettePath) {
     console.log(`cassette record: ${cassetteRecordPath}`);
+}
+if (llm.mode === "openrouter") {
+    console.log(`openrouter model: ${llm.openrouterModel}`);
 }
 if (llm.mode === "cassette" && llm.cassettePath) {
     console.log(`cassette replay: ${path.resolve(llm.cassettePath)}`);
@@ -471,6 +486,8 @@ const verdicts = evaluate(scenarioName, mergedEvents, requestRecords, {
     conversationDbPath: convDbPath,
     mcpProbeRecords,
     workspaceDir,
+    ownerPubkey: owner.pubkey,
+    agentHomeDir: path.join(baseDir, "agents", pm.pubkey, "home"),
 });
 if (scenarioError) {
     verdicts.unshift({
@@ -490,13 +507,37 @@ for (const verdict of verdicts) {
         console.log(`    ${verdict.detail}`);
     }
 }
+const passedCount = verdicts.filter((v) => v.ok).length;
+const failedCount = verdicts.filter((v) => !v.ok && !v.pending).length;
+const skippedCount = verdicts.filter((v) => v.pending).length;
+console.log(`---`);
+console.log(`verdicts: ${passedCount} ok, ${failedCount} bad, ${skippedCount} skip (total ${verdicts.length})`);
+if (verbose) {
+    console.log("--- verbose event timeline ---");
+    for (const event of mergedEvents) {
+        const toolTag = event.tags.find((tag) => tag[0] === "tool");
+        const statusTag = event.tags.find((tag) => tag[0] === "status");
+        const kind = event.kind;
+        const author = event.pubkey === pm.pubkey ? "pm" : event.pubkey === worker.pubkey ? "worker" : event.pubkey.slice(0, 8);
+        const toolLabel = toolTag ?  : "";
+        const statusLabel = statusTag ?  : "";
+        const contentPreview = event.content.slice(0, 120).replace(/\n/g, " \\n");
+        console.log(`  kind=${kind} ${author}${toolLabel}${statusLabel}: ${contentPreview}`);
+    }
+    console.log("--- verbose request records ---");
+    for (const record of requestRecords) {
+        const tools = record.toolCalls?.join(",") ?? "(none)";
+        const contentPreview = (record.content ?? "").slice(0, 80).replace(/\n/g, " \\n");
+        console.log(`  ${record.agent} turn=${record.turn} tools=[${tools}] delay=${record.delayMs}ms: ${contentPreview}`);
+    }
+}
 console.log(`events : ${artifactPath}`);
 console.log(`conversations : ${transcriptArtifactPath}`);
 console.log(`processes : ${processOutputArtifactPath}`);
 if (llm.mode === "mock" || llm.mode === "cassette") {
     console.log(`requests : ${requestRecordPath}`);
 }
-if (llm.mode === "ollama" || llm.mode === "anthropic" || llm.recordCassettePath) {
+if (llm.mode === "ollama" || llm.mode === "anthropic" || llm.mode === "openrouter" || llm.recordCassettePath) {
     console.log(`cassette : ${cassetteRecordPath}`);
 }
 
@@ -589,6 +630,9 @@ function runtimeEnv(
     if (options.mode === "ollama" || options.mode === "anthropic" || options.recordCassettePath) {
         env.TENEX_LLM_CASSETTE_RECORD_PATH = cassettePath;
     }
+    if (options.mode === "openrouter") {
+        env.TENEX_LLM_CASSETTE_RECORD_PATH = cassettePath;
+    }
     if (options.ollamaBaseUrl) {
         env.OLLAMA_API_BASE_URL = options.ollamaBaseUrl;
     }
@@ -601,6 +645,9 @@ function describeLlm(options: ProbeLlmOptions): string {
     }
     if (options.mode === "anthropic") {
         return `anthropic/${options.anthropicModel}`;
+    }
+    if (options.mode === "openrouter") {
+        return `openrouter/${options.openrouterModel}`;
     }
     if (options.mode === "cassette") {
         return `cassette factor=${options.generationTimeFactor}`;
@@ -683,6 +730,8 @@ function positionalArgs(args: string[]): string[] {
         "--llm-generation-time-factor",
         "--ollama-model",
         "--ollama-base-url",
+        "--openrouter-model",
+        "--openrouter-api-key",
     ]);
     const result: string[] = [];
     for (let index = 0; index < args.length; index += 1) {
@@ -714,3 +763,9 @@ function cleanup(): void {
         }
     }
 }
+const llmModelName =
+    llm.mode === "ollama" ? "probe-real"
+    : llm.mode === "anthropic" ? "probe-anthropic"
+    : llm.mode === "openrouter" ? "probe-openrouter"
+    : "mock";
+if (llm.mode === "ollama" || llm.mode === "anthropic" || llm.mode === "openrouter" || llm.recordCassettePath) {

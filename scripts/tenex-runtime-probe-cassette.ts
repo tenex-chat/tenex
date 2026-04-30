@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 
 export type ProbeLlmMode = "mock" | "ollama" | "cassette" | "anthropic";
+export type ProbeLlmMode = "mock" | "ollama" | "cassette" | "anthropic" | "openrouter";
 
 export type ProbeLlmOptions = {
     mode: ProbeLlmMode;
@@ -11,6 +12,8 @@ export type ProbeLlmOptions = {
     ollamaBaseUrl?: string;
     anthropicModel: string;
     anthropicApiKey?: string;
+    openrouterModel: string;
+    openrouterApiKey?: string;
 };
 
 type CassetteToolCall = {
@@ -64,6 +67,14 @@ export function parseProbeLlmOptions(args: string[]): ProbeLlmOptions {
         anthropicApiKey:
             flagValue(args, "anthropic-api-key") ??
             process.env.ANTHROPIC_API_KEY,
+        openrouterModel:
+            flagValue(args, "openrouter-model") ??
+            process.env.TENEX_PROBE_OPENROUTER_MODEL ??
+            "deepseek/deepseek-v4-flash",
+        openrouterApiKey:
+            flagValue(args, "openrouter-api-key") ??
+            process.env.TENEX_PROBE_OPENROUTER_API_KEY ??
+            process.env.OPENROUTER_API_KEY,
     };
 }
 
@@ -126,6 +137,9 @@ function normalizeMode(raw: string | undefined, cassettePath: string | undefined
     }
     if (mode === "anthropic") {
         return "anthropic";
+    }
+    if (mode === "openrouter") {
+        return "openrouter";
     }
     throw new Error(`Unsupported probe LLM mode: ${raw}`);
 }

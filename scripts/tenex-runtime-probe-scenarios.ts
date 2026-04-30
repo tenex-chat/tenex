@@ -16,6 +16,27 @@ import {
     todoStopMockScenario,
     todoStopPmInstructions,
 } from "./tenex-runtime-probe-todo-stop";
+import {
+    learnCompletionText,
+    learnMockScenario,
+    learnPmInstructions,
+    learnUserRequest,
+    runLearnProbe,
+} from "./tenex-runtime-probe-learn";
+import {
+    ragMockScenario,
+    ragPmInstructions,
+    ragSelfUserRequest,
+    runRagDocumentsProbe,
+} from "./tenex-runtime-probe-rag";
+import {
+    askCompletionText,
+    askMockScenario,
+    askPmInstructions,
+    askTitle,
+    askUserRequest,
+    runAskProbe,
+} from "./tenex-runtime-probe-ask";
 
 export const availableScenarios = [
     "delegation-basic",
@@ -35,6 +56,9 @@ export const availableScenarios = [
     "nested-agents-md",
     "conversation-reminders",
     "todo-stop",
+    "learn-tool",
+    "rag-documents",
+    "ask-owner",
 ] as const;
 
 export type ScenarioName = (typeof availableScenarios)[number];
@@ -191,6 +215,15 @@ export function scenarioProjectDtag(name: ScenarioName): string {
     if (name === "todo-stop") {
         return "probe-todo-stop";
     }
+    if (name === "learn-tool") {
+        return "probe-learn-tool";
+    }
+    if (name === "rag-documents") {
+        return "probe-rag-documents";
+    }
+    if (name === "ask-owner") {
+        return "probe-ask-owner";
+    }
     return "probe-fs-read-adjustment";
 }
 
@@ -242,6 +275,15 @@ export function pmInstructions(name: ScenarioName): string {
     }
     if (name === "todo-stop") {
         return todoStopPmInstructions;
+    }
+    if (name === "learn-tool") {
+        return learnPmInstructions;
+    }
+    if (name === "rag-documents") {
+        return ragPmInstructions;
+    }
+    if (name === "ask-owner") {
+        return askPmInstructions;
     }
     return "Use fs_read one file at a time. If the user corrects the requested total, follow the latest total before finishing.";
 }
@@ -549,6 +591,15 @@ export function mockScenario(name: ScenarioName): unknown {
     if (name === "todo-stop") {
         return todoStopMockScenario();
     }
+    if (name === "learn-tool") {
+        return learnMockScenario();
+    }
+    if (name === "rag-documents") {
+        return ragMockScenario();
+    }
+    if (name === "ask-owner") {
+        return askMockScenario();
+    }
 
     const mockDelayMs = Number(process.env.TENEX_PROBE_MOCK_DELAY_MS ?? 750);
     return {
@@ -611,6 +662,12 @@ export async function runScenario(name: ScenarioName, context: ScenarioContext):
         await runConversationRemindersProbe(context);
     } else if (name === "todo-stop") {
         await runTodoStopProbe(context);
+    } else if (name === "learn-tool") {
+        await runLearnProbe(context);
+    } else if (name === "rag-documents") {
+        await runRagDocumentsProbe(context);
+    } else if (name === "ask-owner") {
+        await runAskProbe(context);
     } else {
         await runFsReadAdjustmentProbe(context);
     }

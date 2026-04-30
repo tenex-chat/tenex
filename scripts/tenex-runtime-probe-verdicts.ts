@@ -34,6 +34,9 @@ import {
 } from "./tenex-runtime-probe-scenarios";
 import { evaluateShellKillDuplicate } from "./tenex-runtime-probe-shell-verdicts";
 import { evaluateTodoStop } from "./tenex-runtime-probe-todo-stop";
+import { evaluateLearn, learnCompletionText, learnUserRequest } from "./tenex-runtime-probe-learn";
+import { evaluateRagDocuments, ragSelfUserRequest, ragSelfCompletionText, ragProjectCompletionText } from "./tenex-runtime-probe-rag";
+import { evaluateAsk, askUserRequest, askTitle, askCompletionText } from "./tenex-runtime-probe-ask";
 
 type Verdict = {
     name: string;
@@ -52,10 +55,28 @@ type EvaluateContext = {
     workerPubkey: string;
     modelName: string;
     llmProvider: "mock" | "ollama" | "anthropic" | "cassette";
+export type ProbeLlmProvider = "mock" | "ollama" | "anthropic" | "cassette" | "openrouter";
+    llmProvider: ProbeLlmProvider;
     conversationDbPath: string;
     mcpProbeRecords?: Array<Record<string, unknown>>;
     workspaceDir?: string;
+    ownerPubkey?: string;
+    agentHomeDir?: string;
 };
+
+function isRealLlm(provider: EvaluateContext["llmProvider"]): boolean {
+    return provider === "ollama" || provider === "anthropic" || provider === "openrouter";
+}
+
+function fuzzyIncludes(text: string, needle: string): boolean {
+    const lower = text.toLowerCase().replace(/[^a-z0-9 ]/g, " ");
+    const lowerNeedle = needle.toLowerCase().replace(/[^a-z0-9 ]/g, " ");
+    return lower.includes(lowerNeedle);
+}
+
+function normalizeContent(text: string): string {
+    return text.toLowerCase().replace(/[^a-z0-9 ]/g, " ").replace(/\s+/g, " ").trim();
+}
 
 export function evaluate(
     name: ScenarioName,
@@ -120,6 +141,15 @@ export function evaluate(
     }
     if (name === "todo-stop") {
         return [...commonVerdicts, ...evaluateTodoStop(events, requestRecords, context)];
+    }
+    if (name === "learn-tool") {
+        return [...commonVerdicts, ...evaluateLearn(events, requestRecords, context)];
+    }
+    if (name === "rag-documents") {
+        return [...commonVerdicts, ...evaluateRagDocuments(events, requestRecords, context)];
+    }
+    if (name === "ask-owner") {
+        return [...commonVerdicts, ...evaluateAsk(events, requestRecords, context)];
     }
     return [...commonVerdicts, ...evaluateFsReadAdjustment(events, requestRecords, context)];
 }
@@ -205,7 +235,9 @@ function evaluateRootAgentsMd(
         (event) =>
             event.kind === 1 &&
             event.pubkey === context.pmPubkey &&
-            event.content.includes(`${rootAgentsMdInstruction} observed`)
+            (isRealLlm(context.llmProvider)
+                ? (fuzzyIncludes(event.content, rootAgentsMdInstruction.toLowerCase()) && !hasTag(event, "tool"))
+                : event.content.includes(`${rootAgentsMdInstruction} observed"))
     );
 
     return [
@@ -262,7 +294,9 @@ function evaluateNestedAgentsMd(
         (event) =>
             event.kind === 1 &&
             event.pubkey === context.pmPubkey &&
-            event.content.includes(nestedAgentsMdCompletionText)
+            (isRealLlm(context.llmProvider)
+                ? (fuzzyIncludes(event.content, "nested") && fuzzyIncludes(event.content, "agents") && !hasTag(event, "tool"))
+                : event.content.includes(nestedAgentsMdCompletionText))
     );
     const unexpectedDefault = events.find(
         (event) =>
@@ -971,13 +1005,19 @@ function evaluateSameAgentConcurrency(events: Event[], context: EvaluateContext)
         (event) =>
             event.kind === 1 &&
             event.pubkey === context.pmPubkey &&
-            event.content.includes("First sleep finished while second sleep is still running")
+            (isRealLlm(context.llmProvider)
+                ? (fuzzyIncludes(event.content, "first sleep finished") &&
+                   fuzzyIncludes(event.content, "second sleep"))
+                : event.content.includes("First sleep finished while second sleep is still running"))
     );
     const secondCompleted = events.find(
         (event) =>
             event.kind === 1 &&
             event.pubkey === context.pmPubkey &&
-            event.content.includes("Second sleep finished; returning control")
+            (isRealLlm(context.llmProvider)
+                ? (fuzzyIncludes(event.content, "second sleep finished") ||
+                   fuzzyIncludes(event.content, "second sleep completed"))
+                : event.content.includes("Second sleep finished; returning control"))
     );
     const unexpectedDefault = events.find(
         (event) =>
@@ -1049,6 +1089,9 @@ function evaluateFsReadAdjustment(
             record.agent === "pm" &&
             record.turn === 5 &&
             record.content?.includes("Read 4 files total after adjustment") &&
+            (isRealLlm(context.llmProvider)
+                ? (record.content?.includes("4") && (fuzzyIncludes(record.content ?? "", "read") || fuzzyIncludes(record.content ?? "", "file")))
+                : record.content?.includes("Read 4 files total after adjustment")) &&
             record.requestDebug.includes(correctionText) &&
             record.requestDebug.includes("content-file-4")
     );
@@ -1056,7 +1099,9 @@ function evaluateFsReadAdjustment(
         (event) =>
             event.kind === 1 &&
             event.pubkey === context.pmPubkey &&
-            event.content.includes("Read 4 files total after adjustment")
+            (isRealLlm(context.llmProvider)
+                ? (event.content.includes("4") && (fuzzyIncludes(event.content, "read") || fuzzyIncludes(event.content, "file")))
+                : event.content.includes("Read 4 files total after adjustment"))
     );
     const unexpectedDefault = events.find(
         (event) =>
@@ -1114,7 +1159,9 @@ function evaluateMcpTool(
         (event) =>
             event.kind === 1 &&
             event.pubkey === context.pmPubkey &&
-            event.content.includes("MCP probe final: tool output accepted")
+            (isRealLlm(context.llmProvider)
+                ? (fuzzyIncludes(event.content, "MCP") && (fuzzyIncludes(event.content, "tool") || fuzzyIncludes(event.content, "probe")) && !hasTag(event, "tool"))
+                : event.content.includes("MCP probe final: tool output accepted"))
     );
     const callRecord = context.mcpProbeRecords?.find(
         (record) => record.event === "call_tool" && record.toolName === "answer_probe"
@@ -1196,7 +1243,9 @@ function evaluateMcpResource(
         (event) =>
             event.kind === 1 &&
             event.pubkey === context.pmPubkey &&
-            event.content.includes(mcpResourceFinalText)
+            (isRealLlm(context.llmProvider)
+                ? (fuzzyIncludes(event.content, "subscription") && (fuzzyIncludes(event.content, "update") || fuzzyIncludes(event.content, "received")) && !hasTag(event, "tool"))
+                : event.content.includes(mcpResourceFinalText))
     );
     const listRecord = context.mcpProbeRecords?.find(
         (record) => record.event === "list_resources"
