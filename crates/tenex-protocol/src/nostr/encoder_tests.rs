@@ -217,3 +217,139 @@ fn delegation_followup_uses_delegation_as_root() {
     assert!(!tags.iter().any(|t| t[0] == "delegation"));
     assert!(tags.iter().any(|t| t[0] == "p"));
 }
+
+/// Helper for self-routing assertions: encode a builder, sign with the same
+/// keypair the encoder placed in the recipient slot, and return the tags. The
+/// nostr crate strips author-matching `#p` tags by default, so any encoder
+/// site that intends `#p` as routing must opt in to self-tagging.
+fn signed_with(keys: &Keys, builder: EventBuilder) -> Vec<Vec<String>> {
+    builder
+        .sign_with_keys(keys)
+        .expect("sign")
+        .tags
+        .iter()
+        .map(|t| t.clone().to_vec())
+        .collect()
+}
+
+#[test]
+fn self_completion_keeps_p_tag_when_triggering_principal_equals_signer() {
+    let signer_keys = Keys::generate();
+    let mut ctx = test_ctx();
+    ctx.triggering_principal = PrincipalRef::Nostr {
+        pubkey: signer_keys.public_key(),
+        kind: PrincipalKind::Agent,
+        display_name: None,
+    };
+    ctx.completion_recipient = None;
+    let intent = crate::intent::CompletionIntent {
+        content: "done".into(),
+        usage: None,
+        metadata: None,
+    };
+    let builders =
+        NostrEncoder::encode(&Intent::Completion(intent), &ctx).expect("encode");
+    let tags = signed_with(&signer_keys, builders.into_iter().next().unwrap());
+    let p_tags: Vec<&Vec<String>> = tags.iter().filter(|t| t[0] == "p").collect();
+    assert_eq!(
+        p_tags.len(),
+        1,
+        "self-completion must keep the recipient p-tag for routing back through the delegation route; got tags={tags:?}"
+    );
+    assert_eq!(p_tags[0][1], signer_keys.public_key().to_hex());
+}
+
+#[test]
+fn self_tool_use_keeps_p_tag_when_triggering_principal_equals_signer() {
+    let signer_keys = Keys::generate();
+    let mut ctx = test_ctx();
+    ctx.triggering_principal = PrincipalRef::Nostr {
+        pubkey: signer_keys.public_key(),
+        kind: PrincipalKind::Agent,
+        display_name: None,
+    };
+    let intent = ToolUseIntent {
+        tool_name: "self_delegate".into(),
+        content: String::new(),
+        args_json: Some("{}".into()),
+        referenced_messages: vec![MessageRef::Nostr {
+            event_id: EventId::all_zeros(),
+        }],
+        usage: None,
+    };
+    let builders = NostrEncoder::encode(&Intent::ToolUse(intent), &ctx).expect("encode");
+    // tool_use does not add a `p` tag for the principal directly, but the
+    // builder must still allow self-tagging because conversation tags can
+    // include the signer's pubkey through `triggering_principal`. This test
+    // locks in the no-strip behavior so any future refactor that adds a `p`
+    // routing tag here keeps the tag.
+    let tags = signed_with(&signer_keys, builders.into_iter().next().unwrap());
+    assert!(
+        tags.iter().any(|t| t[0] == "tool" && t[1] == "self_delegate"),
+        "expected tool=self_delegate tag; got tags={tags:?}"
+    );
+}
+
+#[test]
+fn self_ask_keeps_p_tag_when_recipient_equals_signer() {
+    let signer_keys = Keys::generate();
+    let ctx = test_ctx();
+    let intent = crate::intent::AskIntent {
+        recipient: PrincipalRef::Nostr {
+            pubkey: signer_keys.public_key(),
+            kind: PrincipalKind::Agent,
+            display_name: None,
+        },
+        title: "self-question".into(),
+        context: "context".into(),
+        questions: vec![],
+    };
+    let builders = NostrEncoder::encode(&Intent::Ask(intent), &ctx).expect("encode");
+    let tags = signed_with(&signer_keys, builders.into_iter().next().unwrap());
+    let p_tags: Vec<&Vec<String>> = tags.iter().filter(|t| t[0] == "p").collect();
+    assert_eq!(
+        p_tags.len(),
+        1,
+        "self-ask must keep the recipient p-tag; got tags={tags:?}"
+    );
+    assert_eq!(p_tags[0][1], signer_keys.public_key().to_hex());
+}
+
+#[test]
+fn self_delegation_keeps_p_tag_when_recipient_equals_signer() {
+    // Self-delegation: the agent emits a delegation whose recipient pubkey is
+    // its own pubkey. The encoded event still has to carry the recipient `p`
+    // tag — the runtime's `directed` filter (authors AND #p) is what wakes
+    // the agent up for the follow-on invocation. Without the p-tag, a
+    // self-delegation never re-invokes the agent.
+    let ctx = test_ctx();
+    let signer_keys = Keys::generate();
+    let intent = DelegationIntent {
+        items: vec![crate::intent::DelegationRequest {
+            recipient: PrincipalRef::Nostr {
+                pubkey: signer_keys.public_key(),
+                kind: PrincipalKind::Agent,
+                display_name: None,
+            },
+            recipient_label: "@self".into(),
+            request: "Reply with done.".into(),
+            branch: None,
+            followup_of: None,
+        }],
+    };
+    let builders = NostrEncoder::encode(&Intent::Delegation(intent), &ctx).expect("encode");
+    let event = builders
+        .into_iter()
+        .next()
+        .unwrap()
+        .sign_with_keys(&signer_keys)
+        .expect("sign");
+    let tags: Vec<Vec<String>> = event.tags.iter().map(|t| t.clone().to_vec()).collect();
+    let p_tags: Vec<&Vec<String>> = tags.iter().filter(|t| t[0] == "p").collect();
+    assert_eq!(
+        p_tags.len(),
+        1,
+        "self-delegation must include exactly one p-tag for the recipient (== signer); got tags={tags:?}"
+    );
+    assert_eq!(p_tags[0][1], signer_keys.public_key().to_hex());
+}

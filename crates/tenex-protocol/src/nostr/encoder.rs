@@ -30,6 +30,18 @@ pub enum EncodeError {
     Tag(String),
 }
 
+/// Wrap an [`EventBuilder`] so the recipient `#p` tag survives signing even
+/// when the recipient's pubkey equals the signer's.
+///
+/// nostr-rs strips author-matching `#p` tags by default — fine for NIP-01
+/// mention semantics, but TENEX uses `#p` as **routing** (the runtime's
+/// `directed` subscription is `authors AND #p`). Without self-tagging,
+/// self-addressed events (self_delegate, completion-back-to-self in a
+/// self-delegated turn, etc.) lose the routing tag and never wake the agent.
+fn allow_self_addressed(builder: EventBuilder) -> EventBuilder {
+    builder.allow_self_tagging()
+}
+
 /// Stateless encoder. Kept as a unit struct so callers can write
 /// `NostrEncoder::encode(...)` without juggling free imports.
 pub struct NostrEncoder;
@@ -61,7 +73,11 @@ fn encode_completion(
     intent: &CompletionIntent,
     ctx: &EncodingContext,
 ) -> Result<EventBuilder, EncodeError> {
-    let mut builder = EventBuilder::new(Kind::TextNote, &intent.content);
+    // TENEX uses `#p` as routing (the runtime's `directed` subscription filters
+    // on authors AND #p), so we must keep the recipient tag even when it equals
+    // the signer's pubkey. nostr's default is to strip self p-tags as a NIP-01
+    // mention dedupe, which would silently break self-addressed routing.
+    let mut builder = allow_self_addressed(EventBuilder::new(Kind::TextNote, &intent.content));
     builder = add_conversation_tags(builder, ctx)?;
 
     let recipient = ctx
@@ -114,7 +130,8 @@ fn encode_delegation(
         .map(|d| {
             let prefixed = prepend_recipient_label(&d.request, &d.recipient_label);
             let mut builder =
-                EventBuilder::new(Kind::TextNote, prefixed).custom_created_at(now_plus_one);
+                allow_self_addressed(EventBuilder::new(Kind::TextNote, prefixed))
+                    .custom_created_at(now_plus_one);
 
             // Followup delegations stay in the original delegated conversation.
             // Fresh delegations start a new conversation without any e-tag.
@@ -144,7 +161,7 @@ fn encode_delegation(
 }
 
 fn encode_ask(intent: &AskIntent, ctx: &EncodingContext) -> Result<EventBuilder, EncodeError> {
-    let mut builder = EventBuilder::new(Kind::TextNote, &intent.context);
+    let mut builder = allow_self_addressed(EventBuilder::new(Kind::TextNote, &intent.context));
     builder = add_conversation_tags(builder, ctx)?;
     builder = builder.tag(p_tag(&intent.recipient)?);
     builder = builder.tag(tag(["title", &intent.title])?);
@@ -180,7 +197,7 @@ fn encode_ask(intent: &AskIntent, ctx: &EncodingContext) -> Result<EventBuilder,
 }
 
 fn encode_error(intent: &ErrorIntent, ctx: &EncodingContext) -> Result<EventBuilder, EncodeError> {
-    let mut builder = EventBuilder::new(Kind::TextNote, &intent.message);
+    let mut builder = allow_self_addressed(EventBuilder::new(Kind::TextNote, &intent.message));
     builder = add_conversation_tags(builder, ctx)?;
 
     let error_type = intent.error_type.as_deref().unwrap_or("system");
@@ -216,7 +233,7 @@ fn encode_tool_use(
     intent: &ToolUseIntent,
     ctx: &EncodingContext,
 ) -> Result<EventBuilder, EncodeError> {
-    let mut builder = EventBuilder::new(Kind::TextNote, &intent.content);
+    let mut builder = allow_self_addressed(EventBuilder::new(Kind::TextNote, &intent.content));
     builder = add_conversation_tags(builder, ctx)?;
     builder = builder.tag(tag(["tool", &intent.tool_name])?);
 
@@ -271,7 +288,7 @@ fn encode_intervention_review(
         user = intent.user_name,
         agent = intent.agent_name,
     );
-    let mut builder = EventBuilder::new(Kind::TextNote, content);
+    let mut builder = allow_self_addressed(EventBuilder::new(Kind::TextNote, content));
 
     builder = builder.tag(p_tag(&intent.target)?);
     builder = builder.tag(tag(["context", "intervention-review"])?);
