@@ -1,0 +1,35 @@
+[package]
+name = "tenex-accounting"
+version = "0.1.0"
+edition = "2021"
+description = "SQLite-backed LLM accounting & observability for TENEX. Records every LLM, embedding, and tool call as a span; ships a query API + embedded HTTP UI."
+
+[dependencies]
+rusqlite = { version = "0.31", features = ["bundled"] }
+tokio = { version = "1.40", features = ["macros", "rt-multi-thread", "sync", "time", "fs"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+thiserror = "2"
+tracing = "0.1"
+sha2 = "0.10"
+hex = "0.4"
+dirs-next = "2"
+chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
+axum = { version = "0.7", features = ["macros"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["cors", "trace"] }
+hyper = "1"
+reqwest = { version = "0.12", features = ["json"] }
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { version = "1.40", features = ["macros", "rt-multi-thread"] }
+
+[[bin]]
+name = "accounting_smoke"
+path = "src/bin/accounting_smoke.rs"
+
+[[bin]]
+name = "accounting_serve"
+path = "src/bin/accounting_serve.rs"

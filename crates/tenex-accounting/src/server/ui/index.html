@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>TENEX accounting</title>
+  <link rel="stylesheet" href="/app.css" />
+</head>
+<body>
+  <header>
+    <h1>TENEX <span class="muted">accounting</span></h1>
+    <nav>
+      <button data-view="pulse" class="active">Pulse</button>
+      <button data-view="traces">Traces</button>
+      <button data-view="cost">Cost</button>
+      <button data-view="models">Models</button>
+      <button data-view="agents">Agents</button>
+      <button data-view="embeddings">Embeddings</button>
+    </nav>
+    <div class="window-picker">
+      <label>Window
+        <select id="window">
+          <option value="">all time</option>
+          <option value="3600">last hour</option>
+          <option value="86400" selected>last 24h</option>
+          <option value="604800">last 7d</option>
+          <option value="2592000">last 30d</option>
+        </select>
+      </label>
+      <button id="refresh">refresh</button>
+    </div>
+  </header>
+
+  <main>
+    <section id="view-pulse" class="view active">
+      <div class="grid">
+        <div class="card big-number">
+          <div class="label">total cost</div>
+          <div class="value" id="pulse-cost">—</div>
+        </div>
+        <div class="card big-number">
+          <div class="label">traces</div>
+          <div class="value"><span id="pulse-traces">—</span> <span class="muted small" id="pulse-traces-meta"></span></div>
+        </div>
+        <div class="card big-number">
+          <div class="label">llm calls</div>
+          <div class="value" id="pulse-llm">—</div>
+        </div>
+        <div class="card big-number">
+          <div class="label">embeddings</div>
+          <div class="value" id="pulse-emb">—</div>
+        </div>
+        <div class="card big-number">
+          <div class="label">tool calls</div>
+          <div class="value" id="pulse-tool">—</div>
+        </div>
+      </div>
+      <h2>Cost by provider</h2>
+      <div id="pulse-providers"></div>
+      <h2>Recent LLM calls</h2>
+      <div id="pulse-recent"></div>
+    </section>
+
+    <section id="view-traces" class="view">
+      <div class="two-pane">
+        <aside class="pane-left">
+          <h2>Traces</h2>
+          <div id="trace-list"></div>
+        </aside>
+        <article class="pane-right">
+          <div id="trace-detail" class="placeholder">Pick a trace.</div>
+        </article>
+      </div>
+    </section>
+
+    <section id="view-cost" class="view">
+      <h2>Cost by provider</h2>
+      <div id="cost-by-provider"></div>
+      <h2>Cost by model</h2>
+      <div id="cost-by-model"></div>
+      <h2>Cost by agent</h2>
+      <div id="cost-by-agent"></div>
+    </section>
+
+    <section id="view-models" class="view">
+      <h2>Model performance</h2>
+      <div id="models-table"></div>
+    </section>
+
+    <section id="view-agents" class="view">
+      <h2>Agents</h2>
+      <div id="agents-table"></div>
+    </section>
+
+    <section id="view-embeddings" class="view">
+      <h2>Embeddings</h2>
+      <div id="embeddings-table"></div>
+    </section>
+  </main>
+
+  <footer>
+    <span class="muted small">SQLite at <code id="db-path"></code></span>
+  </footer>
+
+  <script src="/app.js"></script>
+</body>
+</html>
