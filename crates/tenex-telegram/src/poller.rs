@@ -372,14 +372,13 @@ impl Poller {
                     })
                     .collect();
                 let routes = projects.to_vec();
-                self.send_project_selection_prompt(
-                    chat_id, message_id, thread_id, &routes, false,
-                )
-                .await?;
-                self.pending_selections
-                    .lock()
-                    .unwrap()
-                    .set(&self.registration.pubkey, channel_id, opts)?;
+                self.send_project_selection_prompt(chat_id, message_id, thread_id, &routes, false)
+                    .await?;
+                self.pending_selections.lock().unwrap().set(
+                    &self.registration.pubkey,
+                    channel_id,
+                    opts,
+                )?;
                 Ok(None)
             }
         }

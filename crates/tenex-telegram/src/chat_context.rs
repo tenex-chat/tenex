@@ -132,11 +132,7 @@ impl TelegramChatContextService {
         };
 
         ChatContext {
-            recently_seen: recently_seen
-                .iter()
-                .take(MAX_SEEN)
-                .cloned()
-                .collect(),
+            recently_seen: recently_seen.iter().take(MAX_SEEN).cloned().collect(),
             ..base
         }
     }
@@ -159,7 +155,10 @@ impl TelegramChatContextService {
             );
 
             if let Ok(info) = chat_result {
-                let trimmed = info.title.map(|t| t.trim().to_string()).filter(|s| !s.is_empty());
+                let trimmed = info
+                    .title
+                    .map(|t| t.trim().to_string())
+                    .filter(|s| !s.is_empty());
                 ctx.chat_title = trimmed;
             }
 
@@ -188,7 +187,10 @@ impl TelegramChatContextService {
         } else {
             // Private chat — only getChat is meaningful.
             if let Ok(info) = self.client.get_chat(chat_id).await {
-                let trimmed = info.title.map(|t| t.trim().to_string()).filter(|s| !s.is_empty());
+                let trimmed = info
+                    .title
+                    .map(|t| t.trim().to_string())
+                    .filter(|s| !s.is_empty());
                 ctx.chat_title = trimmed;
             }
         }

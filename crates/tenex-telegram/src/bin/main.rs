@@ -80,7 +80,9 @@ async fn main() -> Result<()> {
     )));
 
     let pending_selections = Arc::new(Mutex::new(PendingSelectionStore::open(
-        base_dir.join("data").join("pending-channel-selections.json"),
+        base_dir
+            .join("data")
+            .join("pending-channel-selections.json"),
     )));
 
     // One bot token identifies exactly one agent. Project routing is resolved

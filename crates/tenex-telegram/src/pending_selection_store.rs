@@ -124,8 +124,7 @@ impl PendingSelectionStore {
     fn prune_expired(&mut self) {
         let now = now_ms();
         let before = self.records.len();
-        self.records
-            .retain(|_, r| !is_expired(r.requested_at, now));
+        self.records.retain(|_, r| !is_expired(r.requested_at, now));
         if self.records.len() != before {
             let _ = self.save();
         }
@@ -182,12 +181,19 @@ mod tests {
     #[test]
     fn round_trips_pending_selection() {
         let tmp = TempDir::new().unwrap();
-        let path = tmp.path().join("data").join("pending-channel-selections.json");
+        let path = tmp
+            .path()
+            .join("data")
+            .join("pending-channel-selections.json");
 
         {
             let mut store = PendingSelectionStore::open(path.clone());
             store
-                .set("agent-1", "telegram:chat:42", project_opts(&["proj-a", "proj-b"]))
+                .set(
+                    "agent-1",
+                    "telegram:chat:42",
+                    project_opts(&["proj-a", "proj-b"]),
+                )
                 .unwrap();
         }
 
@@ -201,7 +207,10 @@ mod tests {
     #[test]
     fn clear_removes_entry_from_disk() {
         let tmp = TempDir::new().unwrap();
-        let path = tmp.path().join("data").join("pending-channel-selections.json");
+        let path = tmp
+            .path()
+            .join("data")
+            .join("pending-channel-selections.json");
 
         let mut store = PendingSelectionStore::open(path.clone());
         store
@@ -216,7 +225,10 @@ mod tests {
     #[test]
     fn drops_expired_entries_on_load() {
         let tmp = TempDir::new().unwrap();
-        let path = tmp.path().join("data").join("pending-channel-selections.json");
+        let path = tmp
+            .path()
+            .join("data")
+            .join("pending-channel-selections.json");
 
         // Write a record that is already older than 24h.
         let expired_at = now_ms() - PENDING_TTL_MS - 1;
@@ -227,11 +239,7 @@ mod tests {
             requested_at: expired_at,
         };
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(
-            &path,
-            serde_json::to_string_pretty(&vec![record]).unwrap(),
-        )
-        .unwrap();
+        std::fs::write(&path, serde_json::to_string_pretty(&vec![record]).unwrap()).unwrap();
 
         let mut store = PendingSelectionStore::open(path);
         assert!(store.get("agent-1", "telegram:chat:1").is_none());
@@ -240,7 +248,10 @@ mod tests {
     #[test]
     fn get_evicts_expired_entry_and_persists() {
         let tmp = TempDir::new().unwrap();
-        let path = tmp.path().join("data").join("pending-channel-selections.json");
+        let path = tmp
+            .path()
+            .join("data")
+            .join("pending-channel-selections.json");
 
         // Write a record that is still fresh.
         let fresh_at = now_ms() - 1_000; // 1 second ago — well within 24h
@@ -266,10 +277,9 @@ mod tests {
         // the on-load prune by writing directly after open).
         let mut store = PendingSelectionStore::open(path.clone());
         // Insert expired record directly into the map (bypassing set's prune).
-        store.records.insert(
-            make_key("agent-1", "telegram:chat:1"),
-            expired_record,
-        );
+        store
+            .records
+            .insert(make_key("agent-1", "telegram:chat:1"), expired_record);
 
         // get() should detect expiry and return None.
         assert!(store.get("agent-1", "telegram:chat:1").is_none());
@@ -282,7 +292,10 @@ mod tests {
     #[test]
     fn multiple_agents_tracked_independently() {
         let tmp = TempDir::new().unwrap();
-        let path = tmp.path().join("data").join("pending-channel-selections.json");
+        let path = tmp
+            .path()
+            .join("data")
+            .join("pending-channel-selections.json");
 
         let mut store = PendingSelectionStore::open(path.clone());
         store
