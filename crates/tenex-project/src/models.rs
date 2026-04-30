@@ -31,7 +31,6 @@ pub struct Agent {
     pub instructions: Option<String>,
     pub use_criteria: Option<String>,
     pub category: Option<String>,
-    pub inferred_category: Option<String>,
     pub signer_ref: Option<String>,
     pub event_id: Option<String>,
     pub status: Option<String>,

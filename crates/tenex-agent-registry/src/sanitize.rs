@@ -12,6 +12,13 @@ use serde_json::Value;
 pub(crate) fn normalize_loaded_agent(raw: &mut IndexMap<String, Value>) -> bool {
     let mut changed = false;
 
+    if let Some(legacy_category) = raw.shift_remove("inferredCategory") {
+        if !raw.contains_key("category") {
+            raw.insert("category".into(), legacy_category);
+        }
+        changed = true;
+    }
+
     // Capture the legacy default.telegram before mutating `default`.
     let legacy_default_telegram = raw
         .get("default")
@@ -87,6 +94,12 @@ pub(crate) fn migrate_agent_data(raw: &mut IndexMap<String, Value>) -> bool {
 
 /// `sanitizeStoredAgentForPersistence` (`AgentStorage.ts:63-69`).
 pub(crate) fn sanitize_for_persistence(raw: &mut IndexMap<String, Value>) {
+    if let Some(legacy_category) = raw.shift_remove("inferredCategory") {
+        if !raw.contains_key("category") {
+            raw.insert("category".into(), legacy_category);
+        }
+    }
+
     if let Some(t) = raw.get_mut("telegram") {
         sanitize_telegram_inplace(t);
     }

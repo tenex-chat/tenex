@@ -11,7 +11,6 @@ pub struct AgentProjection {
     pub instructions: Option<String>,
     pub use_criteria: Option<String>,
     pub category: Option<String>,
-    pub inferred_category: Option<String>,
     pub signer_ref: Option<String>,
     pub event_id: Option<String>,
     pub status: Option<String>,
@@ -38,8 +37,6 @@ struct RawStoredAgent {
     use_criteria: Option<String>,
     #[serde(default)]
     category: Option<String>,
-    #[serde(default, rename = "inferredCategory")]
-    inferred_category: Option<String>,
     #[serde(default)]
     status: Option<String>,
     #[serde(default, rename = "eventId")]
@@ -68,7 +65,6 @@ pub fn read_agent_projection_file(path: &Path, pubkey: &str) -> anyhow::Result<A
         instructions: raw.instructions,
         use_criteria: raw.use_criteria,
         category: raw.category,
-        inferred_category: raw.inferred_category,
         signer_ref,
         event_id: raw.event_id,
         status: raw.status,

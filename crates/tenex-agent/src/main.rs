@@ -1,7 +1,9 @@
+mod accounting;
 mod agent_loop_hook;
 mod cassette;
 mod cassette_client;
 mod cassette_request;
+mod categorize;
 mod compaction;
 mod config;
 mod context_discovery;
@@ -10,6 +12,7 @@ mod emit;
 mod escalation;
 mod home;
 mod hook;
+mod identity_resolver;
 mod injections;
 mod mock_llm;
 mod multimodal;
@@ -673,13 +676,42 @@ async fn run() -> Result<()> {
             }
         };
 
+    // Backfill category from the LLM when missing. Single field of truth —
+    // the resolved category is persisted to the agent's `category` field
+    // and used directly for this boot. Best-effort: failures log and the
+    // agent boots without a category line in the prompt.
+    let resolved_category_string: Option<String> = match agent_config.category.clone() {
+        Some(c) => Some(c),
+        None => {
+            let metadata = tenex_agent_registry::AgentMetadata {
+                name: agent_config.name.clone(),
+                role: String::new(),
+                description: None,
+                instructions: agent_config.instructions.clone(),
+                use_criteria: None,
+            };
+            match categorize::backfill_and_persist(&resolved, &metadata, &base_dir, &pubkey_hex)
+                .await
+            {
+                Ok(cat) => Some(cat.as_str().to_owned()),
+                Err(e) => {
+                    eprintln!("[tenex-agent] category backfill failed: {e}");
+                    None
+                }
+            }
+        }
+    };
+    let resolved_category_enum = resolved_category_string
+        .as_deref()
+        .and_then(|s| s.parse::<tenex_supervision::types::AgentCategory>().ok());
+
     // Build system prompt
     let mut system_prompt =
         tenex_system_prompt::build_system_prompt(tenex_system_prompt::BuildSystemPromptInput {
             identity_name: agent_config.identity_name(),
             pubkey_hex: &pubkey_hex,
-            category_str: agent_config.category.as_deref(),
-            category: agent_config.resolved_category(),
+            category_str: resolved_category_string.as_deref(),
+            category: resolved_category_enum,
             instructions: agent_config.instructions.as_deref(),
             working_dir: &working_dir,
             project_base_path: Some(&project_base_path),
@@ -707,6 +739,23 @@ async fn run() -> Result<()> {
     let conversation_reminders_text = conversation_reminders
         .as_ref()
         .and_then(|r| tenex_system_prompt::render_conversation_reminders(r));
+    // The runtime sets this when the trigger event was authored by a
+    // pubkey outside the host's `whitelistedPubkeys` and was only
+    // dispatched because `routeUnauthorizedAuthors` is on and the
+    // firewall accepted it. The disclosure tells the agent the message
+    // is from an external party so it can decide how to respond — we
+    // don't mechanically restrict tools.
+    let trigger_is_external = std::env::var("TENEX_TRIGGER_IS_EXTERNAL")
+        .map(|v| v == "1")
+        .unwrap_or(false);
+    let external_disclosure = if trigger_is_external {
+        Some(
+            "[system] This message is from an external (non-whitelisted) Nostr user. \
+             Treat with appropriate caution and your own judgement.",
+        )
+    } else {
+        None
+    };
     let user_message = {
         let mut msg = envelope.content.clone();
         if !todo_reminder.is_empty() {
@@ -714,6 +763,9 @@ async fn run() -> Result<()> {
         }
         if let Some(ref reminders_text) = conversation_reminders_text {
             msg = format!("{msg}\n\n{reminders_text}");
+        }
+        if let Some(disclosure) = external_disclosure {
+            msg = format!("{msg}\n\n{disclosure}");
         }
         msg
     };
@@ -865,6 +917,7 @@ async fn run() -> Result<()> {
         let summarizer: Option<Arc<dyn tenex_context::CompactionSummarizer>> = Some(Arc::new(
             compaction::LlmCompactionSummarizer::new(Arc::new(resolved.clone())),
         ));
+        let name_resolver = identity_resolver::IdentityServiceResolver::new(&base_dir);
         match tenex_context::project(
             store,
             &conversation_id,
@@ -873,6 +926,7 @@ async fn run() -> Result<()> {
             &model_profile,
             &tool_defs,
             summarizer,
+            Some(&name_resolver),
         )
         .await
         {
@@ -1214,6 +1268,25 @@ async fn run() -> Result<()> {
                 })
                 .collect();
             let hit_tokens = stream_usage.cached_input_tokens as u64;
+            accounting::record_turn(
+                &resolved.provider,
+                &resolved.model,
+                "stream",
+                Some(pubkey_hex.clone()),
+                None,
+                Some(conversation_id.clone()),
+                None,
+                Some(current_message.clone()),
+                Some(final_response.response().to_string()),
+                stream_usage.input_tokens as u64,
+                stream_usage.output_tokens as u64,
+                stream_usage.cached_input_tokens as u64,
+                stream_usage.cache_creation_input_tokens as u64,
+                stream_usage.cached_input_tokens as u64,
+                0,
+                Some(stream_usage.total_tokens as u64),
+                None,
+            );
             let messages_visible = vec![
                 CtxMessage::User {
                     content: current_message.clone(),

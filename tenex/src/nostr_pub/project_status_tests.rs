@@ -41,7 +41,6 @@ fn agent(slug: &str, model: Option<&str>) -> Agent {
         instructions: None,
         use_criteria: None,
         category: None,
-        inferred_category: None,
         signer_ref: None,
         event_id: None,
         status: None,

@@ -12,8 +12,8 @@ use crate::serde_util::serialize;
 /// One agent's persisted JSON file.
 ///
 /// Backed by `IndexMap<String, Value>` so unknown / yet-to-be-typed fields
-/// (`projectConfigs`, `inferredCategory`, etc.) round-trip with insertion
-/// order preserved — same approach as `tenex_config`, `mcp`, `embed`.
+/// round-trip with insertion order preserved — same approach as
+/// `tenex_config`, `mcp`, `embed`.
 #[derive(Clone)]
 pub struct AgentDoc {
     raw: IndexMap<String, Value>,
@@ -103,20 +103,10 @@ impl AgentDoc {
         self.status() != Some("inactive")
     }
 
-    /// Operator-authoritative category. Resolves through
-    /// [`crate::category::resolve_category`] so unknown /
-    /// legacy values silently become `None`. Source field: `category`
-    /// (`storage.ts:43`).
+    /// Agent category. Resolves through [`crate::category::resolve_category`]
+    /// so unknown values silently become `None`. Source field: `category`.
     pub fn category(&self) -> Option<crate::category::AgentCategory> {
         let raw = self.raw.get("category").and_then(Value::as_str);
-        crate::category::resolve_category(raw)
-    }
-
-    /// Auto-inferred category (set by the categorize backfill). Distinct
-    /// from `category` so explicit operator provenance is preserved.
-    /// Source field: `inferredCategory` (`storage.ts:48`).
-    pub fn inferred_category(&self) -> Option<crate::category::AgentCategory> {
-        let raw = self.raw.get("inferredCategory").and_then(Value::as_str);
         crate::category::resolve_category(raw)
     }
 

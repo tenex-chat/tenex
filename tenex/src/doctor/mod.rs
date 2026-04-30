@@ -60,7 +60,7 @@ pub enum AgentsCommand {
         #[arg(long)]
         purge: bool,
     },
-    /// Auto-categorize agents that lack an explicit or inferred category
+    /// Auto-categorize agents that lack a category
     Categorize {
         /// Show what would be categorized without making changes
         #[arg(long = "dry-run")]
@@ -143,7 +143,7 @@ async fn run_agents(args: AgentsArgs) -> Result<()> {
 /// counts agents already-categorised vs needing classification, then
 /// surfaces an honest hint identifying the missing LLM substrate.
 ///
-/// The full backfill substrate (`AgentStorage::update_inferred_category`,
+/// The full backfill substrate (`AgentStorage::update_category`,
 /// the [`crate::agent_cmd::categorize::Categorizer`] trait,
 /// `backfill_agent_categories`) is already in place. When the LLM service
 /// lands, a `LlmCategorizer` impl drops in and this becomes:
@@ -164,10 +164,7 @@ fn preview_categorize(dry_run: bool) -> Result<()> {
 
     let agents = storage.get_canonical_active_agents()?;
     let total = agents.len();
-    let already = agents
-        .iter()
-        .filter(|a| a.category().is_some() || a.inferred_category().is_some())
-        .count();
+    let already = agents.iter().filter(|a| a.category().is_some()).count();
     let uncategorised = total - already;
 
     let mode = if dry_run { " (dry run)" } else { "" };
@@ -188,11 +185,11 @@ fn preview_categorize(dry_run: bool) -> Result<()> {
         return Ok(());
     }
     display::hint(
-        "Agent categorization requires the LLM service \
-         (spec doc 04 / categorizeAgent.ts) — pending port. The \
-         AgentStorage scan, the Categorizer trait, the backfill \
-         orchestrator, and the kebab-literal persistence are all wired; \
-         only the per-agent LLM call is missing.",
+        "Agents without a category are auto-classified by the LLM the \
+         next time they boot (`tenex-agent` startup). To force batch \
+         classification from this command, the LLM call needs to live \
+         in a shared crate — wire it in when the operator-driven path \
+         becomes load-bearing.",
     );
     Ok(())
 }
@@ -578,7 +575,7 @@ mod tests {
         let cat = agents.find_subcommand("categorize").unwrap();
         assert_eq!(
             cat.get_about().map(|s| s.to_string()).as_deref(),
-            Some("Auto-categorize agents that lack an explicit or inferred category")
+            Some("Auto-categorize agents that lack a category")
         );
     }
 

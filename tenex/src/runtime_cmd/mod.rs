@@ -60,7 +60,15 @@ struct RuntimeShared {
     client: Client,
     backend_keys: Keys,
     project_addr: String,
+    /// Human-readable project title (falls back to d-tag) — handed to
+    /// the firewall LLM as part of its judgement context.
+    project_title: String,
     whitelisted_pubkeys: Vec<String>,
+    /// When true, kind:1 events from authors outside `whitelisted_pubkeys`
+    /// are eligible for firewall + dispatch. When false, they are still
+    /// persisted to the conversation store for context but never trigger
+    /// an agent run.
+    route_unauthorized_authors: bool,
     project_id: String,
     project_dir: PathBuf,
     base_dir: PathBuf,
@@ -144,6 +152,12 @@ struct DispatchJob {
     agent_json: PathBuf,
     allow_driver_preempt: bool,
     completion_recipient_pubkey: Option<String>,
+    /// True when the triggering event was authored by a pubkey outside
+    /// `whitelistedPubkeys` and only routed because
+    /// `routeUnauthorizedAuthors` is enabled and the firewall passed.
+    /// Surfaces to the agent process as `TENEX_TRIGGER_IS_EXTERNAL=1`,
+    /// which the agent uses to inject a disclosure into the user message.
+    is_external: bool,
     /// Set when this dispatch was triggered via the transport-bridge socket
     /// (`tenex-telegram` etc). Each event the agent emits is also forwarded
     /// to the bridge so it can render the reply on the originating channel.
@@ -379,6 +393,22 @@ pub async fn run(args: RuntimeArgs) -> Result<()> {
     .await?;
     info!("subscriptions active");
 
+    if cfg.route_unauthorized_authors {
+        match crate::store::llms::LlmsDoc::load(&base_dir) {
+            Ok(llms) if llms.firewall().is_none() => {
+                warn!(
+                    "routeUnauthorizedAuthors=true but no llms.firewall role is configured — \
+                     every external-author event will fail closed. Set the 'firewall' role in \
+                     ~/.tenex/llms.json (an Ollama-backed config is recommended)."
+                );
+            }
+            Ok(_) => {}
+            Err(e) => {
+                warn!(error = %e, "failed to load llms.json while checking firewall role");
+            }
+        }
+    }
+
     let agent_snapshot_state = Arc::new(RwLock::new(agent_snapshot.clone()));
 
     // Publish project status (kind:24010) immediately and every 30 seconds.
@@ -443,11 +473,14 @@ pub async fn run(args: RuntimeArgs) -> Result<()> {
         transport_dispatch_tx,
         mcp_control_tx,
     ));
+    let project_title = meta.title.clone().unwrap_or_else(|| meta.d_tag.clone());
     let shared = Arc::new(RuntimeShared {
         client: client.clone(),
         backend_keys: backend_keys.clone(),
         project_addr: project_addr.clone(),
+        project_title,
         whitelisted_pubkeys: cfg.whitelisted_pubkeys.clone(),
+        route_unauthorized_authors: cfg.route_unauthorized_authors,
         project_id: meta.d_tag.clone(),
         project_dir: project_dir.clone(),
         base_dir: base_dir.clone(),
@@ -559,6 +592,59 @@ pub async fn run(args: RuntimeArgs) -> Result<()> {
                         }
                         let short = &event.id.to_hex()[..8];
                         info!(event_id = short, "received event");
+
+                        // Author classification. Whitelisted authors and
+                        // project agents take the existing dispatch path.
+                        // Anything else is "external": the project filter
+                        // dropped its `authors` gate so these reach us via
+                        // the `#a` tag claim. We persist them into the
+                        // conversation store so they can ground future
+                        // whitelisted-user replies, then either drop them
+                        // (config off) or run them through the firewall.
+                        let author_hex = event.pubkey.to_hex();
+                        let author_whitelisted =
+                            shared.whitelisted_pubkeys.contains(&author_hex);
+                        let author_is_agent = agent_pubkeys.contains(&author_hex);
+                        let is_external = !author_whitelisted && !author_is_agent;
+
+                        if is_external {
+                            if !tenex_protocol::event_filter::is_conversation_event(&event) {
+                                // Drop tool/intent/reasoning/error head-tagged
+                                // events from external authors entirely. We
+                                // don't trust unauthorized parties to forge
+                                // structured runtime signals.
+                                continue;
+                            }
+                            let conv_id = conversation_id_from_event(&event);
+                            if let Err(e) =
+                                persist_user_message(&shared.store, &event, &conv_id)
+                            {
+                                warn!(
+                                    event_id = short,
+                                    error = %e,
+                                    "external persist failed"
+                                );
+                                continue;
+                            }
+                            if !shared.route_unauthorized_authors {
+                                info!(
+                                    event_id = short,
+                                    author = %&author_hex[..8],
+                                    "external author persisted; routeUnauthorizedAuthors=false"
+                                );
+                                continue;
+                            }
+                            // The firewall LLM call can take up to 15s. Run
+                            // the firewall + dispatch flow in a spawned task
+                            // so the relay event loop keeps draining.
+                            tokio::spawn(run_external_dispatch(
+                                shared.clone(),
+                                event,
+                                agent_pubkeys.clone(),
+                            ));
+                            continue;
+                        }
+
                         if let Err(e) = register_delegation_route_if_needed(
                             &shared.store,
                             &event,
@@ -569,7 +655,7 @@ pub async fn run(args: RuntimeArgs) -> Result<()> {
                         }
                         match select_dispatch_target(&shared, &event) {
                             Ok((agent, conv_id, completion_recipient_pubkey)) => {
-                                info!(event_id = short, agent = %agent.slug, conversation_id = %conv_id, "dispatching");
+                                info!(event_id = short, agent = %agent.slug, conversation_id = %conv_id, is_external, "dispatching");
                                 if is_agent_blocked(&shared.store, &conv_id, &agent.pubkey) {
                                     warn!(
                                         event_id = short,
@@ -589,6 +675,7 @@ pub async fn run(args: RuntimeArgs) -> Result<()> {
                                     agent_json,
                                     allow_driver_preempt: false,
                                     completion_recipient_pubkey,
+                                    is_external,
                                     response_tee: None,
                                 };
                                 if let Err(e) = accept_dispatch(shared.clone(), job).await {
@@ -656,9 +743,13 @@ fn build_runtime_filters(
     p_authors.extend(agent_keys.iter().copied());
 
     RuntimeFilters {
+        // External-author intake: `#a=project_addr` is the affiliation
+        // assertion. Anyone — whitelisted or not — claiming this project
+        // address lands here. The whitelist gate moves to dispatch:
+        // non-whitelisted authors are persisted, and only routed if
+        // `routeUnauthorizedAuthors` is enabled and the firewall passes.
         project: Filter::new()
             .kind(Kind::TextNote)
-            .authors(authors.to_vec())
             .custom_tags(SingleLetterTag::lowercase(Alphabet::A), [project_addr])
             .since(since),
         project_definition: Filter::new()
@@ -1053,6 +1144,9 @@ async fn handle_transport_dispatch(
         agent_json,
         allow_driver_preempt: false,
         completion_recipient_pubkey,
+        // Transport-bridged events (telegram, etc.) come through
+        // already-authenticated paths — never marked external.
+        is_external: false,
         response_tee: Some(tee.clone()),
     };
     if let Err(e) = accept_dispatch(shared, job).await {
@@ -1063,6 +1157,82 @@ async fn handle_transport_dispatch(
         let msg = format!("dispatch failed: {e}");
         warn!(error = %e, "transport dispatch failed");
         tee.send_error(msg);
+    }
+}
+
+/// Runs firewall screening and (on pass) dispatch for an external-author
+/// event. Always invoked from a `tokio::spawn` so the firewall LLM latency
+/// never blocks the relay event loop.
+async fn run_external_dispatch(
+    shared: Arc<RuntimeShared>,
+    event: Box<Event>,
+    agent_pubkeys: HashSet<String>,
+) {
+    let event_id_hex = event.id.to_hex();
+    let short = &event_id_hex[..8];
+    let author_hex = event.pubkey.to_hex();
+    let author_short = &author_hex[..8];
+
+    let firewall_ctx = tenex_firewall::ProjectContext {
+        title: shared.project_title.as_str(),
+        d_tag: shared.project_id.as_str(),
+    };
+    match tenex_firewall::check(&shared.base_dir, firewall_ctx, &event.content).await {
+        tenex_firewall::Verdict::Safe => {}
+        tenex_firewall::Verdict::Unsafe { reason } => {
+            warn!(
+                event_id = short,
+                author = %author_short,
+                reason = %reason,
+                "firewall rejected external event"
+            );
+            return;
+        }
+    }
+
+    if let Err(e) = register_delegation_route_if_needed(&shared.store, &event, &agent_pubkeys, None)
+    {
+        warn!(event_id = short, error = %e, "failed to register delegation route");
+    }
+    match select_dispatch_target(&shared, &event) {
+        Ok((agent, conv_id, completion_recipient_pubkey)) => {
+            info!(
+                event_id = short,
+                agent = %agent.slug,
+                conversation_id = %conv_id,
+                is_external = true,
+                "dispatching"
+            );
+            if is_agent_blocked(&shared.store, &conv_id, &agent.pubkey) {
+                warn!(
+                    event_id = short,
+                    agent = %agent.slug,
+                    conversation_id = %conv_id,
+                    "agent is blocked in conversation"
+                );
+                return;
+            }
+            let agent_json = shared
+                .base_dir
+                .join("agents")
+                .join(format!("{}.json", agent.pubkey));
+            let job = DispatchJob {
+                event: *event,
+                agent: agent.clone(),
+                conv_id,
+                agent_json,
+                allow_driver_preempt: false,
+                completion_recipient_pubkey,
+                is_external: true,
+                response_tee: None,
+            };
+            if let Err(e) = accept_dispatch(shared, job).await {
+                warn!(event_id = short, agent = %agent.slug, error = %e, "dispatch failed");
+            }
+        }
+        Err(e) => {
+            warn!(event_id = short, error = %e, "no dispatch target");
+        }
     }
 }
 
@@ -1233,6 +1403,10 @@ async fn dispatch_project_agent_target(
             agent_json,
             allow_driver_preempt: false,
             completion_recipient_pubkey,
+            // This path handles agent-emitted events (delegations,
+            // completions). Inter-agent traffic is never external —
+            // external authors are caught earlier in the relay loop.
+            is_external: false,
             response_tee: None,
         },
     )
@@ -1877,6 +2051,9 @@ async fn run_agent(shared: Arc<RuntimeShared>, job: DispatchJob, key: DispatchKe
     if job.allow_driver_preempt {
         command.env("TENEX_RUNTIME_DRIVER_PREEMPT", "1");
     }
+    if job.is_external {
+        command.env("TENEX_TRIGGER_IS_EXTERNAL", "1");
+    }
     if let Some(carrier) = tenex_telemetry::current_trace_context() {
         command.env("TRACEPARENT", carrier.traceparent);
         if let Some(tracestate) = carrier.tracestate {
@@ -2305,7 +2482,6 @@ mod tests {
             instructions: None,
             use_criteria: None,
             category: None,
-            inferred_category: None,
             signer_ref: None,
             event_id: None,
             status: None,
@@ -2323,6 +2499,7 @@ mod tests {
             agent_json: PathBuf::from("agent.json"),
             allow_driver_preempt: false,
             completion_recipient_pubkey: None,
+            is_external: false,
             response_tee: None,
         }
     }
@@ -2574,6 +2751,7 @@ mod tests {
             agent_json: PathBuf::from("agent.json"),
             allow_driver_preempt: false,
             completion_recipient_pubkey: None,
+            is_external: false,
             response_tee: None,
         };
         let delegation = signed_event_from(

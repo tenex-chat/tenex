@@ -354,29 +354,24 @@ impl AgentStorage {
         Ok(out)
     }
 
-    /// Mirror `updateInferredCategory` (`AgentStorage.ts:920-934`).
+    /// Set the agent's `category` field to the canonical kebab-case literal
+    /// and persist via [`Self::save_agent`]. Returns `Ok(false)` when the
+    /// agent file is missing.
     ///
-    /// Loads the agent, sets the `inferredCategory` field to the
-    /// canonical kebab-case literal, and calls [`Self::save_agent`] (which
-    /// applies the persistence sanitiser + index updates). Returns
-    /// `Ok(false)` when the agent file is missing — matches TS
-    /// `if (!agent) { logger.warn(...); return false; }` at `:921-925`.
-    ///
-    /// The TS API stores the category as a string literal. Taking
-    /// [`crate::category::AgentCategory`] here makes it
-    /// impossible for the caller to write a stale literal — the enum is
-    /// the only spelling on disk.
-    pub fn update_inferred_category(
+    /// Taking [`crate::category::AgentCategory`] makes it impossible for the
+    /// caller to write a stale literal — the enum is the only spelling on
+    /// disk.
+    pub fn update_category(
         &mut self,
         pubkey: &str,
-        inferred: crate::category::AgentCategory,
+        category: crate::category::AgentCategory,
     ) -> Result<bool> {
         let Some(mut agent) = AgentDoc::load(&self.base_dir, pubkey)? else {
             return Ok(false);
         };
         agent.raw_mut().insert(
-            "inferredCategory".into(),
-            Value::String(inferred.as_str().to_owned()),
+            "category".into(),
+            Value::String(category.as_str().to_owned()),
         );
         self.save_agent(&agent)?;
         Ok(true)

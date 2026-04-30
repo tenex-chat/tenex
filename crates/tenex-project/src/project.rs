@@ -225,7 +225,6 @@ fn try_read_agent_file(
         instructions: raw.instructions,
         use_criteria: raw.use_criteria,
         category: raw.category,
-        inferred_category: raw.inferred_category,
         signer_ref: raw.signer_ref,
         event_id: raw.event_id,
         status: raw.status,

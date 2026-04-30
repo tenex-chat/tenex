@@ -289,7 +289,7 @@ fn agent_typed_accessors_match_raw() {
 }
 
 #[test]
-fn agent_category_accessors_resolve_through_role_categories() {
+fn agent_category_accessor_resolves_through_role_categories() {
     use crate::AgentCategory;
     let base = unique_temp();
     let pubkey = "categorised";
@@ -299,7 +299,6 @@ fn agent_category_accessors_resolve_through_role_categories() {
   "name": "Alpha",
   "role": "thinker",
   "category": "domain-expert",
-  "inferredCategory": "worker",
   "description": "small philosopher",
   "instructions": "be careful",
   "useCriteria": "always"
@@ -307,10 +306,72 @@ fn agent_category_accessors_resolve_through_role_categories() {
     write_file(&agent_file_path(&base, pubkey), canonical);
     let doc = AgentDoc::load(&base, pubkey).unwrap().unwrap();
     assert_eq!(doc.category(), Some(AgentCategory::DomainExpert));
-    assert_eq!(doc.inferred_category(), Some(AgentCategory::Worker));
     assert_eq!(doc.description(), Some("small philosopher"));
     assert_eq!(doc.instructions(), Some("be careful"));
     assert_eq!(doc.use_criteria(), Some("always"));
+    std::fs::remove_dir_all(&base).ok();
+}
+
+#[test]
+fn agent_load_promotes_legacy_inferred_category_to_category() {
+    use crate::AgentCategory;
+    let base = unique_temp();
+    let pubkey = "legacy-inferred";
+    let legacy = br#"{
+  "nsec": "nsec1foo",
+  "slug": "alpha",
+  "name": "Alpha",
+  "inferredCategory": "worker"
+}"#;
+    write_file(&agent_file_path(&base, pubkey), legacy);
+    let doc = AgentDoc::load(&base, pubkey).unwrap().unwrap();
+    assert_eq!(doc.category(), Some(AgentCategory::Worker));
+    assert!(doc.raw().get("inferredCategory").is_none());
+    assert_eq!(
+        doc.raw().get("category").and_then(Value::as_str),
+        Some("worker")
+    );
+    std::fs::remove_dir_all(&base).ok();
+}
+
+#[test]
+fn agent_persistence_drops_legacy_inferred_category() {
+    let base = unique_temp();
+    let pubkey = "legacy-persist";
+    let mut raw = IndexMap::<String, Value>::new();
+    raw.insert("nsec".into(), Value::String("nsec1foo".into()));
+    raw.insert("slug".into(), Value::String("alpha".into()));
+    raw.insert("name".into(), Value::String("Alpha".into()));
+    raw.insert("category".into(), Value::String("reviewer".into()));
+    raw.insert("inferredCategory".into(), Value::String("worker".into()));
+    let doc = AgentDoc::from_raw(raw);
+    doc.save(&base, pubkey).unwrap();
+    let loaded = AgentDoc::load(&base, pubkey).unwrap().unwrap();
+    assert_eq!(
+        loaded.raw().get("category").and_then(Value::as_str),
+        Some("reviewer")
+    );
+    assert!(loaded.raw().get("inferredCategory").is_none());
+    std::fs::remove_dir_all(&base).ok();
+}
+
+#[test]
+fn agent_persistence_promotes_legacy_inferred_category_when_category_missing() {
+    let base = unique_temp();
+    let pubkey = "legacy-persist-promote";
+    let mut raw = IndexMap::<String, Value>::new();
+    raw.insert("nsec".into(), Value::String("nsec1foo".into()));
+    raw.insert("slug".into(), Value::String("alpha".into()));
+    raw.insert("name".into(), Value::String("Alpha".into()));
+    raw.insert("inferredCategory".into(), Value::String("worker".into()));
+    let doc = AgentDoc::from_raw(raw);
+    doc.save(&base, pubkey).unwrap();
+    let loaded = AgentDoc::load(&base, pubkey).unwrap().unwrap();
+    assert_eq!(
+        loaded.raw().get("category").and_then(Value::as_str),
+        Some("worker")
+    );
+    assert!(loaded.raw().get("inferredCategory").is_none());
     std::fs::remove_dir_all(&base).ok();
 }
 

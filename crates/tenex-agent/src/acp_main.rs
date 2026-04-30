@@ -1,6 +1,15 @@
 mod acp_config;
 mod acp_mcp;
 mod acp_process;
+#[path = "categorize.rs"]
+mod categorize;
+// `config.rs` is shared with the main `tenex-agent` binary; ACP only
+// uses the LLM-resolution helpers (`LlmsConfig`, `ResolvedModel`,
+// `load_providers_config`), so the agent-side structs read as dead from
+// this binary's perspective.
+#[allow(dead_code)]
+#[path = "config.rs"]
+mod config;
 mod emit;
 #[path = "home.rs"]
 mod home;
@@ -174,12 +183,40 @@ async fn run() -> Result<()> {
             }
         };
 
+    let resolved_category_string: Option<String> = match agent_config.category.clone() {
+        Some(c) => Some(c),
+        None => {
+            let llms = config::LlmsConfig::load();
+            let providers = config::load_providers_config();
+            let resolved = config::ResolvedModel::resolve(None, llms.as_ref(), providers.as_ref());
+            let metadata = tenex_agent_registry::AgentMetadata {
+                name: agent_config.name.clone(),
+                role: String::new(),
+                description: None,
+                instructions: agent_config.instructions.clone(),
+                use_criteria: None,
+            };
+            match categorize::backfill_and_persist(&resolved, &metadata, &base_dir, &pubkey_hex)
+                .await
+            {
+                Ok(cat) => Some(cat.as_str().to_owned()),
+                Err(e) => {
+                    eprintln!("[tenex-agent-acp] category backfill failed: {e}");
+                    None
+                }
+            }
+        }
+    };
+    let resolved_category_enum = resolved_category_string
+        .as_deref()
+        .and_then(|s| s.parse::<tenex_supervision::types::AgentCategory>().ok());
+
     let system_prompt =
         tenex_system_prompt::build_system_prompt(tenex_system_prompt::BuildSystemPromptInput {
             identity_name: agent_config.identity_name(),
             pubkey_hex: &pubkey_hex,
-            category_str: agent_config.category.as_deref(),
-            category: agent_config.resolved_category(),
+            category_str: resolved_category_string.as_deref(),
+            category: resolved_category_enum,
             instructions: agent_config.instructions.as_deref(),
             working_dir: &working_dir,
             project_base_path: Some(&working_dir),
@@ -210,8 +247,7 @@ async fn run() -> Result<()> {
         base_dir: base_dir.clone(),
         agent_config_path: args[1].clone(),
         project_id: project_id.clone(),
-        expose_delegation_tools: agent_config
-            .resolved_category()
+        expose_delegation_tools: resolved_category_enum
             .map(|category| category.allows_delegation())
             .unwrap_or(true),
         project: project_ref.clone(),
@@ -447,6 +483,7 @@ async fn render_history(
         system_prompt,
         &profile,
         &tool_defs,
+        None,
         None,
     )
     .await

@@ -1,14 +1,11 @@
 //! Agent semantic-classification categories.
 //!
-//! Mirrors `src/agents/role-categories.ts` (`:1-58`) verbatim. The
-//! category drives capability policy — e.g., a `domain-expert` receives
-//! only `ask` calls while a `worker` is permitted follow-up delegation
-//! but not new-agent spawn.
+//! The category drives capability policy — e.g., a `domain-expert`
+//! receives only `ask` calls while a `worker` is permitted follow-up
+//! delegation but not new-agent spawn.
 //!
-//! Persisted in two places on the agent record:
-//! - `category` — explicitly set (operator-authoritative)
-//! - `inferredCategory` — auto-classified by the categorize backfill,
-//!   kept separate so explicit provenance is preserved.
+//! Persisted as the single `category` field on the agent record. Filled
+//! by the LLM when missing — there is no separate inferred slot.
 //!
 //! The category strings on the wire are kebab-case literals; this module
 //! preserves them byte-for-byte via [`AgentCategory::as_str`] /
@@ -29,8 +26,8 @@ pub enum AgentCategory {
 }
 
 impl AgentCategory {
-    /// Verbatim string form used on disk and over Nostr (`category` /
-    /// `inferredCategory` fields on the agent JSON).
+    /// Verbatim string form used on disk and over Nostr (`category`
+    /// field on the agent JSON).
     pub fn as_str(self) -> &'static str {
         match self {
             AgentCategory::Principal => "principal",

@@ -66,7 +66,6 @@ fn expected_agent() -> Agent {
         instructions: Some("instr".into()),
         use_criteria: Some("crit".into()),
         category: Some("worker".into()),
-        inferred_category: None,
         signer_ref: Some(format!("nsec:{AGENT_NSEC}")),
         event_id: Some("evt-agent".into()),
         status: Some("active".into()),
