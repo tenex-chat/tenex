@@ -84,12 +84,10 @@ pub async fn run(cfg: Config) -> Result<()> {
     // Filter 1: kind:1 that p-tags a whitelisted pubkey → completion candidates.
     let completion_filter = Filter::new()
         .kind(Kind::TextNote)
-        .pubkeys(white_pks.iter().map(|pk| pk.to_owned()).collect::<Vec<_>>());
+        .pubkeys(white_pks.clone());
 
     // Filter 2: kind:1 from whitelisted authors → response candidates.
-    let response_filter = Filter::new()
-        .kind(Kind::TextNote)
-        .authors(white_pks.clone());
+    let response_filter = Filter::new().kind(Kind::TextNote).authors(white_pks);
 
     nostr_client
         .subscribe_with_id(SubscriptionId::generate(), completion_filter, None)
