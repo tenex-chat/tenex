@@ -3,6 +3,7 @@ mod cassette;
 mod cassette_client;
 mod cassette_request;
 mod config;
+mod context_discovery;
 mod context_rig;
 mod emit;
 mod escalation;
@@ -10,6 +11,7 @@ mod home;
 mod hook;
 mod injections;
 mod mock_llm;
+mod multimodal;
 mod oauth_client;
 mod progress_monitor;
 mod project_instructions;
@@ -44,7 +46,7 @@ use tenex_context::{
     BreakpointHint, BreakpointKind, CacheObservation, Message as CtxMessage, ModelProfile,
     ToolCall as CtxToolCall, ToolDef, TurnRecord,
 };
-use tenex_conversations::{AgentContextState, ConversationStore, NewToolMessage};
+use tenex_conversations::{AgentContextState, ConversationListFilter, ConversationStore, NewToolMessage};
 use tenex_project::Project;
 use tenex_protocol::{
     nostr::{read_one_from_stdin, NostrChannel},
@@ -190,6 +192,78 @@ fn save_context_state(
     if let Err(e) = store.upsert_agent_context_state(&state) {
         eprintln!("[tenex-agent] Failed to save agent context state: {e}");
     }
+}
+
+/// Build the conversation reminders overlay for the system prompt.
+///
+/// Queries the conversation store for conversations active in the last hour
+/// (by `last_activity` Unix seconds), excludes the current conversation, and
+/// resolves the delegation parent title from the store when applicable.
+fn build_conversation_reminders(
+    store: &ConversationStore,
+    conversation_id: &str,
+    delegation_parent_id: Option<&str>,
+) -> tenex_system_prompt::ConversationRemindersForPrompt {
+    let now_secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs() as i64);
+    let one_hour_ago = now_secs - 3600;
+
+    let recent = store
+        .list_recent(ConversationListFilter {
+            from_time: Some(one_hour_ago),
+            limit: Some(20),
+            ..Default::default()
+        })
+        .unwrap_or_default();
+
+    let active_conversations = recent
+        .into_iter()
+        .filter(|row| row.id != conversation_id)
+        .map(|row| {
+            let last_active_human = row
+                .last_activity
+                .map(|ts| format_relative_time(now_secs - ts))
+                .unwrap_or_else(|| "unknown".to_string());
+            let id_short = row.id[..row.id.len().min(8)].to_string();
+            tenex_system_prompt::ConversationSummary {
+                id_short,
+                title: row.title,
+                last_active_human,
+            }
+        })
+        .collect();
+
+    let delegation_parent = delegation_parent_id.map(|parent_id| {
+        let title = store
+            .get_conversation(parent_id)
+            .ok()
+            .flatten()
+            .and_then(|row| row.title);
+        let id_short = parent_id[..parent_id.len().min(8)].to_string();
+        tenex_system_prompt::DelegationParentRef { id_short, title }
+    });
+
+    tenex_system_prompt::ConversationRemindersForPrompt {
+        active_conversations,
+        delegation_parent,
+    }
+}
+
+/// Format a duration in seconds as a human-readable relative time string.
+fn format_relative_time(elapsed_secs: i64) -> String {
+    if elapsed_secs < 0 {
+        return "just now".to_string();
+    }
+    if elapsed_secs < 60 {
+        return format!("{elapsed_secs} seconds ago");
+    }
+    let minutes = elapsed_secs / 60;
+    if minutes < 60 {
+        return format!("{minutes} minutes ago");
+    }
+    let hours = minutes / 60;
+    format!("{hours} hours ago")
 }
 
 #[tokio::main]
@@ -510,6 +584,20 @@ async fn run() -> Result<()> {
             None
         };
 
+    // Extract delegation parent conversation ID, if this agent was delegated to.
+    let delegation_parent_id: Option<String> =
+        envelope.metadata.delegation_parent_conversation.as_ref().map(
+            |conv_ref| match conv_ref {
+                ConversationRef::Nostr { root_event_id } => root_event_id.to_hex(),
+            },
+        );
+
+    // Build conversation reminders overlay from the conversation store.
+    let conversation_reminders: Option<tenex_system_prompt::ConversationRemindersForPrompt> =
+        conv_store.as_ref().map(|store| {
+            build_conversation_reminders(store, &conversation_id, delegation_parent_id.as_deref())
+        });
+
     // Build system prompt
     let mut system_prompt =
         tenex_system_prompt::build_system_prompt(tenex_system_prompt::BuildSystemPromptInput {
@@ -530,6 +618,7 @@ async fn run() -> Result<()> {
             preloaded_skills_block: preloaded_skills_block.as_deref(),
             telegram_channel_bindings: &telegram_channel_bindings,
             telegram_chat_context,
+            conversation_reminders: conversation_reminders.as_ref(),
         });
 
     // Load persisted todos and inject them as a system reminder into the user message.
@@ -628,6 +717,8 @@ async fn run() -> Result<()> {
 
     // Proactive context: search RAG before the LLM call so relevant past
     // knowledge appears in the system prompt without the agent needing to ask.
+    // Uses an LLM query planner (for non-trivial messages) and LLM reranker
+    // (when > 3 results pass the score threshold).
     if let Some(store) = &rag_store {
         let collections = [
             "conversations".to_string(),
@@ -635,34 +726,30 @@ async fn run() -> Result<()> {
             format!("agent_{pubkey_hex}"),
         ];
         let refs: Vec<&str> = collections.iter().map(|s| s.as_str()).collect();
-        match store.search(&envelope.content, &refs, 5).await {
-            Ok(results) => {
-                let relevant: Vec<_> = results.into_iter().filter(|r| r.score >= 0.65).collect();
-                if !relevant.is_empty() {
-                    let mut block = String::from(
-                        "\n\n<proactive-context>\nPotentially relevant information retrieved based on your task:\n",
-                    );
-                    for (i, r) in relevant.iter().enumerate() {
-                        let snippet: String = r.content.chars().take(300).collect();
-                        let ellipsis = if r.content.len() > 300 { "…" } else { "" };
-                        block.push_str(&format!(
-                            "\n[{}] score:{:.2} collection:{}{}\n{}{}\n",
-                            i + 1,
-                            r.score,
-                            r.collection,
-                            r.title
-                                .as_deref()
-                                .map(|t| format!(" title:{t}"))
-                                .unwrap_or_default(),
-                            snippet,
-                            ellipsis,
-                        ));
-                    }
-                    block.push_str("</proactive-context>");
-                    system_prompt.push_str(&block);
-                }
+        let relevant =
+            context_discovery::discover_context(&envelope.content, store, &refs, &resolved).await;
+        if !relevant.is_empty() {
+            let mut block = String::from(
+                "\n\n<proactive-context>\nPotentially relevant information retrieved based on your task:\n",
+            );
+            for (i, r) in relevant.iter().enumerate() {
+                let snippet: String = r.content.chars().take(300).collect();
+                let ellipsis = if r.content.len() > 300 { "…" } else { "" };
+                block.push_str(&format!(
+                    "\n[{}] score:{:.2} collection:{}{}\n{}{}\n",
+                    i + 1,
+                    r.score,
+                    r.collection,
+                    r.title
+                        .as_deref()
+                        .map(|t| format!(" title:{t}"))
+                        .unwrap_or_default(),
+                    snippet,
+                    ellipsis,
+                ));
             }
-            Err(e) => eprintln!("[tenex-agent] Proactive context search failed: {e}"),
+            block.push_str("</proactive-context>");
+            system_prompt.push_str(&block);
         }
     }
 
@@ -1034,6 +1121,45 @@ async fn run() -> Result<()> {
         };
         match outcome {
             PostCompletionOutcome::Accept => {
+                let suppressed = suppress_response.load(Ordering::Acquire);
+                if let Some((final_content, final_ral)) = pending_final {
+                    if !suppressed {
+                        let final_ctx = emit_state.build_ctx(final_ral);
+                        let usage = Some(LlmUsage {
+                            input_tokens: Some(stream_usage.input_tokens),
+                            output_tokens: Some(stream_usage.output_tokens),
+                            total_tokens: Some(stream_usage.total_tokens),
+                            cached_input_tokens: Some(stream_usage.cached_input_tokens),
+                            ..Default::default()
+                        });
+                        if emit_state.has_pending_external_work() {
+                            let intent = ConversationIntent {
+                                content: final_content,
+                                is_reasoning: false,
+                                usage,
+                                metadata: None,
+                            };
+                            channel
+                                .send(Intent::Conversation(intent), &final_ctx)
+                                .await
+                                .context("Failed to emit pending-work conversation event")?;
+                        } else {
+                            let intent = CompletionIntent {
+                                content: final_content,
+                                usage,
+                                metadata: None,
+                            };
+                            channel
+                                .send(Intent::Completion(intent), &final_ctx)
+                                .await
+                                .context("Failed to emit final completion event")?;
+                        }
+                    }
+                }
+                break 'agent_loop;
+            }
+            PostCompletionOutcome::InjectMessage { message } => {
+                eprintln!("[tenex-agent] Supervision nudge (no re-engage): {message}");
                 let suppressed = suppress_response.load(Ordering::Acquire);
                 if let Some((final_content, final_ral)) = pending_final {
                     if !suppressed {

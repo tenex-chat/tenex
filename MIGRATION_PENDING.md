@@ -54,7 +54,7 @@ Organized by functional area. Items marked ✅ are already at parity; items mark
 - ✅ **Fragment 34 — Telegram Delivery Rules**: `[[telegram_voice:…]]` marker syntax documentation
 
 ### 2.2 Missing Dynamic Context Injection
-- ✅ **Proactive RAG Context** — RAG search at score ≥ 0.65, up to 5 snippets injected into the system prompt each turn (implemented in `tenex-agent/src/main.rs`); LLM query planner and reranker from `ContextDiscoveryService` are not ported
+- ✅ **Proactive RAG Context** — RAG search at score ≥ 0.65, up to 5 snippets injected into the system prompt each turn; LLM query planner (for messages > 20 words) and LLM reranker (when > 3 results pass threshold) implemented in `tenex-agent/src/context_discovery.rs`
 - [ ] **Conversation Reminders** — active/recent conversation context overlay (streaming conversations, delegation parent refs, human-readable durations)
 - [ ] **Effective Instructions (Lesson Synthesis)** — `PromptCompilerService` merges base instructions with lessons; Rust intentionally uses a different approach (`+INDEX.md` file), but LLM-synthesized multi-lesson synthesis is absent
 
@@ -134,7 +134,7 @@ Pre-tool and post-completion contexts are missing fields that the two unimplemen
 - [ ] Scope-aware search (global / project / personal) via `RAGCollectionRegistry`
 - 🚫 Multiple specialized search providers (`ConversationSearchProvider`, `LessonSearchProvider`, `GenericCollectionSearchProvider`) — won't port
 - 🚫 `UnifiedSearchService` — won't port (Rust `rag_search` is the single search surface; provider multiplexing not needed)
-- [ ] `ContextDiscoveryService` — proactive per-turn context discovery with optional LLM query planner and LLM reranker; emits pointer-only reminder hints
+- ✅ `ContextDiscoveryService` — LLM query planner and LLM reranker implemented in `tenex-agent/src/context_discovery.rs`; pointer-only hint format and deferred background results not ported (direct snippet injection used instead)
 
 ### 6.2 RAG Subscription System (TypeScript-only)
 - [ ] `RagSubscriptionService` — manages persistent subscriptions that pipe MCP resource updates into RAG collections; reconnects automatically on daemon startup; backed by `rag_subscriptions.json`
