@@ -1,6 +1,8 @@
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+
+use parking_lot::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
@@ -52,7 +54,7 @@ impl CassetteRecorder {
     }
 
     pub(crate) fn next_turn(&self) -> usize {
-        let mut turns = self.turns.lock().unwrap();
+        let mut turns = self.turns.lock();
         *turns += 1;
         *turns
     }

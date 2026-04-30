@@ -1,4 +1,6 @@
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+
+use parking_lot::Mutex;
 
 use rig::agent::{HookAction, PromptHook};
 use rig::completion::{AssistantContent, CompletionModel, CompletionResponse, Message};
@@ -121,7 +123,7 @@ where
         _history: &[Message],
     ) -> impl std::future::Future<Output = HookAction> + Send {
         let review_tool_names = {
-            let mut state = self.state.lock().unwrap();
+            let mut state = self.state.lock();
             state.prepare_review(self.threshold)
         };
         let monitor = self.clone();
@@ -150,7 +152,7 @@ where
         _result: &str,
     ) -> impl std::future::Future<Output = HookAction> + Send {
         {
-            let mut state = self.state.lock().unwrap();
+            let mut state = self.state.lock();
             state.record_tool_result(tool_name);
         }
 
@@ -205,7 +207,7 @@ mod tests {
             &self,
             request: CompletionRequest,
         ) -> Result<CompletionResponse<Self::Response>, CompletionError> {
-            self.requests.lock().unwrap().push(format!("{request:?}"));
+            self.requests.lock().push(format!("{request:?}"));
             Ok(CompletionResponse {
                 choice: OneOrMany::one(AssistantContent::Text(Text {
                     text: self.response.clone(),

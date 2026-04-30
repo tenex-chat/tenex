@@ -101,7 +101,7 @@ impl Tool for DelegateCrossProjectTool {
             display_name: None,
         };
 
-        let ral = self.state.meta.lock().unwrap().ral;
+        let ral = self.state.meta.lock().ral;
         let ctx = self.state.build_ctx(ral);
 
         let intent = DelegationIntent {

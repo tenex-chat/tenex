@@ -2,7 +2,8 @@ use crate::skills::{self, SkillLookupCtx};
 use rig::{completion::ToolDefinition, tool::Tool};
 use serde::Deserialize;
 use serde_json::json;
-use std::sync::{Arc, Mutex};
+use parking_lot::Mutex;
+use std::sync::Arc;
 
 #[derive(Debug, Deserialize)]
 pub struct SkillsSetArgs {
@@ -94,10 +95,7 @@ impl Tool for SkillsSetTool {
             }).to_string());
         }
 
-        let mut current = self
-            .self_applied
-            .lock()
-            .map_err(|_| SkillsSetError("Failed to acquire skills lock".to_string()))?;
+        let mut current = self.self_applied.lock();
 
         // No-op path
         if add_ids.is_empty() && remove_ids.is_empty() {
