@@ -31,8 +31,43 @@ export type ConversationMonitor = {
     ) => Promise<Event>;
 };
 
+export type AgentContextStateRow = {
+    conversationId: string;
+    agentPubkey: string;
+    cacheAnchored: boolean;
+    compactionStateJson: string | null;
+};
+
 export function conversationDbPath(baseDir: string, projectDtag: string): string {
     return path.join(baseDir, "projects", projectDtag, "conversation.db");
+}
+
+export function readAgentContextStates(dbPath: string): AgentContextStateRow[] {
+    if (!existsSync(dbPath)) {
+        return [];
+    }
+    const db = createBunDatabase(dbPath);
+    try {
+        return (db
+            .query(
+                `SELECT conversation_id AS conversationId,
+                        agent_pubkey AS agentPubkey,
+                        cache_anchored AS cacheAnchored,
+                        compaction_state_json AS compactionStateJson
+                   FROM agent_context_state`
+            )
+            .all() as Array<{
+            conversationId: string;
+            agentPubkey: string;
+            cacheAnchored: number;
+            compactionStateJson: string | null;
+        }>).map((row) => ({
+            ...row,
+            cacheAnchored: row.cacheAnchored !== 0,
+        }));
+    } finally {
+        db.close();
+    }
 }
 
 export function monitorConversation(

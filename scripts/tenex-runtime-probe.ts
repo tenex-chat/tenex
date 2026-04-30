@@ -96,7 +96,7 @@ const requestRecordPath = path.join(runDir, "mock-requests.jsonl");
 const cassetteRecordPath = llm.recordCassettePath
     ? path.resolve(llm.recordCassettePath)
     : path.join(runDir, "llm-cassette.jsonl");
-const llmModelName = llm.mode === "ollama" ? "probe-real" : "mock";
+const llmModelName = llm.mode === "ollama" ? "probe-real" : llm.mode === "anthropic" ? "probe-anthropic" : "mock";
 const usesAcp =
     scenarioName === "acp-worker-basic" ||
     scenarioName === "acp-delegation-mcp" ||
@@ -167,6 +167,11 @@ const llmConfigurations: Record<string, unknown> =
               [llmModelName]: { provider: "ollama", model: llm.ollamaModel },
               [agentConfigUpdateModelName]: { provider: "ollama", model: llm.ollamaModel },
           }
+        : llm.mode === "anthropic"
+        ? {
+              [llmModelName]: { provider: "anthropic", model: llm.anthropicModel },
+              [agentConfigUpdateModelName]: { provider: "anthropic", model: llm.anthropicModel },
+          }
         : {
               mock: { provider: "mock", model: scenarioName },
               [agentConfigUpdateModelName]: { provider: "mock", model: scenarioName },
@@ -185,6 +190,12 @@ writeJson(path.join(baseDir, "providers.json"), {
                   ollama: {
                       apiKeys: [{ key: llm.ollamaBaseUrl ?? "none" }],
                       baseUrl: llm.ollamaBaseUrl,
+                  },
+              }
+            : llm.mode === "anthropic"
+            ? {
+                  anthropic: {
+                      apiKey: llm.anthropicApiKey ?? "",
                   },
               }
             : { mock: { apiKeys: [{ key: "none" }] } },
@@ -256,7 +267,7 @@ console.log(`scenario: ${scenarioName}`);
 console.log(`llm    : ${describeLlm(llm)}`);
 console.log(`baseDir : ${baseDir}`);
 console.log(`relay   : ${relayUrl}`);
-if (llm.mode === "ollama" || llm.recordCassettePath) {
+if (llm.mode === "ollama" || llm.mode === "anthropic" || llm.recordCassettePath) {
     console.log(`cassette record: ${cassetteRecordPath}`);
 }
 if (llm.mode === "cassette" && llm.cassettePath) {
@@ -388,7 +399,7 @@ console.log(`processes : ${processOutputArtifactPath}`);
 if (llm.mode === "mock" || llm.mode === "cassette") {
     console.log(`requests : ${requestRecordPath}`);
 }
-if (llm.mode === "ollama" || llm.recordCassettePath) {
+if (llm.mode === "ollama" || llm.mode === "anthropic" || llm.recordCassettePath) {
     console.log(`cassette : ${cassetteRecordPath}`);
 }
 
@@ -469,7 +480,7 @@ function runtimeEnv(
         env.TENEX_MOCK_LLM_SCENARIO = mockScenarioPath;
         env.TENEX_MOCK_LLM_RECORD_PATH = mockRecordPath;
     }
-    if (options.mode === "ollama" || options.recordCassettePath) {
+    if (options.mode === "ollama" || options.mode === "anthropic" || options.recordCassettePath) {
         env.TENEX_LLM_CASSETTE_RECORD_PATH = cassettePath;
     }
     if (options.ollamaBaseUrl) {
@@ -481,6 +492,9 @@ function runtimeEnv(
 function describeLlm(options: ProbeLlmOptions): string {
     if (options.mode === "ollama") {
         return `ollama/${options.ollamaModel}`;
+    }
+    if (options.mode === "anthropic") {
+        return `anthropic/${options.anthropicModel}`;
     }
     if (options.mode === "cassette") {
         return `cassette factor=${options.generationTimeFactor}`;

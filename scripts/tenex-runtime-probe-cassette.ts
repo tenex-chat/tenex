@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 
-export type ProbeLlmMode = "mock" | "ollama" | "cassette";
+export type ProbeLlmMode = "mock" | "ollama" | "cassette" | "anthropic";
 
 export type ProbeLlmOptions = {
     mode: ProbeLlmMode;
@@ -9,6 +9,8 @@ export type ProbeLlmOptions = {
     generationTimeFactor: number;
     ollamaModel: string;
     ollamaBaseUrl?: string;
+    anthropicModel: string;
+    anthropicApiKey?: string;
 };
 
 type CassetteToolCall = {
@@ -55,6 +57,13 @@ export function parseProbeLlmOptions(args: string[]): ProbeLlmOptions {
             flagValue(args, "ollama-base-url") ??
             process.env.TENEX_PROBE_OLLAMA_BASE_URL ??
             process.env.OLLAMA_API_BASE_URL,
+        anthropicModel:
+            flagValue(args, "anthropic-model") ??
+            process.env.TENEX_PROBE_ANTHROPIC_MODEL ??
+            "claude-haiku-4-5-20251001",
+        anthropicApiKey:
+            flagValue(args, "anthropic-api-key") ??
+            process.env.ANTHROPIC_API_KEY,
     };
 }
 
@@ -114,6 +123,9 @@ function normalizeMode(raw: string | undefined, cassettePath: string | undefined
     }
     if (mode === "cassette" || mode === "replay") {
         return "cassette";
+    }
+    if (mode === "anthropic") {
+        return "anthropic";
     }
     throw new Error(`Unsupported probe LLM mode: ${raw}`);
 }

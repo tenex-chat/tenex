@@ -197,7 +197,7 @@ Rust (`tenex-llm-config`) is a credential resolver only; all provider protocol w
 ### 9.2 Request Pipeline
 - [ ] **Message sanitizer middleware** — strips trailing assistant messages and empty-content messages before every API call to prevent provider rejections; Rust context projection has no equivalent validation
 - ✅ **Multimodal preparation** — URL-fetch + base64 encoding of images from markdown `![](url)` and bare HTTPS URLs; images prepended to multipart user message for vision-capable providers (anthropic, openai, openrouter); Ollama vision model detection not ported (Ollama passes text only)
-- ✅ **Prompt cache breakpoint emission** — `BreakpointHint` emitted when `cached_input_tokens > 0`; `cache_creation_input_tokens` recorded as `written_tokens` in `CacheObservation`
+- ⚠️ **Prompt cache breakpoint emission** — `BreakpointHint` is recorded when `cached_input_tokens > 0`, but rig 0.35 does not add `cache_control: ephemeral` markers to Anthropic requests. As a result `cache_creation_input_tokens` and `cached_input_tokens` are always 0; breakpoints are never emitted. Needs rig fix or manual cache_control injection before this path activates.
 
 ### 9.3 Instruction Synthesis
 - [ ] **`PromptCompilerService`** — LLM-synthesized agent instructions: compiles base instructions + lessons + lesson comments into compiled instructions; persists scoped disk cache at `~/.tenex/agents/prompts/<project-dTag>/`; publishes updated kind:0 profile after compilation. Rust agents use static instructions only.

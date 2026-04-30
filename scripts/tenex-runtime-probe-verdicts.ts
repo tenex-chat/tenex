@@ -2,6 +2,7 @@ import type { Event } from "nostr-tools";
 import { evaluateAcpWorker } from "./tenex-runtime-probe-acp-verdicts";
 import {
     messageText,
+    readAgentContextStates,
     readConversationTranscript,
     type ConversationTranscript,
 } from "./tenex-runtime-probe-conversations";
@@ -504,6 +505,71 @@ function evaluateDelegation(events: Event[], context: EvaluateContext): Verdict[
             name: "Agent completion contract includes status=completed",
             ok: Boolean(completedStatus),
             detail: "Expected final completion frame to include status=completed.",
+        },
+        ...evaluateCacheBreakpoints(context),
+    ];
+}
+
+function evaluateCacheBreakpoints(context: EvaluateContext): Verdict[] {
+    if (context.modelName === "mock") {
+        return [];
+    }
+    const states = readAgentContextStates(context.conversationDbPath);
+
+    // Prerequisite: did any turn write tokens to the cache?
+    // Without cache_control markers in the request rig does not request caching,
+    // so cache_creation_input_tokens is 0 and no hit can ever occur.
+    const anyWritten = states.some((s) => {
+        if (!s.compactionStateJson) return false;
+        try {
+            const p = JSON.parse(s.compactionStateJson) as {
+                cache_observed?: { written_tokens?: number };
+            };
+            return (p.cache_observed?.written_tokens ?? 0) > 0;
+        } catch {
+            return false;
+        }
+    });
+
+    if (!anyWritten) {
+        // rig 0.35 does not add cache_control markers to Anthropic requests by default.
+        // Until that is fixed upstream (or we patch rig), cache verdicts cannot be checked.
+        return [
+            {
+                name: "Prompt cache write observed (prerequisite for BreakpointHint)",
+                ok: false,
+                detail:
+                    "cache_creation_input_tokens=0 for all turns — rig does not send cache_control markers, so Anthropic never caches. BreakpointHint verdicts skipped.",
+            },
+        ];
+    }
+
+    const anchored = states.find((s) => s.cacheAnchored);
+    const withHints = states.find((s) => {
+        if (!s.compactionStateJson) return false;
+        try {
+            const parsed = JSON.parse(s.compactionStateJson) as {
+                breakpoint_hints?: Array<unknown>;
+            };
+            return Array.isArray(parsed.breakpoint_hints) && parsed.breakpoint_hints.length > 0;
+        } catch {
+            return false;
+        }
+    });
+    return [
+        {
+            name: "Prompt cache hit recorded (cache_anchored=true)",
+            ok: Boolean(anchored),
+            detail: anchored
+                ? `Agent ${anchored.agentPubkey.slice(0, 8)} has cache_anchored=true.`
+                : "No agent_context_state row has cache_anchored=true.",
+        },
+        {
+            name: "BreakpointHint emitted on cache hit",
+            ok: Boolean(withHints),
+            detail: withHints
+                ? `Agent ${withHints.agentPubkey.slice(0, 8)} has non-empty breakpoint_hints.`
+                : "No agent_context_state row has non-empty breakpoint_hints in compaction_state_json.",
         },
     ];
 }
