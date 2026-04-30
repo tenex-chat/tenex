@@ -4,6 +4,7 @@ use std::sync::{Arc, Mutex};
 
 use super::control_process::terminate_process_group;
 use super::control_shell::{self, ShellTaskRecord};
+use super::mcp_subscriptions::McpControlCommand;
 use super::transport::TransportTee;
 use anyhow::{Context, Result};
 use tenex_protocol::{
@@ -33,6 +34,7 @@ pub struct RuntimeControlState {
     active_runs: Arc<Mutex<HashMap<String, ActiveAgentRun>>>,
     pub(super) shell_tasks: Arc<Mutex<HashMap<String, ShellTaskRecord>>>,
     transport_tx: mpsc::UnboundedSender<TransportDispatchRequest>,
+    mcp_tx: mpsc::UnboundedSender<McpControlCommand>,
 }
 
 #[derive(Clone)]
@@ -58,6 +60,7 @@ impl RuntimeControlState {
         base_dir: PathBuf,
         project_id: String,
         transport_tx: mpsc::UnboundedSender<TransportDispatchRequest>,
+        mcp_tx: mpsc::UnboundedSender<McpControlCommand>,
     ) -> Self {
         Self {
             base_dir,
@@ -65,6 +68,7 @@ impl RuntimeControlState {
             active_runs: Arc::new(Mutex::new(HashMap::new())),
             shell_tasks: Arc::new(Mutex::new(HashMap::new())),
             transport_tx,
+            mcp_tx,
         }
     }
 
@@ -158,6 +162,27 @@ impl RuntimeControlState {
             }
             RuntimeControlRequest::Kill(req) => {
                 RuntimeControlResponse::Kill(self.kill_target(&req.target, &req.reason))
+            }
+            RuntimeControlRequest::Mcp(req) => {
+                let (respond_to, response_rx) = tokio::sync::oneshot::channel();
+                if self
+                    .mcp_tx
+                    .send(McpControlCommand {
+                        request: req,
+                        respond_to,
+                    })
+                    .is_err()
+                {
+                    return RuntimeControlResponse::Error(ErrorResponse {
+                        message: "runtime MCP control handler is unavailable".to_string(),
+                    });
+                }
+                match response_rx.await {
+                    Ok(response) => response,
+                    Err(_) => RuntimeControlResponse::Error(ErrorResponse {
+                        message: "runtime MCP control response channel closed".to_string(),
+                    }),
+                }
             }
             RuntimeControlRequest::DispatchTransport(_) => {
                 // Unreachable in practice — handle_connection routes this to

@@ -4,6 +4,9 @@ mod control_process;
 mod control_shell;
 #[cfg(test)]
 mod control_tests;
+mod mcp_resource_control;
+mod mcp_subscription_delivery;
+mod mcp_subscriptions;
 mod transport;
 
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -65,6 +68,7 @@ struct RuntimeShared {
     agent_acp_binary: PathBuf,
     agent_snapshot: Arc<RwLock<RuntimeAgentSnapshot>>,
     mcp_runtime: Arc<ProjectMcpRuntime>,
+    mcp_subscriptions: Arc<mcp_subscriptions::McpSubscriptionRegistry>,
     store: Arc<Mutex<ConversationStore>>,
     coordinator: Arc<Mutex<DispatchCoordinator>>,
     control: Arc<RuntimeControlState>,
@@ -434,13 +438,18 @@ pub async fn run(args: RuntimeArgs) -> Result<()> {
     if !configured_mcp_servers.is_empty() {
         info!(servers = %configured_mcp_servers.join(", "), "project MCP servers configured");
     }
+    let mcp_subscriptions = mcp_subscriptions::McpSubscriptionRegistry::load(base_dir.clone())
+        .context("loading MCP subscription registry")?;
     let coordinator = Arc::new(Mutex::new(DispatchCoordinator::default()));
     let (transport_dispatch_tx, mut transport_dispatch_rx) =
         tokio::sync::mpsc::unbounded_channel::<control::TransportDispatchRequest>();
+    let (mcp_control_tx, mut mcp_control_rx) =
+        tokio::sync::mpsc::unbounded_channel::<mcp_subscriptions::McpControlCommand>();
     let control = Arc::new(RuntimeControlState::new(
         base_dir.clone(),
         meta.d_tag.clone(),
         transport_dispatch_tx,
+        mcp_control_tx,
     ));
     let shared = Arc::new(RuntimeShared {
         client: client.clone(),
@@ -454,11 +463,17 @@ pub async fn run(args: RuntimeArgs) -> Result<()> {
         agent_acp_binary,
         agent_snapshot: agent_snapshot_state,
         mcp_runtime,
+        mcp_subscriptions,
         store: store.clone(),
         coordinator,
         control: control.clone(),
         seen: Arc::new(Mutex::new(HashSet::new())),
     });
+    shared
+        .mcp_subscriptions
+        .restore_active(shared.clone())
+        .await
+        .context("restoring MCP subscriptions")?;
     let control_socket_path = control.socket_path();
     let control_task = tokio::spawn(serve_control_socket(control, control_socket_path.clone()));
 
@@ -602,6 +617,9 @@ pub async fn run(args: RuntimeArgs) -> Result<()> {
             Some(req) = transport_dispatch_rx.recv() => {
                 handle_transport_dispatch(shared.clone(), req).await;
             }
+            Some(cmd) = mcp_control_rx.recv() => {
+                mcp_subscriptions::handle_control(shared.clone(), cmd).await;
+            }
             _ = tokio::signal::ctrl_c() => {
                 info!("shutting down (SIGINT)");
                 break;
@@ -613,6 +631,7 @@ pub async fn run(args: RuntimeArgs) -> Result<()> {
         }
     }
 
+    shared.mcp_subscriptions.shutdown().await;
     shared.mcp_runtime.shutdown().await;
     control_task.abort();
     let _ = tokio::fs::remove_file(control_socket_path).await;
@@ -2039,14 +2058,14 @@ async fn start_mcp_bridge_for_run(
     let allowed_slugs =
         tenex_mcp::mcp_access_from_default_json(job.agent.default_config_json.as_deref())
             .with_context(|| format!("reading MCP access for agent '{}'", job.agent.slug))?;
+    if allowed_slugs.is_empty() {
+        return Ok(None);
+    }
     let manifest = shared
         .mcp_runtime
         .prepare_manifest(&allowed_slugs)
         .await
         .with_context(|| format!("preparing MCP tools for agent '{}'", job.agent.slug))?;
-    if manifest.is_empty() {
-        return Ok(None);
-    }
 
     let run_id: String = execution_id
         .chars()

@@ -96,11 +96,13 @@ fn test_state() -> (Arc<RuntimeControlState>, PathBuf) {
     ));
     std::fs::create_dir_all(&base_dir).unwrap();
     let (transport_tx, _transport_rx) = tokio::sync::mpsc::unbounded_channel();
+    let (mcp_tx, _mcp_rx) = tokio::sync::mpsc::unbounded_channel();
     (
         Arc::new(RuntimeControlState::new(
             base_dir.clone(),
             "proj".to_string(),
             transport_tx,
+            mcp_tx,
         )),
         base_dir,
     )

@@ -39,6 +39,7 @@ function mcpServerSource(): string {
 import readline from "node:readline";
 
 const logPath = process.env.TENEX_MCP_PROBE_LOG;
+let resourceVersion = 0;
 
 function log(record: Record<string, unknown>): void {
     if (!logPath) return;
@@ -61,7 +62,12 @@ rl.on("line", (line) => {
     const request = JSON.parse(line) as {
         id?: unknown;
         method?: string;
-        params?: { name?: string; arguments?: Record<string, unknown> };
+        params?: {
+            name?: string;
+            arguments?: Record<string, unknown>;
+            uri?: string;
+            cursor?: string;
+        };
     };
 
     if (request.method === "notifications/initialized") {
@@ -80,7 +86,7 @@ rl.on("line", (line) => {
             id: request.id,
             result: {
                 protocolVersion: "2025-11-25",
-                capabilities: { tools: {} },
+                capabilities: { tools: {}, resources: { subscribe: true, listChanged: false } },
                 serverInfo: { name: "tenex-probe-mcp", version: "1.0.0" },
             },
         });
@@ -131,6 +137,88 @@ rl.on("line", (line) => {
                 isError: false,
             },
         });
+        return;
+    }
+
+    if (request.method === "resources/list") {
+        log({ event: "list_resources" });
+        send({
+            jsonrpc: "2.0",
+            id: request.id,
+            result: {
+                resources: [
+                    {
+                        uri: "mcp://probe/context",
+                        name: "Probe Context",
+                        description: "Deterministic probe resource.",
+                        mimeType: "text/plain",
+                    },
+                ],
+            },
+        });
+        return;
+    }
+
+    if (request.method === "resources/templates/list") {
+        log({ event: "list_resource_templates" });
+        send({
+            jsonrpc: "2.0",
+            id: request.id,
+            result: { resourceTemplates: [] },
+        });
+        return;
+    }
+
+    if (request.method === "resources/read") {
+        const uri = request.params?.uri;
+        log({ event: "read_resource", uri });
+        if (uri !== "mcp://probe/context") {
+            error(request.id, -32002, "unknown resource: " + String(uri));
+            return;
+        }
+        send({
+            jsonrpc: "2.0",
+            id: request.id,
+            result: {
+                contents: [
+                    {
+                        uri,
+                        mimeType: "text/plain",
+                        text:
+                            resourceVersion > 0
+                                ? '{"id":"subscription-update-1","text":"MCP subscription content"}'
+                                : "MCP resource content: project-context-resource",
+                    },
+                ],
+            },
+        });
+        return;
+    }
+
+    if (request.method === "resources/subscribe") {
+        const uri = request.params?.uri;
+        log({ event: "subscribe_resource", uri });
+        if (uri !== "mcp://probe/context") {
+            error(request.id, -32002, "unknown resource: " + String(uri));
+            return;
+        }
+        send({ jsonrpc: "2.0", id: request.id, result: {} });
+        setTimeout(() => {
+            resourceVersion = 1;
+            log({ event: "resource_update", uri });
+            send({
+                jsonrpc: "2.0",
+                method: "notifications/resources/updated",
+                params: { uri },
+            });
+        }, 750);
+        return;
+    }
+
+    if (request.method === "resources/unsubscribe") {
+        const uri = request.params?.uri;
+        log({ event: "unsubscribe_resource", uri });
+        send({ jsonrpc: "2.0", id: request.id, result: {} });
         return;
     }
 

@@ -13,7 +13,47 @@ pub enum RuntimeControlRequest {
     RunShell(RunShellRequest),
     ListShellTasks(ListShellTasksRequest),
     Kill(KillRequest),
+    Mcp(McpControlRequest),
     DispatchTransport(DispatchTransportRequest),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "op", content = "data", rename_all = "snake_case")]
+pub enum McpControlRequest {
+    ListResources(McpListResourcesRequest),
+    ReadResource(McpReadResourceRequest),
+    Subscribe(McpSubscribeRequest),
+    SubscriptionStop(McpSubscriptionStopRequest),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpListResourcesRequest {
+    pub agent_pubkey: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpReadResourceRequest {
+    pub agent_pubkey: String,
+    pub server_name: String,
+    pub resource_uri: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpSubscribeRequest {
+    pub agent_pubkey: String,
+    pub agent_slug: String,
+    pub server_name: String,
+    pub resource_uri: String,
+    pub conversation_id: String,
+    pub root_event_id: String,
+    pub project_id: String,
+    pub description: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpSubscriptionStopRequest {
+    pub agent_pubkey: String,
+    pub subscription_id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -90,7 +130,37 @@ pub enum RuntimeControlResponse {
     ShellBackground(ShellBackgroundResponse),
     ShellTasks(ShellTasksResponse),
     Kill(KillResponse),
+    Mcp(McpControlResponse),
     Error(ErrorResponse),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", content = "data", rename_all = "snake_case")]
+pub enum McpControlResponse {
+    ListResources(McpListResourcesResponse),
+    ReadResource(McpReadResourceResponse),
+    Subscribe(McpSubscribeResponse),
+    SubscriptionStop(McpSubscriptionStopResponse),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpListResourcesResponse {
+    pub content: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpReadResourceResponse {
+    pub content: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpSubscribeResponse {
+    pub content: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpSubscriptionStopResponse {
+    pub content: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

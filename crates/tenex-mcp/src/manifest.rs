@@ -29,6 +29,44 @@ pub struct ToolManifestEntry {
     pub input_schema: Value,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct McpServerResources {
+    pub server: String,
+    pub resources: Vec<McpResourceEntry>,
+    pub templates: Vec<McpResourceTemplateEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct McpResourceEntry {
+    pub server: String,
+    pub uri: String,
+    pub name: String,
+    pub description: Option<String>,
+    pub mime_type: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct McpResourceTemplateEntry {
+    pub server: String,
+    pub uri_template: String,
+    pub name: String,
+    pub description: Option<String>,
+    pub mime_type: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct McpResourceReadResult {
+    pub contents: Vec<McpResourceContentEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct McpResourceContentEntry {
+    pub uri: Option<String>,
+    pub mime_type: Option<String>,
+    pub text: Option<String>,
+    pub blob: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct McpToolCallRequest {
     pub tool_name: String,

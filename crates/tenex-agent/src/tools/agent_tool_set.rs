@@ -27,6 +27,9 @@ use super::fs::{
 use super::kill::KillTool;
 use super::learn::LearnTool;
 use super::mcp::McpProxyTool;
+use super::mcp_resources::{
+    McpListResourcesTool, McpResourceReadTool, McpSubscribeTool, McpSubscriptionStopTool,
+};
 use super::no_response::NoResponseTool;
 use super::project_list::ProjectListTool;
 use super::rag_add_documents::RagAddDocumentsTool;
@@ -181,6 +184,40 @@ impl ToolSet {
         self.push_tool(&mut tools, &recorder, Box::new(self.skill_list.clone()));
         self.push_tool(&mut tools, &recorder, Box::new(self.skills_set.clone()));
         self.push_tool(&mut tools, &recorder, Box::new(self.find_skills.clone()));
+
+        if self.granted_tools.contains("mcp_list_resources") {
+            self.push_tool(
+                &mut tools,
+                &recorder,
+                Box::new(McpListResourcesTool::new(self.agent_pubkey.clone())),
+            );
+        }
+        if self.granted_tools.contains("mcp_resource_read") {
+            self.push_tool(
+                &mut tools,
+                &recorder,
+                Box::new(McpResourceReadTool::new(self.agent_pubkey.clone())),
+            );
+        }
+        if self.granted_tools.contains("mcp_subscribe") {
+            self.push_tool(
+                &mut tools,
+                &recorder,
+                Box::new(McpSubscribeTool::new(
+                    self.agent_pubkey.clone(),
+                    self.agent_slug.clone(),
+                    self.conversation_id.clone(),
+                    self.project_d_tag.clone(),
+                )),
+            );
+        }
+        if self.granted_tools.contains("mcp_subscription_stop") {
+            self.push_tool(
+                &mut tools,
+                &recorder,
+                Box::new(McpSubscriptionStopTool::new(self.agent_pubkey.clone())),
+            );
+        }
 
         for tool in &self.mcp_proxy_tools {
             self.push_tool(&mut tools, &recorder, Box::new(tool.clone()));

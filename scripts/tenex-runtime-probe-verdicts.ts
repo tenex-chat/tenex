@@ -15,6 +15,9 @@ import {
     delegationWorkerCompletionText,
     extractColorChoice,
     includesColorChoice,
+    mcpResourceContentText,
+    mcpResourceFinalText,
+    mcpResourceUpdateId,
     rootAgentsMdInstruction,
     type MockRequestRecord,
     type ScenarioName,
@@ -49,6 +52,9 @@ export function evaluate(
     }
     if (name === "mcp-tool-basic") {
         return [...commonVerdicts, ...evaluateMcpTool(events, requestRecords, context)];
+    }
+    if (name === "mcp-resource-basic") {
+        return [...commonVerdicts, ...evaluateMcpResource(events, requestRecords, context)];
     }
     if (name === "acp-worker-basic") {
         return [
@@ -772,6 +778,110 @@ function evaluateMcpTool(
             name: "No mock fallback responses were used",
             ok: !unexpectedDefault,
             detail: "A fallback response means a model turn missed the expected MCP result.",
+        },
+    ];
+}
+
+function evaluateMcpResource(
+    events: Event[],
+    requestRecords: MockRequestRecord[],
+    context: EvaluateContext
+): Verdict[] {
+    const listToolEvent = events.find(
+        (event) =>
+            event.kind === 1 &&
+            event.pubkey === context.pmPubkey &&
+            hasTag(event, "tool", "mcp_list_resources")
+    );
+    const readToolEvent = events.find(
+        (event) =>
+            event.kind === 1 &&
+            event.pubkey === context.pmPubkey &&
+            hasTag(event, "tool", "mcp_resource_read")
+    );
+    const subscribeToolEvent = events.find(
+        (event) =>
+            event.kind === 1 &&
+            event.pubkey === context.pmPubkey &&
+            hasTag(event, "tool", "mcp_subscribe")
+    );
+    const notificationEvent = events.find(
+        (event) =>
+            event.kind === 1 &&
+            hasTag(event, "mcp-subscription") &&
+            hasTag(event, "p", context.pmPubkey) &&
+            event.content.includes(mcpResourceUpdateId)
+    );
+    const finalEvent = events.find(
+        (event) =>
+            event.kind === 1 &&
+            event.pubkey === context.pmPubkey &&
+            event.content.includes(mcpResourceFinalText)
+    );
+    const listRecord = context.mcpProbeRecords?.find(
+        (record) => record.event === "list_resources"
+    );
+    const initialReadRecord = context.mcpProbeRecords?.find(
+        (record) => record.event === "read_resource" && record.uri === "mcp://probe/context"
+    );
+    const subscribeRecord = context.mcpProbeRecords?.find(
+        (record) => record.event === "subscribe_resource" && record.uri === "mcp://probe/context"
+    );
+    const updateReadRecord = context.mcpProbeRecords
+        ?.filter((record) => record.event === "read_resource" && record.uri === "mcp://probe/context")
+        .at(1);
+    const readResultRequest = requestRecords.find(
+        (record) =>
+            record.agent === "pm" &&
+            record.requestDebug.includes(mcpResourceContentText) &&
+            record.toolCalls?.includes("mcp_subscribe")
+    );
+    const updateRequest = requestRecords.find(
+        (record) =>
+            record.agent === "pm" && record.requestDebug.includes(mcpResourceUpdateId)
+    );
+    const unexpectedDefault = events.find(
+        (event) =>
+            event.kind === 1 &&
+            event.pubkey === context.pmPubkey &&
+            event.content.includes("MCP resource probe mock response did not match")
+    );
+
+    return [
+        {
+            name: "MCP skill exposed resource tools to agent",
+            ok: Boolean(listToolEvent) && Boolean(readToolEvent) && Boolean(subscribeToolEvent),
+            detail: "Expected PM tool events for mcp_list_resources, mcp_resource_read, and mcp_subscribe.",
+        },
+        {
+            name: "Runtime listed MCP resources from project server",
+            ok: Boolean(listRecord),
+            detail: "Expected MCP probe server log to include resources/list.",
+        },
+        {
+            name: "Agent received MCP resource read result",
+            ok: Boolean(initialReadRecord) && Boolean(readResultRequest),
+            detail: "Expected resources/read result to appear in the next PM model request.",
+        },
+        {
+            name: "Runtime subscribed to MCP resource updates",
+            ok: Boolean(subscribeRecord),
+            detail: "Expected MCP probe server log to include resources/subscribe.",
+        },
+        {
+            name: "Subscription update was delivered to the conversation",
+            ok: Boolean(updateReadRecord) && Boolean(notificationEvent) && Boolean(updateRequest),
+            detail: "Expected resource update notification, runtime read, and PM model request containing the update.",
+        },
+        {
+            name: "Agent completed after MCP subscription update",
+            ok: Boolean(finalEvent),
+            detail: "Expected PM final response after receiving the subscription update.",
+        },
+        {
+            name: "No mock fallback responses were used",
+            ok: !unexpectedDefault,
+            detail: "A fallback response means a model turn missed the expected MCP resource state.",
         },
     ];
 }

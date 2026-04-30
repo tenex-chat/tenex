@@ -4,11 +4,12 @@ use std::sync::Arc;
 
 use anyhow::{bail, Context, Result};
 use serde_json::Value;
+use tokio::sync::broadcast;
 use tokio::sync::Mutex;
 use tracing::info;
 
 use crate::config::{ProjectMcpConfig, ProjectMcpServerConfig};
-use crate::manifest::ToolManifest;
+use crate::manifest::{McpResourceReadResult, McpServerResources, ToolManifest};
 use crate::stdio::StdioMcpClient;
 
 pub struct ProjectMcpRuntime {
@@ -59,6 +60,61 @@ impl ProjectMcpRuntime {
         let handle = self.ensure_server(&server_name).await?;
         let mut client = handle.client.lock().await;
         client.call_tool(&tool_name, arguments).await
+    }
+
+    pub async fn list_server_resources(&self, server_name: &str) -> Result<McpServerResources> {
+        if !self.config.servers.contains_key(server_name) {
+            bail!("MCP server '{}' is not configured", server_name);
+        }
+        let handle = self.ensure_server(server_name).await?;
+        let mut client = handle.client.lock().await;
+        let resources = client.list_resources().await?;
+        let templates = client.list_resource_templates().await?;
+        Ok(McpServerResources {
+            server: server_name.to_string(),
+            resources,
+            templates,
+        })
+    }
+
+    pub async fn read_resource(
+        &self,
+        server_name: &str,
+        uri: &str,
+    ) -> Result<McpResourceReadResult> {
+        if !self.config.servers.contains_key(server_name) {
+            bail!("MCP server '{}' is not configured", server_name);
+        }
+        let handle = self.ensure_server(server_name).await?;
+        let mut client = handle.client.lock().await;
+        client.read_resource(uri).await
+    }
+
+    pub async fn resource_updates(&self, server_name: &str) -> Result<broadcast::Receiver<String>> {
+        if !self.config.servers.contains_key(server_name) {
+            bail!("MCP server '{}' is not configured", server_name);
+        }
+        let handle = self.ensure_server(server_name).await?;
+        let client = handle.client.lock().await;
+        Ok(client.resource_updates())
+    }
+
+    pub async fn subscribe_resource(&self, server_name: &str, uri: &str) -> Result<()> {
+        if !self.config.servers.contains_key(server_name) {
+            bail!("MCP server '{}' is not configured", server_name);
+        }
+        let handle = self.ensure_server(server_name).await?;
+        let mut client = handle.client.lock().await;
+        client.subscribe_resource(uri).await
+    }
+
+    pub async fn unsubscribe_resource(&self, server_name: &str, uri: &str) -> Result<()> {
+        if !self.config.servers.contains_key(server_name) {
+            bail!("MCP server '{}' is not configured", server_name);
+        }
+        let handle = self.ensure_server(server_name).await?;
+        let mut client = handle.client.lock().await;
+        client.unsubscribe_resource(uri).await
     }
 
     pub async fn shutdown(&self) {

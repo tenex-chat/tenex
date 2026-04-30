@@ -122,7 +122,7 @@ if (scenarioName === "root-agents-md") {
     );
 }
 const mcpProbe =
-    scenarioName === "mcp-tool-basic"
+    scenarioName === "mcp-tool-basic" || scenarioName === "mcp-resource-basic"
         ? setupMcpProbeFixture({
               runDir,
               workspaceDir,
@@ -221,6 +221,8 @@ writeJson(path.join(agentsDir, `${pm.pubkey}.json`), {
     default:
         scenarioName === "mcp-tool-basic"
             ? { model: llmModelName, mcp: ["probe"] }
+            : scenarioName === "mcp-resource-basic"
+            ? { model: llmModelName, mcp: ["probe"], skills: ["mcp"] }
             : scenarioName === "acp-delegation-mcp"
             ? { model: acpProbeModelName }
             : scenarioName === "fs-read-adjustment"
@@ -295,7 +297,10 @@ const runtimeProc = spawnLogged(
     tenexBin,
     ["runtime", projectDtag, "--base-dir", baseDir],
     {
-        cwd: scenarioName === "mcp-tool-basic" ? workspaceDir : repoRoot,
+        cwd:
+            scenarioName === "mcp-tool-basic" || scenarioName === "mcp-resource-basic"
+                ? workspaceDir
+                : repoRoot,
         env: runtimeEnv(llm, mockScenarioPath, requestRecordPath, cassetteRecordPath),
     }
 );

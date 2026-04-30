@@ -14,6 +14,7 @@ pub mod fs;
 pub mod kill;
 pub mod learn;
 pub mod mcp;
+pub mod mcp_resources;
 pub mod no_response;
 pub mod project_list;
 pub mod rag_add_documents;

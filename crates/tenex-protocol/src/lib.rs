@@ -43,6 +43,9 @@ pub use refs::{ConversationRef, MessageRef, PrincipalKind, PrincipalRef, Project
 pub use runtime_control::{
     DispatchAcceptedFrame, DispatchEventFrame, DispatchTransportFrame, DispatchTransportRequest,
     ErrorResponse, KillRequest, KillResponse, KillTargetType, ListShellTasksRequest,
-    RunShellRequest, RuntimeControlRequest, RuntimeControlResponse, ShellBackgroundResponse,
-    ShellCompletedResponse, ShellTaskMode, ShellTaskSummary, ShellTasksResponse,
+    McpControlRequest, McpControlResponse, McpListResourcesRequest, McpListResourcesResponse,
+    McpReadResourceRequest, McpReadResourceResponse, McpSubscribeRequest, McpSubscribeResponse,
+    McpSubscriptionStopRequest, McpSubscriptionStopResponse, RunShellRequest,
+    RuntimeControlRequest, RuntimeControlResponse, ShellBackgroundResponse, ShellCompletedResponse,
+    ShellTaskMode, ShellTaskSummary, ShellTasksResponse,
 };

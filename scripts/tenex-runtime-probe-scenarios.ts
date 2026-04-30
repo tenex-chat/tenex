@@ -17,6 +17,7 @@ export const availableScenarios = [
     "same-agent-concurrency",
     "fs-read-adjustment",
     "mcp-tool-basic",
+    "mcp-resource-basic",
     "acp-worker-basic",
     "acp-delegation-mcp",
     "agent-config-reload",
@@ -52,6 +53,9 @@ export const agentConfigUpdateModelName = "mock-updated";
 export const agentConfigUpdateSkills = ["read-access", "shell", "write-access"] as const;
 export const rootAgentsMdInstruction = "ROOT_AGENTS_MD_PROBE";
 export const worktreeAgentsMdInstruction = "WORKTREE_AGENTS_MD_SHOULD_NOT_APPEAR";
+export const mcpResourceContentText = "MCP resource content: project-context-resource";
+export const mcpResourceUpdateId = "subscription-update-1";
+export const mcpResourceFinalText = "MCP subscription final: update received.";
 
 const colorWords = [
     "red", "blue", "green", "yellow", "purple", "orange", "pink", "black",
@@ -122,6 +126,9 @@ export function scenarioProjectDtag(name: ScenarioName): string {
     if (name === "mcp-tool-basic") {
         return "probe-mcp-tool";
     }
+    if (name === "mcp-resource-basic") {
+        return "probe-mcp-resource";
+    }
     if (name === "acp-worker-basic") {
         return "probe-acp-worker";
     }
@@ -155,6 +162,9 @@ export function pmInstructions(name: ScenarioName): string {
     }
     if (name === "mcp-tool-basic") {
         return "Use the MCP probe tool when asked for project-scoped MCP validation.";
+    }
+    if (name === "mcp-resource-basic") {
+        return "Use MCP resource tools to list, read, then subscribe to the probe resource. After a subscription update arrives, answer with the exact final probe phrase.";
     }
     if (name === "acp-worker-basic") {
         return "This scenario targets the ACP worker directly; remain idle unless directly mentioned.";
@@ -291,6 +301,61 @@ export function mockScenario(name: ScenarioName): unknown {
         };
     }
 
+    if (name === "mcp-resource-basic") {
+        return {
+            responses: [
+                {
+                    agent: "pm",
+                    turn: 1,
+                    contains: "List, read, and subscribe to the MCP probe resource",
+                    toolCalls: [{ name: "mcp_list_resources", args: {} }],
+                },
+                {
+                    agent: "pm",
+                    turn: 2,
+                    containsAll: ["mcp://probe/context", "Server: probe"],
+                    toolCalls: [
+                        {
+                            name: "mcp_resource_read",
+                            args: {
+                                serverName: "probe",
+                                resourceUri: "mcp://probe/context",
+                                description: "read probe resource",
+                            },
+                        },
+                    ],
+                },
+                {
+                    agent: "pm",
+                    turn: 3,
+                    contains: mcpResourceContentText,
+                    toolCalls: [
+                        {
+                            name: "mcp_subscribe",
+                            args: {
+                                serverName: "probe",
+                                resourceUri: "mcp://probe/context",
+                                description: "watch probe resource updates",
+                            },
+                        },
+                    ],
+                },
+                {
+                    agent: "pm",
+                    turn: 4,
+                    contains: "Successfully created MCP subscription",
+                    content: "MCP subscription started.",
+                },
+                {
+                    agent: "pm",
+                    contains: mcpResourceUpdateId,
+                    content: mcpResourceFinalText,
+                },
+            ],
+            defaultContent: "MCP resource probe mock response did not match expected runtime state.",
+        };
+    }
+
     if (name === "acp-worker-basic") {
         return { responses: [], defaultContent: "ACP worker scenario uses an ACP backend." };
     }
@@ -387,6 +452,8 @@ export async function runScenario(name: ScenarioName, context: ScenarioContext):
         await runSameAgentConcurrencyProbe(context);
     } else if (name === "mcp-tool-basic") {
         await runMcpToolProbe(context);
+    } else if (name === "mcp-resource-basic") {
+        await runMcpResourceProbe(context);
     } else if (name === "acp-worker-basic") {
         await runAcpWorkerProbe(context);
     } else if (name === "acp-delegation-mcp") {
@@ -583,6 +650,37 @@ async function runMcpToolProbe(context: ScenarioContext): Promise<void> {
         "MCP tool event"
     );
     await context.delay(Number(process.env.TENEX_PROBE_WAIT_MS ?? 5_000));
+}
+
+async function runMcpResourceProbe(context: ScenarioContext): Promise<void> {
+    const userEvent = context.sign(
+        {
+            kind: 1,
+            created_at: context.now(),
+            content: "List, read, and subscribe to the MCP probe resource.",
+            tags: [["a", context.projectRef]],
+        },
+        context.userSecret
+    );
+    await Promise.all(context.pool.publish([context.relayUrl], userEvent));
+    await context.waitForObservedEvent(
+        context.events,
+        (event) =>
+            event.pubkey === context.pmPubkey &&
+            event.kind === 1 &&
+            hasTag(event, "tool", "mcp_subscribe"),
+        12_000,
+        "MCP resource subscription tool event"
+    );
+    await context.waitForObservedEvent(
+        context.events,
+        (event) =>
+            event.pubkey === context.pmPubkey &&
+            event.kind === 1 &&
+            event.content.includes(mcpResourceFinalText),
+        Number(process.env.TENEX_PROBE_WAIT_MS ?? 12_000),
+        "MCP resource subscription update completion"
+    );
 }
 
 async function runRootAgentsMdProbe(context: ScenarioContext): Promise<void> {
