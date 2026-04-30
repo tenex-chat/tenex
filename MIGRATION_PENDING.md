@@ -189,7 +189,7 @@ The Rust `tenex` runtime (`tenex/src/runtime_cmd/`) already implements core orch
 ### 9.1 Provider SDK Implementations
 Rust (`tenex-llm-config`) is a credential resolver only; all provider protocol work is TypeScript:
 - [ ] Anthropic provider with OAuth token support (`sk-ant-oat*` tokens)
-- [ ] OpenRouter provider with usage tracking and metadata extraction
+- [ ] OpenRouter provider with usage tracking and metadata extraction — rig's streaming `FinalResponse` collapses all provider responses into `rig::completion::Usage` (input/output/total/cached/cache-creation tokens only); OpenRouter-specific fields (generation ID, cost, model name) are not accessible through the streaming path. The non-streaming `CompletionResponse` does carry `model` and `usage.cost`, but the agent uses streaming exclusively. Cost and model metadata require either a rig upstream change or a non-streaming fallback
 - [ ] Ollama provider with vision model pattern detection
 - 🚫 Codex agent provider with MCP server adapter (`CodexToolsAdapter`) — won't port (covered by ACP integration)
 - 🚫 Claude Code agent provider with built-in tool routing — won't port (covered by ACP integration)
