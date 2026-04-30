@@ -515,6 +515,13 @@ impl Poller {
         tokio::fs::create_dir_all(&cache_dir)
             .await
             .with_context(|| format!("create cache dir {}", cache_dir.display()))?;
+        // Canonicalize so the emitted `file://` URL is absolute even when the
+        // daemon was started with a relative `--base-dir` / `TENEX_BASE_DIR`.
+        // The agent gates `file://` reads on an absolute prefix; without this,
+        // photos cached under a relative base would be silently rejected.
+        let cache_dir = cache_dir
+            .canonicalize()
+            .with_context(|| format!("canonicalize cache dir {}", cache_dir.display()))?;
         let dest = cache_dir.join(format!("{unique_id}.{ext}"));
         if !dest.exists() {
             let bytes = self.client.download_file_bytes(&file_path).await?;

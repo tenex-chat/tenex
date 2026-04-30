@@ -952,8 +952,11 @@ async fn run() -> Result<()> {
     // `file://` image URLs are only honoured when they live under one of these
     // trusted cache prefixes — otherwise an inbound event could read arbitrary
     // local files. The Telegram bridge writes here when it caches inbound
-    // photos; add new trusted producers to this list.
-    let allowed_file_prefixes = vec![base_dir.join("data").join("telegram-media")];
+    // photos; add new trusted producers to this list. We canonicalize through
+    // `base_dir` so a relative `--base-dir`/`TENEX_BASE_DIR` still produces an
+    // absolute prefix that matches the canonical paths the poller emits.
+    let canonical_base = base_dir.canonicalize().unwrap_or_else(|_| base_dir.clone());
+    let allowed_file_prefixes = vec![canonical_base.join("data").join("telegram-media")];
     let envelope_image_parts: Option<Vec<rig::completion::message::UserContent>> =
         if supports_vision {
             multimodal::prepare_multimodal_content(&envelope.content, &allowed_file_prefixes).await
