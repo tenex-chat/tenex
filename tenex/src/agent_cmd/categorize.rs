@@ -247,23 +247,15 @@ pub fn backfill_agent_categories(
 
 /// Test-friendly classification stub: maps `slug → category` from a
 /// supplied table; missing slugs produce `Ok(None)`.
-#[cfg(test)]
 pub struct StubCategorizer {
     pub by_name: IndexMap<String, AgentCategory>,
 }
 
-#[cfg(test)]
 impl Categorizer for StubCategorizer {
     fn classify(&self, metadata: &AgentMetadata) -> Result<Option<AgentCategory>> {
         Ok(self.by_name.get(&metadata.name).copied())
     }
 }
-
-// Avoid an "unused import" warning in non-test builds — IndexMap is used
-// only by the cfg(test) StubCategorizer.
-const _: fn() = || {
-    let _: IndexMap<String, AgentCategory> = IndexMap::new();
-};
 
 #[cfg(test)]
 mod tests {
