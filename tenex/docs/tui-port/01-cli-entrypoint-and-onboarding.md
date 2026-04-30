@@ -421,16 +421,15 @@ Performed via `new URL(url)`:
 
 `existingProviders = await config.loadTenexProviders(globalPath)` (`src/commands/onboard.ts:1424`).
 
-`detection = await autoDetectProviders(existingProviders, earlyOpenClawDir)` (`src/commands/onboard.ts:1425`). Defined `src/commands/onboard.ts:596-655`. Order:
+Provider auto-detection order:
 
 1. **Local CLIs**: `Promise.all([commandExists("claude"), commandExists("codex")])` — runs `/bin/sh -c command -v <cmd>` (`src/commands/onboard.ts:564-570, 601-604`).
    - If `codex` present and not already configured: `providers.providers.codex = { apiKey: "none" }`. Source label: `"Codex CLI (codex)"` (`src/commands/onboard.ts:606-609`).
    - `claude` presence is recorded as `claudeCliDetected` only — not auto-added (`src/commands/onboard.ts:654`).
 2. **Ollama**: if not configured, `fetch("http://localhost:11434/api/tags", { signal: AbortSignal.timeout(2000) })` and check `response.ok` (`src/commands/onboard.ts:575-582, 612-617`). On success: `providers.providers.ollama = { apiKey: "http://localhost:11434" }`. Source: `"Ollama (localhost:11434)"`.
-3. **Env vars** (each: only set if currently absent) (`src/commands/onboard.ts:620-631`):
+3. **Env vars** (each: only set if currently absent):
    | Env var | Provider id | Source label |
    |---------|-------------|---------------|
-   | `ANTHROPIC_API_KEY` | `anthropic` | `"Anthropic (from ANTHROPIC_API_KEY)"` |
    | `OPENAI_API_KEY` | `openai` | `"OpenAI (from OPENAI_API_KEY)"` |
    | `OPENROUTER_API_KEY` | `openrouter` | `"OpenRouter (from OPENROUTER_API_KEY)"` |
 4. **Anthropic OAuth setup-token**: if `process.env.ANTHROPIC_AUTH_TOKEN` starts with `"sk-ant-oat"` and Anthropic not already configured, set `providers.providers.anthropic = { apiKey: authToken }`. Source: `"Anthropic (from ANTHROPIC_AUTH_TOKEN)"` (`src/commands/onboard.ts:634-638`).

@@ -490,12 +490,11 @@ fn emit_json_summary(
     );
 }
 
-/// Capture the four canonical provider env vars into a snapshot for
-/// [`auto_detect::auto_detect_providers`]. Only these four are read — every
-/// other env var is ignored, matching `autoDetectProviders` exactly.
+/// Capture provider env vars into a snapshot for
+/// [`auto_detect::auto_detect_providers`]. Only these keys are read — every
+/// other env var is ignored.
 fn capture_provider_env() -> HashMap<String, String> {
     [
-        "ANTHROPIC_API_KEY",
         "OPENAI_API_KEY",
         "OPENROUTER_API_KEY",
         "ANTHROPIC_AUTH_TOKEN",
@@ -547,18 +546,15 @@ mod tests {
 
     #[test]
     fn capture_provider_env_only_includes_known_keys() {
-        // Capture is read-only — assert it produces a HashMap of the four
-        // canonical env vars (or fewer when unset). Unrelated env vars
+        // Capture is read-only — assert it produces a HashMap of the
+        // provider env vars (or fewer when unset). Unrelated env vars
         // (e.g. PATH, HOME) must not leak in.
         let captured = capture_provider_env();
         for key in captured.keys() {
             assert!(
                 matches!(
                     key.as_str(),
-                    "ANTHROPIC_API_KEY"
-                        | "OPENAI_API_KEY"
-                        | "OPENROUTER_API_KEY"
-                        | "ANTHROPIC_AUTH_TOKEN"
+                    "OPENAI_API_KEY" | "OPENROUTER_API_KEY" | "ANTHROPIC_AUTH_TOKEN"
                 ),
                 "leaked env var: {key}",
             );

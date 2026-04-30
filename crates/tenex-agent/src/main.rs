@@ -977,7 +977,7 @@ async fn run() -> Result<()> {
                     let key = resolved
                         .api_key
                         .clone()
-                        .context("No OpenRouter API key found. Set OPENROUTER_API_KEY or add it to ~/.tenex/providers.json")?;
+                        .context("No OpenRouter API key found in ~/.tenex/providers.json")?;
                     let client =
                         RecordingClient::new(openrouter::Client::new(&key)?, cassette_recorder.clone());
                     run_agent!(
@@ -994,7 +994,7 @@ async fn run() -> Result<()> {
                     let key = resolved
                         .api_key
                         .clone()
-                        .context("No OpenAI API key found. Set OPENAI_API_KEY or add it to ~/.tenex/providers.json")?;
+                        .context("No OpenAI API key found in ~/.tenex/providers.json")?;
                     let client = RecordingClient::new(
                         openai::CompletionsClient::builder().api_key(&key).build()?,
                         cassette_recorder.clone(),
@@ -1043,9 +1043,8 @@ async fn run() -> Result<()> {
                 _ => {
                     let key = resolved.api_key.clone().with_context(|| {
                         format!(
-                            "No API key found for provider '{}'. Set {}_API_KEY or add it to ~/.tenex/providers.json",
-                            resolved.provider,
-                            resolved.provider.to_uppercase().replace('-', "_")
+                            "No API key found for provider '{}' in ~/.tenex/providers.json",
+                            resolved.provider
                         )
                     })?;
                     if oauth_client::is_oauth_token(&key) {

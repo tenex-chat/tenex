@@ -20,6 +20,10 @@ use crossterm::queue;
 use crossterm::style::Print;
 use crossterm::terminal::{Clear, ClearType};
 
+mod key;
+
+use key::first_usable_api_key;
+
 use crate::onboard::llm_test_hints::map_error_to_hint;
 use crate::onboard::llm_test_request::{
     ERR_TIMED_OUT, SPINNER_FRAMES, SPINNER_TICK_MS, TEST_PROMPT, TEST_TIMEOUT_MS,
@@ -96,12 +100,7 @@ pub fn run_test(base_dir: &Path, config_name: &str) -> TestResult {
 
     let api_key = providers
         .get(&provider)
-        .and_then(|e| {
-            e.api_keys().into_iter().find(|k| {
-                let head = k.split_whitespace().next().unwrap_or("");
-                !head.is_empty() && head != "none"
-            })
-        })
+        .and_then(first_usable_api_key)
         .unwrap_or_default();
 
     let (tx, rx) = mpsc::channel::<TestResult>();

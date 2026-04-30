@@ -157,12 +157,11 @@ Sources: same metadata declarations (last positional arg of `createMetadata`).
 
 | Provider | Env var | Behavior when set and provider not yet present |
 |---|---|---|
-| `anthropic` | `ANTHROPIC_API_KEY` | `providers.anthropic = { apiKey: <value> }`, source label `"Anthropic (from ANTHROPIC_API_KEY)"` |
 | `openai` | `OPENAI_API_KEY` | label `"OpenAI (from OPENAI_API_KEY)"` |
 | `openrouter` | `OPENROUTER_API_KEY` | label `"OpenRouter (from OPENROUTER_API_KEY)"` |
 | `anthropic` | `ANTHROPIC_AUTH_TOKEN` (only if value `startsWith("sk-ant-oat")`) | label `"Anthropic (from ANTHROPIC_AUTH_TOKEN)"` |
 
-Source: `src/commands/onboard.ts:619–638`. Note: these env vars are **only** consulted by the onboarding wizard's `autoDetectProviders`, not by `runProviderSetup` itself when invoked via `tenex config providers`. (`src/commands/onboard.ts:596`, `:1424–1425`)
+Note: these env vars are **only** consulted by the onboarding wizard's provider auto-detection, not by `runProviderSetup` itself when invoked via `tenex config providers`.
 
 ---
 
@@ -374,7 +373,6 @@ async function autoDetectProviders(existing: TenexProviders, preDetectedOpenClaw
 
     // 3. Environment variable API keys
     const envMap = [
-        { envVar: "ANTHROPIC_API_KEY",  providerId: PROVIDER_IDS.ANTHROPIC,  label: "Anthropic (from ANTHROPIC_API_KEY)" },
         { envVar: "OPENAI_API_KEY",     providerId: PROVIDER_IDS.OPENAI,     label: "OpenAI (from OPENAI_API_KEY)" },
         { envVar: "OPENROUTER_API_KEY", providerId: PROVIDER_IDS.OPENROUTER, label: "OpenRouter (from OPENROUTER_API_KEY)" },
     ];

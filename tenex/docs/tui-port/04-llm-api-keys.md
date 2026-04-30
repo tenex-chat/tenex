@@ -344,18 +344,16 @@ skipped at registry init (`src/llm/providers/registry/ProviderRegistry.ts:127-13
 
 ### 3.1 Env-var → provider table
 
-`src/commands/onboard.ts:619-638`:
+Rust onboarding env detection:
 
 | Env Var | Provider ID | Detected Source label | Behavior |
 |---|---|---|---|
-| `ANTHROPIC_API_KEY` | `anthropic` | `Anthropic (from ANTHROPIC_API_KEY)` | Stored as single string |
 | `OPENAI_API_KEY` | `openai` | `OpenAI (from OPENAI_API_KEY)` | Stored as single string |
 | `OPENROUTER_API_KEY` | `openrouter` | `OpenRouter (from OPENROUTER_API_KEY)` | Stored as single string |
-| `ANTHROPIC_AUTH_TOKEN` | `anthropic` | `Anthropic (from ANTHROPIC_AUTH_TOKEN)` | Only if value starts with `sk-ant-oat`, only if Anthropic not yet set by `ANTHROPIC_API_KEY` |
+| `ANTHROPIC_AUTH_TOKEN` | `anthropic` | `Anthropic (from ANTHROPIC_AUTH_TOKEN)` | Only if value starts with `sk-ant-oat` and Anthropic is not yet configured |
 
 ```ts
 const envMap: Array<{ envVar: string; providerId: string; label: string }> = [
-    { envVar: "ANTHROPIC_API_KEY", providerId: PROVIDER_IDS.ANTHROPIC, label: "Anthropic (from ANTHROPIC_API_KEY)" },
     { envVar: "OPENAI_API_KEY", providerId: PROVIDER_IDS.OPENAI, label: "OpenAI (from OPENAI_API_KEY)" },
     { envVar: "OPENROUTER_API_KEY", providerId: PROVIDER_IDS.OPENROUTER, label: "OpenRouter (from OPENROUTER_API_KEY)" },
 ];
@@ -376,7 +374,7 @@ if (authToken?.startsWith("sk-ant-oat") && !providers.providers[PROVIDER_IDS.ANT
 
 ### 3.2 Other auto-detected sources (non-env-var)
 
-Same `autoDetectProviders` function also seeds (`src/commands/onboard.ts:600-652`):
+The same provider auto-detection pass also seeds:
 
 | Source | Provider | Stored value | Label |
 |---|---|---|---|
@@ -396,7 +394,7 @@ The order of operations within the onboard flow:
 1. Existing `providers.json` values (loaded first into `existingProviders`).
 2. Local CLI commands (`codex` → `apiKey:"none"`).
 3. Reachable Ollama → `apiKey:"http://localhost:11434"`.
-4. Env vars (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`).
+4. Env vars (`OPENAI_API_KEY`, `OPENROUTER_API_KEY`).
 5. `ANTHROPIC_AUTH_TOKEN` (only if Anthropic still unset and OAuth-prefixed).
 6. OpenClaw credentials.
 7. Interactive `runProviderSetup` (user can override anything by
@@ -412,7 +410,7 @@ For each `detectedSources` entry, onboard prints a green-check success line
 *before* the provider prompt opens (`src/commands/onboard.ts:1427-1432`):
 
 ```
-  ✓ Anthropic (from ANTHROPIC_API_KEY)
+  ✓ OpenAI (from OPENAI_API_KEY)
   ✓ Ollama (localhost:11434)
 ```
 

@@ -97,9 +97,7 @@ impl ResolvedModel {
     /// 2. Parse `provider:model` or `provider/model` inline format
     /// 3. Fall back to raw model string with "anthropic" as provider
     ///
-    /// API key resolution order:
-    /// 1. Provider-specific env var (ANTHROPIC_API_KEY, OPENROUTER_API_KEY, …)
-    /// 2. ~/.tenex/providers.json
+    /// API keys are resolved only from ~/.tenex/providers.json.
     pub fn resolve(
         raw_model: Option<&str>,
         llms: Option<&LlmsConfig>,
@@ -175,18 +173,10 @@ fn resolve_credentials(
         return (None, base_url);
     }
 
-    let env_var = format!("{}_API_KEY", provider.to_uppercase().replace('-', "_"));
-    let api_key = std::env::var(&env_var)
-        .ok()
-        .filter(|s| !s.is_empty())
-        .or_else(|| {
-            providers?
-                .providers
-                .get(provider)?
-                .api_keys
-                .first()
-                .map(|k| k.key.clone())
-        });
+    let api_key = providers
+        .and_then(|docs| docs.providers.get(provider))
+        .and_then(|entry| entry.api_keys.first())
+        .map(|key| key.key.clone());
 
     (api_key, None)
 }

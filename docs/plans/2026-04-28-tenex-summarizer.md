@@ -57,7 +57,7 @@ The trait keeps the interim adapter localized to one file. No JSON-format leakag
 
 ## LLM
 
-- Uses the same provider abstraction approach as `tenex-agent`: read provider + model id from config, default to Anthropic via `ANTHROPIC_API_KEY`.
+- Uses the same provider abstraction approach as `tenex-agent`: read provider + model id from config and credentials from `providers.json`.
 - Prompt and response schema (zod → serde-equivalent) lifted verbatim from the existing TS `ConversationSummarizer`. The schema is the contract; do not redesign.
 - One-shot per conversation; no streaming, no tool use, no multi-turn.
 

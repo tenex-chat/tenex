@@ -32,6 +32,15 @@ impl<C> RecordingClient<C> {
     }
 }
 
+impl<M> RecordingModel<M> {
+    pub fn map_inner<N>(self, f: impl FnOnce(M) -> N) -> RecordingModel<N> {
+        RecordingModel {
+            inner: f(self.inner),
+            recorder: self.recorder,
+        }
+    }
+}
+
 impl<C> CompletionClient for RecordingClient<C>
 where
     C: CompletionClient + Clone,

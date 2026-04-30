@@ -579,7 +579,7 @@ Resolution order (applied after reading any `meta_model_variant` override from `
 4. Parse `provider:model` inline format (colon, legacy TENEX style).
 5. Fall back: treat the whole string as a model name with `anthropic` as provider.
 
-API keys are resolved from provider-specific env vars (`ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, etc.) then from `~/.tenex/providers.json`. Ollama uses `OLLAMA_API_BASE_URL` or the `baseUrl`/`apiKey` field in `providers.json` as the base URL (no API key).
+API keys are resolved from `~/.tenex/providers.json`. Ollama uses `OLLAMA_API_BASE_URL` or the `baseUrl`/`apiKey` field in `providers.json` as the base URL (no API key).
 
 ## Dependencies
 

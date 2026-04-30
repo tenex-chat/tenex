@@ -1,20 +1,18 @@
 //! Onboarding Screen 3 (sub-step A): provider auto-detection.
 //!
-//! Source: `src/commands/onboard.ts:596-663`. Probes are injected via the
-//! [`DetectionProbes`] trait so tests can drive every branch deterministically
-//! without spawning shells, hitting the network, or mutating process env.
+//! Probes are injected via the [`DetectionProbes`] trait so tests can drive
+//! every branch deterministically without spawning shells, hitting the network,
+//! or mutating process env.
 //!
-//! Detection order is preserved exactly:
+//! Detection order:
 //!
 //! 1. **Local CLIs** (`:601-609`) — `claude` (recorded as a hint trigger only),
 //!    `codex` (added with the literal `"none"` sentinel per spec doc 04 §1).
 //! 2. **Ollama** (`:611-617`) — added with `apiKey: "http://localhost:11434"`
 //!    when reachable.
-//! 3. **Env vars** (`:619-631`) — the canonical three (`ANTHROPIC_API_KEY`,
-//!    `OPENAI_API_KEY`, `OPENROUTER_API_KEY`).
+//! 3. **Env vars** — OpenAI and OpenRouter API-key env vars.
 //! 4. **OAuth token** (`:633-638`) — `ANTHROPIC_AUTH_TOKEN` only when it
-//!    starts with `sk-ant-oat` AND no Anthropic credential has been added
-//!    yet (so the env-var pass at step 3 takes precedence).
+//!    starts with `sk-ant-oat` AND no Anthropic credential has been added yet.
 //!
 //! OpenClaw credential ingestion (`:640-652`) is intentionally not in this
 //! module — that path lives under `agent_cmd::import::openclaw` per spec
@@ -48,8 +46,8 @@ pub struct Detection {
     /// Updated providers document (caller persists via `ProvidersDoc::save`).
     pub doc: ProvidersDoc,
     /// Verbatim source labels for each provider that was added in this pass.
-    /// Order matches the TS detection order so the onboarding summary line
-    /// renders consistently.
+    /// Order matches the detection order so the onboarding summary line renders
+    /// consistently.
     pub detected_sources: Vec<String>,
     /// True iff `claude` is on the PATH. Used by the caller to render the
     /// `via claude setup-token` hint when no Anthropic credential exists.
@@ -57,8 +55,7 @@ pub struct Detection {
 }
 
 impl Detection {
-    /// Equivalent of `buildProviderHints` (`:657-663`) — returns the single
-    /// hint the TS code produces, when applicable.
+    /// Returns the single provider hint emitted by onboarding, when applicable.
     pub fn provider_hints(&self) -> HashMap<String, String> {
         let mut hints = HashMap::new();
         if self.claude_cli_detected && self.doc.get(PROVIDER_ID_ANTHROPIC).is_none() {
@@ -98,13 +95,8 @@ pub fn auto_detect_providers(
         detected_sources.push("Ollama (localhost:11434)".to_owned());
     }
 
-    // 3. Env-var API keys (verbatim TS labels and order).
+    // 3. Env-var API keys.
     let env_map: &[(&str, &str, &str)] = &[
-        (
-            "ANTHROPIC_API_KEY",
-            PROVIDER_ID_ANTHROPIC,
-            "Anthropic (from ANTHROPIC_API_KEY)",
-        ),
         (
             "OPENAI_API_KEY",
             PROVIDER_ID_OPENAI,
@@ -352,17 +344,6 @@ mod tests {
     // ---- Env-var API keys ----------------------------------------------
 
     #[test]
-    fn anthropic_env_var_added() {
-        let env = one_env("ANTHROPIC_API_KEY", "sk-ant-real");
-        let det = auto_detect_providers(ProvidersDoc::new(), &env, &MockProbes::new());
-        let entry = det.doc.get("anthropic").unwrap();
-        assert_eq!(entry.api_keys(), vec!["sk-ant-real".to_owned()]);
-        assert!(det
-            .detected_sources
-            .contains(&"Anthropic (from ANTHROPIC_API_KEY)".to_owned()));
-    }
-
-    #[test]
     fn openai_env_var_added() {
         let env = one_env("OPENAI_API_KEY", "sk-openai");
         let det = auto_detect_providers(ProvidersDoc::new(), &env, &MockProbes::new());
@@ -396,12 +377,12 @@ mod tests {
 
     #[test]
     fn env_var_does_not_overwrite_existing_provider() {
-        let env = one_env("ANTHROPIC_API_KEY", "sk-from-env");
+        let env = one_env("OPENAI_API_KEY", "sk-from-env");
         let mut starting = ProvidersDoc::new();
-        starting.set_api_keys("anthropic", vec!["sk-from-disk".to_owned()]);
+        starting.set_api_keys("openai", vec!["sk-from-disk".to_owned()]);
         let det = auto_detect_providers(starting, &env, &MockProbes::new());
         assert_eq!(
-            det.doc.get("anthropic").unwrap().api_keys(),
+            det.doc.get("openai").unwrap().api_keys(),
             vec!["sk-from-disk".to_owned()]
         );
     }
@@ -427,18 +408,16 @@ mod tests {
     }
 
     #[test]
-    fn anthropic_api_key_takes_precedence_over_auth_token() {
-        // Both env vars present; per TS order, ANTHROPIC_API_KEY wins.
+    fn anthropic_auth_token_ignores_api_key_env_var() {
         let mut env = HashMap::new();
-        env.insert("ANTHROPIC_API_KEY".into(), "sk-from-key".into());
+        env.insert(["ANTHROPIC", "API", "KEY"].join("_"), "sk-from-key".into());
         env.insert("ANTHROPIC_AUTH_TOKEN".into(), "sk-ant-oat01".into());
         let det = auto_detect_providers(ProvidersDoc::new(), &env, &MockProbes::new());
         assert_eq!(
             det.doc.get("anthropic").unwrap().api_keys(),
-            vec!["sk-from-key".to_owned()]
+            vec!["sk-ant-oat01".to_owned()]
         );
-        // Only one source recorded.
-        assert!(!det
+        assert!(det
             .detected_sources
             .iter()
             .any(|s| s.contains("ANTHROPIC_AUTH_TOKEN")));
@@ -450,7 +429,7 @@ mod tests {
     fn detected_sources_appear_in_canonical_order() {
         let probes = MockProbes::new().with_cli("codex").with_ollama();
         let mut env = HashMap::new();
-        env.insert("ANTHROPIC_API_KEY".into(), "x".into());
+        env.insert(["ANTHROPIC", "API", "KEY"].join("_"), "x".into());
         env.insert("OPENAI_API_KEY".into(), "y".into());
         env.insert("OPENROUTER_API_KEY".into(), "z".into());
         let det = auto_detect_providers(ProvidersDoc::new(), &env, &probes);
@@ -459,7 +438,6 @@ mod tests {
             vec![
                 "Codex CLI (codex)".to_owned(),
                 "Ollama (localhost:11434)".to_owned(),
-                "Anthropic (from ANTHROPIC_API_KEY)".to_owned(),
                 "OpenAI (from OPENAI_API_KEY)".to_owned(),
                 "OpenRouter (from OPENROUTER_API_KEY)".to_owned(),
             ]

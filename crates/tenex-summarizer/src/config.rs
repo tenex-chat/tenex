@@ -194,10 +194,6 @@ fn resolve_credentials(
             .or_else(|| providers.and_then(|p| p.ollama_base_url()));
         return (None, base);
     }
-    let env_var = format!("{}_API_KEY", provider.to_uppercase().replace('-', "_"));
-    let key = std::env::var(&env_var)
-        .ok()
-        .filter(|s| !s.is_empty())
-        .or_else(|| providers.and_then(|p| p.api_key(provider)));
+    let key = providers.and_then(|p| p.api_key(provider));
     (key, None)
 }
