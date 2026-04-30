@@ -301,7 +301,7 @@ export function mockScenario(name: ScenarioName): unknown {
                 {
                     agent: "worker",
                     turn: 1,
-                    contains: delegationWorkerPrompt,
+                    contains: "random color",
                     content: delegationWorkerCompletionText,
                 },
             ],

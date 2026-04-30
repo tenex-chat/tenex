@@ -104,11 +104,13 @@ function evaluateAcpDelegationMcp(events: Event[], context: EvaluateContext): Ve
             event.pubkey === context.workerPubkey &&
             includesColorChoice(event.content)
     );
-    const acpAcknowledgement = events.find(
+    const completedDelegationAck = events.find(
         (event) =>
             event.kind === 1 &&
             event.pubkey === context.pmPubkey &&
-            event.content.includes("Delegation started")
+            event.content.toLowerCase().includes("delegat") &&
+            !hasTag(event, "tool") &&
+            hasTag(event, "status", "completed")
     );
     const storedWorkerCompletion = initialUserEvent
         ? readConversationTranscript(context.conversationDbPath, initialUserEvent.id).messages.find(
@@ -141,8 +143,8 @@ function evaluateAcpDelegationMcp(events: Event[], context: EvaluateContext): Ve
         },
         {
             name: "ACP delegation acknowledgement stayed pending",
-            ok: Boolean(acpAcknowledgement) && !hasTag(acpAcknowledgement!, "status", "completed"),
-            detail: "Expected ACP's same-turn delegation acknowledgement to omit status=completed.",
+            ok: !completedDelegationAck,
+            detail: "Expected no ACP delegation acknowledgement to be marked status=completed.",
         },
     ];
 }
