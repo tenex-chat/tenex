@@ -963,6 +963,7 @@ async fn run() -> Result<()> {
     let mut re_engage_history: Vec<RigMessage> = Vec::new();
 
     'agent_loop: loop {
+        suppress_response.store(false, Ordering::Release);
         let current_history: Vec<RigMessage> = {
             let mut h = initial_history.clone();
             h.extend(re_engage_history.iter().cloned());
