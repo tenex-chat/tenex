@@ -7,6 +7,7 @@
 
 use crate::strategies::{ProjectionContext, Strategy};
 use crate::types::Message;
+use serde::{Deserialize, Serialize};
 
 const NAME: &str = "reminders";
 
@@ -26,7 +27,28 @@ struct TodoItem {
     status: TodoStatus,
 }
 
-use serde::{Deserialize, Serialize};
+#[derive(Default)]
+struct TodoStatusCounts {
+    pending: usize,
+    in_progress: usize,
+    done: usize,
+    skipped: usize,
+}
+
+impl TodoStatusCounts {
+    fn from_todos(todos: &[TodoItem]) -> Self {
+        let mut counts = Self::default();
+        for todo in todos {
+            match todo.status {
+                TodoStatus::Pending => counts.pending += 1,
+                TodoStatus::InProgress => counts.in_progress += 1,
+                TodoStatus::Done => counts.done += 1,
+                TodoStatus::Skipped => counts.skipped += 1,
+            }
+        }
+        counts
+    }
+}
 
 fn build_todos_reminder(todos_json: Option<&serde_json::Value>) -> String {
     let Some(val) = todos_json else {
@@ -40,22 +62,7 @@ fn build_todos_reminder(todos_json: Option<&serde_json::Value>) -> String {
         return String::new();
     }
 
-    let pending = todos
-        .iter()
-        .filter(|t| t.status == TodoStatus::Pending)
-        .count();
-    let in_progress = todos
-        .iter()
-        .filter(|t| t.status == TodoStatus::InProgress)
-        .count();
-    let done = todos
-        .iter()
-        .filter(|t| t.status == TodoStatus::Done)
-        .count();
-    let skipped = todos
-        .iter()
-        .filter(|t| t.status == TodoStatus::Skipped)
-        .count();
+    let counts = TodoStatusCounts::from_todos(&todos);
 
     let mut lines = vec![
         "<system-reminder>".to_string(),
@@ -63,7 +70,7 @@ fn build_todos_reminder(todos_json: Option<&serde_json::Value>) -> String {
         String::new(),
         format!(
             "Status: {} pending, {} in progress, {} done, {} skipped",
-            pending, in_progress, done, skipped
+            counts.pending, counts.in_progress, counts.done, counts.skipped
         ),
         String::new(),
     ];
@@ -81,14 +88,14 @@ fn build_todos_reminder(todos_json: Option<&serde_json::Value>) -> String {
     lines.push(String::new());
     lines.push(
         "Use `todo_write` to update statuses. Mark items in_progress when starting, done when complete."
-            .to_string(),
+        .to_string(),
     );
 
-    if pending > 0 {
+    if counts.pending > 0 {
         lines.push(String::new());
         lines.push(format!(
             "**ATTENTION:** You have {} pending todo item(s) that need to be addressed.",
-            pending
+            counts.pending
         ));
     }
 
@@ -229,7 +236,7 @@ mod tests {
         assert_eq!(ctx.telemetry.reminders_overlayed, 1);
         let last = match &ctx.messages[1] {
             Message::User { content } => content.clone(),
-            _ => panic!(),
+            other => panic!("expected user message, got {other:?}"),
         };
         assert!(last.contains("<system-reminder>"), "reminder block present");
         assert!(
@@ -319,7 +326,7 @@ mod tests {
         assert_eq!(ctx.telemetry.reminders_overlayed, 1);
         let last = match &ctx.messages[1] {
             Message::User { content } => content.clone(),
-            _ => panic!(),
+            other => panic!("expected user message, got {other:?}"),
         };
         assert!(last.contains("2 pending"), "should show 2 pending");
         assert!(last.contains("1 in progress"), "should show 1 in_progress");
@@ -356,7 +363,7 @@ mod tests {
         assert_eq!(ctx.telemetry.reminders_overlayed, 1);
         let last_content = match &ctx.messages[2] {
             Message::ToolResult { content, .. } => content.clone(),
-            _ => panic!(),
+            other => panic!("expected tool result message, got {other:?}"),
         };
         assert!(last_content.contains("<system-reminder>"));
     }
