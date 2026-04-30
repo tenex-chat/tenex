@@ -280,7 +280,12 @@ async fn run_cron_loop(
     };
 
     loop {
-        let next = match cron.find_next_occurrence(&Utc::now(), false) {
+        // Sample the clock once per iteration and reuse it for both the next
+        // occurrence lookup and the delay computation. Two `Utc::now()` reads
+        // can straddle the boundary, making the delay computation see a
+        // negative duration and skip a genuinely-due firing.
+        let now = Utc::now();
+        let next = match cron.find_next_occurrence(&now, false) {
             Ok(t) => t,
             Err(e) => {
                 error!(task_id = %task.id, error = %e, "cron next occurrence failed");
@@ -288,7 +293,7 @@ async fn run_cron_loop(
             }
         };
 
-        let delay = match cron_delay_until(next, Utc::now()) {
+        let delay = match cron_delay_until(next, now) {
             Ok(d) => d,
             Err(elapsed) => {
                 // The runtime stalled between picking `next` and computing the
@@ -472,6 +477,19 @@ mod tests {
         let next = Utc.with_ymd_and_hms(2026, 4, 29, 9, 0, 30).unwrap();
 
         assert_eq!(cron_delay_until(next, now), Ok(Duration::from_secs(30)));
+    }
+
+    #[test]
+    fn cron_delay_until_exact_boundary_returns_zero_duration() {
+        // When the daemon samples the clock once and passes that exact
+        // instant as both `now` and the input to `find_next_occurrence`, a
+        // schedule whose next firing is the current instant must yield a
+        // zero (non-negative) delay so the firing actually runs. If the
+        // delay computation drifted into the negative branch here, the
+        // daemon would skip a due firing.
+        let instant = Utc.with_ymd_and_hms(2026, 4, 29, 9, 0, 0).unwrap();
+
+        assert_eq!(cron_delay_until(instant, instant), Ok(Duration::ZERO));
     }
 
     #[test]
