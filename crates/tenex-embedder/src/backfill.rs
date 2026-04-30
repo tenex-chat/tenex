@@ -245,11 +245,21 @@ async fn walk_and_embed(
 /// `now`.
 ///
 /// Per-relay error policy:
-/// - [`FetchPageError::Transient`] — log warning, persist cursor, stop
-///   this relay. The next backfill tick picks up where we left off.
+/// - [`FetchPageError::Transient`] — log warning, persist cursor (only
+///   if real progress was made), stop this relay. The next backfill
+///   tick picks up where we left off.
 /// - [`FetchPageError::Permanent`] — bubble up to the caller. Cursor is
 ///   left at the last successful advance (no half-advance is ever
 ///   committed).
+///
+/// Cursor persistence rule: we only ever write a cursor that is
+/// strictly older than the value we started this walk with. Persisting
+/// the starting value would be a no-op when a cursor was already on
+/// disk, but on a fresh relay/scope the starting value is `now()`, so
+/// rewriting it would shift the daemon's next scheduled scan past
+/// events created during this walk. The walk explicitly does not record
+/// "we attempted to walk at time T" — only "we successfully reached
+/// older time T".
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn walk_relay(
     fetcher: &dyn RelayFetcher,
@@ -277,12 +287,26 @@ pub(crate) async fn walk_relay(
         cursor.put(relay_url, scope_hash_value, until)
     };
 
+    // Only persist when we have advanced strictly past where we
+    // started; otherwise this walk produced no information and the
+    // cursor must be left untouched.
+    let persist_if_advanced = |until: i64| -> Result<()> {
+        if until < starting_until {
+            persist(until)
+        } else {
+            Ok(())
+        }
+    };
+
     loop {
         progress.set_message(format!("{relay_url}  until={until}"));
         if until <= floor {
             // Reached the configured floor; record and stop. The end
             // boundary is `floor`, not `until`, because `until` may
             // have already crossed the floor by the time we get here.
+            // This branch is reachable only if we advanced or the
+            // starting cursor was already at/under the floor — both
+            // are real outcomes worth persisting.
             persist(floor.max(until))?;
             return Ok(());
         }
@@ -295,7 +319,7 @@ pub(crate) async fn walk_relay(
                     error = %e,
                     "transient relay error; persisting cursor and stopping this relay"
                 );
-                persist(until)?;
+                persist_if_advanced(until)?;
                 return Ok(());
             }
             Err(FetchPageError::Permanent(e)) => {
@@ -304,13 +328,14 @@ pub(crate) async fn walk_relay(
                 // up. The current `until` is the next un-fetched
                 // boundary; on a restart we want to resume there once
                 // the underlying issue is fixed.
-                persist(until)?;
+                persist_if_advanced(until)?;
                 return Err(e.context(format!("permanent relay error on {relay_url}")));
             }
         };
         if page.events.is_empty() {
-            // End of stream on this relay.
-            persist(until)?;
+            // End of stream on this relay. Only commit a cursor if
+            // we genuinely walked back during this invocation.
+            persist_if_advanced(until)?;
             return Ok(());
         }
         for ev in page.events {
@@ -324,7 +349,7 @@ pub(crate) async fn walk_relay(
             // Page was 100% duplicates — relay can't make progress
             // past this boundary (probably a `created_at` cluster
             // larger than the page limit). Stop and persist.
-            persist(until)?;
+            persist_if_advanced(until)?;
             return Ok(());
         }
 
@@ -337,7 +362,7 @@ pub(crate) async fn walk_relay(
         if next_until >= until {
             // No timestamp progress at all — same boundary or
             // higher. Stop and persist current position.
-            persist(until)?;
+            persist_if_advanced(until)?;
             return Ok(());
         }
         until = next_until;
@@ -487,7 +512,42 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn cursor_persists_on_empty_page_end_of_stream() {
+    async fn cursor_not_persisted_when_first_page_is_empty_on_fresh_scope() {
+        // The bug: a fresh relay/scope with no cursor starts walking
+        // from `now`. If the very first page comes back empty (relay
+        // has no matching events yet), persisting `until` would write
+        // `now` to disk, and the daemon's next scheduled scan would
+        // start at `until=<old now>` and miss every event published
+        // after. The cursor must remain absent in this case.
+        let fetcher = ScriptedFetcher::new(vec![Ok(Page {
+            events: vec![],
+            event_count: 0,
+            root_count: 0,
+            oldest_secs: None,
+        })]);
+        let (cursor, _dir) = open_cursor();
+        let mut acc = Accumulator::new();
+        let bar = ProgressBar::hidden();
+        let scope_h = "scope";
+        let relay = "wss://test";
+        // No cursor seeded — fresh scope.
+        assert_eq!(cursor.get(relay, scope_h).unwrap(), None);
+
+        walk_relay(
+            &fetcher, relay, &[], scope_h, 0, 500, false, &cursor, &mut acc, &bar,
+        )
+        .await
+        .unwrap();
+
+        // Cursor must still be absent: the walk made no progress, so
+        // there is no value to commit.
+        assert_eq!(cursor.get(relay, scope_h).unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn cursor_unchanged_when_first_page_is_empty_with_seeded_cursor() {
+        // Seeded cursor + empty first page: we made no progress this
+        // walk, so the existing cursor must remain exactly as it was.
         let fetcher = ScriptedFetcher::new(vec![Ok(Page {
             events: vec![],
             event_count: 0,
@@ -507,9 +567,30 @@ mod tests {
         .await
         .unwrap();
 
-        // Empty page = end of stream; cursor should remain at 500
-        // (the un-fetched boundary) rather than be cleared.
         assert_eq!(cursor.get(relay, scope_h).unwrap(), Some(500));
+    }
+
+    #[tokio::test]
+    async fn cursor_not_persisted_when_first_fetch_errors_transiently_on_fresh_scope() {
+        // Mirror of the empty-page case for the transient error path:
+        // a fresh scope must not commit a `now`-valued cursor just
+        // because the very first relay request happened to fail.
+        let fetcher = ScriptedFetcher::new(vec![Err(FetchPageError::Transient(
+            anyhow::anyhow!("simulated network blip"),
+        ))]);
+        let (cursor, _dir) = open_cursor();
+        let mut acc = Accumulator::new();
+        let bar = ProgressBar::hidden();
+        let scope_h = "scope";
+        let relay = "wss://test";
+
+        walk_relay(
+            &fetcher, relay, &[], scope_h, 0, 500, false, &cursor, &mut acc, &bar,
+        )
+        .await
+        .expect("transient error should not bubble out");
+
+        assert_eq!(cursor.get(relay, scope_h).unwrap(), None);
     }
 
     #[tokio::test]
