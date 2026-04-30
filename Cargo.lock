@@ -3058,11 +3058,13 @@ name = "tenex-context"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "serde",
  "serde_json",
  "tempfile",
  "tenex-conversations",
  "thiserror 2.0.18",
+ "tokio",
  "tracing",
 ]
 

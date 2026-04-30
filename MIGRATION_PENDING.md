@@ -69,7 +69,7 @@ Organized by functional area. Items marked ✅ are already at parity; items mark
 ## 3. Conversation Management
 
 ### 3.1 Compaction
-- [ ] **LLM-driven compaction summaries**: TypeScript uses `generateText()` to produce high-signal, multi-section summaries (task, completed work, findings, failures, tool use, side effects, open issues, next steps, persistent facts). Rust produces a generic deterministic placeholder with no semantic content preserved.
+- ✅ **LLM-driven compaction summaries**: `CompactionSummarizer` trait in `tenex-context` + `LlmCompactionSummarizer` impl in `tenex-agent` produce an 8-section summary (Task, Completed, Important Findings, Failures And Dead Ends, Tool Use And Side Effects, Open Issues, Next Steps, Persistent Facts) via the resolved model. Falls back to a deterministic placeholder if the LLM call fails.
 
 ### 3.2 Missing from Both (not a Rust gap specifically)
 - ✅ Rust has equivalent CompactionToolStrategy, ToolResultDecayStrategy, RemindersStrategy (all at parity via `tenex-context`)

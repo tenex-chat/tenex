@@ -5,9 +5,11 @@
 //! a single summary marker message. The system prompt at index 0 and a
 //! tail of recent turns are always preserved.
 
-use crate::strategies::{ProjectionContext, Strategy};
+use crate::strategies::{CompactionSummarizer, ProjectionContext, Strategy};
 use crate::tokens::estimate_message_tokens;
 use crate::types::Message;
+use async_trait::async_trait;
+use std::sync::Arc;
 
 const NAME: &str = "compaction";
 
@@ -17,23 +19,48 @@ pub struct CompactionToolStrategy {
     /// Always preserve at least this many tail messages (after the system
     /// prompt) when compacting.
     keep_tail: usize,
+    /// Optional LLM-backed summarizer. When present, compaction produces a
+    /// semantic 8-section summary. When absent, a deterministic placeholder
+    /// is used as a fallback.
+    summarizer: Option<Arc<dyn CompactionSummarizer>>,
 }
 
-impl Default for CompactionToolStrategy {
-    fn default() -> Self {
+impl CompactionToolStrategy {
+    pub fn new(summarizer: Option<Arc<dyn CompactionSummarizer>>) -> Self {
         Self {
             threshold_ratio: 0.8,
             keep_tail: 6,
+            summarizer,
         }
     }
 }
 
+impl Default for CompactionToolStrategy {
+    fn default() -> Self {
+        Self::new(None)
+    }
+}
+
+/// Build a deterministic placeholder for when no LLM summarizer is available
+/// or the LLM call fails.
+fn deterministic_placeholder(messages: &[Message], conversation_id_hint: Option<&str>) -> String {
+    let count = messages.len();
+    let hint = conversation_id_hint
+        .map(|id| format!(" Retrieve full transcript with `conversation_get {}`.", id))
+        .unwrap_or_default();
+    format!(
+        "[Compacted context: {} prior messages condensed to fit context window.{hint}]",
+        count
+    )
+}
+
+#[async_trait]
 impl Strategy for CompactionToolStrategy {
     fn name(&self) -> &'static str {
         NAME
     }
 
-    fn apply(&self, ctx: &mut ProjectionContext<'_>) -> anyhow::Result<()> {
+    async fn apply(&self, ctx: &mut ProjectionContext<'_>) -> anyhow::Result<()> {
         let max_tokens = ctx.model_profile.max_context_tokens;
         if max_tokens == 0 {
             return Ok(());
@@ -56,12 +83,19 @@ impl Strategy for CompactionToolStrategy {
             return Ok(());
         }
 
-        let collapsed_count = compact_end - compact_start;
+        let to_compact: Vec<Message> = ctx.messages[compact_start..compact_end].to_vec();
+        let collapsed_count = to_compact.len();
+
+        let summary_text = match &self.summarizer {
+            Some(s) => match s.summarize(&to_compact).await {
+                Ok(text) if !text.trim().is_empty() => text,
+                _ => deterministic_placeholder(&to_compact, None),
+            },
+            None => deterministic_placeholder(&to_compact, None),
+        };
+
         let summary = Message::User {
-            content: format!(
-                "[compacted summary: {} prior messages elided to fit context window]",
-                collapsed_count
-            ),
+            content: summary_text,
         };
 
         ctx.messages.splice(compact_start..compact_end, [summary]);
@@ -112,26 +146,32 @@ mod tests {
         }
     }
 
-    #[test]
-    fn no_compaction_below_threshold() {
+    #[tokio::test]
+    async fn no_compaction_below_threshold() {
         let p = profile(1000); // threshold = 800
                                // System(4 chars) + 3 user(4 chars each) = 5 tokens total — far below 800
         let mut ctx = ctx_with_messages("sys.", &["msg1", "msg2", "msg3"], &p);
-        CompactionToolStrategy::default().apply(&mut ctx).unwrap();
+        CompactionToolStrategy::default()
+            .apply(&mut ctx)
+            .await
+            .unwrap();
         assert_eq!(ctx.telemetry.compacted_count, 0);
         assert_eq!(ctx.messages.len(), 4); // unchanged
     }
 
-    #[test]
-    fn no_compaction_when_zero_max_tokens() {
+    #[tokio::test]
+    async fn no_compaction_when_zero_max_tokens() {
         let p = profile(0);
         let mut ctx = ctx_with_messages("sys", &["a", "b", "c"], &p);
-        CompactionToolStrategy::default().apply(&mut ctx).unwrap();
+        CompactionToolStrategy::default()
+            .apply(&mut ctx)
+            .await
+            .unwrap();
         assert_eq!(ctx.telemetry.compacted_count, 0);
     }
 
-    #[test]
-    fn compaction_collapses_middle_and_preserves_head_and_tail() {
+    #[tokio::test]
+    async fn compaction_collapses_middle_and_preserves_head_and_tail() {
         // Each message is 40 chars = 10 tokens (ceil(40/4)).
         // max_context_tokens = 100, threshold = 80.
         // System(10) + 9 user(10 each) = 100 tokens > 80 → triggers.
@@ -146,7 +186,10 @@ mod tests {
         let sys_content = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"; // 40 chars
         let mut ctx = ctx_with_messages(sys_content, &user_msgs, &p);
 
-        CompactionToolStrategy::default().apply(&mut ctx).unwrap();
+        CompactionToolStrategy::default()
+            .apply(&mut ctx)
+            .await
+            .unwrap();
 
         assert!(
             ctx.telemetry.compacted_count >= 1,
@@ -160,7 +203,7 @@ mod tests {
         );
         // A summary marker was inserted
         let has_summary = ctx.messages.iter().any(|m| {
-            matches!(m, Message::User { content } if content.starts_with("[compacted summary:"))
+            matches!(m, Message::User { content } if content.starts_with("[Compacted context:"))
         });
         assert!(has_summary, "summary marker must be present");
         // Strategy recorded in telemetry
@@ -170,8 +213,8 @@ mod tests {
             .contains(&"compaction".to_string()));
     }
 
-    #[test]
-    fn compaction_respects_keep_tail() {
+    #[tokio::test]
+    async fn compaction_respects_keep_tail() {
         // Ensure the last `keep_tail` messages are never compacted.
         // Build enough messages to trigger compaction.
         let p = profile(100);
@@ -187,7 +230,10 @@ mod tests {
             content: tag.to_string(),
         };
 
-        CompactionToolStrategy::default().apply(&mut ctx).unwrap();
+        CompactionToolStrategy::default()
+            .apply(&mut ctx)
+            .await
+            .unwrap();
 
         let tail_survived = ctx
             .messages
@@ -199,13 +245,16 @@ mod tests {
         );
     }
 
-    #[test]
-    fn no_compaction_when_too_few_messages() {
+    #[tokio::test]
+    async fn no_compaction_when_too_few_messages() {
         // keep_tail = 6, so total_msgs must be > 7 to have anything to compact.
         let p = profile(10); // very small budget
                              // Only 4 messages total — can't compact (1 + keep_tail = 7 > 4)
         let mut ctx = ctx_with_messages("s", &["a", "b", "c"], &p);
-        CompactionToolStrategy::default().apply(&mut ctx).unwrap();
+        CompactionToolStrategy::default()
+            .apply(&mut ctx)
+            .await
+            .unwrap();
         // Even if over threshold, can't compact fewer messages than required
         assert_eq!(ctx.telemetry.compacted_count, 0);
     }

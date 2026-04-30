@@ -47,8 +47,8 @@ fn append_user_at(store: &ConversationStore, record_id: &str, content: &str, tim
     store.append_message(CONVO_ID, &msg).expect("append");
 }
 
-#[test]
-fn active_tool_projects_as_pending_tool_pair_before_later_user_message() {
+#[tokio::test]
+async fn active_tool_projects_as_pending_tool_pair_before_later_user_message() {
     let mut store = open_store();
     append_user_at(&store, "run", "run sleep 60", 1_777_464_675);
     append_user_at(&store, "kill", "kill the shell", 1_777_464_685);
@@ -83,7 +83,9 @@ fn active_tool_projects_as_pending_tool_pair_before_later_user_message() {
         "system",
         &cacheable_profile(),
         &[],
+        None,
     )
+    .await
     .expect("project");
 
     assert!(

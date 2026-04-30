@@ -101,8 +101,8 @@ fn append_tool_result(store: &ConversationStore, call_id: &str, tool_name: &str,
     store.record_tool_message(CONVO_ID, &tool).expect("tool");
 }
 
-#[test]
-fn basic_projection_emits_system_prompt_and_anchor() {
+#[tokio::test]
+async fn basic_projection_emits_system_prompt_and_anchor() {
     let store = open_store();
     let profile = cacheable_profile();
 
@@ -113,7 +113,9 @@ fn basic_projection_emits_system_prompt_and_anchor() {
         "you are a helpful assistant",
         &profile,
         &[],
+        None,
     )
+    .await
     .expect("project");
 
     assert!(matches!(
@@ -128,8 +130,8 @@ fn basic_projection_emits_system_prompt_and_anchor() {
     assert!(has_system_anchor, "system anchor must be emitted");
 }
 
-#[test]
-fn no_decay_tagging_preserves_load_skill_and_delegate_results() {
+#[tokio::test]
+async fn no_decay_tagging_preserves_load_skill_and_delegate_results() {
     let store = open_store();
     let profile = cacheable_profile();
 
@@ -179,7 +181,9 @@ fn no_decay_tagging_preserves_load_skill_and_delegate_results() {
         "system",
         &profile,
         &tool_defs,
+        None,
     )
+    .await
     .expect("project");
 
     // Every load_skill and delegate result must remain verbatim (not
@@ -216,8 +220,8 @@ fn no_decay_tagging_preserves_load_skill_and_delegate_results() {
     );
 }
 
-#[test]
-fn unknown_tool_results_are_decay_eligible() {
+#[tokio::test]
+async fn unknown_tool_results_are_decay_eligible() {
     let store = open_store();
     let profile = cacheable_profile();
 
@@ -235,7 +239,9 @@ fn unknown_tool_results_are_decay_eligible() {
     }
 
     // Empty tool_defs: the tool is unknown.
-    let projection = project(&store, CONVO_ID, AGENT_PUBKEY, "system", &profile, &[]).expect("p");
+    let projection = project(&store, CONVO_ID, AGENT_PUBKEY, "system", &profile, &[], None)
+        .await
+        .expect("p");
 
     let decayed = projection
         .messages
@@ -308,8 +314,8 @@ fn record_turn_round_trip_writes_prompt_history() {
     assert_eq!(compaction["cache_observed"]["hit_tokens"], 10);
 }
 
-#[test]
-fn no_prompt_cache_emits_no_message_stream_breakpoint() {
+#[tokio::test]
+async fn no_prompt_cache_emits_no_message_stream_breakpoint() {
     let store = open_store();
     // Add some real message stream content so the test isn't trivial.
     append_user(&store, "rec-1", "first");
@@ -318,7 +324,9 @@ fn no_prompt_cache_emits_no_message_stream_breakpoint() {
 
     let profile = no_cache_profile();
     let projection =
-        project(&store, CONVO_ID, AGENT_PUBKEY, "system", &profile, &[]).expect("project");
+        project(&store, CONVO_ID, AGENT_PUBKEY, "system", &profile, &[], None)
+            .await
+            .expect("project");
 
     assert!(projection.messages.len() > 1, "stream is non-trivial");
     let stream_anchors = projection

@@ -2,6 +2,7 @@ mod agent_loop_hook;
 mod cassette;
 mod cassette_client;
 mod cassette_request;
+mod compaction;
 mod config;
 mod context_rig;
 mod emit;
@@ -682,42 +683,45 @@ async fn run() -> Result<()> {
     // Project conversation history. The projection produces interleaved
     // assistant + tool-result messages; the system prompt is dropped here
     // because rig handles it via `preamble`.
-    let history: Vec<RigMessage> = conv_store
-        .as_ref()
-        .and_then(|store| {
-            let model_profile = ModelProfile {
-                provider: resolved.provider.clone(),
-                model_id: resolved.model.clone(),
-                prompt_cache: resolved.provider == "anthropic",
-                ephemeral_reminders: false,
-                image_support: false,
-                max_context_tokens: 200_000,
-            };
-            let tool_defs: Vec<ToolDef> = Vec::new();
-            match tenex_context::project(
-                store,
-                &conversation_id,
-                &pubkey_hex,
-                &system_prompt,
-                &model_profile,
-                &tool_defs,
-            ) {
-                Ok(projection) => {
-                    let msgs: Vec<RigMessage> = projection
-                        .messages
-                        .into_iter()
-                        .filter(|m| !matches!(m, CtxMessage::System { .. }))
-                        .map(ctx_msg_to_rig)
-                        .collect();
-                    Some(msgs)
-                }
-                Err(e) => {
-                    eprintln!("[tenex-agent] Context projection failed: {e}");
-                    None
-                }
+    let history: Vec<RigMessage> = if let Some(store) = conv_store.as_ref() {
+        let model_profile = ModelProfile {
+            provider: resolved.provider.clone(),
+            model_id: resolved.model.clone(),
+            prompt_cache: resolved.provider == "anthropic",
+            ephemeral_reminders: false,
+            image_support: false,
+            max_context_tokens: 200_000,
+        };
+        let tool_defs: Vec<ToolDef> = Vec::new();
+        let summarizer: Option<Arc<dyn tenex_context::CompactionSummarizer>> =
+            Some(Arc::new(compaction::LlmCompactionSummarizer::new(
+                Arc::new(resolved.clone()),
+            )));
+        match tenex_context::project(
+            store,
+            &conversation_id,
+            &pubkey_hex,
+            &system_prompt,
+            &model_profile,
+            &tool_defs,
+            summarizer,
+        )
+        .await
+        {
+            Ok(projection) => projection
+                .messages
+                .into_iter()
+                .filter(|m| !matches!(m, CtxMessage::System { .. }))
+                .map(ctx_msg_to_rig)
+                .collect(),
+            Err(e) => {
+                eprintln!("[tenex-agent] Context projection failed: {e}");
+                Vec::new()
             }
-        })
-        .unwrap_or_default();
+        }
+    } else {
+        Vec::new()
+    };
 
     let initial_history = history;
     eprintln!(
