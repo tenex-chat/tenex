@@ -127,7 +127,8 @@ impl Tool for SendMessageTool {
 
         validate_target(&chat_id, thread_id.as_deref()).map_err(SendMessageError)?;
 
-        let store = BindingStore::open(self.bindings_path.clone());
+        let store = BindingStore::open(self.bindings_path.clone())
+            .map_err(|e| SendMessageError(format!("open transport bindings store: {e:#}")))?;
         let binding = store
             .get_telegram(&self.agent_pubkey, &args.channel_id)
             .ok_or_else(|| {

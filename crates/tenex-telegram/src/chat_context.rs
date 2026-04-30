@@ -6,8 +6,9 @@
 //! isolated — a single failed method does not void the rest of the context.
 
 use std::collections::HashMap;
-use std::sync::Mutex;
 use std::time::{Duration, Instant};
+
+use tokio::sync::Mutex;
 
 use crate::client::BotClient;
 use crate::types::TelegramChatMemberAdministrator;
@@ -104,9 +105,9 @@ impl TelegramChatContextService {
     ) -> ChatContext {
         let key = cache_key(chat_id, thread_id);
 
-        // Check cache under lock (sync scope — no await inside).
+        // Check cache under lock (no await inside the critical section).
         let cached = {
-            let guard = self.cache.lock().unwrap();
+            let guard = self.cache.lock().await;
             guard.get(&key).and_then(|entry| {
                 if entry.fetched_at.elapsed() < TTL {
                     Some(entry.context.clone())
@@ -120,7 +121,7 @@ impl TelegramChatContextService {
             ctx
         } else {
             let fetched = self.fetch_from_api(chat_id, thread_id).await;
-            let mut guard = self.cache.lock().unwrap();
+            let mut guard = self.cache.lock().await;
             guard.insert(
                 key,
                 CacheEntry {
