@@ -51,6 +51,14 @@ fn contains_todo_guidance() {
 }
 
 #[test]
+fn home_directory_guidance_uses_maintainable_workspace_language() {
+    let home = minimal_home();
+    let out = build_system_prompt(minimal_input(&home));
+    assert!(out.contains("scratch files"));
+    assert!(!out.contains("temporary files"));
+}
+
+#[test]
 fn identical_inputs_produce_byte_identical_output() {
     let home_a = minimal_home();
     let home_b = minimal_home();

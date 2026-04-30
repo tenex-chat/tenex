@@ -20,7 +20,7 @@ pub(crate) fn render_home_directory(info: &HomeDirectoryInfo) -> String {
         String::new(),
         format!("**Current contents:** {}", info.file_count),
         String::new(),
-        "Use this space for notes, helper scripts, temporary files, or any personal workspace needs. Use descriptive names for your files so you can easily find them later.".to_string(),
+        "Use this space for notes, helper scripts, scratch files, or any personal workspace needs. Use descriptive names for your files so you can easily find them later.".to_string(),
         String::new(),
         "**Shell env files:** Shell sessions automatically load environment variables from `.env` files with precedence `agent > project > global`. Your nsec is in your home directory's `.env` file as `NSEC`. `.env` contents are NOT injected into your prompt. Reference them in shell commands with normal shell expansion such as `$NSEC` or `$OPENAI_API_KEY`.".to_string(),
         String::new(),
