@@ -193,7 +193,6 @@ async fn run() -> Result<()> {
             preloaded_skills_block: None,
             telegram_channel_bindings: &telegram_channel_bindings,
             telegram_chat_context: None,
-            conversation_reminders: None,
             scheduled_tasks: &[],
             current_branch: current_branch.as_deref(),
             worktrees: &acp_worktrees,

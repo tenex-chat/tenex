@@ -23,6 +23,9 @@ import {
     availableScenarios,
     delegationWorkerPrompt,
     mockScenario,
+    nestedAgentsMdGlobInstruction,
+    nestedAgentsMdReadInstruction,
+    nestedAgentsMdRootInstruction,
     pmInstructions,
     rootAgentsMdInstruction,
     runScenario,
@@ -120,6 +123,23 @@ if (scenarioName === "root-agents-md") {
         path.join(rootAgentsMdWorktreeDir, "AGENTS.md"),
         `Worktree instruction: ${worktreeAgentsMdInstruction}\n`
     );
+}
+if (scenarioName === "nested-agents-md") {
+    mkdirSync(path.join(workspaceDir, "src", "nested"), { recursive: true });
+    writeFileSync(
+        path.join(workspaceDir, "AGENTS.md"),
+        `Root AGENTS instruction: ${nestedAgentsMdRootInstruction}\n`
+    );
+    writeFileSync(
+        path.join(workspaceDir, "src", "AGENTS.md"),
+        `src AGENTS instruction: ${nestedAgentsMdReadInstruction}\n`
+    );
+    writeFileSync(
+        path.join(workspaceDir, "src", "nested", "AGENTS.md"),
+        `nested AGENTS instruction: ${nestedAgentsMdGlobInstruction}\n`
+    );
+    writeFileSync(path.join(workspaceDir, "src", "file.txt"), "src file content\n");
+    writeFileSync(path.join(workspaceDir, "src", "nested", "file.txt"), "nested file content\n");
 }
 const mcpProbe =
     scenarioName === "mcp-tool-basic" || scenarioName === "mcp-resource-basic"
@@ -226,6 +246,7 @@ writeJson(path.join(agentsDir, `${pm.pubkey}.json`), {
             : scenarioName === "acp-delegation-mcp"
             ? { model: acpProbeModelName }
             : scenarioName === "fs-read-adjustment"
+              || scenarioName === "nested-agents-md"
             ? { model: llmModelName, skills: ["read-access"] }
             : { model: llmModelName },
 });
@@ -375,7 +396,10 @@ writeJson(
     }))
 );
 
-const requestRecords = readRequestRecords(requestRecordPath);
+const requestRecords = [
+    ...readRequestRecords(requestRecordPath),
+    ...readRequestRecords(cassetteRecordPath),
+];
 const mcpProbeRecords = mcpProbe ? readJsonLines(mcpProbe.logPath) : [];
 const verdicts = evaluate(scenarioName, mergedEvents, requestRecords, {
     pmPubkey: pm.pubkey,
@@ -417,6 +441,9 @@ process.exit(verdicts.every((v) => v.ok) ? 0 : 1);
 function resolveRelayCommand(configPath: string): { cmd: string; args: string[]; cwd: string } {
     const candidates = [
         process.env.TENEX_RELAY_BIN,
+        path.join(repoRoot, "relay", "dist", "tenex-relay-linux-amd64"),
+        path.join(repoRoot, "relay", "dist", "tenex-relay-x86_64"),
+        path.join(repoRoot, "relay", "dist", "tenex-relay-arm64"),
         path.join(launcherRelayDir, "dist", "tenex-relay-linux-amd64"),
         path.join(launcherRelayDir, "dist", "tenex-relay-x86_64"),
         path.join(launcherRelayDir, "dist", "tenex-relay-arm64"),
@@ -428,6 +455,10 @@ function resolveRelayCommand(configPath: string): { cmd: string; args: string[];
     }
     if (existsSync(launcherRelayDir)) {
         return { cmd: "go", args: ["run", ".", "-config", configPath], cwd: launcherRelayDir };
+    }
+    const repoRelayDir = path.join(repoRoot, "relay");
+    if (existsSync(repoRelayDir)) {
+        return { cmd: "go", args: ["run", ".", "-config", configPath], cwd: repoRelayDir };
     }
     throw new Error("Cannot locate TENEX launcher relay. Set TENEX_RELAY_BIN.");
 }

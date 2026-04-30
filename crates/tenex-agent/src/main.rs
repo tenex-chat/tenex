@@ -73,7 +73,7 @@ use tracing_opentelemetry::OpenTelemetrySpanExt;
 /// [`RecordingTool`] so every call rig dispatches lands in the shared
 /// [`ToolRecorder`] for post-turn persistence.
 // run_agent!(client, model, system, message, history, hook, tools)
-// run_agent!(client, model, system, message, history, hook, tools, |m| m.with_automatic_caching())
+// run_agent!(client, model, system, message, history, hook, tools, |m| m.with_prompt_caching())
 //
 // The optional seventh argument is a closure applied to the completion model before building the
 // agent. Use it to configure provider-specific options (e.g. Anthropic prompt caching). The
@@ -333,16 +333,26 @@ async fn run() -> Result<()> {
     // Resolve working directory and current branch.
     // The project_root is the canonical base path; working_dir may differ when
     // a worktree is created for the branch carried in the triggering event.
-    let project_root = agent_config
+    let configured_working_dir = agent_config
         .working_directory
         .as_deref()
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| {
             std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
         });
+    let project_root = project_instructions::infer_project_root(&configured_working_dir);
     let (resolved_working_dir, resolved_current_branch) =
-        tenex_project::resolve_working_dir(&project_root, envelope.metadata.branch.as_deref());
+        if envelope.metadata.branch.as_deref().is_some() {
+            tenex_project::resolve_working_dir(&project_root, envelope.metadata.branch.as_deref())
+        } else {
+            let current = tenex_project::current_branch(&configured_working_dir)
+                .ok()
+                .flatten()
+                .or_else(|| tenex_project::current_branch(&project_root).ok().flatten());
+            (configured_working_dir, current)
+        };
     let working_dir = resolved_working_dir.display().to_string();
+    let project_base_path = project_root.display().to_string();
     let current_branch = resolved_current_branch;
     let root_agents_md = project_instructions::read_root_agents_md(&project_root);
 
@@ -672,7 +682,7 @@ async fn run() -> Result<()> {
             category: agent_config.resolved_category(),
             instructions: agent_config.instructions.as_deref(),
             working_dir: &working_dir,
-            project_base_path: Some(&working_dir),
+            project_base_path: Some(&project_base_path),
             project_meta: Some(&project_meta),
             project_id: Some(&project_meta.d_tag),
             conversation_id: Some(&conversation_id),
@@ -683,7 +693,6 @@ async fn run() -> Result<()> {
             preloaded_skills_block: preloaded_skills_block.as_deref(),
             telegram_channel_bindings: &telegram_channel_bindings,
             telegram_chat_context,
-            conversation_reminders: conversation_reminders.as_ref(),
             scheduled_tasks: &scheduled_tasks_for_prompt,
             current_branch: current_branch.as_deref(),
             worktrees: &git_worktrees,
@@ -695,10 +704,18 @@ async fn run() -> Result<()> {
         .map(|s| load_todos_from_store(s, &conversation_id, &pubkey_hex))
         .unwrap_or_default();
     let todo_reminder = tools::format_todos_reminder(&initial_todos);
-    let user_message = if todo_reminder.is_empty() {
-        envelope.content.clone()
-    } else {
-        format!("{}\n\n{}", envelope.content, todo_reminder)
+    let conversation_reminders_text = conversation_reminders
+        .as_ref()
+        .and_then(|r| tenex_system_prompt::render_conversation_reminders(r));
+    let user_message = {
+        let mut msg = envelope.content.clone();
+        if !todo_reminder.is_empty() {
+            msg = format!("{msg}\n\n{todo_reminder}");
+        }
+        if let Some(ref reminders_text) = conversation_reminders_text {
+            msg = format!("{msg}\n\n{reminders_text}");
+        }
+        msg
     };
 
     // Shared todo state across tool calls (pre-seeded from persistence).
@@ -762,10 +779,7 @@ async fn run() -> Result<()> {
     // Initialize RAG store for the embedding tools.
     let embed_config: Option<EmbedConfig> = EmbedConfig::load_from_base_dir(&base_dir);
     let rag_store: Option<Arc<RagStore>> = embed_config.as_ref().and_then(|cfg| {
-        let db_path = base_dir
-            .join("projects")
-            .join(&project_meta.d_tag)
-            .join("embeddings.db");
+        let db_path = base_dir.join("embeddings.db");
         match RagStore::open(&db_path, cfg) {
             Ok(store) => Some(Arc::new(store)),
             Err(e) => {
@@ -1106,7 +1120,7 @@ async fn run() -> Result<()> {
                                     reqwest_middleware::ClientWithMiddleware,
                                 >,
                             >| m
-                                .map_inner(|inner| inner.with_automatic_caching())
+                                .map_inner(|inner| inner.with_prompt_caching())
                         )
                     } else {
                         let client = RecordingClient::new(
@@ -1122,7 +1136,7 @@ async fn run() -> Result<()> {
                             hook.clone(),
                             tools,
                             |m: RecordingModel<anthropic::completion::CompletionModel>| {
-                                m.map_inner(|inner| inner.with_automatic_caching())
+                                m.map_inner(|inner| inner.with_prompt_caching())
                             }
                         )
                     }

@@ -31,7 +31,7 @@ fn minimal_input<'a>(home: &'a HomeDirectoryInfo<'a>) -> BuildSystemPromptInput<
         preloaded_skills_block: None,
         telegram_channel_bindings: &[],
         telegram_chat_context: None,
-        conversation_reminders: None,
+
         scheduled_tasks: &[],
         current_branch: None,
         worktrees: &[],
@@ -84,7 +84,7 @@ fn identical_inputs_produce_byte_identical_output() {
         preloaded_skills_block: None,
         telegram_channel_bindings: &[],
         telegram_chat_context: None,
-        conversation_reminders: None,
+
         scheduled_tasks: &[],
         current_branch: None,
         worktrees: &[],
@@ -107,7 +107,7 @@ fn identical_inputs_produce_byte_identical_output() {
         preloaded_skills_block: None,
         telegram_channel_bindings: &[],
         telegram_chat_context: None,
-        conversation_reminders: None,
+
         scheduled_tasks: &[],
         current_branch: None,
         worktrees: &[],
@@ -137,7 +137,7 @@ fn orchestrator_category_skips_env_vars() {
         preloaded_skills_block: None,
         telegram_channel_bindings: &[],
         telegram_chat_context: None,
-        conversation_reminders: None,
+
         scheduled_tasks: &[],
         current_branch: None,
         worktrees: &[],
@@ -167,7 +167,7 @@ fn includes_root_agents_md_when_supplied() {
         preloaded_skills_block: None,
         telegram_channel_bindings: &[],
         telegram_chat_context: None,
-        conversation_reminders: None,
+
         scheduled_tasks: &[],
         current_branch: None,
         worktrees: &[],
@@ -196,7 +196,7 @@ fn project_context_renders_project_base_relative_cwd() {
         preloaded_skills_block: None,
         telegram_channel_bindings: &[],
         telegram_chat_context: None,
-        conversation_reminders: None,
+
         scheduled_tasks: &[],
         current_branch: None,
         worktrees: &[],
@@ -226,7 +226,7 @@ fn project_context_renders_exact_root_as_project_base() {
         preloaded_skills_block: None,
         telegram_channel_bindings: &[],
         telegram_chat_context: None,
-        conversation_reminders: None,
+
         scheduled_tasks: &[],
         current_branch: None,
         worktrees: &[],
@@ -259,7 +259,7 @@ fn project_context_does_not_rewrite_sibling_path() {
         preloaded_skills_block: None,
         telegram_channel_bindings: &[],
         telegram_chat_context: None,
-        conversation_reminders: None,
+
         scheduled_tasks: &[],
         current_branch: None,
         worktrees: &[],
@@ -289,7 +289,7 @@ fn project_context_renders_project_id_and_conversation_id() {
         preloaded_skills_block: None,
         telegram_channel_bindings: &[],
         telegram_chat_context: None,
-        conversation_reminders: None,
+
         scheduled_tasks: &[],
         current_branch: None,
         worktrees: &[],
@@ -327,7 +327,7 @@ fn project_context_renders_telegram_channel_bindings() {
         preloaded_skills_block: None,
         telegram_channel_bindings: &bindings,
         telegram_chat_context: None,
-        conversation_reminders: None,
+
         scheduled_tasks: &[],
         current_branch: None,
         worktrees: &[],

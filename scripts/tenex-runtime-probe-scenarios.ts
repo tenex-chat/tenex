@@ -25,6 +25,8 @@ export const availableScenarios = [
     "project-membership-reload",
     "shell-kill-duplicate",
     "root-agents-md",
+    "nested-agents-md",
+    "conversation-reminders",
 ] as const;
 
 export type ScenarioName = (typeof availableScenarios)[number];
@@ -56,6 +58,13 @@ export const worktreeAgentsMdInstruction = "WORKTREE_AGENTS_MD_SHOULD_NOT_APPEAR
 export const mcpResourceContentText = "MCP resource content: project-context-resource";
 export const mcpResourceUpdateId = "subscription-update-1";
 export const mcpResourceFinalText = "MCP subscription final: update received.";
+export const nestedAgentsMdRootInstruction = "ROOT_AGENTS_MD_NESTED_PROBE";
+export const nestedAgentsMdReadInstruction = "NESTED_AGENTS_MD_READ_PROBE";
+export const nestedAgentsMdGlobInstruction = "DEEP_AGENTS_MD_GLOB_PROBE";
+export const nestedAgentsMdCompletionText = "Nested AGENTS reminders observed.";
+export const convProbeFirstMessage = "CONVO_PROBE_FIRST";
+export const convReminderProbeMessage = "CONVO_REMINDER_PROBE";
+export const convReminderCompletionText = "conversation reminders observed.";
 
 const colorWords = [
     "red", "blue", "green", "yellow", "purple", "orange", "pink", "black",
@@ -150,6 +159,12 @@ export function scenarioProjectDtag(name: ScenarioName): string {
     if (name === "root-agents-md") {
         return "probe-root-agents-md";
     }
+    if (name === "nested-agents-md") {
+        return "probe-nested-agents-md";
+    }
+    if (name === "conversation-reminders") {
+        return "probe-conversation-reminders";
+    }
     return "probe-fs-read-adjustment";
 }
 
@@ -186,6 +201,12 @@ export function pmInstructions(name: ScenarioName): string {
     }
     if (name === "root-agents-md") {
         return "This scenario verifies root AGENTS.md prompt injection. Answer with the exact observed probe phrase.";
+    }
+    if (name === "nested-agents-md") {
+        return "This scenario verifies nested AGENTS.md reminders. Use fs_read first, then fs_glob after observing the nested instruction.";
+    }
+    if (name === "conversation-reminders") {
+        return "This scenario verifies that active project conversations appear as context. When asked to list active conversations, confirm what you observe by responding: conversation reminders observed.";
     }
     return "Use fs_read one file at a time. If the user corrects the requested total, follow the latest total before finishing.";
 }
@@ -417,6 +438,69 @@ export function mockScenario(name: ScenarioName): unknown {
         };
     }
 
+    if (name === "nested-agents-md") {
+        return {
+            responses: [
+                {
+                    agent: "pm",
+                    turn: 1,
+                    contains: "nested AGENTS check",
+                    toolCalls: [
+                        {
+                            name: "fs_read",
+                            args: {
+                                path: "src/file.txt",
+                                limit: 20,
+                                description: "read src file for nested AGENTS probe",
+                            },
+                        },
+                    ],
+                },
+                {
+                    agent: "pm",
+                    turn: 2,
+                    containsAll: [nestedAgentsMdReadInstruction, "src file content"],
+                    toolCalls: [
+                        {
+                            name: "fs_glob",
+                            args: {
+                                pattern: "src/nested/*.txt",
+                                head_limit: 10,
+                                description: "glob nested files for AGENTS probe",
+                            },
+                        },
+                    ],
+                },
+                {
+                    agent: "pm",
+                    turn: 3,
+                    containsAll: [nestedAgentsMdGlobInstruction, "src/nested/file.txt"],
+                    content: nestedAgentsMdCompletionText,
+                },
+            ],
+            defaultContent: "Nested AGENTS.md probe did not match expected tool reminder state.",
+        };
+    }
+
+    if (name === "conversation-reminders") {
+        return {
+            responses: [
+                {
+                    agent: "pm",
+                    turn: 1,
+                    contains: convReminderProbeMessage,
+                    content: convReminderCompletionText,
+                },
+                {
+                    agent: "pm",
+                    turn: 1,
+                    content: "first conversation done.",
+                },
+            ],
+            defaultContent: "Conversation reminders probe did not match expected runtime state.",
+        };
+    }
+
     const mockDelayMs = Number(process.env.TENEX_PROBE_MOCK_DELAY_MS ?? 750);
     return {
         defaultDelayMs: mockDelayMs,
@@ -468,9 +552,55 @@ export async function runScenario(name: ScenarioName, context: ScenarioContext):
         await runShellKillDuplicateProbe(context);
     } else if (name === "root-agents-md") {
         await runRootAgentsMdProbe(context);
+    } else if (name === "nested-agents-md") {
+        await runNestedAgentsMdProbe(context);
+    } else if (name === "conversation-reminders") {
+        await runConversationRemindersProbe(context);
     } else {
         await runFsReadAdjustmentProbe(context);
     }
+}
+
+async function runConversationRemindersProbe(context: ScenarioContext): Promise<void> {
+    const timeoutMs = Number(process.env.TENEX_PROBE_WAIT_MS ?? 10_000);
+
+    const firstEvent = context.sign(
+        {
+            kind: 1,
+            created_at: context.now(),
+            content: `${convProbeFirstMessage}: simple first message`,
+            tags: [["a", context.projectRef]],
+        },
+        context.userSecret
+    );
+    await Promise.all(context.pool.publish([context.relayUrl], firstEvent));
+    await waitForStoredMessage(
+        context.conversationDbPath,
+        firstEvent.id,
+        (message) => message.authorPubkey === context.pmPubkey,
+        timeoutMs,
+        "PM reply in first conversation",
+        context.delay
+    );
+
+    const reminderProbeEvent = context.sign(
+        {
+            kind: 1,
+            created_at: context.now(),
+            content: `${convReminderProbeMessage}: list active conversations`,
+            tags: [["a", context.projectRef]],
+        },
+        context.userSecret
+    );
+    await Promise.all(context.pool.publish([context.relayUrl], reminderProbeEvent));
+    await waitForStoredMessage(
+        context.conversationDbPath,
+        reminderProbeEvent.id,
+        (message) => message.authorPubkey === context.pmPubkey,
+        timeoutMs,
+        "PM reply in second conversation",
+        context.delay
+    );
 }
 
 function fsReadResponse(turn: number, contains: string, file: string): unknown {
@@ -704,6 +834,44 @@ async function runRootAgentsMdProbe(context: ScenarioContext): Promise<void> {
             ),
         Number(process.env.TENEX_PROBE_WAIT_MS ?? 10_000),
         "PM prompt with root AGENTS.md"
+    );
+}
+
+async function runNestedAgentsMdProbe(context: ScenarioContext): Promise<void> {
+    const timeoutMs = Number(process.env.TENEX_PROBE_WAIT_MS ?? 10_000);
+    const userEvent = context.sign(
+        {
+            kind: 1,
+            created_at: context.now(),
+            content: "nested AGENTS check",
+            tags: [["a", context.projectRef]],
+        },
+        context.userSecret
+    );
+    await Promise.all(context.pool.publish([context.relayUrl], userEvent));
+    await context.waitForObservedEvent(
+        context.events,
+        (event) => event.pubkey === context.pmPubkey && isFsReadTool(event, "src/file.txt"),
+        timeoutMs,
+        "nested AGENTS fs_read tool event"
+    );
+    await context.waitForObservedEvent(
+        context.events,
+        (event) => event.pubkey === context.pmPubkey && isFsGlobTool(event, "src/nested/*.txt"),
+        timeoutMs,
+        "nested AGENTS fs_glob tool event"
+    );
+    await context.waitForRequestRecord(
+        context.requestRecordPath,
+        (records) =>
+            records.some(
+                (record) =>
+                    record.agent === "pm" &&
+                    record.turn === 3 &&
+                    record.requestDebug.includes(nestedAgentsMdGlobInstruction)
+            ),
+        timeoutMs,
+        "PM request with nested AGENTS.md glob reminder"
     );
 }
 
@@ -979,6 +1147,14 @@ function isFsReadTool(event: Event, pathNeedle: string): boolean {
         event.kind === 1 &&
         hasTag(event, "tool", "fs_read") &&
         (tagValue(event, "tool-args") ?? "").includes(pathNeedle)
+    );
+}
+
+function isFsGlobTool(event: Event, patternNeedle: string): boolean {
+    return (
+        event.kind === 1 &&
+        hasTag(event, "tool", "fs_glob") &&
+        (tagValue(event, "tool-args") ?? "").includes(patternNeedle)
     );
 }
 

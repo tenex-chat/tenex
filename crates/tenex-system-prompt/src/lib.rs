@@ -15,8 +15,10 @@ use guidance::{
 };
 use home::render_home_directory;
 pub use home::{HomeDirectoryInfo, InjectedFile};
-use reminders::render_conversation_reminders;
-pub use reminders::{ConversationRemindersForPrompt, ConversationSummary, DelegationParentRef};
+pub use reminders::{
+    render_conversation_reminders, ConversationRemindersForPrompt, ConversationSummary,
+    DelegationParentRef,
+};
 use schedule::render_scheduled_tasks;
 pub use schedule::{humanize_cron, ScheduledTaskForPrompt};
 use telegram::{render_telegram_chat_context, TELEGRAM_DELIVERY_RULES};
@@ -48,8 +50,6 @@ pub struct BuildSystemPromptInput<'a> {
     /// Telegram chat context for Fragment 33. `None` when the triggering event
     /// did not arrive via Telegram.
     pub telegram_chat_context: Option<TelegramChatContextForPrompt>,
-    /// Active/recent conversation overlay. `None` skips the block entirely.
-    pub conversation_reminders: Option<&'a ConversationRemindersForPrompt>,
     /// Fragment 22: the agent's own scheduled tasks (recurring + one-off).
     pub scheduled_tasks: &'a [ScheduledTaskForPrompt],
     /// Current git branch for this agent's working directory.
@@ -82,7 +82,6 @@ pub fn build_system_prompt(input: BuildSystemPromptInput<'_>) -> String {
         preloaded_skills_block,
         telegram_channel_bindings,
         telegram_chat_context,
-        conversation_reminders,
         scheduled_tasks,
         current_branch,
         worktrees,
@@ -334,13 +333,6 @@ Creating a todo list helps you stay organized, shows your progress to observers,
         parts.push(render_scheduled_tasks(scheduled_tasks));
     }
 
-    // Conversation reminders overlay (active/recent conversations + delegation parent)
-    if let Some(reminders) = conversation_reminders {
-        if let Some(rendered) = render_conversation_reminders(reminders) {
-            parts.push(rendered);
-        }
-    }
-
     parts.join("\n\n")
 }
 
@@ -371,7 +363,6 @@ mod tests {
             preloaded_skills_block: None,
             telegram_channel_bindings: &[],
             telegram_chat_context: None,
-            conversation_reminders: None,
             scheduled_tasks: &[],
             current_branch,
             worktrees,

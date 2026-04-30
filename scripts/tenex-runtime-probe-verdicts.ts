@@ -11,6 +11,8 @@ import {
     acpProbeModelName,
     agentConfigUpdateModelName,
     agentConfigUpdateSkills,
+    convReminderCompletionText,
+    convReminderProbeMessage,
     delegationUserRequest,
     delegationWorkerCompletionText,
     extractColorChoice,
@@ -18,6 +20,10 @@ import {
     mcpResourceContentText,
     mcpResourceFinalText,
     mcpResourceUpdateId,
+    nestedAgentsMdCompletionText,
+    nestedAgentsMdGlobInstruction,
+    nestedAgentsMdReadInstruction,
+    nestedAgentsMdRootInstruction,
     rootAgentsMdInstruction,
     type MockRequestRecord,
     type ScenarioName,
@@ -84,6 +90,12 @@ export function evaluate(
     }
     if (name === "root-agents-md") {
         return [...commonVerdicts, ...evaluateRootAgentsMd(events, requestRecords, context)];
+    }
+    if (name === "nested-agents-md") {
+        return [...commonVerdicts, ...evaluateNestedAgentsMd(events, requestRecords, context)];
+    }
+    if (name === "conversation-reminders") {
+        return [...commonVerdicts, ...evaluateConversationReminders(events, requestRecords, context)];
     }
     return [...commonVerdicts, ...evaluateFsReadAdjustment(events, requestRecords, context)];
 }
@@ -189,6 +201,156 @@ function evaluateRootAgentsMd(
             name: "Agent completed after matching root instruction",
             ok: Boolean(completion),
             detail: "Expected PM completion from the mock response matched on the root AGENTS.md instruction.",
+        },
+    ];
+}
+
+function evaluateNestedAgentsMd(
+    events: Event[],
+    requestRecords: MockRequestRecord[],
+    context: EvaluateContext
+): Verdict[] {
+    const readToolEvent = events.find(
+        (event) =>
+            event.pubkey === context.pmPubkey &&
+            isFsReadTool(event) &&
+            (tagValue(event, "tool-args") ?? "").includes("src/file.txt")
+    );
+    const globToolEvent = events.find(
+        (event) =>
+            event.pubkey === context.pmPubkey &&
+            hasTag(event, "tool", "fs_glob") &&
+            (tagValue(event, "tool-args") ?? "").includes("src/nested/*.txt")
+    );
+    const readReminderRequest = requestRecords.find(
+        (record) =>
+            record.agent === "pm" &&
+            record.turn === 2 &&
+            record.requestDebug.includes(nestedAgentsMdReadInstruction)
+    );
+    const globReminderRequest = requestRecords.find(
+        (record) =>
+            record.agent === "pm" &&
+            record.turn === 3 &&
+            record.requestDebug.includes(nestedAgentsMdGlobInstruction)
+    );
+    const finalEvent = events.find(
+        (event) =>
+            event.kind === 1 &&
+            event.pubkey === context.pmPubkey &&
+            event.content.includes(nestedAgentsMdCompletionText)
+    );
+    const unexpectedDefault = events.find(
+        (event) =>
+            event.kind === 1 &&
+            event.pubkey === context.pmPubkey &&
+            event.content.includes("Nested AGENTS.md probe did not match expected tool reminder state")
+    );
+    const readRootMentions = countOccurrences(
+        readReminderRequest?.requestDebug ?? "",
+        nestedAgentsMdRootInstruction
+    );
+    const globRootMentions = countOccurrences(
+        globReminderRequest?.requestDebug ?? "",
+        nestedAgentsMdRootInstruction
+    );
+
+    return [
+        {
+            name: "Agent read project file before nested reminder",
+            ok: Boolean(readToolEvent),
+            detail: "Expected PM fs_read tool call for src/file.txt.",
+        },
+        {
+            name: "fs_read exposed nearest nested AGENTS.md reminder",
+            ok:
+                Boolean(readReminderRequest) &&
+                requestContainsAgentsMdReminder(readReminderRequest!.requestDebug),
+            detail: "Expected second PM request to contain src AGENTS.md reminder from fs_read.",
+        },
+        {
+            name: "Agent globbed deeper project file after first reminder",
+            ok: Boolean(globToolEvent),
+            detail: "Expected PM fs_glob tool call for src/nested/*.txt.",
+        },
+        {
+            name: "fs_glob exposed deeper nested AGENTS.md reminder",
+            ok:
+                Boolean(globReminderRequest) &&
+                requestContainsAgentsMdReminder(globReminderRequest!.requestDebug),
+            detail: "Expected third PM request to contain src/nested AGENTS.md reminder from fs_glob.",
+        },
+        {
+            name: "Root AGENTS.md was not repeated by tool reminders",
+            ok:
+                Boolean(readReminderRequest) &&
+                Boolean(globReminderRequest) &&
+                readRootMentions === 1 &&
+                globRootMentions === 1,
+            detail: `Expected root probe phrase once from the system prompt only; saw turn2=${readRootMentions}, turn3=${globRootMentions}.`,
+        },
+        {
+            name: "Agent completed after nested reminders",
+            ok: Boolean(finalEvent),
+            detail: "Expected final PM completion after observing fs_read and fs_glob AGENTS.md reminders.",
+        },
+        {
+            name: "No mock fallback responses were used",
+            ok: !unexpectedDefault,
+            detail: "A fallback response means a model turn missed the expected AGENTS.md reminder state.",
+        },
+    ];
+}
+
+function evaluateConversationReminders(
+    events: Event[],
+    requestRecords: MockRequestRecord[],
+    context: EvaluateContext
+): Verdict[] {
+    const reminderRequest = requestRecords.find(
+        (record) =>
+            record.agent === "pm" &&
+            record.requestDebug.includes(convReminderProbeMessage) &&
+            record.requestDebug.includes("<conversation-reminders>")
+    );
+    const probeUserEvent = events.find(
+        (event) => event.kind === 1 && event.content.includes(convReminderProbeMessage)
+    );
+    const completion = events.find(
+        (event) =>
+            event.kind === 1 &&
+            event.pubkey === context.pmPubkey &&
+            event.created_at >= (probeUserEvent?.created_at ?? 0) &&
+            !hasTag(event, "tool") &&
+            hasTag(event, "status", "completed")
+    );
+    const unexpectedDefault = events.find(
+        (event) =>
+            event.kind === 1 &&
+            event.pubkey === context.pmPubkey &&
+            event.content.includes("Conversation reminders probe did not match expected runtime state")
+    );
+
+    return [
+        {
+            name: "Conversation reminders block injected into user message",
+            ok: Boolean(reminderRequest),
+            detail: "Expected PM request for CONVO_REMINDER_PROBE to contain <conversation-reminders> block.",
+        },
+        {
+            name: "Active conversations listed in reminders",
+            ok: Boolean(reminderRequest?.requestDebug.includes("Active conversations in this project:")),
+            detail: "Expected <conversation-reminders> to list active conversations with the header text.",
+        },
+        {
+            name: "Agent completed second conversation",
+            ok: Boolean(completion),
+            detail: "Expected PM to publish a status=completed reply after the CONVO_REMINDER_PROBE message.",
+        },
+        {
+            name: "No mock fallback responses were used",
+            ok: !unexpectedDefault,
+            detail: "A fallback response means a model turn missed the expected conversation reminders state.",
         },
     ];
 }
@@ -905,6 +1067,23 @@ function toolArgPath(event: Event): string | undefined {
     } catch {
         return undefined;
     }
+}
+
+function requestContainsAgentsMdReminder(requestDebug: string): boolean {
+    return requestDebug.includes("system-reminder") && requestDebug.includes("agents-md");
+}
+
+function countOccurrences(value: string, needle: string): number {
+    if (needle.length === 0) {
+        return 0;
+    }
+    let count = 0;
+    let index = value.indexOf(needle);
+    while (index >= 0) {
+        count += 1;
+        index = value.indexOf(needle, index + needle.length);
+    }
+    return count;
 }
 
 function hasTag(event: Event, name: string, value?: string): boolean {

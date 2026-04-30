@@ -24,7 +24,7 @@ pub struct ConversationRemindersForPrompt {
     pub delegation_parent: Option<DelegationParentRef>,
 }
 
-pub(crate) fn render_conversation_reminders(
+pub fn render_conversation_reminders(
     reminders: &ConversationRemindersForPrompt,
 ) -> Option<String> {
     let has_active = !reminders.active_conversations.is_empty();
