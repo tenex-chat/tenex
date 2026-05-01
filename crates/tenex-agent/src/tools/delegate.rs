@@ -121,7 +121,7 @@ impl Tool for DelegateTool {
             display_name: None,
         };
 
-        let ral = self.state.meta.lock().ral;
+        let ral = self.state.meta.lock().unwrap().ral;
         let ctx = self.state.build_ctx_with_team(ral, resolved_team);
 
         let delegation_intent = DelegationIntent {

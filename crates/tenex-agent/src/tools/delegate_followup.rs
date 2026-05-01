@@ -177,7 +177,7 @@ impl Tool for DelegateFollowupTool {
         let (recipient, recipient_label) =
             self.resolve_recipient(args.recipient.as_deref(), route.as_ref())?;
 
-        let ral = self.state.meta.lock().ral;
+        let ral = self.state.meta.lock().unwrap().ral;
         let ctx = self.state.build_ctx(ral);
 
         let intent = DelegationIntent {

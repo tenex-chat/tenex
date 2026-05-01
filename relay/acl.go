@@ -19,21 +19,11 @@ import (
 // client was not yet whitelisted. Stored so we can backfill when they are later
 // added to the whitelist.
 type deferredSub struct {
-	ws        *khatru.WebSocket
-	id        string
-	filter    nostr.Filter
-	ctx       context.Context // reqCtx — canceled on CLOSE or disconnect
-	createdAt time.Time       // age-based expiry guards against accumulation when no 14199 ever arrives
+	ws     *khatru.WebSocket
+	id     string
+	filter nostr.Filter
+	ctx    context.Context // reqCtx — canceled on CLOSE or disconnect
 }
-
-// deferredSubMaxAge bounds how long a deferred subscription stays in memory
-// when its owner never publishes a whitelisting event.
-const deferredSubMaxAge = 30 * time.Second
-
-// backfillDrainTimeout caps how long the drain goroutine waits to drain a
-// query channel after the parent context has been canceled. Without it, a
-// stuck event store could leak goroutines indefinitely.
-const backfillDrainTimeout = 5 * time.Second
 
 // ACL manages a pubkey whitelist for read access control.
 // Admin pubkeys (from config) are always whitelisted. Publishing a kind 14199
@@ -236,7 +226,6 @@ func (a *ACL) ProcessWhitelistEvent(event *nostr.Event) {
 	}
 
 	// Pull deferred subs for newly whitelisted pubkeys while still under lock.
-	a.pruneExpiredDeferredLocked(time.Now())
 	toBackfill := make(map[string][]deferredSub, len(newlyWhitelisted))
 	for _, pk := range newlyWhitelisted {
 		if subs := a.deferred[pk]; len(subs) > 0 {
@@ -253,13 +242,9 @@ func (a *ACL) ProcessWhitelistEvent(event *nostr.Event) {
 }
 
 func (a *ACL) backfillSubs(pubkey string, subs []deferredSub) {
-	now := time.Now()
 	for _, sub := range subs {
 		if sub.ctx.Err() != nil {
 			continue // subscription already closed or connection dropped
-		}
-		if now.Sub(sub.createdAt) > deferredSubMaxAge {
-			continue // owner took too long; the client will resubscribe if still interested
 		}
 		ch, err := a.storage.QueryEvents(sub.ctx, sub.filter)
 		if err != nil {
@@ -269,59 +254,16 @@ func (a *ACL) backfillSubs(pubkey string, subs []deferredSub) {
 		count := 0
 		for event := range ch {
 			if sub.ctx.Err() != nil {
-				drainBackfillChannel(ch)
+				go func() {
+					for range ch {
+					}
+				}()
 				break
 			}
 			sub.ws.WriteJSON(nostr.EventEnvelope{SubscriptionID: &sub.id, Event: *event})
 			count++
 		}
 		log.Printf("[acl] backfilled %d event(s) to %s... (sub %s)", count, truncatePubkey(pubkey), sub.id)
-	}
-}
-
-// drainBackfillChannel consumes any remaining events from a backfill query
-// channel after its associated subscription context was canceled. The drain is
-// bounded by backfillDrainTimeout so a wedged event store cannot leak goroutines.
-func drainBackfillChannel(ch <-chan *nostr.Event) {
-	go func() {
-		drainCtx, cancel := context.WithTimeout(context.Background(), backfillDrainTimeout)
-		defer cancel()
-		for {
-			select {
-			case _, ok := <-ch:
-				if !ok {
-					return
-				}
-			case <-drainCtx.Done():
-				log.Printf("[acl] abandoned backfill drain after %s", backfillDrainTimeout)
-				return
-			}
-		}
-	}()
-}
-
-// pruneExpiredDeferredLocked drops deferred subscriptions older than
-// deferredSubMaxAge. Caller must hold a.mu for writing.
-func (a *ACL) pruneExpiredDeferredLocked(now time.Time) {
-	for pk, subs := range a.deferred {
-		kept := subs[:0]
-		for _, sub := range subs {
-			if sub.ctx.Err() == nil && now.Sub(sub.createdAt) <= deferredSubMaxAge {
-				kept = append(kept, sub)
-			}
-		}
-		// Clear the tail of the backing array so dropped entries' websocket,
-		// context, and filter pointers become unreachable and GC-eligible.
-		// Without this, reusing subs[:0] keeps those pointers alive in the
-		// underlying array until the slot is later overwritten.
-		for i := len(kept); i < len(subs); i++ {
-			subs[i] = deferredSub{}
-		}
-		if len(kept) == 0 {
-			delete(a.deferred, pk)
-		} else {
-			a.deferred[pk] = kept
-		}
 	}
 }
 
@@ -386,13 +328,11 @@ func (a *ACL) OverwriteFilterHook(ctx context.Context, filter *nostr.Filter) {
 	filterCopy := *filter // copy before LimitZero is set
 
 	a.mu.Lock()
-	a.pruneExpiredDeferredLocked(time.Now())
 	a.deferred[pubkey] = append(a.deferred[pubkey], deferredSub{
-		ws:        ws,
-		id:        subID,
-		filter:    filterCopy,
-		ctx:       ctx,
-		createdAt: time.Now(),
+		ws:     ws,
+		id:     subID,
+		filter: filterCopy,
+		ctx:    ctx,
 	})
 	a.mu.Unlock()
 

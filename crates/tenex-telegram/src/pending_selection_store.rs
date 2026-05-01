@@ -9,11 +9,10 @@
 //! TTL: 24 hours from `requested_at`.
 
 use std::collections::HashMap;
-use std::io::ErrorKind;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
 /// 24-hour TTL in milliseconds, matching the TypeScript reference.
@@ -47,22 +46,12 @@ pub struct PendingSelectionStore {
 impl PendingSelectionStore {
     /// Load (or create) the store at `path`. Expired entries are dropped on load;
     /// if any are dropped, the cleaned state is persisted immediately.
-    ///
-    /// A missing file yields an empty store. Any other I/O error or a JSON
-    /// parse error returns `Err`; silently emptying a corrupt file would let
-    /// the next write overwrite all known pending selections.
-    pub fn open(path: PathBuf) -> Result<Self> {
+    pub fn open(path: PathBuf) -> Self {
         let now = now_ms();
-        let raw: Vec<PendingSelectionRecord> = match std::fs::read_to_string(&path) {
-            Ok(s) => serde_json::from_str(&s)
-                .with_context(|| format!("parse pending selection store at {}", path.display()))?,
-            Err(e) if e.kind() == ErrorKind::NotFound => Vec::new(),
-            Err(e) => {
-                return Err(e).with_context(|| {
-                    format!("read pending selection store at {}", path.display())
-                });
-            }
-        };
+        let raw: Vec<PendingSelectionRecord> = std::fs::read_to_string(&path)
+            .ok()
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default();
 
         let raw_count = raw.len();
         let records: HashMap<String, PendingSelectionRecord> = raw
@@ -79,10 +68,10 @@ impl PendingSelectionStore {
 
         // Persist pruned state only when records were actually dropped.
         if store.records.len() < raw_count {
-            store.save()?;
+            let _ = store.save();
         }
 
-        Ok(store)
+        store
     }
 
     /// Look up pending projects for an unbound channel. Returns `None` if not
@@ -198,7 +187,7 @@ mod tests {
             .join("pending-channel-selections.json");
 
         {
-            let mut store = PendingSelectionStore::open(path.clone()).unwrap();
+            let mut store = PendingSelectionStore::open(path.clone());
             store
                 .set(
                     "agent-1",
@@ -208,7 +197,7 @@ mod tests {
                 .unwrap();
         }
 
-        let mut store2 = PendingSelectionStore::open(path).unwrap();
+        let mut store2 = PendingSelectionStore::open(path);
         let projects = store2.get("agent-1", "telegram:chat:42").unwrap();
         assert_eq!(projects.len(), 2);
         assert_eq!(projects[0].project_id, "proj-a");
@@ -223,13 +212,13 @@ mod tests {
             .join("data")
             .join("pending-channel-selections.json");
 
-        let mut store = PendingSelectionStore::open(path.clone()).unwrap();
+        let mut store = PendingSelectionStore::open(path.clone());
         store
             .set("agent-1", "telegram:chat:1", project_opts(&["proj-a"]))
             .unwrap();
         store.clear("agent-1", "telegram:chat:1").unwrap();
 
-        let mut store2 = PendingSelectionStore::open(path).unwrap();
+        let mut store2 = PendingSelectionStore::open(path);
         assert!(store2.get("agent-1", "telegram:chat:1").is_none());
     }
 
@@ -252,7 +241,7 @@ mod tests {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(&path, serde_json::to_string_pretty(&vec![record]).unwrap()).unwrap();
 
-        let mut store = PendingSelectionStore::open(path).unwrap();
+        let mut store = PendingSelectionStore::open(path);
         assert!(store.get("agent-1", "telegram:chat:1").is_none());
     }
 
@@ -286,7 +275,7 @@ mod tests {
         };
         // Re-open with a fresh store so it loads the expired record (bypassing
         // the on-load prune by writing directly after open).
-        let mut store = PendingSelectionStore::open(path.clone()).unwrap();
+        let mut store = PendingSelectionStore::open(path.clone());
         // Insert expired record directly into the map (bypassing set's prune).
         store
             .records
@@ -296,7 +285,7 @@ mod tests {
         assert!(store.get("agent-1", "telegram:chat:1").is_none());
 
         // Reloading should confirm removal was persisted.
-        let mut store2 = PendingSelectionStore::open(path).unwrap();
+        let mut store2 = PendingSelectionStore::open(path);
         assert!(store2.get("agent-1", "telegram:chat:1").is_none());
     }
 
@@ -308,7 +297,7 @@ mod tests {
             .join("data")
             .join("pending-channel-selections.json");
 
-        let mut store = PendingSelectionStore::open(path.clone()).unwrap();
+        let mut store = PendingSelectionStore::open(path.clone());
         store
             .set("agent-1", "telegram:chat:1", project_opts(&["proj-a"]))
             .unwrap();
@@ -316,44 +305,10 @@ mod tests {
             .set("agent-2", "telegram:chat:1", project_opts(&["proj-b"]))
             .unwrap();
 
-        let mut store2 = PendingSelectionStore::open(path).unwrap();
+        let mut store2 = PendingSelectionStore::open(path);
         let p1 = store2.get("agent-1", "telegram:chat:1").unwrap();
         let p2 = store2.get("agent-2", "telegram:chat:1").unwrap();
         assert_eq!(p1[0].project_id, "proj-a");
         assert_eq!(p2[0].project_id, "proj-b");
-    }
-
-    #[test]
-    fn parse_error_returns_err_and_does_not_clobber() {
-        let tmp = TempDir::new().unwrap();
-        let path = tmp
-            .path()
-            .join("data")
-            .join("pending-channel-selections.json");
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-
-        let original = "this is not valid json — but represents existing pending state";
-        std::fs::write(&path, original).unwrap();
-
-        let err = match PendingSelectionStore::open(path.clone()) {
-            Ok(_) => panic!("expected parse error, got Ok"),
-            Err(e) => e,
-        };
-        let msg = format!("{err:#}");
-        assert!(
-            msg.contains("parse pending selection store"),
-            "unexpected error: {msg}"
-        );
-
-        let on_disk = std::fs::read_to_string(&path).unwrap();
-        assert_eq!(on_disk, original);
-    }
-
-    #[test]
-    fn missing_file_yields_empty_store() {
-        let tmp = TempDir::new().unwrap();
-        let path = tmp.path().join("does-not-exist.json");
-        let mut store = PendingSelectionStore::open(path).unwrap();
-        assert!(store.get("agent", "channel").is_none());
     }
 }

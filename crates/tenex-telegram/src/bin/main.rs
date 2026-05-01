@@ -18,7 +18,7 @@
 
 use std::collections::HashMap;
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use anyhow::{Context, Result};
@@ -27,7 +27,6 @@ use tenex_telegram::binding::BindingStore;
 use tenex_telegram::discovery::discover_registrations;
 use tenex_telegram::pending_selection_store::PendingSelectionStore;
 use tenex_telegram::poller::Poller;
-use tokio::sync::Mutex;
 use tracing::{error, info, warn};
 
 #[derive(Debug)]
@@ -76,19 +75,15 @@ async fn main() -> Result<()> {
         "discovered Telegram-enabled agents"
     );
 
-    let channel_bindings = Arc::new(Mutex::new(
-        BindingStore::open(base_dir.join("data").join("transport-bindings.json"))
-            .context("open transport bindings store")?,
-    ));
+    let channel_bindings = Arc::new(Mutex::new(BindingStore::open(
+        base_dir.join("data").join("transport-bindings.json"),
+    )));
 
-    let pending_selections = Arc::new(Mutex::new(
-        PendingSelectionStore::open(
-            base_dir
-                .join("data")
-                .join("pending-channel-selections.json"),
-        )
-        .context("open pending selection store")?,
-    ));
+    let pending_selections = Arc::new(Mutex::new(PendingSelectionStore::open(
+        base_dir
+            .join("data")
+            .join("pending-channel-selections.json"),
+    )));
 
     // One bot token identifies exactly one agent. Project routing is resolved
     // later from the Telegram channel binding.

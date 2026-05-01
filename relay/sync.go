@@ -250,11 +250,6 @@ func (s *Syncer) profileSyncLoop(ctx context.Context, relay *nostr.Relay, author
 	}
 }
 
-// profileBatchTimeout caps how long a single profile batch query may run
-// before being abandoned. Without it, an unresponsive upstream relay would
-// stall the entire profile refresh loop for that connection.
-const profileBatchTimeout = 30 * time.Second
-
 // syncProfiles fetches kind:0 profiles for the given authors, replacing any existing ones
 func (s *Syncer) syncProfiles(ctx context.Context, relay *nostr.Relay, authors []string) {
 	log.Printf("[sync] fetching profiles for %d authors", len(authors))
@@ -273,7 +268,10 @@ func (s *Syncer) syncProfiles(ctx context.Context, relay *nostr.Relay, authors [
 		}
 		batch := authors[i:end]
 
-		events, err := s.queryProfileBatch(ctx, relay, batch)
+		events, err := relay.QuerySync(ctx, nostr.Filter{
+			Authors: batch,
+			Kinds:   []int{0},
+		})
 		if err != nil {
 			log.Printf("[sync] profile batch query failed: %v", err)
 			continue
@@ -287,17 +285,6 @@ func (s *Syncer) syncProfiles(ctx context.Context, relay *nostr.Relay, authors [
 		}
 		log.Printf("[sync] stored %d/%d profiles (batch %d-%d)", stored, len(events), i, end)
 	}
-}
-
-// queryProfileBatch runs one profile batch query under a per-iteration timeout
-// derived from the parent context.
-func (s *Syncer) queryProfileBatch(ctx context.Context, relay *nostr.Relay, batch []string) ([]*nostr.Event, error) {
-	batchCtx, cancel := context.WithTimeout(ctx, profileBatchTimeout)
-	defer cancel()
-	return relay.QuerySync(batchCtx, nostr.Filter{
-		Authors: batch,
-		Kinds:   []int{0},
-	})
 }
 
 // storeEvent saves an event, using ReplaceEvent for replaceable/addressable kinds.

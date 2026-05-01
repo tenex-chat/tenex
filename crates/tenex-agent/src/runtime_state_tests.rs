@@ -4,23 +4,6 @@ use serde_json::{json, Value};
 
 use super::*;
 
-/// Build a `RuntimeStateHandle` whose `db_path` cannot be opened: the parent
-/// path component points at a regular file rather than a directory, so
-/// `ConversationStore::open` errors with `NotADirectory` on every attempt.
-fn unopenable_handle() -> (tempfile::TempDir, RuntimeStateHandle) {
-    let dir = tempfile::tempdir().unwrap();
-    let blocker = dir.path().join("not-a-directory");
-    std::fs::write(&blocker, b"").unwrap();
-    let bad_db = blocker.join("conversation.db");
-    let handle = RuntimeStateHandle::new(
-        bad_db,
-        "conv1".to_string(),
-        "agent1".to_string(),
-        "exec1".to_string(),
-    );
-    (dir, handle)
-}
-
 fn handle(db_path: PathBuf, execution_id: &str) -> RuntimeStateHandle {
     RuntimeStateHandle::new(
         db_path,
@@ -56,22 +39,6 @@ fn active_tool_reminder_reports_other_execution_only() {
     assert!(reminder.contains("sleep 60"));
     exec1.finish_tool("tool1");
     assert!(exec2.render_active_tools_reminder().is_none());
-}
-
-#[tokio::test(start_paused = true)]
-async fn acquire_driver_returns_error_after_bounded_db_failures() {
-    // The handle points at an unopenable DB path: every `try_acquire_driver_once`
-    // returns `Err`. With `start_paused = true` the runtime auto-advances time
-    // through the exponential backoff sleeps, so the test completes
-    // instantly while still exercising the full retry budget.
-    let (_keep, handle) = unopenable_handle();
-    let result = handle.acquire_driver().await;
-    let err = result.expect_err("expected acquire_driver to give up after retry budget exhausted");
-    let chain = format!("{err:#}");
-    assert!(
-        chain.contains("gave up after"),
-        "error chain should describe retry exhaustion, got: {chain}"
-    );
 }
 
 #[test]

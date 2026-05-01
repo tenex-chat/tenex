@@ -1,12 +1,11 @@
 use std::path::Path;
+use std::sync::Mutex;
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result};
 use async_trait::async_trait;
-use parking_lot::Mutex;
 use rusqlite::Connection;
-use tracing::warn;
 
-use crate::schema::{self, set_vector_dim};
+use crate::schema;
 use crate::store::{ChunkMeta, VectorMatch, VectorStore};
 
 pub struct SqliteStore {
@@ -48,32 +47,18 @@ impl VectorStore for SqliteStore {
         vector: &[f32],
         meta: &ChunkMeta,
     ) -> Result<()> {
-        if vector.is_empty() {
-            return Err(anyhow!("refuse to upsert doc '{id}' with empty vector"));
-        }
-        let dim = vector.len() as i64;
         let blob = floats_to_bytes(vector);
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs() as i64;
 
-        let meta_json = meta.meta_json.as_ref().map(|v| v.to_string());
+        let meta_json = match &meta.meta_json {
+            Some(v) => Some(v.to_string()),
+            None => None,
+        };
 
-        let conn = self.conn.lock();
-        // Pin/validate the embedding dimension before any row write.
-        // First write on a fresh DB pins it; later writes must match.
-        match schema::read_vector_dim(&conn)? {
-            Some(existing) if existing != dim => {
-                return Err(anyhow!(
-                    "embedding dimension mismatch on upsert of '{id}': \
-                     vector has {dim} components but embeddings.db is pinned at {existing}"
-                ));
-            }
-            Some(_) => {}
-            None => set_vector_dim(&conn, dim).context("pin vector dimension on first upsert")?,
-        }
-
+        let conn = self.conn.lock().unwrap();
         conn.execute(
             "INSERT INTO doc_meta (
                  id, collection, content, title, vector_blob, created_at,
@@ -118,10 +103,6 @@ impl VectorStore for SqliteStore {
         collections: &[&str],
         limit: usize,
     ) -> Result<Vec<VectorMatch>> {
-        if query_vector.is_empty() {
-            return Err(anyhow!("refuse to search with an empty query vector"));
-        }
-
         let placeholders: Vec<String> = (1..=collections.len()).map(|i| format!("?{i}")).collect();
         let sql = format!(
             "SELECT id, collection, content, title, vector_blob,
@@ -131,23 +112,7 @@ impl VectorStore for SqliteStore {
             placeholders.join(", ")
         );
 
-        let conn = self.conn.lock();
-
-        // Validate the query vector matches the pinned dimension. A
-        // mismatch is a programmer error (caller used a different
-        // embedding model than the one this DB was built with) and we
-        // refuse to silently degrade by scoring against nothing.
-        if let Some(pinned) = schema::read_vector_dim(&conn)? {
-            if pinned != query_vector.len() as i64 {
-                return Err(anyhow!(
-                    "embedding dimension mismatch on search: query vector has {} components \
-                     but embeddings.db is pinned at {}",
-                    query_vector.len(),
-                    pinned
-                ));
-            }
-        }
-
+        let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(&sql).context("prepare search statement")?;
 
         let params: Vec<&dyn rusqlite::ToSql> = collections
@@ -192,63 +157,43 @@ impl VectorStore for SqliteStore {
         drop(stmt);
         drop(conn);
 
-        let mut scored: Vec<VectorMatch> = Vec::with_capacity(rows.len());
-        for (
-            id,
-            collection,
-            content,
-            title,
-            blob,
-            source_kind,
-            source_id,
-            seq_start,
-            seq_end,
-            chunk_index,
-            meta_json_str,
-        ) in rows
-        {
-            let doc_vec = match bytes_to_floats(&blob) {
-                Ok(v) => v,
-                Err(e) => {
-                    warn!(
-                        doc_id = %id,
-                        collection = %collection,
-                        error = %e,
-                        "skipping doc with corrupt vector_blob"
-                    );
-                    continue;
-                }
-            };
-            if doc_vec.len() != query_vector.len() {
-                warn!(
-                    doc_id = %id,
-                    collection = %collection,
-                    doc_dim = doc_vec.len(),
-                    query_dim = query_vector.len(),
-                    "skipping doc with mismatched embedding dimension"
-                );
-                continue;
-            }
-            let Some(score) = cosine_similarity(query_vector, &doc_vec) else {
-                continue;
-            };
-            let meta_json = meta_json_str
-                .as_deref()
-                .and_then(|s| serde_json::from_str(s).ok());
-            scored.push(VectorMatch {
-                id,
-                collection,
-                content,
-                title,
-                score,
-                source_kind,
-                source_id,
-                seq_start,
-                seq_end,
-                chunk_index,
-                meta_json,
-            });
-        }
+        let mut scored: Vec<VectorMatch> = rows
+            .into_iter()
+            .filter_map(
+                |(
+                    id,
+                    collection,
+                    content,
+                    title,
+                    blob,
+                    source_kind,
+                    source_id,
+                    seq_start,
+                    seq_end,
+                    chunk_index,
+                    meta_json_str,
+                )| {
+                    let doc_vec = bytes_to_floats(&blob);
+                    let score = cosine_similarity(query_vector, &doc_vec)?;
+                    let meta_json = meta_json_str
+                        .as_deref()
+                        .and_then(|s| serde_json::from_str(s).ok());
+                    Some(VectorMatch {
+                        id,
+                        collection,
+                        content,
+                        title,
+                        score,
+                        source_kind,
+                        source_id,
+                        seq_start,
+                        seq_end,
+                        chunk_index,
+                        meta_json,
+                    })
+                },
+            )
+            .collect();
 
         scored.sort_by(|a, b| {
             b.score
@@ -260,7 +205,7 @@ impl VectorStore for SqliteStore {
     }
 
     async fn list_collections(&self) -> anyhow::Result<Vec<String>> {
-        let conn = self.conn.lock();
+        let conn = self.conn.lock().unwrap();
         let mut stmt = conn
             .prepare("SELECT DISTINCT collection FROM doc_meta ORDER BY collection")
             .context("prepare list_collections")?;
@@ -273,7 +218,7 @@ impl VectorStore for SqliteStore {
     }
 
     async fn delete_collection(&self, collection: &str) -> anyhow::Result<usize> {
-        let conn = self.conn.lock();
+        let conn = self.conn.lock().unwrap();
         let n = conn
             .execute(
                 "DELETE FROM doc_meta WHERE collection = ?1",
@@ -284,7 +229,7 @@ impl VectorStore for SqliteStore {
     }
 
     async fn delete_by_source(&self, source_kind: &str, source_id: &str) -> anyhow::Result<usize> {
-        let conn = self.conn.lock();
+        let conn = self.conn.lock().unwrap();
         let n = conn
             .execute(
                 "DELETE FROM doc_meta WHERE source_kind = ?1 AND source_id = ?2",
@@ -295,7 +240,7 @@ impl VectorStore for SqliteStore {
     }
 
     async fn delete_by_id(&self, id: &str) -> anyhow::Result<usize> {
-        let conn = self.conn.lock();
+        let conn = self.conn.lock().unwrap();
         let n = conn
             .execute("DELETE FROM doc_meta WHERE id = ?1", rusqlite::params![id])
             .with_context(|| format!("delete by id '{id}'"))?;
@@ -307,7 +252,7 @@ impl VectorStore for SqliteStore {
         source_kind: &str,
         source_id: &str,
     ) -> anyhow::Result<Vec<VectorMatch>> {
-        let conn = self.conn.lock();
+        let conn = self.conn.lock().unwrap();
         let mut stmt = conn
             .prepare(
                 "SELECT id, collection, content, title,
@@ -393,19 +338,10 @@ fn floats_to_bytes(v: &[f32]) -> Vec<u8> {
     v.iter().flat_map(|f| f.to_le_bytes()).collect()
 }
 
-/// Decode a little-endian `f32` blob. Rejects any input whose length is
-/// not a multiple of 4 — that means the blob is corrupt and a silent
-/// truncation would be a worse failure mode than an explicit error.
-fn bytes_to_floats(b: &[u8]) -> Result<Vec<f32>> {
-    if !b.len().is_multiple_of(4) {
-        return Err(anyhow!(
-            "vector_blob length {} is not a multiple of 4 bytes",
-            b.len()
-        ));
-    }
-    Ok(b.chunks_exact(4)
+fn bytes_to_floats(b: &[u8]) -> Vec<f32> {
+    b.chunks_exact(4)
         .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
-        .collect())
+        .collect()
 }
 
 fn cosine_similarity(a: &[f32], b: &[f32]) -> Option<f32> {

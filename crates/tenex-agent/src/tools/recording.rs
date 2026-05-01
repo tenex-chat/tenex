@@ -12,9 +12,7 @@
 //! recording at `Tool` would force a `Serialize` bound on every tool's
 //! `Args` type for no extra information.
 
-use std::sync::Arc;
-
-use parking_lot::Mutex;
+use std::sync::{Arc, Mutex};
 
 use rig::completion::ToolDefinition;
 use rig::tool::{ToolDyn, ToolError};
@@ -52,11 +50,11 @@ impl ToolRecorder {
     }
 
     pub fn take_records(&self) -> Vec<ToolCallRecord> {
-        std::mem::take(&mut *self.records.lock())
+        std::mem::take(&mut *self.records.lock().unwrap())
     }
 
     fn push(&self, record: ToolCallRecord) {
-        self.records.lock().push(record);
+        self.records.lock().unwrap().push(record);
     }
 }
 
@@ -125,7 +123,7 @@ impl ToolDyn for RecordingTool {
             }
             if let Some(injections) = &self.message_injections {
                 if let Ok(output) = &mut result {
-                    let reminder = injections.lock().take_new_messages();
+                    let reminder = injections.lock().unwrap().take_new_messages();
                     if let Some(reminder) = reminder {
                         append_tool_result_reminder(output, &reminder);
                     }

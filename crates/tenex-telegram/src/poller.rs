@@ -1,9 +1,8 @@
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
 use nostr_sdk::prelude::*;
-use tokio::sync::Mutex;
 use tracing::{info, warn};
 
 use crate::binding::BindingStore;
@@ -27,11 +26,8 @@ pub struct Poller {
     client: BotClient,
     backend_keys: Keys,
     base_dir: PathBuf,
-    /// Per-poller session map. Owned directly because no other task accesses it.
-    sessions: SessionStore,
-    /// Shared across pollers — multiple bot tasks may write the same file.
+    sessions: Arc<Mutex<SessionStore>>,
     channel_bindings: Arc<Mutex<BindingStore>>,
-    /// Shared across pollers — multiple bot tasks may write the same file.
     pending_selections: Arc<Mutex<PendingSelectionStore>>,
     next_offset: Option<i64>,
 }
@@ -50,14 +46,12 @@ impl Poller {
             registration.config.api_base_url.clone(),
         );
 
-        let sessions = SessionStore::open(session_path)?;
-
         Ok(Self {
             registration,
             client,
             backend_keys,
             base_dir,
-            sessions,
+            sessions: Arc::new(Mutex::new(SessionStore::open(session_path))),
             channel_bindings,
             pending_selections,
             next_offset: None,
@@ -187,11 +181,11 @@ impl Poller {
 
         let is_new = text == "/new" || text.starts_with("/new ") || text.starts_with("/new@");
         if is_new {
-            let _ = self.sessions.clear(&channel_id);
+            let _ = self.clear_session(&channel_id);
             let _ = self
                 .pending_selections
                 .lock()
-                .await
+                .unwrap()
                 .clear(&self.registration.pubkey, &channel_id);
             if let Err(e) = self
                 .client
@@ -285,7 +279,7 @@ impl Poller {
             agent_pubkey: &self.registration.pubkey,
             project: &project,
             backend_keys: &self.backend_keys,
-            root_event_id: self.sessions.get(&channel_id).map(ToString::to_string),
+            root_event_id: self.session_root(&channel_id),
             sender_first_name: &sender.first_name,
             sender_username: sender.username.as_deref(),
             sender_id: sender.id,
@@ -370,7 +364,7 @@ impl Poller {
         match outcome {
             DispatchOutcome::Completed => {
                 if synthesized.new_root {
-                    let _ = self.sessions.set(channel_id, event_id);
+                    let _ = self.set_session_root(channel_id, event_id);
                 }
             }
             DispatchOutcome::Superseded => {
@@ -404,7 +398,7 @@ impl Poller {
         let pending_opts = self
             .pending_selections
             .lock()
-            .await
+            .unwrap()
             .get(&self.registration.pubkey, channel_id);
 
         if let Some(opts) = pending_opts {
@@ -418,14 +412,13 @@ impl Poller {
                 .collect();
 
             if let Some(selected) = parse_project_selection(text, &pending_routes) {
-                self.remember_channel_binding(channel_id, &selected.project_id)
-                    .await?;
+                self.remember_channel_binding(channel_id, &selected.project_id)?;
                 let _ = self
                     .pending_selections
                     .lock()
-                    .await
+                    .unwrap()
                     .clear(&self.registration.pubkey, channel_id);
-                let _ = self.sessions.clear(channel_id);
+                let _ = self.clear_session(channel_id);
                 let response = format!(
                     "Bound this chat to project \"{}\". Send your next message to continue.",
                     selected.display_title()
@@ -450,7 +443,7 @@ impl Poller {
         let bound_project = {
             self.channel_bindings
                 .lock()
-                .await
+                .unwrap()
                 .get_telegram(&self.registration.pubkey, channel_id)
                 .map(|binding| binding.project_id.clone())
         };
@@ -462,16 +455,15 @@ impl Poller {
             let _ = self
                 .channel_bindings
                 .lock()
-                .await
+                .unwrap()
                 .clear_telegram(&self.registration.pubkey, channel_id);
-            let _ = self.sessions.clear(channel_id);
+            let _ = self.clear_session(channel_id);
         }
 
         match self.registration.projects.as_slice() {
             [] => Ok(None),
             [project] => {
-                self.remember_channel_binding(channel_id, &project.project_id)
-                    .await?;
+                self.remember_channel_binding(channel_id, &project.project_id)?;
                 Ok(Some(project.clone()))
             }
             projects => {
@@ -485,7 +477,7 @@ impl Poller {
                 let routes = projects.to_vec();
                 self.send_project_selection_prompt(chat_id, message_id, thread_id, &routes, false)
                     .await?;
-                self.pending_selections.lock().await.set(
+                self.pending_selections.lock().unwrap().set(
                     &self.registration.pubkey,
                     channel_id,
                     opts,
@@ -544,8 +536,8 @@ impl Poller {
             .cloned()
     }
 
-    async fn remember_channel_binding(&self, channel_id: &str, project_id: &str) -> Result<()> {
-        self.channel_bindings.lock().await.remember_telegram(
+    fn remember_channel_binding(&self, channel_id: &str, project_id: &str) -> Result<()> {
+        self.channel_bindings.lock().unwrap().remember_telegram(
             &self.registration.pubkey,
             channel_id,
             project_id,
@@ -565,6 +557,22 @@ impl Poller {
             .send_message(chat_id, &prompt, None, Some(message_id), thread_id)
             .await?;
         Ok(())
+    }
+
+    fn clear_session(&self, channel_id: &str) -> Result<()> {
+        self.sessions.lock().unwrap().clear(channel_id)
+    }
+
+    fn session_root(&self, channel_id: &str) -> Option<String> {
+        self.sessions
+            .lock()
+            .unwrap()
+            .get(channel_id)
+            .map(ToString::to_string)
+    }
+
+    fn set_session_root(&self, channel_id: String, event_id: String) -> Result<()> {
+        self.sessions.lock().unwrap().set(channel_id, event_id)
     }
 
     async fn skip_backlog(&mut self) -> Result<()> {

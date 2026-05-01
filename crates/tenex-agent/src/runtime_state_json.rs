@@ -5,38 +5,46 @@ pub const DRIVER_KEY: &str = "driver";
 pub const ACTIVE_TOOLS_KEY: &str = "activeTools";
 pub const CONSUMED_MESSAGES_KEY: &str = "consumedMessages";
 
-/// Replace `slot` with an empty JSON object if it is anything else,
-/// then return a mutable reference to its `Map`. The match arm cannot fail
-/// because we just normalized the value to `Value::Object` on the line above.
-fn ensure_object(slot: &mut Value) -> &mut Map<String, Value> {
-    if !slot.is_object() {
-        *slot = json!({});
-    }
-    let Value::Object(map) = slot else {
-        unreachable!("value was just normalized to Value::Object")
-    };
-    map
-}
-
 pub fn root_object_mut(state: &mut Value) -> &mut Map<String, Value> {
-    let root = ensure_object(state)
+    if !state.is_object() {
+        *state = json!({});
+    }
+    let root = state
+        .as_object_mut()
+        .expect("state was normalized to object")
         .entry(ROOT_KEY.to_string())
         .or_insert_with(|| json!({}));
-    ensure_object(root)
+    if !root.is_object() {
+        *root = json!({});
+    }
+    root.as_object_mut()
+        .expect("runtime root was normalized to object")
 }
 
 pub fn active_tools_object_mut(state: &mut Value) -> &mut Map<String, Value> {
-    let tools = root_object_mut(state)
+    let root = root_object_mut(state);
+    let tools = root
         .entry(ACTIVE_TOOLS_KEY.to_string())
         .or_insert_with(|| json!({}));
-    ensure_object(tools)
+    if !tools.is_object() {
+        *tools = json!({});
+    }
+    tools
+        .as_object_mut()
+        .expect("active tools was normalized to object")
 }
 
 pub fn consumed_messages_object_mut(state: &mut Value) -> &mut Map<String, Value> {
-    let consumed = root_object_mut(state)
+    let root = root_object_mut(state);
+    let consumed = root
         .entry(CONSUMED_MESSAGES_KEY.to_string())
         .or_insert_with(|| json!({}));
-    ensure_object(consumed)
+    if !consumed.is_object() {
+        *consumed = json!({});
+    }
+    consumed
+        .as_object_mut()
+        .expect("consumed messages was normalized to object")
 }
 
 pub fn driver_matches(

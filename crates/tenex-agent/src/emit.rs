@@ -4,10 +4,8 @@
 
 use std::sync::{
     atomic::{AtomicBool, Ordering},
-    Arc,
+    Arc, Mutex,
 };
-
-use parking_lot::Mutex;
 use tenex_protocol::{
     Channel, ConversationRef, EncodingContext, MessageRef, PrincipalRef, ProjectRef,
 };

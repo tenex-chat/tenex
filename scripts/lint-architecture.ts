@@ -296,13 +296,10 @@ async function lint() {
 	return errors.length > 0 ? 1 : 0;
 }
 
-// Exit code convention:
-//   0 — no violations
-//   1 — architecture violations found
-//   2 — linter itself crashed (config/usage error)
+// Run
 lint()
 	.then((code) => process.exit(code))
 	.catch((err) => {
 		console.error("Linting failed:", err);
-		process.exit(2);
+		process.exit(1);
 	});

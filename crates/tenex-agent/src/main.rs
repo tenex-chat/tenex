@@ -42,10 +42,9 @@ use rig::completion::Message as RigMessage;
 use rig::providers::{anthropic, ollama, openai, openrouter};
 use runtime_state::RuntimeStateHandle;
 use shell_task_reminder::render_active_shell_tasks_reminder;
-use parking_lot::Mutex;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
-    Arc,
+    Arc, Mutex,
 };
 use tenex_context::{
     BreakpointHint, BreakpointKind, CacheObservation, Message as CtxMessage, ModelProfile,
@@ -587,8 +586,7 @@ async fn run() -> Result<()> {
     // Load Telegram channel bindings for this agent so they appear in the system prompt.
     let telegram_channel_bindings: Vec<tenex_system_prompt::TelegramChannelBinding> = {
         let bindings_path = base_dir.join("data").join("transport-bindings.json");
-        let store = tenex_telegram::binding::BindingStore::open(bindings_path)
-            .context("open transport bindings store")?;
+        let store = tenex_telegram::binding::BindingStore::open(bindings_path);
         store
             .list_telegram_for_agent_project(&pubkey_hex, &project_meta.d_tag)
             .into_iter()
@@ -1041,7 +1039,7 @@ async fn run() -> Result<()> {
         // tool call so the inner loop's invocations all land here.
         let recorder = ToolRecorder::new();
         let tools = tool_set.build_for_turn(recorder.clone());
-        let injected = injection_tracker.lock().take_new_messages();
+        let injected = injection_tracker.lock().unwrap().take_new_messages();
         let turn_message = if let Some(ref injected) = injected {
             format!("{current_message}\n\n{injected}")
         } else {
@@ -1223,8 +1221,8 @@ async fn run() -> Result<()> {
 
         // Persist final todos and self-applied skills back to the conversation store.
         if let Some(ref store) = conv_store {
-            let final_todos = todos.lock();
-            let final_skills = self_applied_skills.lock();
+            let final_todos = todos.lock().unwrap();
+            let final_skills = self_applied_skills.lock().unwrap();
             save_context_state(
                 store,
                 &conversation_id,
@@ -1329,7 +1327,7 @@ async fn run() -> Result<()> {
 
         // Post-completion supervision: check if pending todos warrant re-engagement.
         let todos_snap: Vec<SupTodoEntry> = {
-            let lock = todos.lock();
+            let lock = todos.lock().unwrap();
             lock.iter()
                 .map(|t| SupTodoEntry {
                     id: t.id.clone(),
@@ -1343,7 +1341,7 @@ async fn run() -> Result<()> {
                 .collect()
         };
         let outcome = {
-            let mut sup = supervisor_ref.lock();
+            let mut sup = supervisor_ref.lock().unwrap();
             sup.check_post_completion(todos_snap, 0, envelope.content.clone())
         };
         match outcome {
@@ -1445,11 +1443,6 @@ async fn run() -> Result<()> {
             }
         }
     }
-
-    // Drop our reference to the hook before shutting down its background
-    // delta-buffer task; `hook_handle` still holds the JoinHandle.
-    drop(hook);
-    hook_handle.shutdown().await;
 
     Ok(())
 }

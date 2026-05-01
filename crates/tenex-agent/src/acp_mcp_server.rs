@@ -167,7 +167,7 @@ impl ToolDyn for AcpMcpTool {
 }
 
 async fn emit_tool_use(state: Arc<EmitState>, tool_name: String, args_json: String) {
-    let ral = state.meta.lock().ral;
+    let ral = state.meta.lock().unwrap().ral;
     let ctx = state.build_ctx(ral);
     let intent = ToolUseIntent {
         tool_name,

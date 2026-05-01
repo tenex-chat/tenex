@@ -204,7 +204,7 @@ impl Tool for LearnTool {
     }
 
     async fn call(&self, args: LearnArgs) -> Result<String, LearnError> {
-        let ral = self.state.meta.lock().ral;
+        let ral = self.state.meta.lock().unwrap().ral;
         let ctx = self.state.build_ctx(ral);
         let hashtags = args.hashtags.unwrap_or_default();
 

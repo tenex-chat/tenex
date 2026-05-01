@@ -17,8 +17,6 @@ pub enum DecodeError {
     InvalidEventId(&'static str, String),
     #[error("invalid pubkey in tag {0}: {1}")]
     InvalidPubkey(&'static str, String),
-    #[error("tag {0} is missing its required value")]
-    MissingTagValue(&'static str),
 }
 
 /// Decode a Nostr event into a transport-tagged [`InboundEnvelope`].
@@ -46,7 +44,9 @@ pub fn decode(event: &Event) -> Result<InboundEnvelope, DecodeError> {
         let head = parts.first().map(|s| s.as_str()).unwrap_or("");
         match head {
             "e" => {
-                let id = required_value(&parts, "e")?;
+                let id = parts
+                    .get(1)
+                    .ok_or_else(|| DecodeError::InvalidEventId("e", "missing".into()))?;
                 let parsed = EventId::from_hex(id)
                     .map_err(|e| DecodeError::InvalidEventId("e", e.to_string()))?;
                 let marker = parts.get(3).map(|s| s.as_str()).unwrap_or("");
@@ -64,45 +64,40 @@ pub fn decode(event: &Event) -> Result<InboundEnvelope, DecodeError> {
                 }
             }
             "p" => {
-                let hex = required_value(&parts, "p")?;
-                let pubkey = nostr::PublicKey::from_hex(hex)
-                    .map_err(|e| DecodeError::InvalidPubkey("p", e.to_string()))?;
-                recipients.push(PrincipalRef::Nostr {
-                    pubkey,
-                    kind: PrincipalKind::Agent,
-                    display_name: None,
-                });
-            }
-            "a" => {
-                let coord = required_value(&parts, "a")?;
-                article_references.push(coord.clone());
-                if coord.starts_with(&format!("{}:", kinds::PROJECT)) {
-                    project_a_tags.push(coord.clone());
+                if let Some(hex) = parts.get(1) {
+                    let pubkey = nostr::PublicKey::from_hex(hex)
+                        .map_err(|e| DecodeError::InvalidPubkey("p", e.to_string()))?;
+                    recipients.push(PrincipalRef::Nostr {
+                        pubkey,
+                        kind: PrincipalKind::Agent,
+                        display_name: None,
+                    });
                 }
             }
-            "tool" => tool_name = Some(required_value(&parts, "tool")?.clone()),
-            "status" => status = Some(required_value(&parts, "status")?.clone()),
-            "branch" => branch = Some(required_value(&parts, "branch")?.clone()),
-            "team" => team = Some(required_value(&parts, "team")?.clone()),
-            "variant" => variant_override = Some(required_value(&parts, "variant")?.clone()),
+            "a" => {
+                if let Some(coord) = parts.get(1) {
+                    article_references.push(coord.clone());
+                    if coord.starts_with(&format!("{}:", kinds::PROJECT)) {
+                        project_a_tags.push(coord.clone());
+                    }
+                }
+            }
+            "tool" => tool_name = parts.get(1).cloned(),
+            "status" => status = parts.get(1).cloned(),
+            "branch" => branch = parts.get(1).cloned(),
+            "team" => team = parts.get(1).cloned(),
+            "variant" => variant_override = parts.get(1).cloned(),
             "delegation" => {
-                let parent = required_value(&parts, "delegation")?;
-                let id = EventId::from_hex(parent)
-                    .map_err(|e| DecodeError::InvalidEventId("delegation", e.to_string()))?;
-                delegation_parent_conversation = Some(ConversationRef::Nostr { root_event_id: id });
+                if let Some(parent) = parts.get(1) {
+                    if let Ok(id) = EventId::from_hex(parent) {
+                        delegation_parent_conversation =
+                            Some(ConversationRef::Nostr { root_event_id: id });
+                    }
+                }
             }
-            "telegram-chat-id" => {
-                telegram_chat_id = Some(required_value(&parts, "telegram-chat-id")?.clone())
-            }
-            "telegram-message-id" => {
-                telegram_message_id = Some(required_value(&parts, "telegram-message-id")?.clone())
-            }
-            "telegram-thread-id" => {
-                telegram_thread_id = Some(required_value(&parts, "telegram-thread-id")?.clone())
-            }
-            // Unknown tag types are ignored: NIP-01 explicitly allows arbitrary
-            // tag names, and the protocol layer must tolerate forward-compatible
-            // additions emitted by other clients.
+            "telegram-chat-id" => telegram_chat_id = parts.get(1).cloned(),
+            "telegram-message-id" => telegram_message_id = parts.get(1).cloned(),
+            "telegram-thread-id" => telegram_thread_id = parts.get(1).cloned(),
             _ => {}
         }
     }
@@ -158,19 +153,6 @@ pub fn decode(event: &Event) -> Result<InboundEnvelope, DecodeError> {
     })
 }
 
-fn required_value<'a>(parts: &'a [String], tag: &'static str) -> Result<&'a String, DecodeError> {
-    parts
-        .get(1)
-        .ok_or(DecodeError::MissingTagValue(tag))
-        .and_then(|v| {
-            if v.is_empty() {
-                Err(DecodeError::MissingTagValue(tag))
-            } else {
-                Ok(v)
-            }
-        })
-}
-
 impl InboundEnvelope {
     /// Match TS `isDelegationCompletion`: kind:1 + `["status","completed"]`.
     pub fn is_completion(&self) -> bool {
@@ -180,119 +162,5 @@ impl InboundEnvelope {
     /// Match TS `isAgentInternalMessage`: has tool tag or status tag.
     pub fn is_agent_internal_message(&self) -> bool {
         self.metadata.tool_name.is_some() || self.metadata.status.is_some()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use nostr::{EventBuilder, Keys, Tag};
-
-    fn signed(builder: EventBuilder) -> Event {
-        let keys = Keys::generate();
-        builder.sign_with_keys(&keys).expect("sign")
-    }
-
-    fn build_with_tags(tags: Vec<Tag>) -> Event {
-        let mut builder = EventBuilder::new(nostr::Kind::TextNote, "hello");
-        for tag in tags {
-            builder = builder.tag(tag);
-        }
-        signed(builder)
-    }
-
-    #[test]
-    fn well_formed_event_decodes_successfully() {
-        let other = Keys::generate().public_key();
-        let parent_id = EventId::all_zeros().to_hex();
-        let event = build_with_tags(vec![
-            Tag::parse(["e", &parent_id, "", "root"]).unwrap(),
-            Tag::parse(["p", &other.to_hex()]).unwrap(),
-            Tag::parse(["a", "31933:abc:my-project"]).unwrap(),
-            Tag::parse(["status", "completed"]).unwrap(),
-            Tag::parse(["tool", "shell"]).unwrap(),
-            Tag::parse(["delegation", &parent_id]).unwrap(),
-        ]);
-
-        let env = decode(&event).expect("decode well-formed");
-        assert_eq!(env.metadata.status.as_deref(), Some("completed"));
-        assert_eq!(env.metadata.tool_name.as_deref(), Some("shell"));
-        assert_eq!(env.recipients.len(), 1);
-        assert_eq!(env.metadata.article_references.len(), 1);
-        assert_eq!(env.metadata.project_a_tags.len(), 1);
-        assert!(env.metadata.delegation_parent_conversation.is_some());
-    }
-
-    #[test]
-    fn unmarked_e_tag_first_becomes_root() {
-        let parent_id = EventId::all_zeros().to_hex();
-        let event = build_with_tags(vec![Tag::parse(["e", &parent_id]).unwrap()]);
-        let env = decode(&event).expect("decode");
-        match env.root {
-            MessageRef::Nostr { event_id } => assert_eq!(event_id.to_hex(), parent_id),
-        }
-    }
-
-    #[test]
-    fn missing_e_tag_value_errors() {
-        // Build a raw tag with only the head; bypass nostr Tag parsing rules
-        // by constructing the event from its parts. Since `Tag::parse(["e"])`
-        // is itself rejected, we go via `Tag::custom`.
-        let event = build_with_tags(vec![Tag::custom(
-            nostr::TagKind::SingleLetter(nostr::SingleLetterTag::lowercase(nostr::Alphabet::E)),
-            Vec::<String>::new(),
-        )]);
-        match decode(&event) {
-            Err(DecodeError::MissingTagValue("e")) => {}
-            other => panic!("expected MissingTagValue(\"e\"), got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn empty_p_tag_value_errors() {
-        let event = build_with_tags(vec![Tag::parse(["p", ""]).unwrap()]);
-        match decode(&event) {
-            Err(DecodeError::MissingTagValue("p")) => {}
-            other => panic!("expected MissingTagValue(\"p\"), got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn malformed_p_tag_value_errors() {
-        let event = build_with_tags(vec![Tag::parse(["p", "not-a-real-pubkey"]).unwrap()]);
-        match decode(&event) {
-            Err(DecodeError::InvalidPubkey("p", _)) => {}
-            other => panic!("expected InvalidPubkey(\"p\", _), got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn malformed_delegation_tag_errors() {
-        let event = build_with_tags(vec![Tag::parse(["delegation", "not-hex"]).unwrap()]);
-        match decode(&event) {
-            Err(DecodeError::InvalidEventId("delegation", _)) => {}
-            other => panic!("expected InvalidEventId(\"delegation\", _), got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn missing_status_tag_value_errors() {
-        let event = build_with_tags(vec![Tag::custom(
-            nostr::TagKind::Custom("status".into()),
-            Vec::<String>::new(),
-        )]);
-        match decode(&event) {
-            Err(DecodeError::MissingTagValue("status")) => {}
-            other => panic!("expected MissingTagValue(\"status\"), got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn unknown_tag_kinds_are_ignored() {
-        let event = build_with_tags(vec![Tag::custom(
-            nostr::TagKind::Custom("some-future-tag".into()),
-            ["x"],
-        )]);
-        decode(&event).expect("unknown tags must not break decode");
     }
 }

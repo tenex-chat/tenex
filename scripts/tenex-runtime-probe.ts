@@ -59,8 +59,7 @@ type Proc = {
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(scriptDir, "..");
-const launcherRelayDir =
-    process.env.TENEX_LAUNCHER_RELAY_DIR ?? path.resolve(repoRoot, "..", "tenex-launcher", "relay");
+const launcherRelayDir = "/home/pablo/Work/tenex-launcher/relay";
 const cliArgs = process.argv.slice(2);
 const scenarioName = (positionalArgs(cliArgs)[0] ?? "delegation-basic") as ScenarioName;
 const keep = cliArgs.includes("--keep");
@@ -345,7 +344,7 @@ const agentAcpBin = path.join(path.dirname(tenexBin), "tenex-agent-acp");
 if (!existsSync(tenexBin) || !existsSync(agentBin) || (usesAcp && !existsSync(agentAcpBin))) {
     console.error("Missing Rust binaries. Build them first:");
     console.error("  cargo build -p tenex -p tenex-agent");
-    process.exit(1);
+    process.exit(2);
 }
 
 console.log(`scenario: ${scenarioName}`);

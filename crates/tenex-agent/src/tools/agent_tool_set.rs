@@ -1,8 +1,6 @@
 use std::collections::HashSet;
 use std::path::PathBuf;
-use std::sync::{atomic::AtomicBool, Arc};
-
-use parking_lot::Mutex;
+use std::sync::{atomic::AtomicBool, Arc, Mutex};
 
 use rig::tool::ToolDyn;
 use tenex_rag::{EmbedConfig, RagStore};

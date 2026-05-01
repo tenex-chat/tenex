@@ -11,7 +11,9 @@ use indexmap::IndexMap;
 use serde_json::{Map, Value};
 
 use crate::key_health::KeyHealthTracker;
-use crate::protocol::{ApiKey, MetaConfigResponse, ResolvedVariant, StandardConfigResponse};
+use crate::protocol::{
+    ApiKey, ErrorResponse, MetaConfigResponse, ResolvedVariant, StandardConfigResponse,
+};
 
 // ── On-disk representations ───────────────────────────────────────────────────
 
@@ -179,8 +181,7 @@ pub fn resolve_config(
         resolve_meta(config, llms, providers, key_health)
     } else {
         match resolve_standard(name, config, providers, key_health) {
-            Ok(r) => serde_json::to_value(r)
-                .unwrap_or_else(|e| err_val(format!("serialize StandardConfigResponse: {e}"))),
+            Ok(r) => serde_json::to_value(r).expect("serialization of StandardConfigResponse"),
             Err(e) => err_val(e),
         }
     }
@@ -336,15 +337,15 @@ fn resolve_meta(
         default,
         variants,
     })
-    .unwrap_or_else(|e| err_val(format!("serialize MetaConfigResponse: {e}")))
+    .expect("serialization of MetaConfigResponse")
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 fn err_val(msg: impl Into<String>) -> Value {
-    // The `json!` macro is infallible for owned data, so this never panics.
-    serde_json::json!({
-        "ok": false,
-        "error": msg.into(),
+    serde_json::to_value(ErrorResponse {
+        ok: false,
+        error: msg.into(),
     })
+    .expect("serialization of ErrorResponse")
 }

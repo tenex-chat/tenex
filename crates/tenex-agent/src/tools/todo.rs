@@ -1,9 +1,8 @@
 use rig::{completion::ToolDefinition, tool::Tool};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use parking_lot::Mutex;
 use std::{
-    sync::Arc,
+    sync::{Arc, Mutex},
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -212,7 +211,10 @@ impl Tool for TodoWriteTool {
             }
         }
 
-        let mut todos = self.todos.lock();
+        let mut todos = self
+            .todos
+            .lock()
+            .map_err(|_| TodoError("Failed to acquire todo lock".to_string()))?;
 
         // Safety check: detect removals
         if !force {

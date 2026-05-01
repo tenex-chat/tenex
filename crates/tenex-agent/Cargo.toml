@@ -49,8 +49,6 @@ uuid = { version = "1", features = ["v4"] }
 tenex-telemetry = { path = "../tenex-telemetry" }
 tracing = "0.1"
 tracing-opentelemetry = "0.32"
-parking_lot = "0.12"
 
 [dev-dependencies]
 tempfile = "3"
-tokio = { version = "1", features = ["full", "test-util"] }

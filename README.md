@@ -104,6 +104,7 @@ TENEX: [System routes to Planner]
 
 - **[Architecture](./docs/ARCHITECTURE.md)**: Core principles, layered architecture, and module organization.
 - **[Contributing](./docs/CONTRIBUTING.md)**: Development workflow, coding guidelines, and testing.
+- **[Testing Status](./docs/TESTING_STATUS.md)**: Current state of the test suite and future improvements.
 - **[NDK Testing](./docs/testing-with-ndk.md)**: How to use Nostr Development Kit utilities for testing.
 - **[Worktrees](./docs/worktrees.md)**: Guide to using Git worktrees for parallel development.
 
