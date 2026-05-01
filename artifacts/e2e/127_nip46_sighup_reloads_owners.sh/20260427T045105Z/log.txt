@@ -1,0 +1,37 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-127-1777265465-54337
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-127-1777265465-54337
+[harness]   backend pubkey:  7817623b9f42e3fae4ea158d9831b7e6d90e3faf88b1c14b98722c97f2dfde85
+[harness]   user pubkey:     8a4f4cf676f62f64d25761a11024250c2994c8f9fe60a0224596e14c599a5dd6
+[harness]   agent1 pubkey:   07557fe9993f9c9688ce7dabbbab6e46b180205c727d5c3c5dd933c0a507139f
+[harness]   agent2 pubkey:   ad06fd58f207334b6794bd639c8486e23eea3bbbb4a4382b770333d70877b4ff
+[harness]   project a-tag:   31933:8a4f4cf676f62f64d25761a11024250c2994c8f9fe60a0224596e14c599a5dd6:nak-interop-test-20260427075105-2496
+[harness] starting relay on 127.0.0.1:64348 (admins=1)
+[harness] relay ready at ws://127.0.0.1:64348
+[harness] daemon config relays -> [ws://127.0.0.1:64348]
+[harness] wrote 2 pubkey(s) to /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-127-1777265465-54337/backend/daemon/whitelist.txt
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-127-1777265465-54337/backend, binary=/Users/pablofernandez/Work/TENEX-ff3ssq/target/release/daemon)
+[harness] daemon ready (pid 54818, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-127-1777265465-54337/backend/daemon/tenex.lock)
+[harness] kind:14199 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] kind:24030 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] daemon subscription confirmed live (all probed listener filters registered)
+[scenario] waiting up to 12s for initial reconcile failure with bunker A
+[scenario]   initial bunker-A timeout (saw_fail=1)
+[scenario] nak bunker B pid=54914
+[scenario] sending SIGHUP to daemon pid=54818 (lockfile PID)
+[scenario]   SIGHUP whitelist reload logged ✓
+[scenario]   agent2 added to byProject to force poller trigger
+[scenario] waiting up to 20s for kind:14199 via bunker B with agent1 p-tag
+[scenario]   kind:14199 published after SIGHUP ✓
+
+[scenario] PASS — scenario 12.7 SIGHUP reloads NIP-46 owners
+[harness] RESULT status=pass scenario=127_nip46_sighup_reloads_owners.sh detail=SIGHUP cleared registry; kind:14199 published via bunker B
+/Users/pablofernandez/Work/TENEX-ff3ssq/scripts/e2e/scenarios/127_nip46_sighup_reloads_owners.sh: line 191: 54914 Terminated: 15          nak bunker --sec "$USER_NSEC" --authorized-keys "$BACKEND_PUBKEY" "$HARNESS_RELAY_URL" > "$bunker_log" 2>&1
+[harness] cleanup (script exit code=0)
+[harness] stopping daemon pid 54818 (SIGTERM)
+[harness] stopping relay pid 54803

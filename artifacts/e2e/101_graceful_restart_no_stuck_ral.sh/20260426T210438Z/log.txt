@@ -1,0 +1,55 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-101-1777237478-37298
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-101-1777237478-37298
+[harness]   backend pubkey:  daec509a327056d1a32460ca041fac5da5e61c1b1d08f986503720e72cbad419
+[harness]   user pubkey:     2298a71ccc658c423be01914da1a04e47de69c056dd571e977716e60e421c87b
+[harness]   agent1 pubkey:   de086ceadab1f5131bc41b5ee52cddcb0ffb1868e3f3ca17008a3fc1f6bc6bc4
+[harness]   agent2 pubkey:   35b6f81a5ef778881eb6bfa2d9f30e38b039ef05d259718b722e7fc7b0134dc6
+[harness]   project a-tag:   31933:2298a71ccc658c423be01914da1a04e47de69c056dd571e977716e60e421c87b:nak-interop-test-20260427000438-28716
+[scenario] rewriting llms.json to use mock fixture model 'mock/delegation-02'
+[harness] starting relay on 127.0.0.1:62274 (admins=1)
+[harness] relay ready at ws://127.0.0.1:62274
+[harness] daemon config relays -> [ws://127.0.0.1:62274]
+[scenario] publishing 14199 (whitelist) as user
+connecting to ws://127.0.0.1:62274... ok.
+publishing to ws://127.0.0.1:62274... success.
+[scenario] publishing 31933 (project) as user
+connecting to ws://127.0.0.1:62274... ok.
+publishing to ws://127.0.0.1:62274... success.
+
+[scenario] === Phase 1: first daemon incarnation ===
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-101-1777237478-37298/backend, binary=/Users/pablofernandez/Work/TENEX-ff3ssq/target/release/daemon)
+[harness] daemon ready (pid 37999, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-101-1777237478-37298/backend/daemon/tenex.lock)
+[harness] kind:14199 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] kind:24030 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] daemon subscription confirmed live (all probed listener filters registered)
+[scenario] publishing kind:24000 (boot) as user
+connecting to ws://127.0.0.1:62274... ok.
+publishing to ws://127.0.0.1:62274... success.
+[scenario]   boot event id=8b7caeef33311cec0b44fbcecde73bc78f9e6e52b84542429ee7c597e8ce9b3e
+[scenario]   kind:24010 published (project boot confirmed) ✓
+[scenario] publishing kind:1 from user to agent1 (attempt 1)
+connecting to ws://127.0.0.1:62274... ok.
+publishing to ws://127.0.0.1:62274... success.
+[scenario]   user message id=36e4ea4886a3c45b8a800258abc63e2c1aabba5cc25c302a9c98361883a80a43
+/Users/pablofernandez/Work/TENEX-ff3ssq/scripts/e2e/scenarios/101_graceful_restart_no_stuck_ral.sh: line 128: 37999 Killed: 9               TENEX_BASE_DIR="$TENEX_BASE_DIR" "$daemon_bin" --tenex-base-dir "$TENEX_BASE_DIR" >> "$HARNESS_DAEMON_LOG" 2>&1
+[scenario]   no dispatch yet — retrying...
+[scenario] publishing kind:1 from user to agent1 (attempt 2)
+connecting to ws://127.0.0.1:62274... ok.
+publishing to ws://127.0.0.1:62274... success.
+[scenario]   user message id=3254516baa7b9cb6d75e5b76715451a27f27fa6ac5d546f7ed996a33401595f6
+[scenario]   no dispatch yet — retrying...
+[scenario] publishing kind:1 from user to agent1 (attempt 3)
+connecting to ws://127.0.0.1:62274... ok.
+publishing to ws://127.0.0.1:62274... success.
+[scenario]   user message id=891dee31695863e51d6e04a16cd69868d46851b2bd83b09190b18c2e599b0fc7
+[scenario]   no dispatch yet — retrying...
+[harness] FATAL: ASSERT: no dispatch enqueued for user message 1
+[harness] cleanup (script exit code=1)
+[harness] stopping daemon pid 37999 (SIGTERM)
+[harness] stopping relay pid 37943

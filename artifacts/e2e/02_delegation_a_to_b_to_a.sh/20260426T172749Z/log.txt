@@ -1,0 +1,62 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-1777224469-6865
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-1777224469-6865
+[harness]   backend pubkey:  a97751ead44394969e31a9d9eba4485fef5279eb253d025e8b36b63c556fa100
+[harness]   user pubkey:     3649fcd8e6bf86b0a17838cb8fc9453dfdce0de7815b8ad6082a71218efd4d36
+[harness]   agent1 pubkey:   c1ef905e81f619b847b92ca2205f7f6d322058952d25cc7ee03c0f937aee990c
+[harness]   agent2 pubkey:   93d8e694e5a04cdd5effd8a121f89d3d0440ed9c021e42113711ed70018865b4
+[harness]   project a-tag:   31933:3649fcd8e6bf86b0a17838cb8fc9453dfdce0de7815b8ad6082a71218efd4d36:nak-interop-test-20260426202749-420
+[scenario] rewriting llms.json to use mock fixture model 'mock/delegation-02'
+[scenario] mock LLM enabled: fixture=/Users/pablofernandez/Work/TENEX-ff3ssq/scripts/e2e/fixtures/mock-llm/02_delegation.json
+[scenario] pre-seeded project descriptor at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-1777224469-6865/backend/projects/nak-interop-test-20260426202749-420/project.json
+[harness] starting relay on 127.0.0.1:62691 (admins=1)
+[harness] relay ready at ws://127.0.0.1:62691
+[harness] daemon config relays -> [ws://127.0.0.1:62691]
+[scenario] publishing 14199 (whitelist) as user
+connecting to ws://127.0.0.1:62691... ok.
+publishing to ws://127.0.0.1:62691... success.
+[scenario] publishing 31933 (project) as user
+connecting to ws://127.0.0.1:62691... ok.
+publishing to ws://127.0.0.1:62691... success.
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-1777224469-6865/backend)
+[harness] daemon ready (pid 7368, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-1777224469-6865/backend/daemon/tenex.lock)
+[harness] kind:14199 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] kind:24030 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] kind:21 agent-mentions listener confirmed (probe #1 round-tripped after 200ms)
+[harness] daemon subscription confirmed live (all probed listener filters registered)
+[scenario] publishing 24000 (boot) as user
+connecting to ws://127.0.0.1:62691... ok.
+publishing to ws://127.0.0.1:62691... success.
+[scenario]   boot event id=5d256ca5daffe75636ab269a600feec1145d6db76f6ea337f38a567fb9af6ec6
+[scenario] waiting for daemon to process boot and publish kind:24010...
+[scenario] querying for kind:24010 from backend...
+[scenario]   24010 status published for our project ✓ (proves boot was recorded)
+[scenario] publishing kind:1 from user to agent1 (attempt 1)
+connecting to ws://127.0.0.1:62691... ok.
+publishing to ws://127.0.0.1:62691... success.
+[scenario]   user message id=97c0972742be782795e3618586cc46c543c39e217afff6fc0f1c50e61c158b6e
+[scenario] waiting up to 15s for daemon to enqueue dispatch...
+[scenario]   dispatch enqueued ✓
+[scenario] === Phase A complete: daemon plumbing OK ===
+
+[scenario] === Phase B: asserting mock-driven delegation ===
+[scenario]   observed: agent1 published kind:1 (historical)
+[scenario]   observed: agent2 published kind:1 with fixture content 'agent2 says 4'
+[scenario]   observed: agent1 published its final kind:1 with fixture content
+[scenario]   observed: RAL journal has a completion/terminal record
+
+[scenario] === Phase B observations ===
+[scenario]   agent1 published kind:1           : yes
+[scenario]   agent2 replied with fixture text  : yes
+[scenario]   agent1 final kind:1 (post-delegation): yes
+[scenario]   RAL journal completion record     : yes
+
+[scenario] PASS — scenario 5.1 (Phase A daemon plumbing + Phase B mock-driven delegation)
+[harness] cleanup (script exit code=0)
+[harness] stopping daemon pid 7368 (SIGTERM)
+[harness] stopping relay pid 7344

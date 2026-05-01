@@ -1,0 +1,52 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-43-1777231517-62474
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-43-1777231517-62474
+[harness]   backend pubkey:  60af67488f31ecd12a46f7b380c2eeeee19ffa0b487fc8b8f4466b107ca6db45
+[harness]   user pubkey:     2cd41655625c11f35a6caecedbc4eb6ca4debeeb84e91f6ceed60378e5b22588
+[harness]   agent1 pubkey:   9b8eb96bd363800eb86931417be7085152b1700b9270b305e326ad22a239cbef
+[harness]   agent2 pubkey:   078bbb41091a9129b20a6312e51c318c5e6af375ebc510dd177282f027bae7ab
+[harness]   project a-tag:   31933:2cd41655625c11f35a6caecedbc4eb6ca4debeeb84e91f6ceed60378e5b22588:nak-interop-test-20260426222517-23723
+[scenario] rewriting llms.json to use mock fixture model 'mock/delegation-02'
+[scenario] mock LLM enabled: fixture=/Users/pablofernandez/Work/TENEX-ff3ssq/scripts/e2e/fixtures/mock-llm/02_delegation.json
+[scenario] pre-seeded project descriptor at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-43-1777231517-62474/backend/projects/nak-interop-test-20260426222517-23723/project.json
+[harness] starting relay on 127.0.0.1:57795 (admins=1)
+[harness] relay ready at ws://127.0.0.1:57795
+[harness] daemon config relays -> [ws://127.0.0.1:57795]
+[scenario] publishing 14199 (whitelist) as user
+connecting to ws://127.0.0.1:57795... ok.
+publishing to ws://127.0.0.1:57795... success.
+[scenario] publishing 31933 (project) as user
+connecting to ws://127.0.0.1:57795... ok.
+publishing to ws://127.0.0.1:57795... success.
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-43-1777231517-62474/backend, binary=/Users/pablofernandez/Work/TENEX-ff3ssq/target/release/daemon)
+[harness] daemon ready (pid 62946, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-43-1777231517-62474/backend/daemon/tenex.lock)
+[harness] kind:14199 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] kind:24030 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] daemon subscription confirmed live (all probed listener filters registered)
+[scenario] publishing kind:24000 (boot)
+connecting to ws://127.0.0.1:57795... ok.
+publishing to ws://127.0.0.1:57795... success.
+[scenario]   boot event id=e824afce82d46a3e3f492954dcfcbbcbcbe5e2f3a20b9f9d75060a4c4cc2a862
+[scenario] waiting for daemon to publish kind:24010...
+[scenario] publishing kind:1 from user to agent1 (attempt 1)
+connecting to ws://127.0.0.1:57795... ok.
+publishing to ws://127.0.0.1:57795... success.
+[scenario]   user message id=d1d24eff50f181bfd84d3a79e9a32771a40f11c3297fdfa6c43380a9a18ca835
+[scenario]   dispatch enqueued ✓
+
+[scenario] waiting for mock-driven delegation flow to complete (timeout=60s)...
+[scenario]   observed: RAL journal has a terminal record
+[scenario] daemon log (last 80 lines):
+[2m19:25:20[0m  [1m[32m✓[0m  [1m[32mdaemon ready[0m  [2m(nostr on, telegram off)[0m
+[2m19:25:20[0m  ↑  [1m[96mnak-interop-test-20260426222517-23723[0m  [2m(1 booted)[0m
+[2m19:25:21[0m  [1m[33m●[0m  [1m[34magent1[0m  [2minbound-worker-b922b18560740a9d3c142b0c[0m  [1m[96mnak-interop-test-20260426222517-23723[0m
+[2m19:25:21[0m  [1m[32m✓[0m  [1m[34magent1[0m  [2minbound-worker-b922b18560740a9d3c142b0c[0m  [1m[96mnak-interop-test-20260426222517-23723[0m
+[harness] FATAL: ASSERT: agent2 never published kind:1 with fixture content 'agent2 says 4'
+[harness] cleanup (script exit code=1)
+[harness] stopping daemon pid 62946 (SIGTERM)
+[harness] stopping relay pid 62935

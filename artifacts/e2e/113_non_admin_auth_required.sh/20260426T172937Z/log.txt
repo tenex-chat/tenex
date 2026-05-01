@@ -1,0 +1,33 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-113-1777224577-14091
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-113-1777224577-14091
+[harness]   backend pubkey:  30e8185632ad0a2a69764198cb0b1f1e649f0f5f6b0f2a1e0f3e0064322d1629
+[harness]   user pubkey:     90dbdf0fc849c686f007c8690398e544b3dc8144891231841b7068cdd2580b61
+[harness]   agent1 pubkey:   48bc430d8ff30c088da094eeadf26cb4af59e0728fab6090744a1e03ce41f9dd
+[harness]   agent2 pubkey:   9ce73166fec0500976ae3ef41c205058b31e51dcca4c1d3a964ec2cb45da8797
+[harness]   project a-tag:   31933:90dbdf0fc849c686f007c8690398e544b3dc8144891231841b7068cdd2580b61:nak-interop-test-20260426202937-6805
+[harness] starting relay on 127.0.0.1:63822 (admins=1)
+[harness] relay ready at ws://127.0.0.1:63822
+connecting to ws://127.0.0.1:63822... ok.
+publishing to ws://127.0.0.1:63822... success.
+connecting to ws://127.0.0.1:63822... ok.
+publishing to ws://127.0.0.1:63822... success.
+connecting to ws://127.0.0.1:63822... ok.
+publishing to ws://127.0.0.1:63822... success.
+[scenario] step 1: subscribe WITHOUT auth — expect 0 events and relay denies
+[scenario]   unauthenticated_count=0 (expect 0)
+[scenario]   relay denied unauthenticated subscribe ✓
+[scenario] step 2: subscribe WITH auth (user not whitelisted) — expect 0 historical events
+[scenario]   authenticated_count=0 (expect 0; non-whitelisted)
+[scenario]   non-whitelisted AUTH returns 0 events ✓
+[scenario]   relay log confirms NIP-42 AUTH was exercised (deferred sub recorded) ✓
+
+[scenario] PASS — scenario 11.3: non-admin gets auth-required
+[harness] RESULT status=pass scenario=113_non_admin_auth_required.sh detail=
+[harness] cleanup (script exit code=0)
+[harness] stopping relay pid 14545

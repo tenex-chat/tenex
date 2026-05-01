@@ -1,0 +1,45 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-14-1777237740-69265
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-14-1777237740-69265
+[harness]   backend pubkey:  9ae97c3b96a61d5a8e22ecef2ad97e342acb63370595aa7c99544a3ffdf57659
+[harness]   user pubkey:     7d0312de3ff83ffede7751b78f325b10fb3f6b852d8439fa71a9fd493cdab907
+[harness]   agent1 pubkey:   881e4793d37e5e9f89937dca3667ac2fa87c2a7d728746f0865f49ca2fa913e8
+[harness]   agent2 pubkey:   0ded4eb233614a3c50374b901a37b935303dd7e645c5ea24c64ac28afa69ae24
+[harness]   project a-tag:   31933:7d0312de3ff83ffede7751b78f325b10fb3f6b852d8439fa71a9fd493cdab907:nak-interop-test-20260427000900-20987
+[harness] starting relay on 127.0.0.1:63454 (admins=1)
+[harness] relay ready at ws://127.0.0.1:63454
+[harness] daemon config relays -> [ws://127.0.0.1:63454]
+connecting to ws://127.0.0.1:63454... ok.
+publishing to ws://127.0.0.1:63454... success.
+connecting to ws://127.0.0.1:63454... ok.
+publishing to ws://127.0.0.1:63454... success.
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-14-1777237740-69265/backend, binary=/Users/pablofernandez/Work/TENEX-ff3ssq/target/release/daemon)
+[harness] daemon ready (pid 70186, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-14-1777237740-69265/backend/daemon/tenex.lock)
+[harness] kind:14199 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] kind:24030 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] daemon subscription confirmed live (all probed listener filters registered)
+[scenario] publishing kind:24000 (boot) for first daemon
+connecting to ws://127.0.0.1:63454... ok.
+publishing to ws://127.0.0.1:63454... success.
+[scenario]   boot event id=32e326fa30dda6d964da18f0b6cd84e655c14f7acca0a490682b7aab964798ee
+[scenario] waiting for first-incarnation boot to be recorded (up to 8s)
+[scenario]   first daemon recorded boot (1 project_booted log lines) ✓
+[scenario] crashing daemon (SIGKILL)
+[harness] crashing daemon pid 70186 (SIGKILL)
+[scenario]   stale lockfile present at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-14-1777237740-69265/backend/daemon/tenex.lock ✓
+[scenario]   pre-restart daemon.log line count: 27
+[scenario] restarting daemon
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-14-1777237740-69265/backend, binary=/Users/pablofernandez/Work/TENEX-ff3ssq/target/release/daemon)
+[harness] daemon ready (pid 70329, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-14-1777237740-69265/backend/daemon/tenex.lock)
+/Users/pablofernandez/Work/TENEX-ff3ssq/scripts/e2e-test-harness.sh: line 294: 70329 Killed: 9               TENEX_BASE_DIR="$TENEX_BASE_DIR" "$daemon_bin" --tenex-base-dir "$TENEX_BASE_DIR" >> "$HARNESS_DAEMON_LOG" 2>&1
+[harness] kind:14199 probe #1 was signed locally but never became readable on the relay; retrying
+[harness] TIMEOUT: kind:14199 probe never round-tripped within 45s
+[harness] FATAL: restarted daemon subscription never became live
+[harness] cleanup (script exit code=1)
+[harness] stopping daemon pid 70329 (SIGTERM)
+[harness] stopping relay pid 70022

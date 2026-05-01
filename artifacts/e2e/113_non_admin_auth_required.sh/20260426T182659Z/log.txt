@@ -1,0 +1,33 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-113-1777228019-34189
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-113-1777228019-34189
+[harness]   backend pubkey:  baf95bf6e49e80e4fefb331fe19bde513a2d52b94722c18185e208049ac10175
+[harness]   user pubkey:     ae042b1eaaa46d31e10d02c26f5b26b8513cc1e9d968bcacaa01519685dca8aa
+[harness]   agent1 pubkey:   346699327d9ee4eb89c19c3c8728744eeb0d6b8d8532d3423d193e95146df6dd
+[harness]   agent2 pubkey:   aab23e293de63532e76a60ac98ba92a03b3fbca030b856287182d32ba72a3889
+[harness]   project a-tag:   31933:ae042b1eaaa46d31e10d02c26f5b26b8513cc1e9d968bcacaa01519685dca8aa:nak-interop-test-20260426212659-4696
+[harness] starting relay on 127.0.0.1:55859 (admins=1)
+[harness] relay ready at ws://127.0.0.1:55859
+connecting to ws://127.0.0.1:55859... ok.
+publishing to ws://127.0.0.1:55859... success.
+connecting to ws://127.0.0.1:55859... ok.
+publishing to ws://127.0.0.1:55859... success.
+connecting to ws://127.0.0.1:55859... ok.
+publishing to ws://127.0.0.1:55859... success.
+[scenario] step 1: subscribe WITHOUT auth — expect 0 events and relay denies
+[scenario]   unauthenticated_count=0 (expect 0)
+[scenario]   relay denied unauthenticated subscribe ✓
+[scenario] step 2: subscribe WITH auth (user not whitelisted) — expect 0 historical events
+[scenario]   authenticated_count=0 (expect 0; non-whitelisted)
+[scenario]   non-whitelisted AUTH returns 0 events ✓
+[scenario]   relay log confirms NIP-42 AUTH was exercised (deferred sub recorded) ✓
+
+[scenario] PASS — scenario 11.3: non-admin gets auth-required
+[harness] RESULT status=pass scenario=113_non_admin_auth_required.sh detail=
+[harness] cleanup (script exit code=0)
+[harness] stopping relay pid 35464

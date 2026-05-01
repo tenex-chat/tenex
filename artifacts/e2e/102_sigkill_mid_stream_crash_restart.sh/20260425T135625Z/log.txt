@@ -1,0 +1,33 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-102-1777125385-28447
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-102-1777125385-28447
+[harness]   backend pubkey:  10b63f80c8f3af42d50f68c0ca7f9f7dce84ea85c65781abf424fbaba48d7b56
+[harness]   user pubkey:     5d064d4fe4f90e3ed8766763eefc29ef3c6f5766332cb38f4991697ee1494290
+[harness]   agent1 pubkey:   c44cf3045f68bede2ddf315069ce5264e1f23f2015aa0fd951fce8ba23b1a4bd
+[harness]   agent2 pubkey:   3cb327a8133d33ba3b154cbc65dbaa12e5a56f06c4bc0af8537e033e57b6e7bb
+[harness]   project a-tag:   31933:5d064d4fe4f90e3ed8766763eefc29ef3c6f5766332cb38f4991697ee1494290:nak-interop-test-20260425165625-6799
+[scenario] rewriting llms.json to use mock fixture model 'mock/delegation-02'
+[harness] starting relay on 127.0.0.1:51644 (admins=1)
+[harness] relay ready at ws://127.0.0.1:51644
+[harness] daemon config relays -> [ws://127.0.0.1:51644]
+[scenario] publishing 14199 (whitelist) as user
+connecting to ws://127.0.0.1:51644... ok.
+publishing to ws://127.0.0.1:51644... success.
+[scenario] publishing 31933 (project) as user
+connecting to ws://127.0.0.1:51644... ok.
+publishing to ws://127.0.0.1:51644... success.
+
+[scenario] === Phase 1: first daemon incarnation; SIGKILL mid-stream ===
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-102-1777125385-28447/backend, binary=/Users/pablofernandez/Work/TENEX-ff3ssq/target/release/daemon)
+[harness] daemon ready (pid 28998, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-102-1777125385-28447/backend/daemon/tenex.lock)
+[harness] kind:14199 listener confirmed (probe #1 round-tripped after 500ms)
+[harness] TIMEOUT: kind:24030 probe never round-tripped within 45s
+[harness] RESULT status=fail scenario=102_sigkill_mid_stream_crash_restart.sh detail=harness-flake: daemon subscription never became live (first boot)
+[harness] cleanup (script exit code=1)
+[harness] stopping daemon pid 28998 (SIGTERM)
+[harness] stopping relay pid 28986

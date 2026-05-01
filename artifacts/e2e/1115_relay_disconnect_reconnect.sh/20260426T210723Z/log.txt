@@ -1,0 +1,50 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-1115-1777237643-56291
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-1115-1777237643-56291
+[harness]   backend pubkey:  92339afa58bc9f133ed610bffb426d4196bffb5db2e913cea1ed096572281eeb
+[harness]   user pubkey:     240396369c379923d2832b628006c9bc544d516c600f00e8b6f7a29efe4d9ffa
+[harness]   agent1 pubkey:   2da33150880d56ecc725714004da41f4b53dab930381278de8f178293c3ff1a3
+[harness]   agent2 pubkey:   322d4dc00df930bca9ad56ea68883cd2d521334e1b7a6b99909b4bbcca53b9ad
+[harness]   project a-tag:   31933:240396369c379923d2832b628006c9bc544d516c600f00e8b6f7a29efe4d9ffa:nak-interop-test-20260427000723-14211
+[harness] starting relay on 127.0.0.1:62991 (admins=1)
+[harness] relay ready at ws://127.0.0.1:62991
+[harness] daemon config relays -> [ws://127.0.0.1:62991]
+connecting to ws://127.0.0.1:62991... ok.
+publishing to ws://127.0.0.1:62991... success.
+connecting to ws://127.0.0.1:62991... ok.
+publishing to ws://127.0.0.1:62991... success.
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-1115-1777237643-56291/backend, binary=/Users/pablofernandez/Work/TENEX-ff3ssq/target/release/daemon)
+[harness] daemon ready (pid 57215, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-1115-1777237643-56291/backend/daemon/tenex.lock)
+[harness] kind:14199 probe #1 was signed locally but never became readable on the relay; retrying
+[harness] kind:14199 listener confirmed (probe #2 round-tripped after 200ms)
+[harness] kind:24030 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] daemon subscription confirmed live (all probed listener filters registered)
+[scenario]   daemon subscribed and relay authenticated ✓
+[scenario]   log_offset_before_kill=    6206
+[scenario] killing relay (SIGTERM via stop_local_relay)
+[harness] stopping relay pid 57178
+[scenario]   relay killed ✓
+[scenario] waiting for daemon to log relay disconnect
+[scenario]   daemon logged 'relay disconnected, reconnecting after backoff' ✓
+[scenario]   daemon survived relay disconnect ✓
+[scenario] restarting relay on port 62991
+[scenario]   relay restarted and healthy ✓
+[scenario] waiting for daemon to reconnect and re-authenticate
+[scenario]   daemon re-authenticated after reconnect ✓
+[scenario] verifying live event delivery after reconnect
+connecting to ws://127.0.0.1:62991... ok.
+publishing to ws://127.0.0.1:62991... success.
+[scenario]   probe event id=d3cd22e2e40d28426b658f0e89f694048e5b9251855eb15e7283e6a40c7223e8 (kind:24030)
+/Users/pablofernandez/Work/TENEX-ff3ssq/scripts/e2e/scenarios/1115_relay_disconnect_reconnect.sh: line 140: 57215 Killed: 9               TENEX_BASE_DIR="$TENEX_BASE_DIR" "$daemon_bin" --tenex-base-dir "$TENEX_BASE_DIR" >> "$HARNESS_DAEMON_LOG" 2>&1
+[scenario]   probe event stored on relay after reconnect ✓
+
+[scenario] PASS — scenario 11.15: relay disconnect/reconnect with re-subscription
+[harness] RESULT status=pass scenario=1115_relay_disconnect_reconnect.sh detail=
+[harness] cleanup (script exit code=0)
+[harness] stopping daemon pid 57215 (SIGTERM)
+[harness] stopping relay pid 57568

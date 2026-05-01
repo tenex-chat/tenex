@@ -1,0 +1,28 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-39-1777227983-27001
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-39-1777227983-27001
+[harness]   backend pubkey:  752f26648bc3c36e74f6ebf7270157fc6c5d71613b81aaf44ee9ea3941ec97a7
+[harness]   user pubkey:     47f0f2f92f07bc7ad0d4afe6c8d2589728ca43e932e89813ebef4a13b0cf13fd
+[harness]   agent1 pubkey:   0105b02e0f8e3b0526d688faaf6d38f526b62ce5b0a13813452d5083633a730e
+[harness]   agent2 pubkey:   b34921c13a2b9c26ed5f0ba00f8dba2f23f8a76b0b01dd7b43ee5335a6cd0183
+[harness]   project a-tag:   31933:47f0f2f92f07bc7ad0d4afe6c8d2589728ca43e932e89813ebef4a13b0cf13fd:nak-interop-test-20260426212623-29629
+[harness] starting relay on 127.0.0.1:54934 (admins=1)
+[harness] relay ready at ws://127.0.0.1:54934
+[harness] daemon config relays -> [ws://127.0.0.1:54934]
+connecting to ws://127.0.0.1:54934... ok.
+publishing to ws://127.0.0.1:54934... success.
+connecting to ws://127.0.0.1:54934... ok.
+publishing to ws://127.0.0.1:54934... success.
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-39-1777227983-27001/backend)
+[harness] daemon ready (pid 28701, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-39-1777227983-27001/backend/daemon/tenex.lock)
+/Users/pablofernandez/Work/TENEX-ff3ssq/scripts/e2e-test-harness.sh: line 175: 28703 Killed: 9               TENEX_BASE_DIR="$TENEX_BASE_DIR" cargo run --release -p tenex-daemon --bin daemon -- --tenex-base-dir "$TENEX_BASE_DIR" >> "$HARNESS_DAEMON_LOG" 2>&1
+[harness] TIMEOUT: kind:14199 probe never round-tripped within 45s
+[harness] FATAL: daemon subscription never became live
+[harness] cleanup (script exit code=1)
+[harness] stopping daemon pid 28701 (SIGTERM)
+[harness] stopping relay pid 28647

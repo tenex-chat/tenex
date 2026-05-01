@@ -1,0 +1,37 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-122-1777224885-34391
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-122-1777224885-34391
+[harness]   backend pubkey:  dcb3acfe43f2e9dcf0bf232461e37bbb75fec930ffe09a178dac36ffa7f5079b
+[harness]   user pubkey:     c7e2cfc8c296cba0ffe82a2984cd85f70f6f1fd86d0e58aab0beccd388a51eec
+[harness]   agent1 pubkey:   e85260c70f53628f0e291f85ba46a5ebabcbe7383407b80814f1b224b57b6a97
+[harness]   agent2 pubkey:   3cd10099b91d7e3f4e92d4ca08a3f1141fbfc0d7bbfb5ffd01b90883f7f430bd
+[harness]   project a-tag:   31933:c7e2cfc8c296cba0ffe82a2984cd85f70f6f1fd86d0e58aab0beccd388a51eec:nak-interop-test-20260426203445-15249
+[harness] starting relay on 127.0.0.1:51500 (admins=1)
+[harness] relay ready at ws://127.0.0.1:51500
+[harness] daemon config relays -> [ws://127.0.0.1:51500]
+[harness] wrote 2 pubkey(s) to /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-122-1777224885-34391/backend/daemon/whitelist.txt
+connecting to ws://127.0.0.1:51500... ok.
+publishing to ws://127.0.0.1:51500... success.
+[scenario] pre-seeded 14199 id=11359923a3b8eaca38474af3cd27659effad2dec792f3825e523fdba37645e22 (agent1+backend only)
+[scenario] nak bunker pid=34908
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-122-1777224885-34391/backend)
+[harness] daemon ready (pid 34910, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-122-1777224885-34391/backend/daemon/tenex.lock)
+[harness] kind:14199 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] kind:24030 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] daemon subscription confirmed live (all probed listener filters registered)
+[scenario] waiting up to 25s for updated kind:14199 with agent2
+[scenario]   updated kind:14199 appeared ✓
+/Users/pablofernandez/Work/TENEX-ff3ssq/scripts/e2e/scenarios/122_nip46_additive_reconciliation.sh: line 117: 34908 Terminated: 15          nak bunker --sec "$USER_NSEC" --authorized-keys "$BACKEND_PUBKEY" "$HARNESS_RELAY_URL" > "$bunker_log" 2>&1
+[scenario]   p-tags: 3cd10099b91d7e3f4e92d4ca08a3f1141fbfc0d7bbfb5ffd01b90883f7f430bd c7e2cfc8c296cba0ffe82a2984cd85f70f6f1fd86d0e58aab0beccd388a51eec dcb3acfe43f2e9dcf0bf232461e37bbb75fec930ffe09a178dac36ffa7f5079b e85260c70f53628f0e291f85ba46a5ebabcbe7383407b80814f1b224b57b6a97
+[scenario]   agent1, agent2, and backend all present in p-tags ✓
+
+[scenario] PASS — scenario 12.2 Additive reconciliation on agent add
+[harness] RESULT status=pass scenario=122_nip46_additive_reconciliation.sh detail=additive 14199 published with all three p-tags
+[harness] cleanup (script exit code=0)
+[harness] stopping daemon pid 34910 (SIGTERM)
+[harness] stopping relay pid 34886

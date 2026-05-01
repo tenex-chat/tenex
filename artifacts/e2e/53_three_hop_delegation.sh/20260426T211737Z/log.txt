@@ -1,0 +1,146 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-53-1777238257-98703
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-53-1777238257-98703
+[harness]   backend pubkey:  2fb857acea2d04d27177df6ca0b4b74ca2607a8b2ec4c969bd7484abe9969336
+[harness]   user pubkey:     0075e30b32e587b13256db932197f4a1d1188e195b79154890cfda12fd8d8dbb
+[harness]   agent1 pubkey:   2d198aeb66436131fe7ff4d60c70852434ee95b3cc66ee516a74ca83eee2dc26
+[harness]   agent2 pubkey:   93b8bf95799f0a37e090b371f9d22fb507a411abb0d0e7168cd1f89699debec1
+[harness]   project a-tag:   31933:0075e30b32e587b13256db932197f4a1d1188e195b79154890cfda12fd8d8dbb:nak-interop-test-20260427001737-3244
+[scenario] generating agent3 key pair
+[scenario]   agent3 pubkey=2fcd1f5966728a95bcf0a8f5daf6aacd738d033cabecb46ce0be590f37b0bc57
+[scenario]   agent3 JSON written to /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-53-1777238257-98703/backend/agents/2fcd1f5966728a95bcf0a8f5daf6aacd738d033cabecb46ce0be590f37b0bc57.json
+[scenario] rewriting llms.json to use mock fixture model 'mock/three-hop-53'
+[scenario] mock LLM enabled: fixture=/Users/pablofernandez/Work/TENEX-ff3ssq/scripts/e2e/fixtures/mock-llm/53_three_hop.json
+[scenario] pre-seeded project descriptor at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-53-1777238257-98703/backend/projects/nak-interop-test-20260427001737-3244/project.json
+[harness] starting relay on 127.0.0.1:64612 (admins=1)
+[harness] relay ready at ws://127.0.0.1:64612
+[harness] daemon config relays -> [ws://127.0.0.1:64612]
+[scenario] publishing 14199 (whitelist) as user — includes agent3
+connecting to ws://127.0.0.1:64612... ok.
+publishing to ws://127.0.0.1:64612... success.
+[scenario] publishing 31933 (project) as user — includes agent3
+connecting to ws://127.0.0.1:64612... ok.
+publishing to ws://127.0.0.1:64612... success.
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-53-1777238257-98703/backend, binary=/Users/pablofernandez/Work/TENEX-ff3ssq/target/release/daemon)
+[harness] daemon ready (pid 205, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-53-1777238257-98703/backend/daemon/tenex.lock)
+[harness] kind:14199 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] kind:24030 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] daemon subscription confirmed live (all probed listener filters registered)
+[scenario] publishing 24000 (boot) as user
+connecting to ws://127.0.0.1:64612... ok.
+publishing to ws://127.0.0.1:64612... success.
+[scenario]   boot event id=c3ba68452c206adc4d633a8c668cc8d1ff777c9fed41b3a9fba56f730cb79840
+[scenario] waiting for daemon to process boot and publish kind:24010...
+[scenario]   24010 status published for our project ✓
+[scenario] publishing kind:1 from user to agent1 (attempt 1)
+connecting to ws://127.0.0.1:64612... ok.
+publishing to ws://127.0.0.1:64612... success.
+[scenario]   user message id=9d8882d846467d70b1bbfe66c7ede7687a63f4755c47355feca3b6a36fa83351
+[scenario] waiting up to 15s for daemon to enqueue dispatch...
+[scenario]   dispatch enqueued ✓
+[scenario] === Phase A complete: daemon plumbing OK ===
+
+[scenario] === Phase B: asserting mock-driven three-hop delegation ===
+[scenario]   observed: agent1 published kind:1 (delegation)
+[scenario]   observed: agent2 published kind:1
+[scenario]   observed: agent3 published terminal reply 'agent3 says result is 42'
+[scenario]   observed: agent1 published final answer incorporating the full chain
+[scenario]   observed: RAL journal has 3 delegation completion records
+
+[scenario] === Phase B observations ===
+[scenario]   agent1 published delegation kind:1      : yes
+[scenario]   agent2 published delegation kind:1      : yes
+[scenario]   agent3 terminal reply (fixture content) : yes
+[scenario]   agent2 resume (agent3 result relayed)   : no
+[scenario]   agent1 final answer (full chain)        : yes
+[scenario]   RAL journal >=2 completion records      : yes
+[scenario] daemon log (last 80 lines):
+[2m21:18:05[0m  [1m[32m✓[0m  [1m[95magent1[0m  [2mpre-completed-resume-worker-374743bbc9529e444289ceda[0m  [1m[35mnak-interop-test-20260427001737-3244[0m
+[2m21:18:05[0m  [1m[33m●[0m  [1m[95magent1[0m  [2mpre-completed-resume-worker-374743bbc9529e444289ceda[0m  [1m[35mnak-interop-test-20260427001737-3244[0m
+[2m21:18:06[0m  [1m[32m✓[0m  [1m[95magent1[0m  [2mpre-completed-resume-worker-374743bbc9529e444289ceda[0m  [1m[35mnak-interop-test-20260427001737-3244[0m
+[2m21:18:06[0m  [1m[33m●[0m  [1m[95magent1[0m  [2mpre-completed-resume-worker-374743bbc9529e444289ceda[0m  [1m[35mnak-interop-test-20260427001737-3244[0m
+[2m21:18:06[0m  [1m[32m✓[0m  [1m[95magent1[0m  [2mpre-completed-resume-worker-374743bbc9529e444289ceda[0m  [1m[35mnak-interop-test-20260427001737-3244[0m
+[2m21:18:06[0m  [1m[33m●[0m  [1m[95magent1[0m  [2mpre-completed-resume-worker-374743bbc9529e444289ceda[0m  [1m[35mnak-interop-test-20260427001737-3244[0m
+[2m21:18:06[0m  [1m[32m✓[0m  [1m[95magent1[0m  [2mpre-completed-resume-worker-374743bbc9529e444289ceda[0m  [1m[35mnak-interop-test-20260427001737-3244[0m
+[2m21:18:06[0m  [1m[33m●[0m  [1m[95magent1[0m  [2mpre-completed-resume-worker-374743bbc9529e444289ceda[0m  [1m[35mnak-interop-test-20260427001737-3244[0m
+[2m21:18:06[0m  [1m[32m✓[0m  [1m[95magent1[0m  [2mpre-completed-resume-worker-374743bbc9529e444289ceda[0m  [1m[35mnak-interop-test-20260427001737-3244[0m
+[2m21:18:06[0m  [1m[33m●[0m  [1m[95magent1[0m  [2mpre-completed-resume-worker-374743bbc9529e444289ceda[0m  [1m[35mnak-interop-test-20260427001737-3244[0m
+[2m21:18:06[0m  [1m[32m✓[0m  [1m[95magent1[0m  [2mpre-completed-resume-worker-374743bbc9529e444289ceda[0m  [1m[35mnak-interop-test-20260427001737-3244[0m
+[2m21:18:06[0m  [1m[33m●[0m  [1m[95magent1[0m  [2mpre-completed-resume-worker-374743bbc9529e444289ceda[0m  [1m[35mnak-interop-test-202604270017[harness] stopping relay pid 135
+m[32m✓[0m  [1m[95magent1[0m  [2mpre-completed-resume-worker-374743bbc9529e444289ceda[0m  [1m[35mnak-interop-test-20260427001737-3244[0m
+[2m21:18:07[0m  [1m[33m●[0m  [1m[95magent1[0m  [2mpre-completed-resume-worker-374743bbc9529e444289ceda[0m  [1m[35mnak-interop-test-20260427001737-3244[0m
+[2m21:18:07[0m  [1m[32m✓[0m  [1m[95magent1[0m  [2mpre-completed-resume-worker-374743bbc9529e444289ceda[0m  [1m[35mnak-interop-test-20260427001737-3244[0m
+[2m21:18:07[0m  [1m[33m●[0m  [1m[95magent1[0m  [2mpre-completed-resume-worker-374743bbc9529e444289ceda[0m  [1m[35mnak-interop-test-20260427001737-3244[0m
+[2m21:18:07[0m  [1m[32m✓[0m  [1m[95magent1[0m  [2mpre-completed-resume-worker-374743bbc9529e444289ceda[0m  [1m[35mnak-interop-test-20260427001737-3244[0m
+[2m21:18:07[0m  [1m[33m●[0m  [1m[95magent1[0m  [2mpre-completed-resume-worker-374743bbc9529e444289ceda[0m  [1m[35mnak-interop-test-20260427001737-3244[0m
+[2m21:18:07[0m  [1m[32m✓[0m  [1m[95magent1[0m  [2mpre-completed-resume-worker-374743bbc9529e444289ceda[0m  [1m[35mnak-interop-test-20260427001737-3244[0m
+[2m21:18:07[0m  [1m[33m●[0m  [1m[95magent1[0m  [2mpre-completed-resume-worker-374743bbc9529e444289ceda[0m  [1m[35mnak-interop-test-20260427001737-3244[0m
+[2m21:18:07[0m  [1m[32m✓[0m  [1m[95magent1[0m  [2mpre-completed-resume-worker-374743bbc9529e444289ceda[0m  [1m[35mnak-interop-test-20260427001737-3244[0m
+[2m21:18:07[0m  [1m[33m●[0m  [1m[95magent1[0m  [2mpre-completed-resume-worker-374743bbc9529e444289ceda[0m  [1m[35mnak-interop-test-20260427001737-3244[0m
+[2m21:18:07[0m  [1m[32m✓[0m  [1m[95magent1[0m  [2mpre-completed-resume-worker-374743bbc9529e444289ceda[0m  [1m[35mnak-interop-test-20260427001737-3244[0m
+[2m21:18:07[0m  [1m[33m●[0m  [1m[95magent1[0m  [2mpre-completed-resume-worker-374743bbc9529e444289ceda[0m  [1m[35mnak-interop-test-20260427001737-3244[0m
+[2m21:18:08[0m  [1m[32m✓[0m  [1m[95magent1[0m  [2mpre-completed-resume-worker-374743bbc9529e444289ceda[0m  [1m[35mnak-interop-test-20260427001737-3244[0m
+[2m21:18:08[0m  [1m[33m●[0m  [1m[95magent1[0m  [2mpre-completed-resume-worker-374743bbc9529e444289ceda[0m  [1m[35mnak-interop-test-20260427001737-3244[0m
+[2m21:18:08[0m  [1m[32m✓[0m  [1m[95magent1[0m  [2mpre-completed-resume-worker-374743bbc9529e444289ceda[0m  [1m[35mnak-interop-test-20260427001737-3244[0m
+[2m21:18:08[0m  [1m[33m●[0m  [1m[95magent1[0m  [2mpre-completed-resume-worker-374743bbc9529e444289ceda[0m  [1m[35mnak-interop-test-20260427001737-3244[0m
+[2m21:18:08[0m  [1m[32m✓[0m  [1m[95magent1[0m  [2mpre-completed-resume-worker-374743bbc9529e444289ceda[0m  [1m[35mnak-interop-test-20260427001737-3244[0m
+[2m21:18:08[0m  [1m[33m●[0m  [1m[95magent1[0m  [2mpre-completed-resume-worker-374743bbc9529e444289ceda[0m  [1m[35mnak-interop-test-20260427001737-3244[0m
+[2m21:18:08[0m  [1m[32m✓[0m  [1m[95magent1[0m  [2mpre-completed-resume-worker-374743bbc9529e444289ceda[0m  [1m[35mnak-interop-test-20260427001737-3244[0m
+[2m21:18:08[0m  [1m[33m●[0m  [1m[95magent1[0m  [2mpre-completed-resume-worker-374743bbc9529e444289ceda[0m  [1m[35mnak-interop-test-20260427001737-3244[0m
+[2m21:18:08[0m  [1m[32m✓[0m  [1m[95magent1[0m  [2mpre-completed-resume-worker-374743bbc9529e444289ceda[0m  [1m[35mnak-interop-test-20260427001737-3244[0m
+[2m21:18:08[0m  [1m[33m●[0m  [1m[95magent1[0m  [2mpre-completed-resume-worker-374743bbc9529e444289ceda[0m  [1m[35mnak-interop-test-20260427001737-3244[0m
+[2m21:18:09[0m  [1m[32m✓[0m  [1m[95magent1[0m  [2mpre-completed-resume-worker-374743bbc9529e444289ceda[0m  [1m[35mnak-interop-test-20260427001737-3244[0m
+[2m21:18:09[0m  [1m[33m●[0m  [1m[95magent1[0m  [2mpre-completed-resume-worker-374743bbc9529e444289ceda[0m  [1m[35mnak-interop-test-20260427001737-3244[0m
+[2m21:18:09[0m  [1m[32m✓[0m  [1m[95magent1[0m  [2mpre-completed-resume-worker-374743bbc9529e444289ceda[0m  [1m[35mnak-interop-test-20260427001737-3244[0m
+[2m21:18:09[0m  [1m[33m●[0m  [1m[95magent1[0m  [2mpre-completed-resume-worker-374743bbc9529e444289ceda[0m  [1m[35mnak-interop-test-20260427001737-3244[0m
+[2m21:18:09[0m  [1m[32m✓[0m  [1m[95magent1[0m  [2mpre-completed-resume-worker-374743bbc9529e444289ceda[0m  [1m[35mnak-interop-test-20260427001737-3244[0m
+[2m21:18:09[0m  [1m[33m●[0m  [1m[95magent1[0m  [2mpre-completed-resume-worker-374743bbc9529e444289ceda[0m  [1m[35mnak-interop-test-20260427001737-3244[0m
+[2m21:18:09[0m  [1m[32m✓[0m  [1m[95magent1[0m  [2mpre-completed-resume-worker-374743bbc9529e444289ceda[0m  [1m[35mnak-interop-test-20260427001737-3244[0m
+[2m21:18:09[0m  [1m[33m●[0m  [1m[95magent1[0m  [2mpre-completed-resume-worker-374743bbc9529e444289ceda[0m  [1m[35mnak-interop-test-20260427001737-3244[0m
+[2m21:18:09[0m  [1m[32m✓[0m  [1m[95magent1[0m  [2mpre-completed-resume-worker-374743bbc9529e444289ceda[0m  [1m[35mnak-interop-test-20260427001737-3244[0m
+[2m21:18:09[0m  [1m[33m●[0m  [1m[95magent1[0m  [2mpre-completed-resume-worker-374743bbc9529e444289ceda[0m  [1m[35mnak-interop-test-20260427001737-3244[0m
+[2m21:18:10[0m  [1m[32m✓[0m  [1m[95magent1[0m  [2mpre-completed-resume-worker-374743bbc9529e444289ceda[0m  [1m[35mnak-interop-test-20260427001737-3244[0m
+[2m21:18:10[0m  [1m[33m●[0m  [1m[95magent1[0m  [2mpre-completed-resume-worker-374743bbc9529e444289ceda[0m  [1m[35mnak-interop-test-20260427001737-3244[0m
+[2m21:18:10[0m  [1m[32m✓[0m  [1m[95magent1[0m  [2mpre-completed-resume-worker-374743bbc9529e444289ceda[0m  [1m[35mnak-interop-test-20260427001737-3244[0m
+[2m21:18:10[0m  [1m[33m●[0m  [1m[95magent1[0m  [2mpre-completed-resume-worker-374743bbc9529e444289ceda[0m  [1m[35mnak-interop-test-20260427001737-3244[0m
+[2m21:18:10[0m  [1m[32m✓[0m  [1m[95magent1[0m  [2mpre-completed-resume-worker-374743bbc9529e444289ceda[0m  [1m[35mnak-interop-test-20260427001737-3244[0m
+[2m21:18:10[0m  [1m[33m●[0m  [1m[95magent1[0m  [2mpre-completed-resume-worker-374743bbc9529e444289ceda[0m  [1m[35mnak-interop-test-20260427001737-3244[0m
+[2m21:18:10[0m  [1m[32m✓[0m  [1m[95magent1[0m  [2mpre-completed-resume-worker-374743bbc9529e444289ceda[0m  [1m[35mnak-interop-test-20260427001737-3244[0m
+[2m21:18:10[0m  [1m[33m●[0m  [1m[95magent1[0m  [2mpre-completed-resume-worker-374743bbc9529e444289ceda[0m  [1m[35mnak-interop-test-20260427001737-3244[0m
+[2m21:18:10[0m  [1m[32m✓[0m  [1m[95magent1[0m  [2mpre-completed-resume-worker-374743bbc9529e444289ceda[0m  [1m[35mnak-interop-test-20260427001737-3244[0m
+[2m21:18:10[0m  [1m[33m●[0m  [1m[95magent1[0m  [2mpre-completed-resume-worker-374743bbc9529e444289ceda[0m  [1m[35mnak-interop-test-20260427001737-3244[0m
+[2m21:18:11[0m  [1m[32m✓[0m  [1m[95magent1[0m  [2mpre-completed-resume-worker-374743bbc9529e444289ceda[0m  [1m[35mnak-interop-test-20260427001737-3244[0m
+[2m21:18:11[0m  [1m[33m●[0m  [1m[95magent1[0m  [2mpre-completed-resume-worker-374743bbc9529e444289ceda[0m  [1m[35mnak-interop-test-20260427001737-3244[0m
+[2m21:18:11[0m  [1m[32m✓[0m  [1m[95magent1[0m  [2mpre-completed-resume-worker-374743bbc9529e444289ceda[0m  [1m[35mnak-interop-test-20260427001737-3244[0m
+[2m21:18:11[0m  [1m[33m●[0m  [1m[95magent1[0m  [2mpre-completed-resume-worker-374743bbc9529e444289ceda[0m  [1m[35mnak-interop-test-20260427001737-3244[0m
+[2m21:18:11[0m  [1m[32m✓[0m  [1m[95magent1[0m  [2mpre-completed-resume-worker-374743bbc9529e444289ceda[0m  [1m[35mnak-interop-test-20260427001737-3244[0m
+[2m21:18:11[0m  [1m[33m●[0m  [1m[95magent1[0m  [2mpre-completed-resume-worker-374743bbc9529e444289ceda[0m  [1m[35mnak-interop-test-20260427001737-3244[0m
+[2m21:18:11[0m  [1m[32m✓[0m  [1m[95magent1[0m  [2mpre-completed-resume-worker-374743bbc9529e444289ceda[0m  [1m[35mnak-interop-test-20260427001737-3244[0m
+[2m21:18:11[0m  [1m[33m●[0m  [1m[95magent1[0m  [2mpre-completed-resume-worker-374743bbc9529e444289ceda[0m  [1m[35mnak-interop-test-20260427001737-3244[0m
+[2m21:18:12[0m  [1m[32m✓[0m  [1m[95magent1[0m  [2mpre-completed-resume-worker-374743bbc9529e444289ceda[0m  [1m[35mnak-interop-test-20260427001737-3244[0m
+[2m21:18:12[0m  [1m[33m●[0m  [1m[95magent1[0m  [2mpre-completed-resume-worker-374743bbc9529e444289ceda[0m  [1m[35mnak-interop-test-20260427001737-3244[0m
+[2m21:18:12[0m  [1m[32m✓[0m  [1m[95magent1[0m  [2mpre-completed-resume-worker-374743bbc9529e444289ceda[0m  [1m[35mnak-interop-test-20260427001737-3244[0m
+[2m21:18:12[0m  [1m[33m●[0m  [1m[95magent1[0m  [2mpre-completed-resume-worker-374743bbc9529e444289ceda[0m  [1m[35mnak-interop-test-20260427001737-3244[0m
+[2m21:18:12[0m  [1m[32m✓[0m  [1m[95magent1[0m  [2mpre-completed-resume-worker-374743bbc9529e444289ceda[0m  [1m[35mnak-interop-test-20260427001737-3244[0m
+[2m21:18:12[0m  [1m[33m●[0m  [1m[95magent1[0m  [2mpre-completed-resume-worker-374743bbc9529e444289ceda[0m  [1m[35mnak-interop-test-20260427001737-3244[0m
+[2m21:18:12[0m  [1m[32m✓[0m  [1m[95magent1[0m  [2mpre-completed-resume-worker-374743bbc9529e444289ceda[0m  [1m[35mnak-interop-test-20260427001737-3244[0m
+[2m21:18:12[0m  [1m[33m●[0m  [1m[95magent1[0m  [2mpre-completed-resume-worker-374743bbc9529e444289ceda[0m  [1m[35mnak-interop-test-20260427001737-3244[0m
+[2m21:18:12[0m  [1m[32m✓[0m  [1m[95magent1[0m  [2mpre-completed-resume-worker-374743bbc9529e444289ceda[0m  [1m[35mnak-interop-test-20260427001737-3244[0m
+[2m21:18:12[0m  [1m[33m●[0m  [1m[95magent1[0m  [2mpre-completed-resume-worker-374743bbc9529e444289ceda[0m  [1m[35mnak-interop-test-20260427001737-3244[0m
+[2m21:18:13[0m  [1m[32m✓[0m  [1m[95magent1[0m  [2mpre-completed-resume-worker-374743bbc9529e444289ceda[0m  [1m[35mnak-interop-test-20260427001737-3244[0m
+[2m21:18:13[0m  [1m[33m●[0m  [1m[95magent1[0m  [2mpre-completed-resume-worker-374743bbc9529e444289ceda[0m  [1m[35mnak-interop-test-20260427001737-3244[0m
+[2m21:18:13[0m  [1m[32m✓[0m  [1m[95magent1[0m  [2mpre-completed-resume-worker-374743bbc9529e444289ceda[0m  [1m[35mnak-interop-test-20260427001737-3244[0m
+[2m21:18:13[0m  [1m[33m●[0m  [1m[95magent1[0m  [2mpre-completed-resume-worker-374743bbc9529e444289ceda[0m  [1m[35mnak-interop-test-20260427001737-3244[0m
+[2m21:18:13[0m  [1m[32m✓[0m  [1m[95magent1[0m  [2mpre-completed-resume-worker-374743bbc9529e444289ceda[0m  [1m[35mnak-interop-test-20260427001737-3244[0m
+[2m21:18:13[0m  [1m[33m●[0m  [1m[95magent1[0m  [2mpre-completed-resume-worker-374743bbc9529e444289ceda[0m  [1m[35mnak-interop-test-20260427001737-3244[0m
+[2m21:18:13[0m  [1m[32m✓[0m  [1m[95magent1[0m  [2mpre-completed-resume-worker-374743bbc9529e444289ceda[0m  [1m[35mnak-interop-test-20260427001737-3244[0m
+[2m21:18:13[0m  [1m[33m●[0m  [1m[95magent1[0m  [2mpre-completed-resume-worker-374743bbc9529e444289ceda[0m  [1m[35mnak-interop-test-20260427001737-3244[0m
+[harness] RESULT status=fail scenario=53_three_hop_delegation.sh detail=agent2 never published resume reply incorporating agent3's result
+[harness] cleanup (script exit code=1)
+[harness] stopping daemon pid 205 (SIGTERM)
+[harness] stopping relay pid 171

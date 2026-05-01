@@ -1,0 +1,84 @@
+{
+  "scenario": "02_delegation_a_to_b_to_a.sh",
+  "runs": 50,
+  "pass": 40,
+  "fail": 10,
+  "total_duration_s": 1590,
+  "min_s": 25,
+  "max_s": 82,
+  "mean_s": 31,
+  "started": "2026-04-24T07:21:41Z",
+  "finished": "2026-04-24T07:48:22Z",
+  "failures": [
+    {
+      "idx": 4,
+      "exit_code": 1,
+      "reason": "[harness] FATAL: daemon subscription never became live",
+      "log": "/Users/pablofernandez/Work/TENEX-ff3ssq/artifacts/e2e/stress/02_delegation/4/scenario.log",
+      "fixture_root": "/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-1777015379-97493"
+    },
+    {
+      "idx": 11,
+      "exit_code": 1,
+      "reason": "[harness] FATAL: daemon subscription never became live",
+      "log": "/Users/pablofernandez/Work/TENEX-ff3ssq/artifacts/e2e/stress/02_delegation/11/scenario.log",
+      "fixture_root": "/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-1777015567-10333"
+    },
+    {
+      "idx": 15,
+      "exit_code": 1,
+      "reason": "[harness] FATAL: daemon subscription never became live",
+      "log": "/Users/pablofernandez/Work/TENEX-ff3ssq/artifacts/e2e/stress/02_delegation/15/scenario.log",
+      "fixture_root": "/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-1777015697-18870"
+    },
+    {
+      "idx": 32,
+      "exit_code": 1,
+      "reason": "[harness] FATAL: daemon subscription never became live",
+      "log": "/Users/pablofernandez/Work/TENEX-ff3ssq/artifacts/e2e/stress/02_delegation/32/scenario.log",
+      "fixture_root": "/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-1777016188-58178"
+    },
+    {
+      "idx": 33,
+      "exit_code": 1,
+      "reason": "[harness] FATAL: daemon subscription never became live",
+      "log": "/Users/pablofernandez/Work/TENEX-ff3ssq/artifacts/e2e/stress/02_delegation/33/scenario.log",
+      "fixture_root": "/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-1777016219-60476"
+    },
+    {
+      "idx": 36,
+      "exit_code": 1,
+      "reason": "[harness] FATAL: daemon subscription never became live",
+      "log": "/Users/pablofernandez/Work/TENEX-ff3ssq/artifacts/e2e/stress/02_delegation/36/scenario.log",
+      "fixture_root": "/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-1777016314-67002"
+    },
+    {
+      "idx": 39,
+      "exit_code": 1,
+      "reason": "[harness] FATAL: daemon subscription never became live",
+      "log": "/Users/pablofernandez/Work/TENEX-ff3ssq/artifacts/e2e/stress/02_delegation/39/scenario.log",
+      "fixture_root": "/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-1777016436-74602"
+    },
+    {
+      "idx": 42,
+      "exit_code": 1,
+      "reason": "[harness] FATAL: ASSERT: agent1 never published any kind:1 event",
+      "log": "/Users/pablofernandez/Work/TENEX-ff3ssq/artifacts/e2e/stress/02_delegation/42/scenario.log",
+      "fixture_root": "/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-1777016546-81762"
+    },
+    {
+      "idx": 46,
+      "exit_code": 1,
+      "reason": "[harness] FATAL: daemon subscription never became live",
+      "log": "/Users/pablofernandez/Work/TENEX-ff3ssq/artifacts/e2e/stress/02_delegation/46/scenario.log",
+      "fixture_root": "/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-1777016734-92849"
+    },
+    {
+      "idx": 47,
+      "exit_code": 1,
+      "reason": "[harness] FATAL: daemon subscription never became live",
+      "log": "/Users/pablofernandez/Work/TENEX-ff3ssq/artifacts/e2e/stress/02_delegation/47/scenario.log",
+      "fixture_root": "/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-1777016767-95424"
+    }
+  ]
+}

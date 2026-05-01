@@ -1,0 +1,84 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-56-1777220783-68885
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-56-1777220783-68885
+[harness]   backend pubkey:  b1c2a0f2aed035076bfb213b7b655a91d949166eb01dcd5d625af12343cdd6aa
+[harness]   user pubkey:     1a0cf577471a8fdcbeac4416421d8355b44daeefd055525f2380b27f534371c2
+[harness]   agent1 pubkey:   739c33c21d02c37bc0b0e6f122fca639a2993a4a7d3eff73e6d233194ddaac3b
+[harness]   agent2 pubkey:   f2d97c0d0bd6e73088d9c002d63b33c04812194590569ab809b17a4d9ae039f6
+[harness]   project a-tag:   31933:1a0cf577471a8fdcbeac4416421d8355b44daeefd055525f2380b27f534371c2:nak-interop-test-20260426192623-10361
+[scenario] generating agent3 key pair
+[scenario]   agent3 pubkey=7b37694df65d7e295d1ad3114a9c6cd372cbb369118d3195655a04baee3ad4ee
+[scenario]   agent3 JSON written
+[scenario] rewriting llms.json to use mock fixture model 'mock/partial-delegation-56'
+[scenario] mock LLM enabled: fixture=/Users/pablofernandez/Work/TENEX-ff3ssq/scripts/e2e/fixtures/mock-llm/56_partial_delegation_completion.json
+[harness] starting relay on 127.0.0.1:56153 (admins=1)
+[harness] relay ready at ws://127.0.0.1:56153
+[harness] daemon config relays -> [ws://127.0.0.1:56153]
+[scenario] publishing 14199 (whitelist) — includes agent3
+connecting to ws://127.0.0.1:56153... ok.
+publishing to ws://127.0.0.1:56153... success.
+[scenario] publishing 31933 (project) — includes agent3
+connecting to ws://127.0.0.1:56153... ok.
+publishing to ws://127.0.0.1:56153... success.
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-56-1777220783-68885/backend)
+[harness] daemon ready (pid 69467, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-56-1777220783-68885/backend/daemon/tenex.lock)
+[harness] kind:14199 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] kind:24030 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] daemon subscription confirmed live (all probed listener filters registered)
+[scenario] publishing 24000 (boot)
+connecting to ws://127.0.0.1:56153... ok.
+publishing to ws://127.0.0.1:56153... success.
+[scenario]   boot event id=3b01053a6ac910ef9203b6e18b080b2dece0b87b70a2a16934457bb356cf19a5
+[scenario] publishing kind:1 from user to agent1 (attempt 1)
+connecting to ws://127.0.0.1:56153... ok.
+publishing to ws://127.0.0.1:56153... success.
+[scenario]   initial dispatch enqueued ✓
+
+[scenario] === Phase B: partial delegation completion ===
+[scenario]   observed: agent1 published delegation kind:1
+[scenario]   observed: agent2 published 'agent2-task-B-done'
+[scenario]   observed: agent3 published 'agent3-task-C-done'
+[scenario]   observed: agent1 published final kind:1
+
+[scenario] === Phase B results ===
+[scenario]   agent1 issued multi-delegation        : yes
+[scenario]   agent2 (B) published completion       : yes
+[scenario]   agent3 (C) published completion       : yes
+[scenario]   RAL journal >=2 DelegationCompleted   : no
+[scenario]   agent1 published final kind:1         : yes
+warning: field `status` is never read
+  --> crates/tenex-daemon/src/per_agent_config_snapshot.rs:64:5
+   |
+61 | struct RawStoredAgent {
+   |        -------------- field in this struct
+...
+64 |     status: Option<String>,
+   |     ^^^^^^
+   |
+   = note: `RawStoredAgent` has a derived impl for the trait `Debug`, but this is intentionally ignored during dead code analysis
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `tenex-daemon` (lib) generated 1 warning
+    Finished `release` profile [optimized] target(s) in 0.26s
+     Running `target/release/daemon --tenex-base-dir /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-56-1777220783-68885/backend`
+[2m16:26:29[0m  [1m[32m✓[0m  [1m[32mdaemon ready[0m  [2m(nostr on, telegram off)[0m
+[2m16:26:29[0m  ↑  [1m[92mnak-interop-test-20260426192623-10361[0m  [2m(1 booted)[0m
+[2m16:26:32[0m  [1m[33m●[0m  [1m[36magent1[0m  [2minbound-worker-08e67f0c8410a2ead7022570[0m  [1m[92mnak-interop-test-20260426192623-10361[0m
+[2m16:26:34[0m  [1m[33m●[0m  [1m[94magent2[0m  [2minbound-worker-e029f82a4a9ba38f202aa3aa[0m  [1m[92mnak-interop-test-20260426192623-10361[0m
+[2m16:26:37[0m  [1m[33m●[0m  [1m[92magent3[0m  [2minbound-worker-567de1190ac73e871e521f45[0m  [1m[92mnak-interop-test-20260426192623-10361[0m
+[2m16:26:47[0m  [1m[33m●[0m  [1m[94magent2[0m  [2minbound-worker-ba22590270b7eed5bb57b113[0m  [1m[92mnak-interop-test-20260426192623-10361[0m
+[2m16:26:47[0m  [1m[32m✓[0m  [1m[94magent2[0m  [2minbound-worker-e029f82a4a9ba38f202aa3aa[0m  [1m[92mnak-interop-test-20260426192623-10361[0m
+[2m16:26:48[0m  [1m[32m✓[0m  [1m[92magent3[0m  [2minbound-worker-567de1190ac73e871e521f45[0m  [1m[92mnak-interop-test-20260426192623-10361[0m
+[2m16:26:49[0m  [1m[33m●[0m  [1m[92magent3[0m  [2minbound-worker-369e84d96e412b689008cc98[0m  [1m[92mnak-interop-test-20260426192623-10361[0m
+[2m16:26:55[0m  [1m[32m✓[0m  [1m[94magent2[0m  [2minbound-worker-ba22590270b7eed5bb57b113[0m  [1m[92mnak-interop-test-20260426192623-10361[0m
+[2m16:26:57[0m  [1m[32m✓[0m  [1m[36magent1[0m  [2minbound-worker-08e67f0c8410a2ead7022570[0m  [1m[92mnak-interop-test-20260426192623-10361[0m
+[2m16:26:57[0m  [1m[32m✓[0m  [1m[92magent3[0m  [2minbound-worker-369e84d96e412b689008cc98[0m  [1m[92mnak-interop-test-20260426192623-10361[0m
+[harness] RESULT status=fail scenario=56_partial_delegation_completion.sh detail=RAL journal never recorded >=2 DelegationCompleted entries for parallel children
+[harness] cleanup (script exit code=1)
+[harness] stopping daemon pid 69467 (SIGTERM)
+[harness] stopping relay pid 69442

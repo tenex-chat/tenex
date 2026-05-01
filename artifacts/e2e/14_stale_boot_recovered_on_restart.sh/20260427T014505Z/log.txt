@@ -1,0 +1,57 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-14-1777254305-15484
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-14-1777254305-15484
+[harness]   backend pubkey:  eff1b9c9b2133a99fb4f88414b43c2e40adfff681dfe3a0af57331d39799e642
+[harness]   user pubkey:     8a31eecc4e6b36722417c0a2c86f0d6497dad3efd05d7beef6e3c9887f298ec1
+[harness]   agent1 pubkey:   ebfc7c365b36e18b3309a721d1fcff4f7cd29b9ca5618411841969527e62439c
+[harness]   agent2 pubkey:   3a23e0b30489079ebaa9411ea302ed549102b6cf8ce64dffbdd88b29c5650969
+[harness]   project a-tag:   31933:8a31eecc4e6b36722417c0a2c86f0d6497dad3efd05d7beef6e3c9887f298ec1:nak-interop-test-20260427044505-21810
+[harness] starting relay on 127.0.0.1:56095 (admins=1)
+[harness] relay ready at ws://127.0.0.1:56095
+[harness] daemon config relays -> [ws://127.0.0.1:56095]
+connecting to ws://127.0.0.1:56095... ok.
+publishing to ws://127.0.0.1:56095... success.
+connecting to ws://127.0.0.1:56095... ok.
+publishing to ws://127.0.0.1:56095... success.
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-14-1777254305-15484/backend, binary=/Users/pablofernandez/Work/TENEX-ff3ssq/target/release/daemon)
+[harness] daemon ready (pid 16373, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-14-1777254305-15484/backend/daemon/tenex.lock)
+[harness] kind:14199 probe #1 was signed locally but never became readable on the relay; retrying
+[harness] kind:14199 listener confirmed (probe #2 round-tripped after 200ms)
+[harness] kind:24030 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] daemon subscription confirmed live (all probed listener filters registered)
+[scenario] publishing kind:24000 (boot) for first daemon
+connecting to ws://127.0.0.1:56095... ok.
+publishing to ws://127.0.0.1:56095... success.
+[scenario]   boot event id=31244a6c62fe18b6eeca2106d6f009104c476f3169494355b4ca82bdf6b92323
+[scenario] waiting for first-incarnation boot to be recorded (up to 8s)
+[scenario]   first daemon recorded boot (1 project_booted log lines) ✓
+[scenario] crashing daemon (SIGKILL)
+[harness] crashing daemon pid 16373 (SIGKILL)
+[scenario]   stale lockfile present at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-14-1777254305-15484/backend/daemon/tenex.lock ✓
+[scenario]   pre-restart daemon.log line count: 29
+[scenario] restarting daemon
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-14-1777254305-15484/backend, binary=/Users/pablofernandez/Work/TENEX-ff3ssq/target/release/daemon)
+[harness] daemon ready (pid 16680, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-14-1777254305-15484/backend/daemon/tenex.lock)
+[harness] kind:14199 probe #1 was signed locally but never became readable on the relay; retrying
+[harness] kind:14199 listener confirmed (probe #2 round-tripped after 200ms)
+[harness] kind:24030 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] daemon subscription confirmed live (all probed listener filters registered)
+[scenario] re-publishing kind:24000 for restarted daemon
+connecting to ws://127.0.0.1:56095... ok.
+publishing to ws://127.0.0.1:56095... success.
+[scenario]   boot event id=610c4b1c5087e50425d8fed1f9308bdbb495774c5b1c20f499f34e0d4e266a50
+[scenario] waiting for re-boot to be processed (up to 10s)
+[scenario]   post-restart project_booted log lines: 2
+[scenario] waiting up to 15s for restarted daemon to publish a 24010
+[scenario]   observed 2 total 24010s for our a-tag ✓ (historical)
+[scenario]   restarted daemon still running (pid 16680) ✓
+
+[scenario] PASS — scenario 1.4 Stale boot state recovered on restart
+[harness] cleanup (script exit code=0)
+[harness] stopping daemon pid 16680 (SIGTERM)
+[harness] stopping relay pid 16342

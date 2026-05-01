@@ -1,0 +1,87 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-56-1777221666-14009
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-56-1777221666-14009
+[harness]   backend pubkey:  ae709f80c3d64b954cf8795ee30aa17b16a1a3441a2c3e9397a2c55f13220296
+[harness]   user pubkey:     1c9e93909bf18dc26bee14a3916ecbe91e77b3357c1dbf4e857c6266bb6bda16
+[harness]   agent1 pubkey:   fe2d96d468460f65bf8ca20de2e7b9ae4132eba13e4bf8c511ac33c3717f2735
+[harness]   agent2 pubkey:   4bdf45e87f05671bc7077b7926efbd9e842a08035e6854d870f997726ff0cd7a
+[harness]   project a-tag:   31933:1c9e93909bf18dc26bee14a3916ecbe91e77b3357c1dbf4e857c6266bb6bda16:nak-interop-test-20260426194106-6938
+[scenario] generating agent3 key pair
+[scenario]   agent3 pubkey=e661b81f2175debd2d036aa0047ac3c93264732a8f166e2fdfdc1ce57e35270e
+[scenario]   agent3 JSON written
+[scenario] rewriting llms.json to use mock fixture model 'mock/partial-delegation-56'
+[scenario] mock LLM enabled: fixture=/Users/pablofernandez/Work/TENEX-ff3ssq/scripts/e2e/fixtures/mock-llm/56_partial_delegation_completion.json
+[harness] starting relay on 127.0.0.1:52090 (admins=1)
+[harness] relay ready at ws://127.0.0.1:52090
+[harness] daemon config relays -> [ws://127.0.0.1:52090]
+[scenario] publishing 14199 (whitelist) — includes agent3
+connecting to ws://127.0.0.1:52090... ok.
+publishing to ws://127.0.0.1:52090... success.
+[scenario] publishing 31933 (project) — includes agent3
+connecting to ws://127.0.0.1:52090... ok.
+publishing to ws://127.0.0.1:52090... success.
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-56-1777221666-14009/backend)
+[harness] daemon ready (pid 14539, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-56-1777221666-14009/backend/daemon/tenex.lock)
+[harness] kind:14199 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] kind:24030 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] daemon subscription confirmed live (all probed listener filters registered)
+[scenario] publishing 24000 (boot)
+connecting to ws://127.0.0.1:52090... ok.
+publishing to ws://127.0.0.1:52090... success.
+[scenario]   boot event id=740a54462f8ebfc57607a1ce779ca43092502eb17793a561ea73d7da98b9085d
+[scenario] publishing kind:1 from user to agent1 (attempt 1)
+connecting to ws://127.0.0.1:52090... ok.
+publishing to ws://127.0.0.1:52090... success.
+[scenario]   initial dispatch enqueued ✓
+
+[scenario] === Phase B: partial delegation completion ===
+[scenario]   observed: agent1 published delegation kind:1
+[scenario]   observed: agent2 published 'agent2-task-B-done'
+[scenario]   observed: agent3 published 'agent3-task-C-done'
+
+[scenario] === Phase B results ===
+[scenario]   agent1 issued multi-delegation        : yes
+[scenario]   agent2 (B) published completion       : yes
+[scenario]   agent3 (C) published completion       : yes
+[scenario]   RAL journal >=2 DelegationCompleted   : no
+[scenario]   agent1 published final kind:1         : no
+warning: field `status` is never read
+  --> crates/tenex-daemon/src/per_agent_config_snapshot.rs:64:5
+   |
+61 | struct RawStoredAgent {
+   |        -------------- field in this struct
+...
+64 |     status: Option<String>,
+   |     ^^^^^^
+   |
+   = note: `RawStoredAgent` has a derived impl for the trait `Debug`, but this is intentionally ignored during dead code analysis
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `tenex-daemon` (lib) generated 1 warning
+    Finished `release` profile [optimized] target(s) in 0.08s
+     Running `target/release/daemon --tenex-base-dir /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-56-1777221666-14009/backend`
+[2m16:41:10[0m  [1m[32m✓[0m  [1m[32mdaemon ready[0m  [2m(nostr on, telegram off)[0m
+[2m16:41:10[0m  ↑  [1m[34mnak-interop-test-20260426194106-6938[0m  [2m(1 booted)[0m
+[2m16:41:11[0m  [1m[33m●[0m  [1m[95magent1[0m  [2minbound-worker-697b2203ef161dbf36bad8b2[0m  [1m[34mnak-interop-test-20260426194106-6938[0m
+[2m16:41:12[0m  [1m[33m●[0m  [1m[34magent2[0m  [2minbound-worker-a25731621207104917667ea6[0m  [1m[34mnak-interop-test-20260426194106-6938[0m
+[2m16:41:12[0m  [1m[33m●[0m  [1m[94magent3[0m  [2minbound-worker-5e4d441a0616c9e70751ce05[0m  [1m[34mnak-interop-test-20260426194106-6938[0m
+[2m16:41:12[0m  [1m[32m✓[0m  [1m[34magent2[0m  [2minbound-worker-a25731621207104917667ea6[0m  [1m[34mnak-interop-test-20260426194106-6938[0m
+[2m16:41:13[0m  [1m[32m✓[0m  [1m[94magent3[0m  [2minbound-worker-5e4d441a0616c9e70751ce05[0m  [1m[34mnak-interop-test-20260426194106-6938[0m
+[2m16:41:13[0m  [1m[33m●[0m  [1m[34magent2[0m  [2minbound-worker-efc22f4033f643be1d5361b9[0m  [1m[34mnak-interop-test-20260426194106-6938[0m
+[2m16:41:13[0m  [1m[33m●[0m  [1m[94magent3[0m  [2minbound-worker-81fdce813e3345bd39d0e9d2[0m  [1m[34mnak-interop-test-20260426194106-6938[0m
+[2m16:41:14[0m  [1m[32m✓[0m  [1m[34magent2[0m  [2minbound-worker-efc22f4033f643be1d5361b9[0m  [1m[34mnak-interop-test-20260426194106-6938[0m
+[2m16:41:14[0m  [1m[32m✓[0m  [1m[95magent1[0m  [2minbound-worker-697b2203ef161dbf36bad8b2[0m  [1m[34mnak-interop-test-20260426194106-6938[0m
+[2m16:41:14[0m  [1m[33m●[0m  [1m[95magent1[0m  [2mdelegation-resume-worker-e543877f2ce94996dc06dddb[0m  [1m[34mnak-interop-test-20260426194106-6938[0m
+[2m16:41:14[0m  [1m[32m✓[0m  [1m[94magent3[0m  [2minbound-worker-81fdce813e3345bd39d0e9d2[0m  [1m[34mnak-interop-test-20260426194106-6938[0m
+[2m16:41:14[0m  [1m[32m✓[0m  [1m[95magent1[0m  [2mdelegation-resume-worker-e543877f2ce94996dc06dddb[0m  [1m[34mnak-interop-test-20260426194106-6938[0m
+[2m16:41:15[0m  [1m[33m●[0m  [1m[95magent1[0m  [2mpre-completed-resume-worker-d1fb6abe0e007e75b6c903e5[0m  [1m[34mnak-interop-test-20260426194106-6938[0m
+[2m16:41:15[0m  [1m[32m✓[0m  [1m[95magent1[0m  [2mpre-completed-resume-worker-d1fb6abe0e007e75b6c903e5[0m  [1m[34mnak-interop-test-20260426194106-6938[0m
+[harness] RESULT status=fail scenario=56_partial_delegation_completion.sh detail=RAL journal never recorded >=2 DelegationCompleted entries for parallel children
+[harness] cleanup (script exit code=1)
+[harness] stopping daemon pid 14539 (SIGTERM)
+[harness] stopping relay pid 14521

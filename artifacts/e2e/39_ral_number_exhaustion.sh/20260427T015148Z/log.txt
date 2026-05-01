@@ -1,0 +1,29 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-39-1777254708-41438
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-39-1777254708-41438
+[harness]   backend pubkey:  3ee4c918e7942c9d567d80cf7cc1b7ae5596bb32e733f586c9d93f0eaf834ccc
+[harness]   user pubkey:     cd47ef4a9b2130d12a8bef49706c2da388d74aa6c10a2c9c44bef036c297d6bc
+[harness]   agent1 pubkey:   92e45e6a099e137af93f465b5049f2ed5dad6cb2c3fd0f42f7e213b0d2194fac
+[harness]   agent2 pubkey:   ae1b3ee83c2e2ac35c6fdcbba617b579c58f23df2c28dba11a31ae4eeb0e2f2e
+[harness]   project a-tag:   31933:cd47ef4a9b2130d12a8bef49706c2da388d74aa6c10a2c9c44bef036c297d6bc:nak-interop-test-20260427045148-21076
+[harness] starting relay on 127.0.0.1:56956 (admins=1)
+[harness] relay ready at ws://127.0.0.1:56956
+[harness] daemon config relays -> [ws://127.0.0.1:56956]
+connecting to ws://127.0.0.1:56956... ok.
+publishing to ws://127.0.0.1:56956... success.
+connecting to ws://127.0.0.1:56956... ok.
+publishing to ws://127.0.0.1:56956... success.
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-39-1777254708-41438/backend, binary=/Users/pablofernandez/Work/TENEX-ff3ssq/target/release/daemon)
+[harness] daemon ready (pid 42143, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-39-1777254708-41438/backend/daemon/tenex.lock)
+[harness] kind:14199 listener confirmed (probe #1 round-tripped after 200ms)
+/Users/pablofernandez/Work/TENEX-ff3ssq/scripts/e2e-test-harness.sh: line 206: 42143 Killed: 9               TENEX_BASE_DIR="$TENEX_BASE_DIR" "$daemon_bin" --tenex-base-dir "$TENEX_BASE_DIR" >> "$HARNESS_DAEMON_LOG" 2>&1
+[harness] TIMEOUT: kind:24030 probe never round-tripped within 45s
+[harness] FATAL: daemon subscription never became live
+[harness] cleanup (script exit code=1)
+[harness] stopping daemon pid 42143 (SIGTERM)
+[harness] stopping relay pid 42109

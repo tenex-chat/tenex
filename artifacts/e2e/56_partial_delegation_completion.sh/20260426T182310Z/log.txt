@@ -1,0 +1,60 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-56-1777227790-12310
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-56-1777227790-12310
+[harness]   backend pubkey:  83f5707ad8fe666e221171c24c68376984abc41a1325b5aaf37d9435aa7ce915
+[harness]   user pubkey:     3c0b84fae61e2f533c2294ac12991b18c785566aad66b3bca003a7d576fd77ce
+[harness]   agent1 pubkey:   45657bc67099363d3a6f3a757a84a2aa199b387a4d29cf12a33c588bebb831fe
+[harness]   agent2 pubkey:   207b26c248482b6d33d206c305af5f20f9e10a0d1911335fbc8e533a4c618616
+[harness]   project a-tag:   31933:3c0b84fae61e2f533c2294ac12991b18c785566aad66b3bca003a7d576fd77ce:nak-interop-test-20260426212310-3829
+[scenario] generating agent3 key pair
+[scenario]   agent3 pubkey=40570d05be1de0d5838508260e18c4ea6cceab63ab6432f8177253dc0e28a299
+[scenario]   agent3 JSON written
+[scenario] rewriting llms.json to use mock fixture model 'mock/partial-delegation-56'
+[scenario] mock LLM enabled: fixture=/Users/pablofernandez/Work/TENEX-ff3ssq/scripts/e2e/fixtures/mock-llm/56_partial_delegation_completion.json
+[harness] starting relay on 127.0.0.1:49689 (admins=1)
+[harness] relay ready at ws://127.0.0.1:49689
+[harness] daemon config relays -> [ws://127.0.0.1:49689]
+[scenario] publishing 14199 (whitelist) — includes agent3
+connecting to ws://127.0.0.1:49689... ok.
+publishing to ws://127.0.0.1:49689... success.
+[scenario] publishing 31933 (project) — includes agent3
+connecting to ws://127.0.0.1:49689... ok.
+publishing to ws://127.0.0.1:49689... success.
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-56-1777227790-12310/backend)
+[harness] daemon ready (pid 13310, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-56-1777227790-12310/backend/daemon/tenex.lock)
+[harness] kind:14199 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] kind:24030 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] daemon subscription confirmed live (all probed listener filters registered)
+[scenario] publishing 24000 (boot)
+connecting to ws://127.0.0.1:49689... ok.
+publishing to ws://127.0.0.1:49689... success.
+[scenario]   boot event id=eab3e35be32f54c4211fa131664f9147dae329f816b11c7176738380384f3293
+[scenario] publishing kind:1 from user to agent1 (attempt 1)
+connecting to ws://127.0.0.1:49689... ok.
+publishing to ws://127.0.0.1:49689... success.
+[scenario]   initial dispatch enqueued ✓
+
+[scenario] === Phase B: partial delegation completion ===
+[scenario]   observed: agent1 published delegation kind:1
+[scenario]   observed: agent2 published 'agent2-task-B-done'
+[scenario]   observed: agent3 published 'agent3-task-C-done'
+[scenario]   observed: RAL journal has 2 DelegationCompleted entries
+[scenario]   observed: agent1 published final kind:1
+
+[scenario] === Phase B results ===
+[scenario]   agent1 issued multi-delegation        : yes
+[scenario]   agent2 (B) published completion       : yes
+[scenario]   agent3 (C) published completion       : yes
+[scenario]   RAL journal >=2 DelegationCompleted   : yes
+[scenario]   agent1 published final kind:1         : yes
+
+[scenario] PASS — scenario 5.6: parallel delegation completions recorded in RAL journal
+[harness] RESULT status=pass scenario=56_partial_delegation_completion.sh detail=both B and C delegation completions recorded; agent1 resumed and published final answer
+[harness] cleanup (script exit code=0)
+[harness] stopping daemon pid 13310 (SIGTERM)
+[harness] stopping relay pid 13219

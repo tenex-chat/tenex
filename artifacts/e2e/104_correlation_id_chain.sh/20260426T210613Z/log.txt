@@ -1,0 +1,39 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-104-1777237573-47327
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-104-1777237573-47327
+[harness]   backend pubkey:  53f48dc78ad1915644955824c7a78135710fb8a97424b2359e37e8cca18a2a07
+[harness]   user pubkey:     927e974a245fc4fda6039823dd4caba10d6ed3eec918b7041ba07bf938926866
+[harness]   agent1 pubkey:   84f5ad083c03d9196bb8ac5de9d469cbf70146b6d62f84c55c7e67fc0ffa9288
+[harness]   agent2 pubkey:   dde0a5989adfe537533b6da52ac87205164e93eac8f851af6120b778c5e33a3a
+[harness]   project a-tag:   31933:927e974a245fc4fda6039823dd4caba10d6ed3eec918b7041ba07bf938926866:nak-interop-test-20260427000613-25572
+[harness] starting relay on 127.0.0.1:62646 (admins=1)
+[harness] relay ready at ws://127.0.0.1:62646
+[harness] daemon config relays -> [ws://127.0.0.1:62646]
+connecting to ws://127.0.0.1:62646... ok.
+publishing to ws://127.0.0.1:62646... success.
+connecting to ws://127.0.0.1:62646... ok.
+publishing to ws://127.0.0.1:62646... success.
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-104-1777237573-47327/backend, binary=/Users/pablofernandez/Work/TENEX-ff3ssq/target/release/daemon)
+[harness] daemon ready (pid 47977, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-104-1777237573-47327/backend/daemon/tenex.lock)
+[harness] kind:14199 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] kind:24030 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] daemon subscription confirmed live (all probed listener filters registered)
+connecting to ws://127.0.0.1:62646... ok.
+publishing to ws://127.0.0.1:62646... success.
+[scenario]   boot event id=7f3c1ec9758ecb27de70656deba6ee6647ab6f58b6e2c80062ded6ada43172c9
+[scenario]   kind:24010 published for our project ✓
+connecting to ws://127.0.0.1:62646... ok.
+publishing to ws://127.0.0.1:62646... success.
+[scenario]   user message id (correlation key)=6cda6ce3fec2be074be3e4185a3b6a917f5a6c6d58f5030fde44e1211729f7b4
+/Users/pablofernandez/Work/TENEX-ff3ssq/scripts/e2e/scenarios/104_correlation_id_chain.sh: line 112: 47977 Killed: 9               TENEX_BASE_DIR="$TENEX_BASE_DIR" "$daemon_bin" --tenex-base-dir "$TENEX_BASE_DIR" >> "$HARNESS_DAEMON_LOG" 2>&1
+
+[scenario] === Asserting correlation_id chain ===
+[scenario]   daemon.log hits for conv_id: 6 ✓
+[scenario]   ral journal records for conv_id: 2 ✓
+[scenario]   publish-outbox records for conv_id: 1 ✓
+[harness] RESULT status=pass scenario=104_correlation_id_chain.sh detail=conv_id present in daemon.log (6) + ral journal (2) + publish outbox (1)

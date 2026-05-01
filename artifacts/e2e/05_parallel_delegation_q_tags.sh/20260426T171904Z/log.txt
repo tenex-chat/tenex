@@ -1,0 +1,26 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-1777223944-62716
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-1777223944-62716
+[harness]   backend pubkey:  363092a4d42c71a001c219aa83d932cc6ff4ab9c871f54fb752fa8c1a4579ed8
+[harness]   user pubkey:     a7ea19687e1e23c63b90408383378eead59d0529b3c748d33df9b3a36756bc62
+[harness]   agent1 pubkey:   3497ca07e9dc1758683810f4275fe5dbaf8eab9c20dc33bb53f50ac9c2a8d13d
+[harness]   agent2 pubkey:   03b86981b1c59a2a5cb85bff534a1c34e28fcb673705f9b20ed45fe48c84b436
+[harness]   project a-tag:   31933:a7ea19687e1e23c63b90408383378eead59d0529b3c748d33df9b3a36756bc62:nak-interop-test-20260426201904-19155
+[scenario] rewriting llms.json to use mock fixture model 'mock/parallel-delegation-05'
+[scenario] mock LLM enabled: fixture=/Users/pablofernandez/Work/TENEX-ff3ssq/scripts/e2e/fixtures/mock-llm/05_parallel_delegation.json
+[scenario] pre-seeded project descriptor at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-1777223944-62716/backend/projects/nak-interop-test-20260426201904-19155/project.json
+[harness] starting relay on 127.0.0.1:53155 (admins=1)
+[harness] relay ready at ws://127.0.0.1:53155
+[harness] daemon config relays -> [ws://127.0.0.1:53155]
+[scenario] publishing 14199 (whitelist) as user
+connecting to ws://127.0.0.1:53155... ok.
+publishing to ws://127.0.0.1:53155... success.
+[scenario] publishing 31933 (project) as user
+connecting to ws://127.0.0.1:53155... ok.
+publishing to ws://127.0.0.1:53155... success.
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-1777223944-62716/backend)

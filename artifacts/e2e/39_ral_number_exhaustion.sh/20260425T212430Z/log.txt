@@ -1,0 +1,41 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-39-1777152270-23325
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-39-1777152270-23325
+[harness]   backend pubkey:  aae6208b894cc3d2ffa3a1fc37c784b95d3e7ed0008e9a0c5fda8e3ceb6cf4eb
+[harness]   user pubkey:     003435cc0c685e5c7a89206de6bc9721a93056ba99d59497e1a34f590b0b2889
+[harness]   agent1 pubkey:   75affa2e813cc9072d7f52244ff899e92c0913fff8ed73b521316b44a2f6712d
+[harness]   agent2 pubkey:   71ed3702de6a471a6ae13d506088b99bc96040a83e2965424ad3694220a9382d
+[harness]   project a-tag:   31933:003435cc0c685e5c7a89206de6bc9721a93056ba99d59497e1a34f590b0b2889:nak-interop-test-20260426002430-23886
+[harness] starting relay on 127.0.0.1:58840 (admins=1)
+[harness] relay ready at ws://127.0.0.1:58840
+[harness] daemon config relays -> [ws://127.0.0.1:58840]
+connecting to ws://127.0.0.1:58840... ok.
+publishing to ws://127.0.0.1:58840... success.
+connecting to ws://127.0.0.1:58840... ok.
+publishing to ws://127.0.0.1:58840... success.
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-39-1777152270-23325/backend)
+[harness] daemon ready (pid 23795, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-39-1777152270-23325/backend/daemon/tenex.lock)
+[harness] kind:14199 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] kind:24030 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] daemon subscription confirmed live (all probed listener filters registered)
+connecting to ws://127.0.0.1:58840... ok.
+publishing to ws://127.0.0.1:58840... success.
+[scenario] boot event id=42b460207447648138f2997ae87d9656ba0852e615a4cd8c7a26a5e3619dea12
+[scenario] daemon published kind:24010 ✓
+connecting to ws://127.0.0.1:58840... ok.
+publishing to ws://127.0.0.1:58840... success.
+[scenario] priming event id=48d2082956fb55e9a5449f3a63848b4191aadfa057f98f5c6cdb9f1e4ac9ddeb (attempt 1)
+[scenario] namespace captured:
+[scenario]   project_id      = nak-interop-test-20260426002430-23886
+[scenario]   agent_pubkey    = 75affa2e813cc9072d7f52244ff899e92c0913fff8ed73b521316b44a2f6712d
+[scenario]   conversation_id = 48d2082956fb55e9a5449f3a63848b4191aadfa057f98f5c6cdb9f1e4ac9ddeb
+[scenario] stopping daemon to seed RAL journal with u64::MAX
+[harness] stopping daemon pid 23795 (SIGTERM)
+[harness] cleanup (script exit code=143)
+[harness] stopping daemon pid 23795 (SIGTERM)
+[harness] stopping relay pid 23784

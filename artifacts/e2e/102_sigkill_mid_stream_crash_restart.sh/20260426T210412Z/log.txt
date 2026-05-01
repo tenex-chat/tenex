@@ -1,0 +1,61 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-102-1777237452-32349
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-102-1777237452-32349
+[harness]   backend pubkey:  600c60d07e7c95fa72708cf08347832d5eddc58defa4f29fa50b4c33ce99c0d9
+[harness]   user pubkey:     9030275aecf75f186efa99a4f097126347507996ba977cb2adf469213dcb5c8c
+[harness]   agent1 pubkey:   91ebd6e1c3a16a533649da9fcbbc0aeac3a86af882e4b4dab4b0021b6d9987eb
+[harness]   agent2 pubkey:   770f09cdb7d20e69459146c0e7ec0cb471d3dd4bcd79c2d2e0b01b2a9b2cc561
+[harness]   project a-tag:   31933:9030275aecf75f186efa99a4f097126347507996ba977cb2adf469213dcb5c8c:nak-interop-test-20260427000412-29988
+[scenario] rewriting llms.json to use mock fixture model 'mock/delegation-02'
+[harness] starting relay on 127.0.0.1:62024 (admins=1)
+[harness] relay ready at ws://127.0.0.1:62024
+[harness] daemon config relays -> [ws://127.0.0.1:62024]
+[scenario] publishing 14199 (whitelist) as user
+connecting to ws://127.0.0.1:62024... ok.
+publishing to ws://127.0.0.1:62024... success.
+[scenario] publishing 31933 (project) as user
+connecting to ws://127.0.0.1:62024... ok.
+publishing to ws://127.0.0.1:62024... success.
+
+[scenario] === Phase 1: first daemon incarnation; SIGKILL mid-stream ===
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-102-1777237452-32349/backend, binary=/Users/pablofernandez/Work/TENEX-ff3ssq/target/release/daemon)
+[harness] daemon ready (pid 33304, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-102-1777237452-32349/backend/daemon/tenex.lock)
+[harness] kind:14199 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] kind:24030 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] daemon subscription confirmed live (all probed listener filters registered)
+[scenario] publishing kind:24000 (boot) as user
+connecting to ws://127.0.0.1:62024... ok.
+publishing to ws://127.0.0.1:62024... success.
+[scenario]   boot event id=17a282d4042a7f8b54856441c8353df11e2161ff6b6d1dbe3178792a346a8c22
+[scenario]   kind:24010 published (project boot confirmed) ✓
+[scenario] publishing kind:1 from user to agent1
+connecting to ws://127.0.0.1:62024... ok.
+publishing to ws://127.0.0.1:62024... success.
+[scenario]   user message id=dd97a98d8b3edd75ec52f1b74f923ef8dc816068bdc00e4d4f0b22760e1d6be8
+[scenario] waiting for dispatch to reach 'leased' state (mid-stream window)...
+[scenario]   dispatch reached 'leased' (worker mid-stream) ✓
+[scenario]   pre-crash worker pids: <none>
+[scenario] sending SIGKILL to daemon (pid 33304)...
+[harness] crashing daemon pid 33304 (SIGKILL)
+[scenario]   daemon killed ✓
+
+[scenario] === Phase 2: post-crash state observation ===
+[scenario]   dispatch-queue: 2 total entries, 1 leased after crash
+[scenario]   ral/journal.jsonl: 2 lines
+[scenario]   stale tenex.lock present (expected after SIGKILL) ✓
+
+[scenario] === Phase 3: restart daemon against same fixture ===
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-102-1777237452-32349/backend, binary=/Users/pablofernandez/Work/TENEX-ff3ssq/target/release/daemon)
+[harness] daemon ready (pid 33528, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-102-1777237452-32349/backend/daemon/tenex.lock)
+/Users/pablofernandez/Work/TENEX-ff3ssq/scripts/e2e-test-harness.sh: line 206: 33528 Killed: 9               TENEX_BASE_DIR="$TENEX_BASE_DIR" "$daemon_bin" --tenex-base-dir "$TENEX_BASE_DIR" > "$HARNESS_DAEMON_LOG" 2>&1
+[harness] kind:14199 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] TIMEOUT: kind:24030 probe never round-tripped within 45s
+[harness] RESULT status=fail scenario=102_sigkill_mid_stream_crash_restart.sh detail=harness-flake: daemon subscription never became live (post-SIGKILL restart)
+[harness] cleanup (script exit code=1)
+[harness] stopping daemon pid 33528 (SIGTERM)
+[harness] stopping relay pid 33278

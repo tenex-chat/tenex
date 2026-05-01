@@ -1,0 +1,41 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-16-1777217898-51642
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-16-1777217898-51642
+[harness]   backend pubkey:  9fe8921f1af1813573b561ccb567d3ee334d62f9c055ef722656b9045edfbda2
+[harness]   user pubkey:     5354613b1c33b6d80014cacba300509e820238261e2ee8c12b63b5d6e4cd15db
+[harness]   agent1 pubkey:   7410337871cdf0ecd7e054b23198e8779472ea3ccc830591a9cbaa97c53379a1
+[harness]   agent2 pubkey:   2e1c7cbee8708cc393620b0d2b26438539740a194b7f7b1277ec60c0ab74cdee
+[harness]   project a-tag:   31933:5354613b1c33b6d80014cacba300509e820238261e2ee8c12b63b5d6e4cd15db:nak-interop-test-20260426183818-7446
+[scenario] projects/ cleared — cold-start environment confirmed empty
+[harness] starting relay on 127.0.0.1:52257 (admins=1)
+[harness] relay ready at ws://127.0.0.1:52257
+[harness] daemon config relays -> [ws://127.0.0.1:52257]
+connecting to ws://127.0.0.1:52257... ok.
+publishing to ws://127.0.0.1:52257... success.
+connecting to ws://127.0.0.1:52257... ok.
+publishing to ws://127.0.0.1:52257... success.
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-16-1777217898-51642/backend)
+[harness] daemon ready (pid 52440, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-16-1777217898-51642/backend/daemon/tenex.lock)
+[harness] kind:14199 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] kind:24030 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] daemon subscription confirmed live (all probed listener filters registered)
+[scenario] daemon running; no pre-seeded project on disk — cold start verified
+[scenario] publishing kind:24000 boot event
+connecting to ws://127.0.0.1:52257... ok.
+publishing to ws://127.0.0.1:52257... success.
+[scenario]   boot event id=9cb0c96406896a59030689cc33104a5ca3114ec69e8466b222d8e2869f39a7b5
+[scenario]   daemon process still alive ✓
+[scenario]   no relay disconnect logged ✓
+[scenario] waiting for kind:24010 project-status
+[scenario]   kind:24010 published for our a-tag ✓
+[scenario]   ingress recorded project_booted for our d-tag ✓
+
+[scenario] PASS — scenario 1.6 Cold-start boot does not crash daemon
+[harness] cleanup (script exit code=0)
+[harness] stopping daemon pid 52440 (SIGTERM)
+[harness] stopping relay pid 52275

@@ -1,0 +1,55 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-14-1777224718-22542
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-14-1777224718-22542
+[harness]   backend pubkey:  a961b4935f6933b4683f1e137aa383ae3dba88f844247705b36ff96e779831fd
+[harness]   user pubkey:     71f2a88f0e97b93d6402bd50bfbc7cf5102690ae85fba7c75f73c31f6322e530
+[harness]   agent1 pubkey:   82fd77d7f6535355b14049b23e625e569f719fa9fec2685753bdf53533562022
+[harness]   agent2 pubkey:   406ba831521e2a6900036e19b3839c345a1df18129e2eb27dc3bfb41d295e47b
+[harness]   project a-tag:   31933:71f2a88f0e97b93d6402bd50bfbc7cf5102690ae85fba7c75f73c31f6322e530:nak-interop-test-20260426203158-26743
+[harness] starting relay on 127.0.0.1:49793 (admins=1)
+[harness] relay ready at ws://127.0.0.1:49793
+[harness] daemon config relays -> [ws://127.0.0.1:49793]
+connecting to ws://127.0.0.1:49793... ok.
+publishing to ws://127.0.0.1:49793... success.
+connecting to ws://127.0.0.1:49793... ok.
+publishing to ws://127.0.0.1:49793... success.
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-14-1777224718-22542/backend)
+[harness] daemon ready (pid 23022, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-14-1777224718-22542/backend/daemon/tenex.lock)
+[harness] kind:14199 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] kind:24030 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] daemon subscription confirmed live (all probed listener filters registered)
+[scenario] publishing kind:24000 (boot) for first daemon
+connecting to ws://127.0.0.1:49793... ok.
+publishing to ws://127.0.0.1:49793... success.
+[scenario]   boot event id=39a6fca74c04d19dc79c31eafea15c0bc761fccd25828104cca3ffbc4bf7f1e7
+[scenario] waiting for first-incarnation boot to be recorded (up to 8s)
+[scenario]   first daemon recorded boot (1 project_booted log lines) ✓
+[scenario] crashing daemon (SIGKILL)
+[harness] crashing daemon pid 23022 (SIGKILL)
+[scenario]   stale lockfile present at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-14-1777224718-22542/backend/daemon/tenex.lock ✓
+[scenario]   pre-restart daemon.log line count: 27
+[scenario] restarting daemon
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-14-1777224718-22542/backend)
+[harness] daemon ready (pid 23198, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-14-1777224718-22542/backend/daemon/tenex.lock)
+[harness] kind:14199 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] kind:24030 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] daemon subscription confirmed live (all probed listener filters registered)
+[scenario] re-publishing kind:24000 for restarted daemon
+connecting to ws://127.0.0.1:49793... ok.
+publishing to ws://127.0.0.1:49793... success.
+[scenario]   boot event id=e321dd841116462eaed5cd17096db72703b8475cb8c3f7f390507dcc8a09255f
+[scenario] waiting for re-boot to be processed (up to 10s)
+[scenario]   post-restart project_booted log lines: 2
+[scenario] waiting up to 15s for restarted daemon to publish a 24010
+[scenario]   observed 2 total 24010s for our a-tag ✓ (historical)
+[scenario]   restarted daemon still running (pid 23198) ✓
+
+[scenario] PASS — scenario 1.4 Stale boot state recovered on restart
+[harness] cleanup (script exit code=0)
+[harness] stopping daemon pid 23198 (SIGTERM)
+[harness] stopping relay pid 23007

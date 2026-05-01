@@ -1,0 +1,38 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-41-1777137618-26778
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-41-1777137618-26778
+[harness]   backend pubkey:  0d67bb14cf32ec9054d600ed8e9fe99ed8ccc9fe7ca26f838b217eefabce3c01
+[harness]   user pubkey:     50163b8bf6aa3e498d38ac48a05f4dc2f919fcb1fe2e20c285783b09eac31bfa
+[harness]   agent1 pubkey:   9c62706a70808c2aebdb853d5963a15794ed516b45e6a9bd36cf44c2c38f69a5
+[harness]   agent2 pubkey:   621c31ab1409d4f7d203125abb70f39046ad61d70d770d64eb88db93d437f3eb
+[harness]   project a-tag:   31933:50163b8bf6aa3e498d38ac48a05f4dc2f919fcb1fe2e20c285783b09eac31bfa:nak-interop-test-20260425202018-31533
+[harness] starting relay on 127.0.0.1:64147 (admins=1)
+[harness] relay ready at ws://127.0.0.1:64147
+[harness] daemon config relays -> [ws://127.0.0.1:64147]
+connecting to ws://127.0.0.1:64147... ok.
+publishing to ws://127.0.0.1:64147... success.
+connecting to ws://127.0.0.1:64147... ok.
+publishing to ws://127.0.0.1:64147... success.
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-41-1777137618-26778/backend)
+[harness] daemon ready (pid 27278, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-41-1777137618-26778/backend/daemon/tenex.lock)
+[harness] kind:14199 listener confirmed (probe #1 round-tripped after 500ms)
+[harness] kind:24030 listener confirmed (probe #1 round-tripped after 500ms)
+[harness] daemon subscription confirmed live (all probed listener filters registered)
+[scenario] publishing kind:24000 boot event
+connecting to ws://127.0.0.1:64147... ok.
+publishing to ws://127.0.0.1:64147... success.
+[scenario] writing schedules.json with executeAt=2026-04-25T17:20:27Z (task_id=sched-task-e2e-41-26778)
+[scenario] waiting up to 7s for scheduled task dispatch to appear in queue
+[scenario]   scheduled task dispatch enqueued ✓
+[scenario] WARNING: schedules.json still has 1 entries after dispatch
+[scenario]   schedules.json finalized (tasks remaining: 1) ✓
+
+[scenario] PASS — scenario 4.1 Scheduled-task driver fires within deadline
+[harness] cleanup (script exit code=0)
+[harness] stopping daemon pid 27278 (SIGTERM)
+[harness] stopping relay pid 27267

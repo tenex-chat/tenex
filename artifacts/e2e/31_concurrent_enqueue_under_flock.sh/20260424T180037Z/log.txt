@@ -1,0 +1,8 @@
+[scenario] test_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-31-1777053637-73192
+[scenario] spawning 5 writers, 20 appends each (total=100)
+[scenario] all writers complete — verifying invariants
+[scenario]   record count: 100 ✓
+[scenario]   sequences contiguous 1..100 and strictly increasing in file order ✓
+[scenario]   dispatchIds all unique ✓
+
+[scenario] PASS — scenario 3.1: concurrent enqueue under flock

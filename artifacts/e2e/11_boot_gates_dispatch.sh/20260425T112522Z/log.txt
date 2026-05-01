@@ -1,0 +1,46 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-11-1777116322-93400
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-11-1777116322-93400
+[harness]   backend pubkey:  3339d6e4cd3fea821736d5cce3167727816a6792b161509f5a5e51fe29a58645
+[harness]   user pubkey:     902dd89536f7647d3be51c754f48bc6e4b0bf1ddb709a272e7d940f2941e0828
+[harness]   agent1 pubkey:   1d4eec7212682d1a5d8f1ac7dc9a32e63f7fbd23dd67404a2c46adb73f79cabb
+[harness]   agent2 pubkey:   7062f1159d26f56ada6429a808ba5940c6b05e0c709dae6b3dae7051d8df0b7e
+[harness]   project a-tag:   31933:902dd89536f7647d3be51c754f48bc6e4b0bf1ddb709a272e7d940f2941e0828:nak-interop-test-20260425142522-19620
+[harness] starting relay on 127.0.0.1:58993 (admins=1)
+[harness] relay ready at ws://127.0.0.1:58993
+[harness] daemon config relays -> [ws://127.0.0.1:58993]
+connecting to ws://127.0.0.1:58993... ok.
+publishing to ws://127.0.0.1:58993... success.
+connecting to ws://127.0.0.1:58993... ok.
+publishing to ws://127.0.0.1:58993... success.
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-11-1777116322-93400/backend)
+[harness] daemon ready (pid 93938, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-11-1777116322-93400/backend/daemon/tenex.lock)
+[harness] kind:14199 listener confirmed (probe #1 round-tripped after 500ms)
+[harness] kind:24030 listener confirmed (probe #1 round-tripped after 500ms)
+[harness] daemon subscription confirmed live (all probed listener filters registered)
+[scenario] publishing kind:1 without a prior boot event
+connecting to ws://127.0.0.1:58993... ok.
+publishing to ws://127.0.0.1:58993... success.
+[scenario]   user message id=fa826a7f11dda577e53d94bc22e1b09d6d85488b8091761fee33cfcde33ae4ea
+[scenario]   no 24010 published for unbooted project ✓
+[scenario]   NOTE: dispatch queued despite project being unbooted.
+[scenario]         (daemon does not currently gate dispatch on boot state;
+[scenario]          the docs project_not_booted code is not implemented.)
+[scenario]   ingress log lines referencing message id:
+[scenario]     {"timestamp":"2026-04-25T11:25:28.178810Z","level":"INFO","fields":{"message":"inbound dispatch queued","dispatch_id":"inbound-dad0dcea0d417c26be57ddd1","agent_pubkey":"1d4eec7212682d1a5d8f1ac7dc9a32e63f7fbd23dd67404a2c46adb73f79cabb","project_id":"nak-interop-test-20260425142522-19620","conversation_id":"fa826a7f11dda577e53d94bc22e1b09d6d85488b8091761fee33cfcde33ae4ea","triggering_event_id":"fa826a7f11dda577e53d94bc22e1b09d6d85488b8091761fee33cfcde33ae4ea"},"target":"tenex_daemon::inbound_dispatch"}
+[scenario]     {"timestamp":"2026-04-25T11:25:28.178859Z","level":"DEBUG","fields":{"message":"nostr event received","relay_url":"ws://127.0.0.1:58993","event_id":"fa826a7f11dda577e53d94bc22e1b09d6d85488b8091761fee33cfcde33ae4ea","event_kind":1,"event_pubkey":"902dd89536f7647d3be51c754f48bc6e4b0bf1ddb709a272e7d940f2941e0828","class":"Conversation"},"target":"tenex_daemon::nostr_subscription_gateway"}
+[scenario]     {"timestamp":"2026-04-25T11:25:28.178862Z","level":"INFO","fields":{"message":"inbound nostr event dispatched","relay_url":"ws://127.0.0.1:58993","event_id":"fa826a7f11dda577e53d94bc22e1b09d6d85488b8091761fee33cfcde33ae4ea","dispatch_id":"inbound-dad0dcea0d417c26be57ddd1","project_id":"nak-interop-test-20260425142522-19620","agent_pubkey":"1d4eec7212682d1a5d8f1ac7dc9a32e63f7fbd23dd67404a2c46adb73f79cabb","conversation_id":"fa826a7f11dda577e53d94bc22e1b09d6d85488b8091761fee33cfcde33ae4ea","queued":true,"already_existed":false},"target":"tenex_daemon::nostr_subscription_gateway"}
+[scenario]     {"timestamp":"2026-04-25T11:25:28.179303Z","level":"DEBUG","fields":{"message":"nostr event received","relay_url":"ws://127.0.0.1:58993","event_id":"fa826a7f11dda577e53d94bc22e1b09d6d85488b8091761fee33cfcde33ae4ea","event_kind":1,"event_pubkey":"902dd89536f7647d3be51c754f48bc6e4b0bf1ddb709a272e7d940f2941e0828","class":"Conversation"},"target":"tenex_daemon::nostr_subscription_gateway"}
+[scenario]     {"timestamp":"2026-04-25T11:25:28.179307Z","level":"INFO","fields":{"message":"inbound nostr event dispatched","relay_url":"ws://127.0.0.1:58993","event_id":"fa826a7f11dda577e53d94bc22e1b09d6d85488b8091761fee33cfcde33ae4ea","dispatch_id":"inbound-dad0dcea0d417c26be57ddd1","project_id":"nak-interop-test-20260425142522-19620","agent_pubkey":"1d4eec7212682d1a5d8f1ac7dc9a32e63f7fbd23dd67404a2c46adb73f79cabb","conversation_id":"fa826a7f11dda577e53d94bc22e1b09d6d85488b8091761fee33cfcde33ae4ea","queued":true,"already_existed":true},"target":"tenex_daemon::nostr_subscription_gateway"}
+[scenario]     {"timestamp":"2026-04-25T11:25:29.352940Z","level":"DEBUG","fields":{"message":"worker operations-status skipped because project descriptor is unavailable","project_id":"nak-interop-test-20260425142522-19620","conversation_id":"fa826a7f11dda577e53d94bc22e1b09d6d85488b8091761fee33cfcde33ae4ea","variant":"active"},"target":"tenex_daemon::daemon_worker_runtime","span":{"dispatch_id":"inbound-dad0dcea0d417c26be57ddd1","worker_id":"inbound-worker-dad0dcea0d417c26be57ddd1","name":"worker.session"},"spans":[{"dispatch_id":"inbound-dad0dcea0d417c26be57ddd1","worker_id":"inbound-worker-dad0dcea0d417c26be57ddd1","name":"worker.session"}]}
+[scenario]     {"timestamp":"2026-04-25T11:25:29.737453Z","level":"DEBUG","fields":{"message":"worker operations-status skipped because project descriptor is unavailable","project_id":"nak-interop-test-20260425142522-19620","conversation_id":"fa826a7f11dda577e53d94bc22e1b09d6d85488b8091761fee33cfcde33ae4ea","variant":"cleanup"},"target":"tenex_daemon::daemon_worker_runtime","span":{"dispatch_id":"inbound-dad0dcea0d417c26be57ddd1","worker_id":"inbound-worker-dad0dcea0d417c26be57ddd1","name":"worker.session"},"spans":[{"dispatch_id":"inbound-dad0dcea0d417c26be57ddd1","worker_id":"inbound-worker-dad0dcea0d417c26be57ddd1","name":"worker.session"}]}
+
+[scenario] PASS — scenario 1.1 Boot gates dispatch (observable-state assertions)
+[harness] cleanup (script exit code=0)
+[harness] stopping daemon pid 93938 (SIGTERM)
+[harness] stopping relay pid 93924

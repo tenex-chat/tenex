@@ -1,0 +1,40 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-104-1777255264-59365
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-104-1777255264-59365
+[harness]   backend pubkey:  03c058ecb56539477ae6e87127563b91a5bd5549fca19cfba541d7570d95fb7b
+[harness]   user pubkey:     e0a9ba386ac1bbb79db83830f61e5a855c87214f85557bd01930cbf583d9b441
+[harness]   agent1 pubkey:   180a2dae48ea150cbf49633d9ad51e36f6105ade844b30e7db43d774c5667102
+[harness]   agent2 pubkey:   a4ff7c3b19e27cd836e27c349ddcc01314618c79625a3f6f554889fa8f53d12d
+[harness]   project a-tag:   31933:e0a9ba386ac1bbb79db83830f61e5a855c87214f85557bd01930cbf583d9b441:nak-interop-test-20260427050104-12120
+[harness] starting relay on 127.0.0.1:57561 (admins=1)
+[harness] relay ready at ws://127.0.0.1:57561
+[harness] daemon config relays -> [ws://127.0.0.1:57561]
+connecting to ws://127.0.0.1:57561... ok.
+publishing to ws://127.0.0.1:57561... success.
+connecting to ws://127.0.0.1:57561... ok.
+publishing to ws://127.0.0.1:57561... success.
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-104-1777255264-59365/backend, binary=/Users/pablofernandez/Work/TENEX-ff3ssq/target/release/daemon)
+[harness] daemon ready (pid 59852, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-104-1777255264-59365/backend/daemon/tenex.lock)
+[harness] kind:14199 probe #1 was signed locally but never became readable on the relay; retrying
+[harness] kind:14199 listener confirmed (probe #2 round-tripped after 200ms)
+[harness] kind:24030 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] daemon subscription confirmed live (all probed listener filters registered)
+connecting to ws://127.0.0.1:57561... ok.
+publishing to ws://127.0.0.1:57561... success.
+[scenario]   boot event id=1686c027fb6ab489dc1a2ba76706d0152a74a775db5d84775a93bbc433624a71
+[scenario]   kind:24010 published for our project ✓
+connecting to ws://127.0.0.1:57561... ok.
+publishing to ws://127.0.0.1:57561... success.
+[scenario]   user message id (correlation key)=d28c00506722781f1a66ab347a643f27906db652f0a0082aef08507adcf8d7a6
+[scenario]   agent1 published final reply ✓
+
+[scenario] === Asserting correlation_id chain ===
+[scenario]   daemon.log hits for conv_id: 19 ✓
+[scenario]   ral journal records for conv_id: 9 ✓
+[scenario]   publish-outbox records for conv_id: 12 ✓
+[harness] RESULT status=pass scenario=104_correlation_id_chain.sh detail=conv_id present in daemon.log (19) + ral journal (9) + publish outbox (12)

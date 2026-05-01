@@ -1,0 +1,61 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-101-1777138822-56196
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-101-1777138822-56196
+[harness]   backend pubkey:  7c72392c4c041eaa481dab1bf13403a94727953dc14c8e27b3f4874fae9f5a19
+[harness]   user pubkey:     b80e906bcfcf50818db09a7d00236d4f58ca280557575bec7e336afd3045d8a2
+[harness]   agent1 pubkey:   ae360cfdef18e7b10b297aaf6bed27e330721409f4399500993f4fc035ced1c4
+[harness]   agent2 pubkey:   936d562e6ed9f796bf2f0553d41a9c65a6a51c6ba1fb20332abe5463133273f9
+[harness]   project a-tag:   31933:b80e906bcfcf50818db09a7d00236d4f58ca280557575bec7e336afd3045d8a2:nak-interop-test-20260425204022-972
+[scenario] rewriting llms.json to use mock fixture model 'mock/delegation-02'
+[harness] starting relay on 127.0.0.1:50034 (admins=1)
+[harness] relay ready at ws://127.0.0.1:50034
+[harness] daemon config relays -> [ws://127.0.0.1:50034]
+[scenario] publishing 14199 (whitelist) as user
+connecting to ws://127.0.0.1:50034... ok.
+publishing to ws://127.0.0.1:50034... success.
+[scenario] publishing 31933 (project) as user
+connecting to ws://127.0.0.1:50034... ok.
+publishing to ws://127.0.0.1:50034... success.
+
+[scenario] === Phase 1: first daemon incarnation ===
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-101-1777138822-56196/backend)
+[harness] daemon log tail:
+    |
+334 -         spawner,
+335 -         publisher,
+334 +         spawner,
+    |
+
+error[E0308]: mismatched types
+   --> crates/tenex-daemon/src/daemon_loop.rs:451:25
+    |
+444 |                     let result = run_started_worker_session_from_filesystem(
+    |                                  ------------------------------------------ arguments to this function are incorrect
+...
+451 |                         publish_enqueued_tx_for_spawn,
+    |                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `Option<...>`, found `Option<UnboundedSender<PublishEnqueued>>`
+    |
+    = note: expected enum `std::option::Option<DaemonWorkerLivePublishMaintenance<'_>>`
+               found enum `std::option::Option<UnboundedSender<PublishEnqueued>>`
+note: function defined here
+   --> crates/tenex-daemon/src/daemon_worker_runtime.rs:854:8
+    |
+854 | pub fn run_started_worker_session_from_filesystem<S>(
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+861 |     live_publish_maintenance: Option<DaemonWorkerLivePublishMaintenance<'_>>,
+    |     ------------------------------------------------------------------------
+
+Some errors have detailed explanations: E0061, E0063, E0308.
+For more information about an error, try `rustc --explain E0061`.
+warning: `tenex-daemon` (lib) generated 1 warning
+error: could not compile `tenex-daemon` (lib) due to 5 previous errors; 1 warning emitted
+[harness] FATAL: daemon never wrote lockfile
+[harness] cleanup (script exit code=1)
+[harness] stopping daemon pid 56668 (SIGTERM)
+[harness] stopping relay pid 56657

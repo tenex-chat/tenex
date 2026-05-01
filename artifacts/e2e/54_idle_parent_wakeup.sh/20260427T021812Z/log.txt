@@ -1,0 +1,60 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-54-1777256292-82709
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-54-1777256292-82709
+[harness]   backend pubkey:  e8c76d7306ff6e1aec2e41d3974897ebbe6d10d6fa5e5b63b02b58a5a049601a
+[harness]   user pubkey:     fea2e29daf3829907b4d1cc3d32528b7de661d6c2f6e696ea379e6cf5917f036
+[harness]   agent1 pubkey:   6ac1a6e21e53604fbcd6d4f905fb6803de185f9a03cb6ca483df98f152a974eb
+[harness]   agent2 pubkey:   78ab279ff5dd2f2d2e271def510a85b1c1e0dc63b0b58fa26b6739205f53a3ef
+[harness]   project a-tag:   31933:fea2e29daf3829907b4d1cc3d32528b7de661d6c2f6e696ea379e6cf5917f036:nak-interop-test-20260427051812-10707
+[scenario] rewriting llms.json to use mock fixture model 'mock/idle-parent-54'
+[scenario] mock LLM enabled: fixture=/Users/pablofernandez/Work/TENEX-ff3ssq/scripts/e2e/fixtures/mock-llm/54_idle_parent_wakeup.json
+[scenario] pre-seeded project descriptor at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-54-1777256292-82709/backend/projects/nak-interop-test-20260427051812-10707/project.json
+[harness] starting relay on 127.0.0.1:58373 (admins=1)
+[harness] relay ready at ws://127.0.0.1:58373
+[harness] daemon config relays -> [ws://127.0.0.1:58373]
+[scenario] publishing 14199 (whitelist) as user
+connecting to ws://127.0.0.1:58373... ok.
+publishing to ws://127.0.0.1:58373... success.
+[scenario] publishing 31933 (project) as user
+connecting to ws://127.0.0.1:58373... ok.
+publishing to ws://127.0.0.1:58373... success.
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-54-1777256292-82709/backend, binary=/Users/pablofernandez/Work/TENEX-ff3ssq/target/release/daemon)
+[harness] daemon ready (pid 83655, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-54-1777256292-82709/backend/daemon/tenex.lock)
+[harness] kind:14199 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] kind:24030 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] daemon subscription confirmed live (all probed listener filters registered)
+[scenario] publishing 24000 (boot) as user
+connecting to ws://127.0.0.1:58373... ok.
+publishing to ws://127.0.0.1:58373... success.
+[scenario]   boot event id=bab90ad4b25cbfb8b03ef7af0f7205a1a95429359c8372414a2d332c302f42c7
+[scenario] waiting for daemon to publish kind:24010...
+[scenario] publishing kind:1 from user to agent1 (attempt 1)
+connecting to ws://127.0.0.1:58373... ok.
+publishing to ws://127.0.0.1:58373... success.
+[scenario]   user message id=f257b5558da512b4c7fcd8a9be1d1299acb69554a760f18aaa9a4a7e1d1f9973
+[scenario]   initial dispatch enqueued ✓
+
+[scenario] === Phase B: idle-parent wakeup ===
+[scenario]   observed: agent1 published delegation kind:1
+[scenario]   observed: agent2 published kind:1 with 'hello-from-agent2'
+[scenario]   observed: agent1 published resume kind:1 incorporating child response
+[scenario]   observed: RAL journal has DelegationCompleted record
+[scenario]   observed: dispatch queue has 11 records for agent1 (initial + resume)
+
+[scenario] === Phase B results ===
+[scenario]   agent1 published delegation kind:1  : yes
+[scenario]   agent2 replied (hello-from-agent2)  : yes
+[scenario]   agent1 resumed (idle-parent wakeup) : yes
+[scenario]   RAL DelegationCompleted recorded    : yes
+[scenario]   resume dispatch enqueued (>=2 total): yes
+
+[scenario] PASS — scenario 5.4: idle-parent wakeup path verified
+[harness] RESULT status=pass scenario=54_idle_parent_wakeup.sh detail=agent1 resumed from WaitingForDelegation via new dispatch after child completion
+[harness] cleanup (script exit code=0)
+[harness] stopping daemon pid 83655 (SIGTERM)
+[harness] stopping relay pid 83633

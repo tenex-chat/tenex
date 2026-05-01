@@ -143,16 +143,15 @@ pub fn run(base_dir: &std::path::Path) -> Result<Option<String>> {
         .filter(|s| !s.is_empty())
         .collect();
 
-    // Step 5: Model ID (optional).
-    let model = match prompts::input("Model ID (press Enter to skip)")
-        .with_help_message("e.g. claude-haiku-4-5-20251001 or gpt-5.4")
-        .prompt_skippable()
-    {
-        Ok(m) => m.filter(|s| !s.trim().is_empty()),
-        Err(InquireError::OperationCanceled | InquireError::OperationInterrupted) => {
-            return Ok(None)
-        }
-        Err(e) => return Err(anyhow!("model prompt: {e}")),
+    // Step 5: Model ID (optional). When the models.dev disk cache is
+    // populated, present a structured picker for the underlying provider
+    // (Claude Code → anthropic, Codex → openai). For Custom backends and
+    // empty/missing caches, fall back to freeform text input. In every
+    // case the user may skip the selection — model is optional and the
+    // backend then uses its own default.
+    let model = match select_acp_model(backend, base_dir)? {
+        Some(m) => m,
+        None => return Ok(None),
     };
 
     // Step 6: Permission policy.
@@ -180,4 +179,94 @@ pub fn run(base_dir: &std::path::Path) -> Result<Option<String>> {
 
     display::success(&format!("ACP configuration \"{name}\" saved"));
     Ok(Some(name))
+}
+
+/// Map an ACP backend to the TENEX provider whose models.dev section
+/// holds the relevant model IDs. Returns `None` for `Custom`, which
+/// has no canonical model list.
+fn provider_for_backend(backend: AcpBackend) -> Option<&'static str> {
+    match backend {
+        AcpBackend::ClaudeCode => Some("anthropic"),
+        AcpBackend::Codex => Some("openai"),
+        AcpBackend::Custom => None,
+    }
+}
+
+/// Outer `Option`: `None` = user cancelled the wizard.
+/// Inner `Option`: `None` = user skipped (no model set).
+fn select_acp_model(
+    backend: AcpBackend,
+    base_dir: &std::path::Path,
+) -> Result<Option<Option<String>>> {
+    use crate::store::models_dev;
+
+    // Try the structured picker when the backend has a known provider
+    // and the cache is populated for that provider.
+    if let Some(provider) = provider_for_backend(backend) {
+        let cache_opt = models_dev::load_from_disk(base_dir).ok().flatten();
+        if let Some(cache) = cache_opt {
+            let models = models_dev::get_provider_models(&cache.data, provider);
+            if !models.is_empty() {
+                return select_from_models_dev(models);
+            }
+        }
+    }
+
+    // Fallback: freeform skippable text input.
+    match prompts::input("Model ID (press Enter to skip)")
+        .with_help_message("e.g. claude-haiku-4-5-20251001 or gpt-5.4")
+        .prompt_skippable()
+    {
+        Ok(m) => Ok(Some(m.filter(|s| !s.trim().is_empty()))),
+        Err(InquireError::OperationCanceled | InquireError::OperationInterrupted) => Ok(None),
+        Err(e) => Err(anyhow!("model prompt: {e}")),
+    }
+}
+
+/// Picker entry. The synthetic skip row stores `id = None`; real models
+/// store their full ID.
+struct AcpModelChoice {
+    id: Option<String>,
+    label: String,
+}
+
+impl std::fmt::Display for AcpModelChoice {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.label)
+    }
+}
+
+fn select_from_models_dev(
+    models: Vec<crate::store::models_dev::ModelsDevModel>,
+) -> Result<Option<Option<String>>> {
+    use crate::store::models_dev;
+
+    let mut choices: Vec<AcpModelChoice> = Vec::with_capacity(models.len() + 1);
+    choices.push(AcpModelChoice {
+        id: None,
+        label: format!(
+            "(skip {})",
+            crate::tui::theme::chalk_dim("— use backend default"),
+        ),
+    });
+    for m in &models {
+        let (name, id_seg, meta_seg) = models_dev::picker_label_segments(m);
+        choices.push(AcpModelChoice {
+            id: Some(m.id.clone()),
+            label: format!(
+                "{} {} {}",
+                name,
+                crate::tui::theme::chalk_dim(&id_seg),
+                crate::tui::theme::chalk_dim(&meta_seg),
+            )
+            .trim()
+            .to_owned(),
+        });
+    }
+
+    match prompts::select("Select model:", choices).prompt() {
+        Ok(c) => Ok(Some(c.id)),
+        Err(InquireError::OperationCanceled | InquireError::OperationInterrupted) => Ok(None),
+        Err(e) => Err(anyhow!("model select: {e}")),
+    }
 }

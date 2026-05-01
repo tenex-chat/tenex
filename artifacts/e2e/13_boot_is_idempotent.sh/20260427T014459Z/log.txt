@@ -1,0 +1,47 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-13-1777254299-14296
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-13-1777254299-14296
+[harness]   backend pubkey:  4fa04602f9c5b148c2b257ab3dde41482ae00333cc8ff8489351c30033949478
+[harness]   user pubkey:     2a38037508f684bc4abc1eeccec756d6474b12ddbd674e609d0d95e7cfe22b07
+[harness]   agent1 pubkey:   09770b414a81c8459e3881d02372238a34d4caf57a7275fc7f7d91c54708a474
+[harness]   agent2 pubkey:   6a94268265d6edee61c0db2a8fad37ae259b6599fe25be65c90245557661356c
+[harness]   project a-tag:   31933:2a38037508f684bc4abc1eeccec756d6474b12ddbd674e609d0d95e7cfe22b07:nak-interop-test-20260427044459-3657
+[harness] starting relay on 127.0.0.1:56063 (admins=1)
+[harness] relay ready at ws://127.0.0.1:56063
+[harness] daemon config relays -> [ws://127.0.0.1:56063]
+connecting to ws://127.0.0.1:56063... ok.
+publishing to ws://127.0.0.1:56063... success.
+connecting to ws://127.0.0.1:56063... ok.
+publishing to ws://127.0.0.1:56063... success.
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-13-1777254299-14296/backend, binary=/Users/pablofernandez/Work/TENEX-ff3ssq/target/release/daemon)
+[harness] daemon ready (pid 15206, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-13-1777254299-14296/backend/daemon/tenex.lock)
+[harness] kind:14199 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] kind:24030 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] daemon subscription confirmed live (all probed listener filters registered)
+[scenario] publishing first kind:24000 (boot)
+connecting to ws://127.0.0.1:56063... ok.
+publishing to ws://127.0.0.1:56063... success.
+[scenario]   first boot id=2dcf335501a540500a0419613a91f47cac95c903146743c3e88b7848e80296f1
+[scenario]   14199 count on relay after first boot: 1
+[scenario]   daemon log project_booted count after first boot: 1
+[scenario] publishing second kind:24000 (replay)
+connecting to ws://127.0.0.1:56063... ok.
+publishing to ws://127.0.0.1:56063... success.
+[scenario]   second boot id=f8056c3a87978eec248b4f044f31f8ab2d26960253d9ae74f175fbe03a24b064
+[scenario] publishing third kind:24000 (replay)
+connecting to ws://127.0.0.1:56063... ok.
+publishing to ws://127.0.0.1:56063... success.
+[scenario]   third boot id=926d49cd4348190f2b024a96968b967608c743aea01e971c06622084fdcb0fd1
+[scenario]   daemon log project_booted count after 3 boots: 3
+[scenario]   distinct project a-tags in 24010: 1
+[scenario]   14199 count on relay after 3 boots: 1
+
+[scenario] PASS — scenario 1.3 Boot is idempotent
+[harness] cleanup (script exit code=0)
+[harness] stopping daemon pid 15206 (SIGTERM)
+[harness] stopping relay pid 15084

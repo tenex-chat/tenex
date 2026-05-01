@@ -1,0 +1,38 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-11-1777227999-30089
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-11-1777227999-30089
+[harness]   backend pubkey:  94204253c07f070c98756267807b86155b51087ed96c32f8f2e494a2c78f7f8e
+[harness]   user pubkey:     80647502f21575cd83992cc287cca2f3edbe8e3e6ad94f7849acdeaede323ffd
+[harness]   agent1 pubkey:   67677db57e2ce798882ff7c46b6afe22cf60076e72fb1a40024c30ab3fdbe6f8
+[harness]   agent2 pubkey:   e384997475880b5624f0962857e2aa1de70fd782f21b5db9f81f857a054fc38c
+[harness]   project a-tag:   31933:80647502f21575cd83992cc287cca2f3edbe8e3e6ad94f7849acdeaede323ffd:nak-interop-test-20260426212639-32589
+[harness] starting relay on 127.0.0.1:55545 (admins=1)
+[harness] relay ready at ws://127.0.0.1:55545
+[harness] daemon config relays -> [ws://127.0.0.1:55545]
+connecting to ws://127.0.0.1:55545... ok.
+publishing to ws://127.0.0.1:55545... success.
+connecting to ws://127.0.0.1:55545... ok.
+publishing to ws://127.0.0.1:55545... success.
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-11-1777227999-30089/backend)
+[harness] daemon ready (pid 31162, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-11-1777227999-30089/backend/daemon/tenex.lock)
+[harness] kind:14199 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] kind:24030 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] daemon subscription confirmed live (all probed listener filters registered)
+[scenario] publishing kind:1 without a prior boot event
+connecting to ws://127.0.0.1:55545... ok.
+publishing to ws://127.0.0.1:55545... success.
+[scenario]   user message id=ef3f567c60b2acbeb71d387d8dd5b5c9c51b9bf4228236fed4431da5c7d90bc5
+/Users/pablofernandez/Work/TENEX-ff3ssq/scripts/e2e-test-harness.sh: line 175: 31166 Killed: 9               TENEX_BASE_DIR="$TENEX_BASE_DIR" cargo run --release -p tenex-daemon --bin daemon -- --tenex-base-dir "$TENEX_BASE_DIR" >> "$HARNESS_DAEMON_LOG" 2>&1
+[scenario]   no 24010 published for unbooted project ✓
+[scenario]   daemon log contains project_not_booted ignored entry ✓
+[scenario]   no dispatch queued for unbooted project ✓
+
+[scenario] PASS — scenario 1.1 Boot gates dispatch (boot gate enforced by daemon)
+[harness] cleanup (script exit code=0)
+[harness] stopping daemon pid 31162 (SIGTERM)
+[harness] stopping relay pid 30990

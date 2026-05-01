@@ -1,0 +1,58 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-37-1777053933-97959
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-37-1777053933-97959
+[harness]   backend pubkey:  b9ccaa0d531922bd88ad51d8fd25c2c1144303aa17e16ad7061ef6b3ce96219a
+[harness]   user pubkey:     57a6717e72d54256ec82b894e60e054ae3f7bc30fc75d44d67b802a677adb6a1
+[harness]   agent1 pubkey:   1751b9a243828a0c4b4b2b496ae1eaf5f6d48d5f74d4d15e1813adb378d60db0
+[harness]   agent2 pubkey:   011cbd9597d2f69bfd9b3813a8436bf114c37ab4d1a10e6c4b1432a020ba26b2
+[harness]   project a-tag:   31933:57a6717e72d54256ec82b894e60e054ae3f7bc30fc75d44d67b802a677adb6a1:nak-interop-test-20260424210533-19750
+[harness] starting relay on 127.0.0.1:51771 (admins=1)
+[harness] relay ready at ws://127.0.0.1:51771
+[harness] daemon config relays -> [ws://127.0.0.1:51771]
+connecting to ws://127.0.0.1:51771... ok.
+publishing to ws://127.0.0.1:51771... success.
+connecting to ws://127.0.0.1:51771... ok.
+publishing to ws://127.0.0.1:51771... success.
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-37-1777053933-97959/backend)
+[harness] daemon ready (pid 98541, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-37-1777053933-97959/backend/daemon/tenex.lock)
+[harness] kind:14199 listener confirmed (probe #1 round-tripped after 500ms)
+[harness] kind:24030 listener confirmed (probe #1 round-tripped after 500ms)
+[harness] daemon subscription confirmed live (all probed listener filters registered)
+connecting to ws://127.0.0.1:51771... ok.
+publishing to ws://127.0.0.1:51771... success.
+[scenario] boot event id=25fefab4a1d5a231aceb647bbe501f44a9ac22f220b5fe2271bd120fa9210326
+[scenario] stopping daemon before publishing the inbound event
+[harness] stopping daemon pid 98541 (SIGTERM)
+connecting to ws://127.0.0.1:51771... ok.
+publishing to ws://127.0.0.1:51771... success.
+[scenario] inbound event id=0c004edb435a3e79d92014bc7d8418c2b08c0025403f7e9977ddea3e79712b86
+[scenario] held allocation lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-37-1777053933-97959/backend/daemon/ral/locks/alloc.nak-interop-test-20260424210533-19750.1751b9a243828a0c4b4b2b496ae1eaf5f6d48d5f74d4d15e1813adb378d60db0.0c004edb435a3e79d92014bc7d8418c2b08c0025403f7e9977ddea3e79712b86.lock
+[scenario] starting daemon with the allocation lock held
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-37-1777053933-97959/backend)
+[harness] daemon ready (pid 99621, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-37-1777053933-97959/backend/daemon/tenex.lock)
+[harness] kind:14199 listener confirmed (probe #1 round-tripped after 1000ms)
+[harness] kind:24030 listener confirmed (probe #1 round-tripped after 500ms)
+[harness] daemon subscription confirmed live (all probed listener filters registered)
+[scenario] dispatch_id=inbound-9b04420cc3a3f209e5ee4cad
+[scenario] sidecar present at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-37-1777053933-97959/backend/daemon/workers/dispatch-inputs/inbound-9b04420cc3a3f209e5ee4cad.json
+[scenario]   dispatch remained queued while lock was held ✓
+[scenario] stopping daemon to corrupt sidecar
+[harness] stopping daemon pid 99621 (SIGTERM)
+[scenario] sidecar corrupted: triggeringEventId 0c004edb435a3e79d92014bc7d8418c2b08c0025403f7e9977ddea3e79712b86 -> deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef
+[scenario] released held allocation lock
+[scenario] restarting daemon
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-37-1777053933-97959/backend)
+[harness] daemon ready (pid 99716, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-37-1777053933-97959/backend/daemon/tenex.lock)
+[scenario] waiting 10s for dispatch tick to attempt admission + fail
+[scenario]   mismatch error observed in daemon log ✓
+[scenario]   no lease row appended ✓ (worker never launched)
+
+[scenario] PASS — scenario 3.7: dispatch input mismatch validation
+[harness] cleanup (script exit code=0)
+[harness] stopping daemon pid 99716 (SIGTERM)
+[harness] stopping relay pid 98530

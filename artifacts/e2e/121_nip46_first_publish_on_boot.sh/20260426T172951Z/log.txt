@@ -1,0 +1,27 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-121-1777224591-15840
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-121-1777224591-15840
+[harness]   backend pubkey:  cc5ef89a908068cd3f872ccf29f29a346c8fd822a1109508248bd0f0a00a8da7
+[harness]   user pubkey:     ef15ee0b217e74b65c00efb3b6418dd9378824537c89ae2a849123930422c855
+[harness]   agent1 pubkey:   e9d6d8f984ce9c83bb7ca69474f098bc313f45dc650fafbf1fbaa36caf2931bb
+[harness]   agent2 pubkey:   47447866ebf2955015d9602f24fb5a3aad44878f74c5ea253c5eafd689a6d1bc
+[harness]   project a-tag:   31933:ef15ee0b217e74b65c00efb3b6418dd9378824537c89ae2a849123930422c855:nak-interop-test-20260426202951-4931
+[harness] starting relay on 127.0.0.1:64067 (admins=1)
+[harness] relay ready at ws://127.0.0.1:64067
+[harness] daemon config relays -> [ws://127.0.0.1:64067]
+[harness] wrote 2 pubkey(s) to /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-121-1777224591-15840/backend/daemon/whitelist.txt
+[scenario] nak bunker pid=16355
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-121-1777224591-15840/backend)
+[harness] daemon ready (pid 16386, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-121-1777224591-15840/backend/daemon/tenex.lock)
+[harness] kind:14199 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] kind:24030 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] TIMEOUT: kind:21 agent-mentions probe never round-tripped within 45s
+[harness] FATAL: daemon subscription never became live
+[harness] cleanup (script exit code=1)
+[harness] stopping daemon pid 16386 (SIGTERM)
+[harness] stopping relay pid 16327

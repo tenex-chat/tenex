@@ -1,0 +1,44 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-125-1777231213-51243
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-125-1777231213-51243
+[harness]   backend pubkey:  bc1b88a510797e315499a188faf9a6982e3b9f38772252bd9939119f4ccee6e5
+[harness]   user pubkey:     e0e37304de834edf07cad92b6688ae24919e03cc7fac4c0c64d69ff862b78992
+[harness]   agent1 pubkey:   e21ba0e22a0659daadc3a619e36eea41b2a153c7a59a6a39cd9e1d944f3e29a5
+[harness]   agent2 pubkey:   955c8a9cf337ea5f4213cea605a2f7be5bc68566e49b580997e8efd1261c4d72
+[harness]   project a-tag:   31933:e0e37304de834edf07cad92b6688ae24919e03cc7fac4c0c64d69ff862b78992:nak-interop-test-20260426222013-9795
+[harness] starting relay on 127.0.0.1:57490 (admins=1)
+[harness] relay ready at ws://127.0.0.1:57490
+[harness] daemon config relays -> [ws://127.0.0.1:57490]
+connecting to ws://127.0.0.1:57490... ok.
+publishing to ws://127.0.0.1:57490... success.
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-125-1777231213-51243/backend, binary=/Users/pablofernandez/Work/TENEX-ff3ssq/target/release/daemon)
+[harness] daemon ready (pid 51709, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-125-1777231213-51243/backend/daemon/tenex.lock)
+[harness] kind:14199 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] kind:24030 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] daemon subscription confirmed live (all probed listener filters registered)
+[scenario] waiting up to 15s for NIP-46 timeout log entry
+[scenario] daemon log (last 60 lines):
+{"timestamp":"2026-04-26T19:20:16.543573Z","level":"INFO","fields":{"message":"nostr relay task started","relay_url":"ws://127.0.0.1:57490"},"target":"tenex_daemon::nostr_subscription_gateway"}
+{"timestamp":"2026-04-26T19:20:16.543593Z","level":"DEBUG","fields":{"message":"connecting subscription relay session","relay_url":"ws://127.0.0.1:57490"},"target":"tenex_daemon::nostr_subscription_gateway"}
+{"timestamp":"2026-04-26T19:20:16.543598Z","level":"DEBUG","fields":{"message":"connecting to relay","relay_url":"ws://127.0.0.1:57490","subscription_id":"tenex-main"},"target":"tenex_daemon::nostr_subscription_gateway"}
+{"timestamp":"2026-04-26T19:20:16.544207Z","level":"DEBUG","fields":{"message":"relay sent AUTH challenge, authenticating","relay_url":"ws://127.0.0.1:57490"},"target":"tenex_daemon::nostr_subscription_gateway"}
+{"timestamp":"2026-04-26T19:20:16.544249Z","level":"DEBUG","fields":{"message":"ignoring duplicate AUTH challenge","relay_url":"ws://127.0.0.1:57490"},"target":"tenex_daemon::nostr_subscription_gateway"}
+{"timestamp":"2026-04-26T19:20:16.544516Z","level":"INFO","fields":{"message":"relay authenticated, resubscribed","relay_url":"ws://127.0.0.1:57490"},"target":"tenex_daemon::nostr_subscription_gateway"}
+{"timestamp":"2026-04-26T19:20:16.544768Z","level":"DEBUG","fields":{"message":"nostr event received","relay_url":"ws://127.0.0.1:57490","event_id":"a6089a7c0d304dfc665047e84feda5af14f3d0fa7d6a8daf17ae9f9fb0b376a3","event_kind":14199,"event_pubkey":"e0e37304de834edf07cad92b6688ae24919e03cc7fac4c0c64d69ff862b78992","class":"NeverRoute"},"target":"tenex_daemon::nostr_subscription_gateway"}
+{"timestamp":"2026-04-26T19:20:16.544775Z","level":"INFO","fields":{"message":"inbound nostr event ignored","relay_url":"ws://127.0.0.1:57490","event_id":"a6089a7c0d304dfc665047e84feda5af14f3d0fa7d6a8daf17ae9f9fb0b376a3","code":"never_route","detail":"nostr event class NeverRoute is not a worker conversation","class":"Some(NeverRoute)","project_id":"None","pubkeys":"[]","dispatch_id":"None"},"target":"tenex_daemon::nostr_subscription_gateway"}
+{"timestamp":"2026-04-26T19:20:16.561485Z","level":"DEBUG","fields":{"message":"worker runtime: no queued dispatches"},"target":"tenex_daemon::daemon_worker_runtime"}
+{"timestamp":"2026-04-26T19:20:16.561498Z","level":"DEBUG","fields":{"message":"worker-admission-driver: not admitted; waiting for signal","reason":"NoQueuedDispatches"},"target":"tenex_daemon::worker_admission_driver"}
+{"timestamp":"2026-04-26T19:20:16.712342Z","level":"DEBUG","fields":{"message":"nostr event received","relay_url":"ws://127.0.0.1:57490","event_id":"8dca1e12887e650e5372f1d6880babd1ccc697bc91679409a81c9e7930917536","event_kind":14199,"event_pubkey":"e0e37304de834edf07cad92b6688ae24919e03cc7fac4c0c64d69ff862b78992","class":"NeverRoute"},"target":"tenex_daemon::nostr_subscription_gateway"}
+{"timestamp":"2026-04-26T19:20:16.712355Z","level":"INFO","fields":{"message":"inbound nostr event ignored","relay_url":"ws://127.0.0.1:57490","event_id":"8dca1e12887e650e5372f1d6880babd1ccc697bc91679409a81c9e7930917536","code":"never_route","detail":"nostr event class NeverRoute is not a worker conversation","class":"Some(NeverRoute)","project_id":"None","pubkeys":"[]","dispatch_id":"None"},"target":"tenex_daemon::nostr_subscription_gateway"}
+{"timestamp":"2026-04-26T19:20:16.889171Z","level":"DEBUG","fields":{"message":"nostr event received","relay_url":"ws://127.0.0.1:57490","event_id":"499d8ecfb303b957166b8d38d38c041b0e8b6c6a747e0a21c07d19a169f1c750","event_kind":24030,"event_pubkey":"e0e37304de834edf07cad92b6688ae24919e03cc7fac4c0c64d69ff862b78992","class":"Other"},"target":"tenex_daemon::nostr_subscription_gateway"}
+{"timestamp":"2026-04-26T19:20:16.889183Z","level":"INFO","fields":{"message":"inbound nostr event ignored","relay_url":"ws://127.0.0.1:57490","event_id":"499d8ecfb303b957166b8d38d38c041b0e8b6c6a747e0a21c07d19a169f1c750","code":"unsupported_nostr_event_class","detail":"nostr event class Other is not a worker conversation","class":"Some(Other)","project_id":"None","pubkeys":"[]","dispatch_id":"None"},"target":"tenex_daemon::nostr_subscription_gateway"}
+[harness] RESULT status=fail scenario=125_nip46_sign_timeout.sh detail=NIP-46 timeout not observed in daemon log within 15s
+[harness] FATAL: ASSERT: expected timeout log entry after sign request to unreachable bunker
+[harness] cleanup (script exit code=1)
+[harness] stopping daemon pid 51709 (SIGTERM)
+[harness] stopping relay pid 51697

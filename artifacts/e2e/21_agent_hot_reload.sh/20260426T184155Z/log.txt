@@ -1,0 +1,74 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-21-1777228915-97447
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-21-1777228915-97447
+[harness]   backend pubkey:  53abd338156dab0597833c34fcc1825191289e50d581f3bf916c219fd60a2ba0
+[harness]   user pubkey:     ae17d0ee571e820ce941ad757fbf39ee6dfe2fe9bc0b8ab6076e2ca8f7c36927
+[harness]   agent1 pubkey:   cbda4d4da490c97fe687b2950a91d15188d13995a504a82428ba9e7cbb5884fe
+[harness]   agent2 pubkey:   506faff34d9c19bfad8dc853f887da44366eae014a1c337ef9233a7eaed313b4
+[harness]   project a-tag:   31933:ae17d0ee571e820ce941ad757fbf39ee6dfe2fe9bc0b8ab6076e2ca8f7c36927:nak-interop-test-20260426214155-858
+[scenario] rewriting llms.json to use mock fixture model 'mock/agent-hot-reload-21'
+[scenario] mock LLM enabled: fixture=/Users/pablofernandez/Work/TENEX-ff3ssq/scripts/e2e/fixtures/mock-llm/21_agent_hot_reload.json
+[harness] starting relay on 127.0.0.1:55713 (admins=1)
+[harness] relay ready at ws://127.0.0.1:55713
+[harness] daemon config relays -> [ws://127.0.0.1:55713]
+[scenario] publishing kind:14199 (whitelist) with agent1 only for now
+connecting to ws://127.0.0.1:55713... ok.
+publishing to ws://127.0.0.1:55713... success.
+[scenario] publishing initial kind:31933 (project) with agent1 ONLY in p-tags (ts=1777228858)
+connecting to ws://127.0.0.1:55713... ok.
+publishing to ws://127.0.0.1:55713... success.
+[scenario]   initial 31933 id=3d4e3f78943d2c30fd7c2ac784b77bcee2502066ea57d466e296b0f239a90294 (agent1 only)
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-21-1777228915-97447/backend)
+[harness] daemon ready (pid 97926, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-21-1777228915-97447/backend/daemon/tenex.lock)
+[harness] kind:14199 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] kind:24030 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] daemon subscription confirmed live (all probed listener filters registered)
+[scenario] phase 1: booting project and dispatching to agent1
+[scenario]   publishing kind:24000 (boot) as user
+connecting to ws://127.0.0.1:55713... ok.
+publishing to ws://127.0.0.1:55713... success.
+[scenario]   boot event id=8345088deea79e007e268666d4bae112ac0b277bb9d2c21e8fc8faa473d487c9
+[scenario]   waiting for project_booted log line...
+[scenario]   project_booted logged ✓
+[scenario]   publishing kind:1 to agent1
+connecting to ws://127.0.0.1:55713... ok.
+publishing to ws://127.0.0.1:55713... success.
+[scenario]   agent1 kind:1 id=11cad7de019b4b7822f6decabb6567cce53e75dcc7d7cdca19ffe45467c46ca9
+[scenario]   waiting for agent1 dispatch to appear in queue...
+[scenario]   agent1 dispatch enqueued ✓
+[scenario] === Phase 1 complete: initial dispatch to agent1 OK ===
+[scenario] phase 2: publishing NEWER kind:31933 adding agent2 (ts=1777228978)
+connecting to ws://127.0.0.1:55713... ok.
+publishing to ws://127.0.0.1:55713... success.
+[scenario]   updated 31933 id=3f2e1fcca4d41352d0e18783a307989a3a6d78528055dcdfba726e970dc03e8b (agent1 + agent2)
+[scenario]   waiting for daemon to log project_updated for the new 31933...
+[scenario]   project_updated logged for new 31933 ✓
+[scenario] phase 3: verifying agents/index.json byProject contains agent2
+[scenario]   agents/index.json byProject[nak-interop-test-20260426214155-858] contains agent2 ✓
+[scenario]   agents/index.json still contains agent1 (regression guard ✓)
+[scenario] === Phase 3 complete: index updated correctly ===
+[scenario] phase 4: verifying subscription filter refresh in daemon log
+[scenario]   subscription filter refresh logged ✓
+[scenario] === Phase 4 complete: filter refresh confirmed ===
+[scenario] phase 5: probing for agent2 filter liveness before publishing
+[scenario]   agent2 filter live (probe #1 round-tripped)
+[scenario]   publishing kind:1 to agent2
+connecting to ws://127.0.0.1:55713... ok.
+publishing to ws://127.0.0.1:55713... success.
+[scenario]   agent2 kind:1 id=275db176b8336a152666ad1028f41f7c25e05a3cdd19b17d7abddab097f512f3
+[scenario]   waiting for agent2 dispatch to appear in queue...
+[scenario]   agent2 dispatch enqueued ✓
+[scenario] === Phase 5 complete: agent2 dispatches after hot-reload ===
+[scenario] phase 6: regression guard (commit 56fbae67) — agent1 dispatch still in queue
+[scenario]   agent1 pre-reload dispatch still in queue ✓
+
+[scenario] PASS — scenario 2.1 Agent hot-reload
+[harness] RESULT status=pass scenario=21_agent_hot_reload.sh detail=agent2 added to index; filter refreshed; agent2 dispatched; agent1 index/dispatch unchanged
+[harness] cleanup (script exit code=0)
+[harness] stopping daemon pid 97926 (SIGTERM)
+[harness] stopping relay pid 97906

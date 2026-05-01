@@ -1,0 +1,50 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-13-1777126204-74320
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-13-1777126204-74320
+[harness]   backend pubkey:  c3514b9191233de820ebc1672ddaa25fd32dc2a60a1d561fdbfb00e6b679e9ce
+[harness]   user pubkey:     c20c96dad3ad76060b85a4d0cda691a61934d5775a8bfb91c1ea3f4ed22a6922
+[harness]   agent1 pubkey:   c03031edac67575f3827b4c05abb6bc94d7f413a5dc63e69e91734de86435f21
+[harness]   agent2 pubkey:   78ea9882033829267753bbebcdc3ffd2abc58ba9fde6bffb37a4060107dea160
+[harness]   project a-tag:   31933:c20c96dad3ad76060b85a4d0cda691a61934d5775a8bfb91c1ea3f4ed22a6922:nak-interop-test-20260425171004-12015
+[harness] starting relay on 127.0.0.1:49755 (admins=1)
+[harness] relay ready at ws://127.0.0.1:49755
+[harness] daemon config relays -> [ws://127.0.0.1:49755]
+connecting to ws://127.0.0.1:49755... ok.
+publishing to ws://127.0.0.1:49755... success.
+connecting to ws://127.0.0.1:49755... ok.
+publishing to ws://127.0.0.1:49755... success.
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-13-1777126204-74320/backend)
+[harness] daemon ready (pid 75061, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-13-1777126204-74320/backend/daemon/tenex.lock)
+[harness] kind:14199 listener confirmed (probe #1 round-tripped after 500ms)
+[harness] kind:24030 listener confirmed (probe #1 round-tripped after 500ms)
+[harness] daemon subscription confirmed live (all probed listener filters registered)
+[scenario] publishing first kind:24000 (boot)
+connecting to ws://127.0.0.1:49755... ok.
+publishing to ws://127.0.0.1:49755... success.
+[scenario]   first boot id=df1ef5168463f4cf658b6f92236ceb2f48d2ecc4b281d56b2fcc4de9e43710a6
+[scenario]   14199 count on relay after first boot: 1
+[scenario]   daemon log project_booted count after first boot: 0
+0
+[scenario] publishing second kind:24000 (replay)
+connecting to ws://127.0.0.1:49755... ok.
+publishing to ws://127.0.0.1:49755... success.
+[scenario]   second boot id=6b628f9128f291c99cb7eebca41dc49bf54828f38de3704edd1bf1c04b814e32
+[scenario] publishing third kind:24000 (replay)
+connecting to ws://127.0.0.1:49755... ok.
+publishing to ws://127.0.0.1:49755... success.
+[scenario]   third boot id=80159141e14d5bb988363e2c11fc8abb3a298ecc9fca17f878495ec1fdc3c69f
+[scenario]   daemon log project_booted count after 3 boots: 0
+0
+/Users/pablofernandez/Work/TENEX-ff3ssq/scripts/e2e/scenarios/13_boot_is_idempotent.sh: line 116: [[: 0
+0: syntax error in expression (error token is "0")
+[harness] FATAL: ASSERT: no additional project_booted lines after 2nd/3rd boot (pre=0
+0 post=0
+0)
+[harness] cleanup (script exit code=1)
+[harness] stopping daemon pid 75061 (SIGTERM)
+[harness] stopping relay pid 75038

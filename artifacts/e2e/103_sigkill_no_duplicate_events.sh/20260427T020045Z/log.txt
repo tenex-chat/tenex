@@ -1,0 +1,53 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-103-1777255245-58608
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-103-1777255245-58608
+[harness]   backend pubkey:  714025098c6060ce5c1b1ab1fc8bc922bcd20904ef40d49d05564457f4cc2b3c
+[harness]   user pubkey:     a3d2b4a54debe336c063de034aafa0eda85de495bafb723b197f129224b49e3a
+[harness]   agent1 pubkey:   7669ad0bc83e5d8975c35064f9a3a79ad5088a6ff09354923f7e67d4dcbbd57d
+[harness]   agent2 pubkey:   6d4e8f2d79597d09d35e2c6ea3a9eaf6cea714c7b8d4d2589d8e7d419ffcf2c9
+[harness]   project a-tag:   31933:a3d2b4a54debe336c063de034aafa0eda85de495bafb723b197f129224b49e3a:nak-interop-test-20260427050045-3188
+[harness] starting relay on 127.0.0.1:57520 (admins=1)
+[harness] relay ready at ws://127.0.0.1:57520
+[harness] daemon config relays -> [ws://127.0.0.1:57520]
+connecting to ws://127.0.0.1:57520... ok.
+publishing to ws://127.0.0.1:57520... success.
+connecting to ws://127.0.0.1:57520... ok.
+publishing to ws://127.0.0.1:57520... success.
+
+[scenario] === Phase 1: first daemon completes delegation ===
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-103-1777255245-58608/backend, binary=/Users/pablofernandez/Work/TENEX-ff3ssq/target/release/daemon)
+[harness] daemon ready (pid 59091, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-103-1777255245-58608/backend/daemon/tenex.lock)
+[harness] kind:14199 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] kind:24030 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] daemon subscription confirmed live (all probed listener filters registered)
+connecting to ws://127.0.0.1:57520... ok.
+publishing to ws://127.0.0.1:57520... success.
+connecting to ws://127.0.0.1:57520... ok.
+publishing to ws://127.0.0.1:57520... success.
+[scenario]   conv_id=00e3254dbd3f8ed6d33c29c3f362d7d068e24ee743faff1680831d10fc0fb8a0
+[scenario]   agent1 published final reply ✓
+[scenario]   pre-crash agent1 kind:1 count: 7
+
+[scenario] === Phase 2: SIGKILL daemon mid-flight ===
+
+[scenario] === Phase 3: restart daemon ===
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-103-1777255245-58608/backend, binary=/Users/pablofernandez/Work/TENEX-ff3ssq/target/release/daemon)
+[harness] daemon ready (pid 59260, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-103-1777255245-58608/backend/daemon/tenex.lock)
+[harness] kind:14199 listener confirmed (probe #1 round-tripped after 400ms)
+[harness] kind:24030 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] daemon subscription confirmed live (all probed listener filters registered)
+connecting to ws://127.0.0.1:57520... ok.
+publishing to ws://127.0.0.1:57520... success.
+
+[scenario] === Phase 4: assert no duplicates for old conversation ===
+[scenario]   post-restart agent1 kind:1 count: 7
+[scenario]   agent1 did not republish for old conversation ✓
+
+[scenario] === Phase 5: outbox dedup invariant ===
+[scenario]   outbox dedup invariant holds ✓
+[harness] RESULT status=pass scenario=103_sigkill_no_duplicate_events.sh detail=no duplicate kind:1 from agent1 post-SIGKILL-restart; outbox request_id unique

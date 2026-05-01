@@ -1,0 +1,116 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-53-1777225046-46317
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-53-1777225046-46317
+[harness]   backend pubkey:  97bdbd1ad47c1e8a4ab7aac80c6bde024ba0d5f61995d71e3d9ae1a8a421c699
+[harness]   user pubkey:     7c46c7e8671f7d499db68cfa1de9cf670563e71ac543a4810ae5c5d4523a5884
+[harness]   agent1 pubkey:   8dfd3811611a15da00145e894b8f7c3b84b8d18fbff14a594213804d826792fe
+[harness]   agent2 pubkey:   4f406ed18be14be393f8e5070a0e9d2ca56dd3781c2c891c0bc4405da3c322d8
+[harness]   project a-tag:   31933:7c46c7e8671f7d499db68cfa1de9cf670563e71ac543a4810ae5c5d4523a5884:nak-interop-test-20260426203726-63
+[scenario] generating agent3 key pair
+[scenario]   agent3 pubkey=e6b9fdf77081f60adf7c37d676cbac51bd65aaef9da59a5dc37bfe7b37f20cea
+[scenario]   agent3 JSON written to /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-53-1777225046-46317/backend/agents/e6b9fdf77081f60adf7c37d676cbac51bd65aaef9da59a5dc37bfe7b37f20cea.json
+[scenario] rewriting llms.json to use mock fixture model 'mock/three-hop-53'
+[scenario] mock LLM enabled: fixture=/Users/pablofernandez/Work/TENEX-ff3ssq/scripts/e2e/fixtures/mock-llm/53_three_hop.json
+[scenario] pre-seeded project descriptor at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-53-1777225046-46317/backend/projects/nak-interop-test-20260426203726-63/project.json
+[harness] starting relay on 127.0.0.1:55346 (admins=1)
+[harness] relay ready at ws://127.0.0.1:55346
+[harness] daemon config relays -> [ws://127.0.0.1:55346]
+[scenario] publishing 14199 (whitelist) as user — includes agent3
+connecting to ws://127.0.0.1:55346... ok.
+publishing to ws://127.0.0.1:55346... success.
+[scenario] publishing 31933 (project) as user — includes agent3
+connecting to ws://127.0.0.1:55346... ok.
+publishing to ws://127.0.0.1:55346... success.
+[harness] starting daemon via pre-built binary (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-53-1777225046-46317/backend)
+[harness] daemon ready (pid 46832, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-53-1777225046-46317/backend/daemon/tenex.lock)
+[harness] kind:14199 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] kind:24030 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] daemon subscription confirmed live (all probed listener filters registered)
+[scenario] publishing 24000 (boot) as user
+connecting to ws://127.0.0.1:55346... ok.
+publishing to ws://127.0.0.1:55346... success.
+[scenario]   boot event id=67bdc41a0fb117176966e16245f970761ed6685c9139522ba904945c1a84f5f4
+[scenario] waiting for daemon to process boot and publish kind:24010...
+[scenario]   24010 status published for our project ✓
+[scenario] publishing kind:1 from user to agent1 (attempt 1)
+connecting to ws://127.0.0.1:55346... ok.
+publishing to ws://127.0.0.1:55346... success.
+[scenario]   user message id=7d0de35d84ac0cc85422c05602de09f4286415e06f34ca535a083c1c236359ae
+[scenario] waiting up to 15s for daemon to enqueue dispatch...
+[scenario]   dispatch enqueued ✓
+[scenario] === Phase A complete: daemon plumbing OK ===
+
+[scenario] === Phase B: asserting mock-driven three-hop delegation ===
+[scenario]   observed: agent1 published kind:1 (delegation)
+[scenario]   observed: agent2 published kind:1
+[scenario]   observed: agent3 published terminal reply 'agent3 says result is 42'
+[scenario]   observed: agent1 published final answer incorporating the full chain
+[scenario]   observed: RAL journal has 38 delegation completion records
+
+[scenario] === Phase B observations ===
+[scenario]   agent1 published delegation kind:1      : yes
+[scenario]   agent2 published delegation kind:1      : yes
+[scenario]   agent3 terminal reply (fixture content) : yes
+[scenario]   agent2 resume (agent3 result relayed)   : no
+[scenario]   agent1 final answer (full chain)        : yes
+[scenario]   RAL journal >=2 completion records      : yes
+[scenario] daemon log (last 80 lines):
+[2m17:37:29[0m  [1m[32m✓[0m  [1m[32mdaemon ready[0m  [2m(nostr on, telegram off)[0m
+[2m17:37:30[0m  ↑  [1m[95mnak-interop-test-20260426203726-63[0m  [2m(1 booted)[0m
+[2m17:37:30[0m  [1m[33m●[0m  [1m[93magent1[0m  [2minbound-worker-38d0f89faf48f255abc831f4[0m  [1m[95mnak-interop-test-20260426203726-63[0m
+[2m17:37:31[0m  [1m[33m●[0m  [1m[94magent2[0m  [2minbound-worker-5ea2a8367f4e5f204275f293[0m  [1m[95mnak-interop-test-20260426203726-63[0m
+[2m17:37:32[0m  [1m[33m●[0m  [1m[94magent2[0m  [2minbound-worker-e7e7e8e83f33e395133a744c[0m  [1m[95mnak-interop-test-20260426203726-63[0m
+[2m17:37:32[0m  [1m[33m●[0m  [1m[93magent3[0m  [2minbound-worker-1df516eb7a8fdf4bbe0735e3[0m  [1m[95mnak-interop-test-20260426203726-63[0m
+[2m17:37:33[0m  [1m[33m●[0m  [1m[93magent3[0m  [2minbound-worker-12d09d31bf613216f4f8d4cd[0m  [1m[95mnak-interop-test-20260426203726-63[0m
+[2m17:37:34[0m  [1m[33m●[0m  [1m[93magent1[0m  [2mdelegation-resume-worker-a2b785df3e3263e7bf447a1a[0m  [1m[95mnak-interop-test-20260426203726-63[0m
+[2m17:37:34[0m  [1m[32m✓[0m  [1m[93magent1[0m  [2minbound-worker-38d0f89faf48f255abc831f4[0m  [1m[95mnak-interop-test-20260426203726-63[0m
+[2m17:37:34[0m  [1m[32m✓[0m  [1m[93magent3[0m  [2minbound-worker-1df516eb7a8fdf4bbe0735e3[0m  [1m[95mnak-interop-test-20260426203726-63[0m
+[2m17:37:34[0m  [1m[32m✓[0m  [1m[93magent3[0m  [2minbound-worker-12d09d31bf613216f4f8d4cd[0m  [1m[95mnak-interop-test-20260426203726-63[0m
+[2m17:37:34[0m  [1m[33m●[0m  [1m[93magent3[0m  [2minbound-worker-c54113d176b831075ac59653[0m  [1m[95mnak-interop-test-20260426203726-63[0m
+[2m17:37:35[0m  [1m[33m●[0m  [1m[94magent2[0m  [2minbound-worker-0622a261c3fa1a0965bd24b6[0m  [1m[95mnak-interop-test-20260426203726-63[0m
+[2m17:37:35[0m  [1m[33m●[0m  [1m[93magent3[0m  [2minbound-worker-c130a5fb2a064b2d9d3da3f4[0m  [1m[95mnak-interop-test-20260426203726-63[0m
+[2m17:37:36[0m  [1m[33m●[0m  [1m[93magent3[0m  [2minbound-worker-fc6f46fe15da609a3f85bc14[0m  [1m[95mnak-interop-test-20260426203726-63[0m
+[2m17:37:36[0m  [1m[32m✓[0m  [1m[93magent3[0m  [2minbound-worker-c54113d176b831075ac59653[0m  [1m[95mnak-interop-test-20260426203726-63[0m
+[2m17:37:37[0m  [1m[33m●[0m  [1m[93magent3[0m  [2minbound-worker-1faa475c273bac1047bdfdae[0m  [1m[95mnak-interop-test-20260426203726-63[0m
+[2m17:37:37[0m  [1m[33m●[0m  [1m[93magent3[0m  [2minbound-worker-ae92a7d1936c89ab7166d135[0m  [1m[95mnak-interop-test-20260426203726-63[0m
+[2m17:37:38[0m  [1m[32m✓[0m  [1m[93magent3[0m  [2minbound-worker-c130a5fb2a064b2d9d3da3f4[0m  [1m[95mnak-interop-test-20260426203726-63[0m
+[2m17:37:38[0m  [1m[32m✓[0m  [1m[93magent3[0m  [2minbound-worker-fc6f46fe15da609a3f85bc14[0m  [1m[95mnak-interop-test-20260426203726-63[0m
+[2m17:37:38[0m  [1m[32m✓[0m  [1m[94magent2[0m  [2minbound-worker-e7e7e8e83f33e395133a744c[0m  [1m[95mnak-interop-test-20260426203726-63[0m
+[2m17:37:38[0m  [1m[33m●[0m  [1m[94magent2[0m  [2minbound-worker-c87d2c7f29c1a3318e8f7fc9[0m  [1m[95mnak-interop-test-20260426203726-63[0m
+[2m17:37:39[0m  [1m[33m●[0m  [1m[94magent2[0m  [2mdelegation-resume-worker-141a5a78c74ae3c947588162[0m  [1m[95mnak-interop-test-20260426203726-63[0m
+[2m17:37:39[0m  [1m[33m●[0m  [1m[93magent3[0m  [2minbound-worker-27bda7adb9ffb84c94102e2b[0m  [1m[95mnak-interop-test-20260426203726-63[0m
+[2m17:37:39[0m  [1m[33m●[0m  [1m[93magent3[0m  [2minbound-worker-54001ab3f03afc625790b25e[0m  [1m[95mnak-interop-test-20260426203726-63[0m
+[2m17:37:40[0m  [1m[32m✓[0m  [1m[93magent3[0m  [2minbound-worker-ae92a7d1936c89ab7166d135[0m  [1m[95mnak-interop-test-20260426203726-63[0m
+[2m17:37:40[0m  [1m[33m●[0m  [1m[93magent3[0m  [2minbound-worker-99b280e37f6c61bf48dab0ff[0m  [1m[95mnak-interop-test-20260426203726-63[0m
+[2m17:37:40[0m  [1m[32m✓[0m  [1m[93magent3[0m  [2minbound-worker-1faa475c273bac1047bdfdae[0m  [1m[95mnak-interop-test-20260426203726-63[0m
+[2m17:37:41[0m  [1m[33m●[0m  [1m[93magent3[0m  [2minbound-worker-bddf29977cb4c1894ac3e268[0m  [1m[95mnak-interop-test-20260426203726-63[0m
+[2m17:37:41[0m  [1m[32m✓[0m  [1m[93magent3[0m  [2minbound-worker-27bda7adb9ffb84c94102e2b[0m  [1m[95mnak-interop-test-20260426203726-63[0m
+[2m17:37:42[0m  [1m[33m●[0m  [1m[94magent2[0m  [2minbound-worker-f7d92b6aa7b72b662a510a8a[0m  [1m[95mnak-interop-test-20260426203726-63[0m
+[2m17:37:42[0m  [1m[33m●[0m  [1m[93magent3[0m  [2minbound-worker-7970c44d266472f8825d82f1[0m  [1m[95mnak-interop-test-20260426203726-63[0m
+[2m17:37:42[0m  [1m[32m✓[0m  [1m[93magent3[0m  [2minbound-worker-54001ab3f03afc625790b25e[0m  [1m[95mnak-interop-test-20260426203726-63[0m
+[2m17:37:43[0m  [1m[33m●[0m  [1m[93magent3[0m  [2minbound-worker-5fbbbf41a6c08760556a5a39[0m  [1m[95mnak-interop-test-20260426203726-63[0m
+[2m17:37:43[0m  [1m[32m✓[0m  [1m[93magent3[0m  [2minbound-worker-99b280e37f6c61bf48dab0ff[0m  [1m[95mnak-interop-test-20260426203726-63[0m
+[2m17:37:43[0m  [1m[32m✓[0m  [1m[93magent3[0m  [2minbound-worker-bddf29977cb4c1894ac3e268[0m  [1m[95mnak-interop-test-20260426203726-63[0m
+[2m17:37:44[0m  [1m[33m●[0m  [1m[93magent3[0m  [2minbound-worker-9b74a46245d49cb2aa1b73c3[0m  [1m[95mnak-interop-test-20260426203726-63[0m
+[2m17:37:44[0m  [1m[33m●[0m  [1m[93magent3[0m  [2minbound-worker-9ec8bf2d5f70ab335a05472c[0m  [1m[95mnak-interop-test-20260426203726-63[0m
+[2m17:37:45[0m  [1m[33m●[0m  [1m[93magent3[0m  [2minbound-worker-c3cfb186a0cf4a20628d84cc[0m  [1m[95mnak-interop-test-20260426203726-63[0m
+[2m17:37:45[0m  [1m[32m✓[0m  [1m[93magent3[0m  [2minbound-worker-5fbbbf41a6c08760556a5a39[0m  [1m[95mnak-interop-test-20260426203726-63[0m
+[2m17:37:45[0m  [1m[32m✓[0m  [1m[93magent3[0m  [2minbound-worker-7970c44d266472f8825d82f1[0m  [1m[95mnak-interop-test-20260426203726-63[0m
+[2m17:37:46[0m  [1m[33m●[0m  [1m[94magent2[0m  [2minbound-worker-ae62f397bc8d5878f74f5810[0m  [1m[95mnak-interop-test-20260426203726-63[0m
+[2m17:37:46[0m  [1m[33m●[0m  [1m[93magent3[0m  [2minbound-worker-5dbf42af2515736554386617[0m  [1m[95mnak-interop-test-20260426203726-63[0m
+[2m17:37:47[0m  [1m[32m✓[0m  [1m[93magent3[0m  [2minbound-worker-9b74a46245d49cb2aa1b73c3[0m  [1m[95mnak-interop-test-20260426203726-63[0m
+[2m17:37:47[0m  [1m[33m●[0m  [1m[93magent3[0m  [2minbound-worker-fd820bed7cb0abe829a6c5e6[0m  [1m[95mnak-interop-test-20260426203726-63[0m
+[2m17:37:47[0m  [1m[33m●[0m  [1m[93magent3[0m  [2minbound-worker-c19a69d9836adf923463604a[0m  [1m[95mnak-interop-test-20260426203726-63[0m
+[2m17:37:48[0m  [1m[32m✓[0m  [1m[93magent3[0m  [2minbound-worker-9ec8bf2d5f70ab335a05472c[0m  [1m[95mnak-interop-test-20260426203726-63[0m
+[2m17:37:48[0m  [1m[32m✓[0m  [1m[93magent3[0m  [2minbound-worker-c3cfb186a0cf4a20628d84cc[0m  [1m[95mnak-interop-test-20260426203726-63[0m
+[2m17:37:48[0m  [1m[33m●[0m  [1m[93magent3[0m  [2minbound-worker-3d554327a8f739492673b8b6[0m  [1m[95mnak-interop-test-20260426203726-63[0m
+[2m17:37:49[0m  [1m[33m●[0m  [1m[93magent3[0m  [2minbound-worker-ecdb93435fe3fcd97b41eab9[0m  [1m[95mnak-interop-test-20260426203726-63[0m
+[harness] RESULT status=fail scenario=53_three_hop_delegation.sh detail=agent2 never published resume reply incorporating agent3's result
+[harness] cleanup (script exit code=1)
+[harness] stopping daemon pid 46832 (SIGTERM)
+[harness] stopping relay pid 46818

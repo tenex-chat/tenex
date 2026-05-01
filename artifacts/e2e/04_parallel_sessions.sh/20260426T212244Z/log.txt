@@ -1,0 +1,63 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-04-1777238564-12402
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-04-1777238564-12402
+[harness]   backend pubkey:  703a8308b272f6151165ef9a1f1f74e3d370e1931ab003dcd663dbdacf67714e
+[harness]   user pubkey:     55c95acb342ef0bcd0134bae2dbba853c9ee0daf34935a6c6ec95ec3f9fda03a
+[harness]   agent1 pubkey:   db013932c021d004b6dc9bd84f11b6ebfa071e6411f40131c8cc8bd192682792
+[harness]   agent2 pubkey:   ebc3901dd6143b56aec7816f88b121444f3d22f5099f4f654bfeeb169949c294
+[harness]   project a-tag:   31933:55c95acb342ef0bcd0134bae2dbba853c9ee0daf34935a6c6ec95ec3f9fda03a:nak-interop-test-20260427002244-14643
+[scenario] rewriting llms.json to use mock fixture model 'mock/parallel-04'
+[scenario] mock LLM enabled: fixture=/Users/pablofernandez/Work/TENEX-ff3ssq/scripts/e2e/fixtures/mock-llm/04_parallel_sessions.json
+[scenario] pre-seeded project descriptor at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-04-1777238564-12402/backend/projects/nak-interop-test-20260427002244-14643/project.json
+[harness] starting relay on 127.0.0.1:65241 (admins=1)
+[harness] relay ready at ws://127.0.0.1:65241
+[harness] daemon config relays -> [ws://127.0.0.1:65241]
+[scenario] publishing 14199 (whitelist) as user
+connecting to ws://127.0.0.1:65241... ok.
+publishing to ws://127.0.0.1:65241... success.
+[scenario] publishing 31933 (project) as user
+connecting to ws://127.0.0.1:65241... ok.
+publishing to ws://127.0.0.1:65241... success.
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-04-1777238564-12402/backend, binary=/Users/pablofernandez/Work/TENEX-ff3ssq/target/release/daemon)
+[harness] daemon ready (pid 14252, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-04-1777238564-12402/backend/daemon/tenex.lock)
+[harness] kind:14199 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] kind:24030 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] daemon subscription confirmed live (all probed listener filters registered)
+[scenario] publishing 24000 (boot) as user
+connecting to ws://127.0.0.1:65241... ok.
+publishing to ws://127.0.0.1:65241... success.
+[scenario]   boot event id=8fef0385215b78612c7582de091360bf313b294e03b1ef352d3f7134454c89a1
+[scenario] waiting for daemon to process boot and publish kind:24010...
+[scenario]   24010 status published for our project ✓
+[scenario] publishing kind:1 SESSION-ALPHA → agent1 and SESSION-BETA → agent2 in parallel
+connecting to ws://127.0.0.1:65241... ok.
+connecting to ws://127.0.0.1:65241... ok.
+publishing to ws://127.0.0.1:65241... success.
+publishing to ws://127.0.0.1:65241... success.
+[scenario]   msg1 (SESSION-ALPHA) id=6cd8430516270f51b686f8f85667d6b51a9da11eaebd209742adb74b977e5350
+[scenario]   msg2 (SESSION-BETA)  id=ad9675083e031b997f97258356f5c06dbf8fcf111f704db1517efb9b04288355
+[scenario] waiting up to 20s for both dispatches to be enqueued...
+[scenario]   SESSION-BETA dispatch enqueued ✓
+/Users/pablofernandez/Work/TENEX-ff3ssq/scripts/e2e/scenarios/04_parallel_sessions.sh: line 198: 14252 Killed: 9               TENEX_BASE_DIR="$TENEX_BASE_DIR" "$daemon_bin" --tenex-base-dir "$TENEX_BASE_DIR" >> "$HARNESS_DAEMON_LOG" 2>&1
+[scenario]   SESSION-ALPHA dispatch enqueued ✓
+[scenario] === Phase A complete: both dispatches enqueued ===
+
+[scenario] === Phase B: asserting both sessions complete and ran in parallel ===
+
+[scenario] === Phase B observations ===
+[scenario]   agent1 kind:1 (session-alpha result: 100) : no
+[scenario]   agent2 kind:1 (session-beta result: 200)  : no
+[scenario]   RAL journal >=2 terminal entries           : no
+[scenario] daemon log (last 80 lines):
+[2m21:22:48[0m  [1m[32m✓[0m  [1m[32mdaemon ready[0m  [2m(nostr on, telegram off)[0m
+[2m21:22:48[0m  ↑  [1m[93mnak-interop-test-20260427002244-14643[0m  [2m(1 booted)[0m
+[2m21:22:49[0m  [1m[33m●[0m  [1m[34magent2[0m  [2minbound-worker-6f53cd919a3ae531fe470f1b[0m  [1m[93mnak-interop-test-20260427002244-14643[0m
+[harness] RESULT status=fail scenario=04_parallel_sessions.sh detail=agent1 never published kind:1 with 'session-alpha result: 100'
+[harness] cleanup (script exit code=1)
+[harness] stopping daemon pid 14252 (SIGTERM)
+[harness] stopping relay pid 14213

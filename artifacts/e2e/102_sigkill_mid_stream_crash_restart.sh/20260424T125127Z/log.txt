@@ -1,0 +1,87 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-102-1777035087-73449
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-102-1777035087-73449
+[harness]   backend pubkey:  b275090b35725f5d9516e5874208df48a37d3e8d62ce91e1c8a8c164242df74e
+[harness]   user pubkey:     605ccc248f752a5aed6cb9bb032132d2506e38836cb0ac453b6f43c5cb54ee1c
+[harness]   agent1 pubkey:   857a09773dd16a1f10e48bc05d2d3e5af1aa834035954710eb26d6e80cc1026e
+[harness]   agent2 pubkey:   2da386e759a826d019d6adc0559c76bf0be8592dcf0c65a96275f81201084f20
+[harness]   project a-tag:   31933:605ccc248f752a5aed6cb9bb032132d2506e38836cb0ac453b6f43c5cb54ee1c:nak-interop-test-20260424155127-483
+[scenario] rewriting llms.json to use mock fixture model 'mock/delegation-02'
+[harness] starting relay on 127.0.0.1:56328 (admins=1)
+[harness] relay ready at ws://127.0.0.1:56328
+[harness] daemon config relays -> [ws://127.0.0.1:56328]
+[scenario] publishing 14199 (whitelist) as user
+connecting to ws://127.0.0.1:56328... ok.
+publishing to ws://127.0.0.1:56328... success.
+[scenario] publishing 31933 (project) as user
+connecting to ws://127.0.0.1:56328... ok.
+publishing to ws://127.0.0.1:56328... success.
+
+[scenario] === Phase 1: first daemon incarnation; SIGKILL mid-stream ===
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-102-1777035087-73449/backend, binary=/Users/pablofernandez/Work/TENEX-ff3ssq/target/release/daemon)
+[harness] daemon ready (pid 73924, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-102-1777035087-73449/backend/daemon/tenex.lock)
+[harness] kind:14199 listener confirmed (probe #1 round-tripped after 500ms)
+[harness] kind:24030 listener confirmed (probe #1 round-tripped after 500ms)
+[harness] daemon subscription confirmed live (all probed listener filters registered)
+[scenario] publishing kind:24000 (boot) as user
+connecting to ws://127.0.0.1:56328... ok.
+publishing to ws://127.0.0.1:56328... success.
+[scenario]   boot event id=aac3a463d6473bf6f964c810734511da99609f0aa1db371fe9818345f9ab7e5e
+[scenario]   kind:24010 published (project boot confirmed) ✓
+[scenario] publishing kind:1 from user to agent1 (attempt 1)
+connecting to ws://127.0.0.1:56328... ok.
+publishing to ws://127.0.0.1:56328... success.
+[scenario]   user message id=b0312357bb5152e652fc7b9211143e785489f80ebea9c80ab79e5a392ca62ded
+[scenario]   dispatch enqueued ✓
+[scenario] waiting for dispatch to be leased (worker active)...
+[scenario]   pre-crash state:
+[scenario]     dispatch leased entries: 1
+[scenario]     RAL journal lines: 2
+[scenario]     active RAL identities: 1
+[scenario]     observed leased dispatch entry ✓
+[scenario]   pre-crash tenex-e2e-102 worker PIDs: 73909 73924
+[scenario] crashing daemon via SIGKILL
+[harness] crashing daemon pid 73924 (SIGKILL)
+[scenario]   daemon SIGKILLed ✓
+[scenario] Phase 1 complete ✓
+
+[scenario] === Phase 2: post-crash state ===
+[scenario]   stale lockfile present after SIGKILL ✓
+[scenario]   dispatch queue leased entries post-crash: 1
+[scenario]   (documented behavior: 1 leased entry(s) remain — not cleared by daemon on crash)
+[scenario]   RAL journal active (non-terminal) identities post-crash: 1
+[scenario] Phase 2 complete ✓
+
+[scenario] === Phase 3: restart daemon against same fixture ===
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-102-1777035087-73449/backend, binary=/Users/pablofernandez/Work/TENEX-ff3ssq/target/release/daemon)
+[harness] daemon ready (pid 74099, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-102-1777035087-73449/backend/daemon/tenex.lock)
+[harness] kind:14199 listener confirmed (probe #1 round-tripped after 500ms)
+[harness] kind:24030 listener confirmed (probe #1 round-tripped after 500ms)
+[harness] daemon subscription confirmed live (all probed listener filters registered)
+[scenario]   restarted daemon subscription is live ✓
+[scenario]   restarted daemon is running (pid 74099) ✓
+[scenario]   no panic in post-restart daemon.log ✓
+[scenario] Phase 3 complete ✓
+
+[scenario] === Phase 4: orphan reconciliation — observed behavior ===
+[scenario]   pre-crash active RAL identities: 1
+[scenario]   stuck (non-terminal) RAL identities after restart: 1
+[scenario]   crashed records appended after restart: 0
+[scenario]   dispatch queue leased entries after restart: 1
+[scenario]   (documented: leased dispatch entries persist after crash AND restart — known behavior per 101's finding)
+[scenario]   OBSERVED GAP: orphan reconciliation NOT performed by current daemon binary
+[scenario]   recover_worker_startup() exists in worker_lifecycle/startup_recovery.rs
+[scenario]   but is not wired into the daemon startup path — stuck RALs are NOT transitioned to crashed
+[scenario]   This is a daemon implementation gap, documented here. Phases 3/5/6 still pass.
+[scenario] Phase 4 complete (observed behavior documented) ✓
+
+[scenario] === Phase 5: assert no pre-crash workers still alive ===
+[harness] FATAL: ASSERT: 1 pre-crash worker(s) still running: 73909
+[harness] cleanup (script exit code=1)
+[harness] stopping daemon pid 74099 (SIGTERM)
+[harness] stopping relay pid 73909

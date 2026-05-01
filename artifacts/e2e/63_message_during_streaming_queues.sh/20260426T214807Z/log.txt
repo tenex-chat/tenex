@@ -1,0 +1,56 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-63-1777240087-81892
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-63-1777240087-81892
+[harness]   backend pubkey:  79f3dd949a9fb4925e407a87cd81c1c244d4e1b73dfeb86f1dc67fe6470bb4a5
+[harness]   user pubkey:     f4d8710cd2902308355c9b81b1341966548e4de625f314e2cb1f34a1aa855e08
+[harness]   agent1 pubkey:   94ed0689b3c8dcebb4ec498e7a84665445dfa03b9617d0e60d431cdd41af401e
+[harness]   agent2 pubkey:   e39e9852e016e81c89cc7e8384b7ad3dfee655c597803f596e6ad796c360c952
+[harness]   project a-tag:   31933:f4d8710cd2902308355c9b81b1341966548e4de625f314e2cb1f34a1aa855e08:nak-interop-test-20260427004807-24865
+[scenario] rewriting llms.json to use mock model 'mock/streaming-63'
+[scenario] mock LLM enabled: fixture=/Users/pablofernandez/Work/TENEX-ff3ssq/scripts/e2e/fixtures/mock-llm/63_message_during_streaming.json
+[harness] starting relay on 127.0.0.1:51474 (admins=1)
+[harness] relay ready at ws://127.0.0.1:51474
+[harness] daemon config relays -> [ws://127.0.0.1:51474]
+connecting to ws://127.0.0.1:51474... ok.
+publishing to ws://127.0.0.1:51474... success.
+connecting to ws://127.0.0.1:51474... ok.
+publishing to ws://127.0.0.1:51474... success.
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-63-1777240087-81892/backend, binary=/Users/pablofernandez/Work/TENEX-ff3ssq/target/release/daemon)
+[harness] daemon ready (pid 82368, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-63-1777240087-81892/backend/daemon/tenex.lock)
+[harness] kind:14199 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] kind:24030 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] daemon subscription confirmed live (all probed listener filters registered)
+connecting to ws://127.0.0.1:51474... ok.
+publishing to ws://127.0.0.1:51474... success.
+[scenario] publishing first kind:1 (triggers 3s streaming response)
+connecting to ws://127.0.0.1:51474... ok.
+publishing to ws://127.0.0.1:51474... success.
+[scenario]   first message id=056aa7f3aaefe058ba12dbdbe3cd323f946035fe44402225d7ffa5f664530193
+[scenario] waiting for first dispatch to be LEASED (worker active)...
+[scenario]   first dispatch is LEASED (agent1 streaming) ✓
+[scenario] publishing second kind:1 mid-stream
+connecting to ws://127.0.0.1:51474... ok.
+publishing to ws://127.0.0.1:51474... success.
+[scenario]   second message id=c001d6f75b4b9f2f747fe86e4cac29aebe9b8ceeb35c4a5bbbc7c744ae2eca73
+[scenario] waiting for second dispatch to appear as QUEUED...
+[scenario]   second dispatch is QUEUED (not pre-empting first stream) ✓
+[scenario]   only 1 dispatch(es) in LEASED state at time of check ✓
+[scenario] waiting for both dispatches to complete and agent1 to publish two kind:1 responses...
+[scenario]   observed: agent1 published both kind:1 responses (2x) ✓
+
+[scenario] === Results ===
+[scenario]   first dispatch LEASED (streaming active)     : yes
+[scenario]   second dispatch QUEUED mid-stream            : yes
+[scenario]   no simultaneous LEASED pair                  : yes
+[scenario]   agent1 published both kind:1 responses (2x) : yes
+
+[scenario] PASS — scenario 6.3: second message queued mid-stream; not pre-empted; processed after
+[harness] RESULT status=pass scenario=63_message_during_streaming_queues.sh detail=streaming not pre-empted; second dispatch queued; both messages processed sequentially
+[harness] cleanup (script exit code=0)
+[harness] stopping daemon pid 82368 (SIGTERM)
+[harness] stopping relay pid 82357

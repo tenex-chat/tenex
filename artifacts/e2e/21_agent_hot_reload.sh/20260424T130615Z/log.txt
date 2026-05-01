@@ -1,0 +1,55 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-21-1777035975-47392
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-21-1777035975-47392
+[harness]   backend pubkey:  5754be8cdea69e4925129f23b67f4432c0c7ac4766963a5225f2ba747be68d22
+[harness]   user pubkey:     9a932fbed0e3811cf28cc7512a2866756ef5efc50d4cf7d0489a8bb3216cfdfc
+[harness]   agent1 pubkey:   b9dc3f2a66732d42e2459b5afeda5b24049a0ad83b4022c5ff9a9910fb5e7c17
+[harness]   agent2 pubkey:   d8d49f70ea14b4685fbff4e2563758cd7add468cf5cfe386f3d0146f7228e110
+[harness]   project a-tag:   31933:9a932fbed0e3811cf28cc7512a2866756ef5efc50d4cf7d0489a8bb3216cfdfc:nak-interop-test-20260424160615-18462
+[scenario] rewriting llms.json to use mock fixture model 'mock/agent-hot-reload-21'
+[scenario] mock LLM enabled: fixture=/Users/pablofernandez/Work/TENEX-ff3ssq/scripts/e2e/fixtures/mock-llm/21_agent_hot_reload.json
+[harness] starting relay on 127.0.0.1:60801 (admins=1)
+[harness] relay ready at ws://127.0.0.1:60801
+[harness] daemon config relays -> [ws://127.0.0.1:60801]
+[scenario] publishing kind:14199 (whitelist) with agent1 only for now
+connecting to ws://127.0.0.1:60801... ok.
+publishing to ws://127.0.0.1:60801... success.
+[scenario] publishing initial kind:31933 (project) with agent1 ONLY in p-tags (ts=1777035917)
+connecting to ws://127.0.0.1:60801... ok.
+publishing to ws://127.0.0.1:60801... success.
+[scenario]   initial 31933 id=c5456c531260890ea517c615800a8498c04f7f091d90fa4ad2df4c3608e55130 (agent1 only)
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-21-1777035975-47392/backend)
+[harness] daemon log tail:
+   Compiling tenex-daemon v0.1.0 (/Users/pablofernandez/Work/TENEX-ff3ssq/crates/tenex-daemon)
+error[E0432]: unresolved import `crate::dispatch_queue::plan_dispatch_queue_requeue`
+  --> crates/tenex-daemon/src/worker_dispatch/admission_start.rs:10:5
+   |
+10 |     plan_dispatch_queue_requeue, replay_dispatch_queue,
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |     |
+   |     no `plan_dispatch_queue_requeue` in `dispatch_queue`
+   |     help: a similar name exists in the module: `plan_dispatch_queue_lease`
+
+error[E0599]: no variant or associated item named `SelectedDispatchBlockedByLaunchLock` found for enum `WorkerDispatchAdmissionBlockedReason` in the current scope
+   --> crates/tenex-daemon/src/worker_dispatch/admission_start.rs:313:67
+    |
+313 |                     reason: WorkerDispatchAdmissionBlockedReason::SelectedDispatchBlockedByLaunchLock,
+    |                                                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ variant or associated item not found in `WorkerDispatchAdmissionBlockedReason`
+    |
+   ::: crates/tenex-daemon/src/worker_dispatch/admission.rs:42:1
+    |
+ 42 | pub enum WorkerDispatchAdmissionBlockedReason {
+    | --------------------------------------------- variant or associated item `SelectedDispatchBlockedByLaunchLock` not found for this enum
+
+Some errors have detailed explanations: E0432, E0599.
+For more information about an error, try `rustc --explain E0432`.
+error: could not compile `tenex-daemon` (lib) due to 2 previous errors
+[harness] FATAL: daemon never wrote lockfile
+[harness] cleanup (script exit code=1)
+[harness] stopping daemon pid 48039 (SIGTERM)
+[harness] stopping relay pid 47963

@@ -41,14 +41,9 @@ pub fn run(base_dir: &std::path::Path) -> Result<()> {
 
     if enabled {
         let agent_default = prev_agent.clone().unwrap_or_default();
-        let agent_raw = match prompts::input("Agent slug:")
-            .with_default(&agent_default)
-            .prompt()
-        {
-            Ok(s) => s,
-            Err(inquire::InquireError::OperationCanceled)
-            | Err(inquire::InquireError::OperationInterrupted) => return Ok(()),
-            Err(e) => return Err(anyhow!("intervention agent prompt: {e}")),
+        let agent_raw = match select_intervention_agent(base_dir, &agent_default)? {
+            Some(s) => s,
+            None => return Ok(()),
         };
         let validator =
             prompts::adapt_static_str_validator(crate::config_cmd::summarization::validate_integer);
@@ -82,6 +77,38 @@ pub fn run(base_dir: &std::path::Path) -> Result<()> {
     doc.save(base_dir)?;
     crate::tui::display::config_success("Intervention config saved.");
     Ok(())
+}
+
+/// Render the intervention agent picker. When the global agent index is
+/// non-empty we render a `Select` over every known slug, pre-positioned
+/// on the previously-stored default; otherwise we fall back to a
+/// freeform text input. Returns `None` when the user cancels — the
+/// caller leaves the existing config untouched.
+fn select_intervention_agent(base_dir: &std::path::Path, default: &str) -> Result<Option<String>> {
+    let slugs: Vec<String> = match tenex_agent_registry::AgentIndexDoc::load(base_dir) {
+        Ok(idx) => idx.by_slug().keys().cloned().collect(),
+        Err(_) => Vec::new(),
+    };
+
+    if slugs.is_empty() {
+        return match prompts::input("Agent slug:").with_default(default).prompt() {
+            Ok(s) => Ok(Some(s)),
+            Err(inquire::InquireError::OperationCanceled)
+            | Err(inquire::InquireError::OperationInterrupted) => Ok(None),
+            Err(e) => Err(anyhow!("intervention agent prompt: {e}")),
+        };
+    }
+
+    let starting = slugs.iter().position(|s| s == default).unwrap_or(0);
+    match prompts::select("Agent slug:", slugs)
+        .with_starting_cursor(starting)
+        .prompt()
+    {
+        Ok(s) => Ok(Some(s)),
+        Err(inquire::InquireError::OperationCanceled)
+        | Err(inquire::InquireError::OperationInterrupted) => Ok(None),
+        Err(e) => Err(anyhow!("intervention agent select: {e}")),
+    }
 }
 
 #[cfg(test)]

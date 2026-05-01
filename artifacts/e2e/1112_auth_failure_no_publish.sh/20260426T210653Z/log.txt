@@ -1,0 +1,35 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-1112-1777237613-51410
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-1112-1777237613-51410
+[harness]   backend pubkey:  eb885b5af3aaaa996f8139b681ad476229672c23c1758dc174ef09b8aad7ac66
+[harness]   user pubkey:     deab718bb7d642956a13876499c7cd21f82ff605fc79755a5e84583a64eb5e8d
+[harness]   agent1 pubkey:   b900cee12a64629a77f58c56af75c3a78aa77fbbd5c7f6bac7e38f4f28ad44eb
+[harness]   agent2 pubkey:   eccbdc896826cb6e6d08dc054c9a3c1f228643bc3d2f8fdc5744ed442437cafb
+[harness]   project a-tag:   31933:deab718bb7d642956a13876499c7cd21f82ff605fc79755a5e84583a64eb5e8d:nak-interop-test-20260427000653-11791
+[harness] starting relay on 127.0.0.1:62838 (admins=1)
+[harness] relay ready at ws://127.0.0.1:62838
+[harness] daemon config relays -> [ws://127.0.0.1:62838]
+connecting to ws://127.0.0.1:62838... ok.
+publishing to ws://127.0.0.1:62838... success.
+connecting to ws://127.0.0.1:62838... ok.
+publishing to ws://127.0.0.1:62838... success.
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-1112-1777237613-51410/backend, binary=/Users/pablofernandez/Work/TENEX-ff3ssq/target/release/daemon)
+[harness] daemon ready (pid 52830, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-1112-1777237613-51410/backend/daemon/tenex.lock)
+[harness] kind:14199 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] kind:24030 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] daemon subscription confirmed live (all probed listener filters registered)
+[scenario] daemon subscribed; relay healthy ✓
+[scenario] stopping relay — simulate unreachable relay for publish
+[harness] stopping relay pid 52710
+[scenario] injecting boot event into relay outbox artificially via daemon boot
+[scenario]   daemon now configured to publish to unreachable ws://127.0.0.1:62848
+[scenario] waiting for daemon to attempt and fail a publish (relay unreachable)
+/Users/pablofernandez/Work/TENEX-ff3ssq/scripts/e2e/scenarios/1112_auth_failure_no_publish.sh: line 105: 52830 Killed: 9               TENEX_BASE_DIR="$TENEX_BASE_DIR" "$daemon_bin" --tenex-base-dir "$TENEX_BASE_DIR" >> "$HARNESS_DAEMON_LOG" 2>&1
+[harness] FATAL: ASSERT: daemon crashed when relay became unreachable
+[harness] cleanup (script exit code=1)
+[harness] stopping daemon pid 52830 (SIGTERM)

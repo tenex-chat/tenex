@@ -1,0 +1,27 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-36-1777228087-47308
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-36-1777228087-47308
+[harness]   backend pubkey:  4762ddbee192f583a5dc6fb403c68956c1fd24d0066818344d5f5fac29a35b1e
+[harness]   user pubkey:     806b36fc719a2ab867ec7c7b939f1ef65dd7b51e4057350b25e2a6f9e006ca73
+[harness]   agent1 pubkey:   084fadfeedd426f3cd342ee628bc0b2aed6cd2d6ba6290f28d2c59e15c946886
+[harness]   agent2 pubkey:   a1de146c0a290be4a4861d8792dae2f661ef6bbb6dc5db383dfa8281b13b3f41
+[harness]   project a-tag:   31933:806b36fc719a2ab867ec7c7b939f1ef65dd7b51e4057350b25e2a6f9e006ca73:nak-interop-test-20260426212807-16382
+[harness] starting relay on 127.0.0.1:57436 (admins=1)
+[harness] relay ready at ws://127.0.0.1:57436
+[harness] daemon config relays -> [ws://127.0.0.1:57436]
+connecting to ws://127.0.0.1:57436... ok.
+publishing to ws://127.0.0.1:57436... success.
+connecting to ws://127.0.0.1:57436... ok.
+publishing to ws://127.0.0.1:57436... success.
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-36-1777228087-47308/backend)
+[harness] daemon ready (pid 49552, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-36-1777228087-47308/backend/daemon/tenex.lock)
+[harness] TIMEOUT: kind:14199 probe never round-tripped within 45s
+[harness] FATAL: daemon subscription never became live
+[harness] cleanup (script exit code=1)
+[harness] stopping daemon pid 49552 (SIGTERM)
+[harness] stopping relay pid 49471

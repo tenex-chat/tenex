@@ -1,0 +1,29 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-63-1777254572-36033
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-63-1777254572-36033
+[harness]   backend pubkey:  284f7d95d7eda5749c2bfaa9a1929c0ff64a199acc88de8739f8f6246f438fee
+[harness]   user pubkey:     2b96a180ee54f1117853493a0d9669a3939a6b5c20d1fa0b74f013014fbadc41
+[harness]   agent1 pubkey:   cfeb077c60d9d0e9007e72e28e7d2b44b43ab0b9d71c54f6f4d62276e556f479
+[harness]   agent2 pubkey:   3e0ecc5aa0a2c42a874b9190e4d085dea8195485c80f7e46e8dc28ee93265aac
+[harness]   project a-tag:   31933:2b96a180ee54f1117853493a0d9669a3939a6b5c20d1fa0b74f013014fbadc41:nak-interop-test-20260427044932-25538
+[scenario] rewriting llms.json to use mock model 'mock/streaming-63'
+[scenario] mock LLM enabled: fixture=/Users/pablofernandez/Work/TENEX-ff3ssq/scripts/e2e/fixtures/mock-llm/63_message_during_streaming.json
+[harness] starting relay on 127.0.0.1:56819 (admins=1)
+[harness] relay ready at ws://127.0.0.1:56819
+[harness] daemon config relays -> [ws://127.0.0.1:56819]
+connecting to ws://127.0.0.1:56819... ok.
+publishing to ws://127.0.0.1:56819... success.
+connecting to ws://127.0.0.1:56819... ok.
+publishing to ws://127.0.0.1:56819... success.
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-63-1777254572-36033/backend, binary=/Users/pablofernandez/Work/TENEX-ff3ssq/target/release/daemon)
+/Users/pablofernandez/Work/TENEX-ff3ssq/scripts/e2e-test-harness.sh: line 691: 36642 Killed: 9               TENEX_BASE_DIR="$TENEX_BASE_DIR" "$daemon_bin" --tenex-base-dir "$TENEX_BASE_DIR" >> "$HARNESS_DAEMON_LOG" 2>&1
+[harness] daemon log tail:
+[harness] FATAL: daemon never wrote lockfile
+[harness] cleanup (script exit code=1)
+[harness] stopping daemon pid 36642 (SIGTERM)
+[harness] stopping relay pid 36631

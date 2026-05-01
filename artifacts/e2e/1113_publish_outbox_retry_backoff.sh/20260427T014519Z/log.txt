@@ -1,0 +1,35 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-1113-1777254319-16903
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-1113-1777254319-16903
+[harness]   backend pubkey:  af30b40e9961eb61e2f21bae147d18d21e52e83039f66354eaedaabe1ba167f3
+[harness]   user pubkey:     a36b7ebe2a13c8c117f42c9b146faec44cf4292c430b488e96cd81a83ed2e3e4
+[harness]   agent1 pubkey:   9c3c119662ce36c25e90291667d6d395b372085c89a56dd05a143ce6f3c87f65
+[harness]   agent2 pubkey:   4efaaae811f127ece82796f50fd1fcdca12dc519716144eb2f0e28058e4fc209
+[harness]   project a-tag:   31933:a36b7ebe2a13c8c117f42c9b146faec44cf4292c430b488e96cd81a83ed2e3e4:nak-interop-test-20260427044519-19743
+[harness] starting relay on 127.0.0.1:56170 (admins=1)
+[harness] relay ready at ws://127.0.0.1:56170
+connecting to ws://127.0.0.1:56170... ok.
+publishing to ws://127.0.0.1:56170... success.
+connecting to ws://127.0.0.1:56170... ok.
+publishing to ws://127.0.0.1:56170... success.
+[harness] stopping relay pid 17807
+[scenario] pre-publish relay stopped (port 56170 is now unreachable)
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-1113-1777254319-16903/backend)
+[scenario]   daemon started despite relay being unreachable ✓
+[scenario] waiting for 'relay disconnected, reconnecting after backoff' in daemon log
+[scenario]   daemon logged reconnect-backoff ✓
+[scenario]   daemon alive with relay unreachable ✓
+[scenario] restarting relay on port 56170 (daemon config unchanged)
+[scenario]   relay restarted on port 56170 ✓
+[scenario] waiting for daemon to reconnect and re-authenticate
+/Users/pablofernandez/Work/TENEX-ff3ssq/scripts/e2e/scenarios/1113_publish_outbox_retry_backoff.sh: line 82: 17837 Killed: 9               TENEX_BASE_DIR="$TENEX_BASE_DIR" cargo run --release -p tenex-daemon --bin daemon -- --tenex-base-dir "$TENEX_BASE_DIR" >> "$HARNESS_DAEMON_LOG" 2>&1
+[await_file] TIMEOUT: /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-1113-1777254319-16903/backend/daemon/daemon.log did not match /relay authenticated, resubscribed/ within 25s
+[harness] FATAL: ASSERT: daemon never re-authenticated after relay returned within 25s
+[harness] cleanup (script exit code=1)
+[harness] stopping daemon pid 17835 (SIGTERM)
+[harness] stopping relay pid 17882

@@ -1,0 +1,46 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-13-1777239569-53162
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-13-1777239569-53163
+[harness]   backend pubkey:  ff1aef67acad2ec982a940a68ee44721f394964a7196da61c57f2b7c3af178eb
+[harness]   user pubkey:     3d10471c931f40cca17955445fba9eb0f8d98390710852785391b8dd2506de26
+[harness]   agent1 pubkey:   bb6f99d4d06b36ac3a91a5831107034de04171ff144aea9d4aa2e3f9bba07a2b
+[harness]   agent2 pubkey:   352de5fe47e81800389404c88c763317807321831243e84b5643874fd0739c63
+[harness]   project a-tag:   31933:3d10471c931f40cca17955445fba9eb0f8d98390710852785391b8dd2506de26:nak-interop-test-20260427003929-27917
+[harness] starting relay on 127.0.0.1:50448 (admins=1)
+[harness] relay ready at ws://127.0.0.1:50448
+[harness] daemon config relays -> [ws://127.0.0.1:50448]
+connecting to ws://127.0.0.1:50448... ok.
+publishing to ws://127.0.0.1:50448... success.
+connecting to ws://127.0.0.1:50448... ok.
+publishing to ws://127.0.0.1:50448... success.
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-13-1777239569-53163/backend, binary=/Users/pablofernandez/Work/TENEX-ff3ssq/target/release/daemon)
+[harness] daemon ready (pid 54105, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-13-1777239569-53163/backend/daemon/tenex.lock)
+[harness] kind:14199 listener confirmed (probe #1 round-tripped after 200ms)
+/Users/pablofernandez/Work/TENEX-ff3ssq/scripts/e2e-test-harness.sh: line 310: 54101 Killed: 9               TENEX_BASE_DIR="$TENEX_BASE_DIR" "$daemon_bin" --tenex-base-dir "$TENEX_BASE_DIR" >> "$HARNESS_DAEMON_LOG" 2>&1
+[harness] TIMEOUT: kind:24030 probe never round-tripped within 45s
+[harness] FATAL: daemon subscription never became live
+[harness] cleanup (script exit code=1)
+[harness] stopping daemon pid 54101 (SIGTERM)
+[harness] stopping relay pid 54066
+ log project_booted count after first boot: 1
+[scenario] publishing second kind:24000 (replay)
+connecting to ws://127.0.0.1:50448... ok.
+publishing to ws://127.0.0.1:50448... success.
+[scenario]   second boot id=7f07caf6f1073611e65e39cef31374ec30eb968b3eae1dda3c9008515b7cef4f
+[scenario] publishing third kind:24000 (replay)
+connecting to ws://127.0.0.1:50448... ok.
+publishing to ws://127.0.0.1:50448... success.
+[scenario]   third boot id=e6dd3af745760e3ac4bf9afabc361830357dc12c8419fa0a85a13a4aa33b0304
+[scenario]   daemon log project_booted count after 3 boots: 3
+[scenario]   distinct project a-tags in 24010: 1
+[scenario]   14199 count on relay after 3 boots: 1
+
+[scenario] PASS — scenario 1.3 Boot is idempotent
+[harness] cleanup (script exit code=0)
+[harness] stopping daemon pid 54105 (SIGTERM)
+[harness] stopping relay pid 54082

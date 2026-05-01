@@ -1,0 +1,29 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-64-1777220913-85729
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-64-1777220913-85729
+[harness]   backend pubkey:  85e7583195ca267c3a6c5f72d0f9e550772af8006b6c5ce9aedeae29e06a9e74
+[harness]   user pubkey:     b3955618dbd6226307c6ddfc28f138de58d72399861ec05355775d61e9044d32
+[harness]   agent1 pubkey:   a83f213323e445d73176b31f70ea7054aabc3c8d3b926b8a9775fbc40c5addcb
+[harness]   agent2 pubkey:   23ba6afddd43a6bb82be42a6dcd5353239bc05c86180a79c24ba023d92b7df2c
+[harness]   project a-tag:   31933:b3955618dbd6226307c6ddfc28f138de58d72399861ec05355775d61e9044d32:nak-interop-test-20260426192833-21277
+[scenario] rewriting llms.json to use mock model 'mock/concurrent-race-64'
+[scenario] mock LLM enabled: fixture=/Users/pablofernandez/Work/TENEX-ff3ssq/scripts/e2e/fixtures/mock-llm/64_concurrent_message_race.json
+[harness] starting relay on 127.0.0.1:55544 (admins=1)
+[harness] relay ready at ws://127.0.0.1:55544
+[harness] daemon config relays -> [ws://127.0.0.1:55544]
+connecting to ws://127.0.0.1:55544... ok.
+publishing to ws://127.0.0.1:55544... success.
+connecting to ws://127.0.0.1:55544... ok.
+publishing to ws://127.0.0.1:55544... success.
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-64-1777220913-85729/backend)
+[harness] daemon ready (pid 86432, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-64-1777220913-85729/backend/daemon/tenex.lock)
+[harness] TIMEOUT: kind:14199 probe never round-tripped within 45s
+[harness] FATAL: daemon subscription never became live
+[harness] cleanup (script exit code=1)
+[harness] stopping daemon pid 86432 (SIGTERM)
+[harness] stopping relay pid 86396

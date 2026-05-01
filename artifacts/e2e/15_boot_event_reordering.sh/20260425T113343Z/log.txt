@@ -1,0 +1,50 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-15-1777116823-16857
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-15-1777116823-16857
+[harness]   backend pubkey:  96c86e411ff7e92b58a0b18b174580f23f5a2fff38112193662029a2f8b7a75b
+[harness]   user pubkey:     629523157496ae4a5b65e5e49fedddf6bacd0862c65640ac72a94acd10ed8dc8
+[harness]   agent1 pubkey:   f721b99d0c1ffd0edc82634f8e09ba6162e7386a372aac397b1957bd4bb3fd37
+[harness]   agent2 pubkey:   fd9a89433e2574c17e404be6ebf1b65402780686bdb8cdfef9582393265d44d8
+[harness]   project a-tag:   31933:629523157496ae4a5b65e5e49fedddf6bacd0862c65640ac72a94acd10ed8dc8:nak-interop-test-20260425143343-20298
+[harness] starting relay on 127.0.0.1:63433 (admins=1)
+[harness] relay ready at ws://127.0.0.1:63433
+[harness] daemon config relays -> [ws://127.0.0.1:63433]
+connecting to ws://127.0.0.1:63433... ok.
+publishing to ws://127.0.0.1:63433... success.
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-15-1777116823-16857/backend)
+[harness] daemon ready (pid 17379, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-15-1777116823-16857/backend/daemon/tenex.lock)
+[harness] kind:14199 listener confirmed (probe #1 round-tripped after 500ms)
+[harness] kind:24030 listener confirmed (probe #1 round-tripped after 500ms)
+[harness] daemon subscription confirmed live (all probed listener filters registered)
+[scenario] phase 1: publishing NEWER kind:31933 (created_at=1777120425)
+connecting to ws://127.0.0.1:63433... ok.
+publishing to ws://127.0.0.1:63433... success.
+[scenario]   newer 31933 id=35d0b6dbf9bf36a01bf653ded97bb40eb9451cc554d332df3d00cb5235fc14ef created_at=1777120425
+[scenario]   daemon log project_updated count after newer 31933: 1
+[scenario]   newer 31933 accepted (project_updated logged) ✓
+[scenario] phase 2: publishing OLDER kind:31933 (created_at=1777113225)
+connecting to ws://127.0.0.1:63433... ok.
+publishing to ws://127.0.0.1:63433... success.
+[scenario]   older 31933 id=14254a596c9cc94a5c145946f60d99b3035dd34b846cb73ef6445cc4837b295a created_at=1777113225
+[scenario]   daemon log project_updated count after older 31933: 2 (informational)
+[scenario]   relay stored 31933 created_at=1777120425 (expected=1777120425)
+[scenario]   relay correctly retains the newer revision ✓
+[scenario] phase 3: checking daemon process is still alive
+[scenario]   daemon still running (pid 17379) ✓
+[scenario] phase 4: polling-boot kind:24000 for project nak-interop-test-20260425143343-20298
+[scenario]   boot attempt #1 id=9ce933898a5440fd744b10a7f7073cc5f615e4896ce9d2a4ac78a6fed30a202c
+[scenario]   project_booted logged for our d-tag ✓
+[scenario]   kind:24010 published for our project a-tag ✓
+[scenario] phase 5: verifying relay retains the newer kind:31933
+[scenario]   relay retains newer kind:31933 (created_at=1777120425) ✓
+
+[scenario] PASS — scenario 1.5 Boot event reordering
+[harness] RESULT status=pass scenario=15_boot_event_reordering.sh detail=newer 31933 wins; older discarded; boot succeeded; no crash
+[harness] cleanup (script exit code=0)
+[harness] stopping daemon pid 17379 (SIGTERM)
+[harness] stopping relay pid 17369

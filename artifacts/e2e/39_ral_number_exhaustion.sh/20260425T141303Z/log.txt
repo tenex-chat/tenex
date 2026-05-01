@@ -1,0 +1,57 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-39-1777126383-87843
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-39-1777126383-87843
+[harness]   backend pubkey:  93e1a70fd7c0a9025c3368972281a7b4c43eda1009bad7f94c8374bf0733d5a1
+[harness]   user pubkey:     ce49c15029585fdca91e90b3e9a7bd3e41853f70b59e00cd47ae20728b4b1a70
+[harness]   agent1 pubkey:   c76b97b579e34298a08f89d0339e2a672497a5e2953a914a65faa2edad71eafe
+[harness]   agent2 pubkey:   450908e144c21e4ea3e9f84b95be604f53f0ec6184a08d3f40b627059b2838b4
+[harness]   project a-tag:   31933:ce49c15029585fdca91e90b3e9a7bd3e41853f70b59e00cd47ae20728b4b1a70:nak-interop-test-20260425171303-26931
+[harness] starting relay on 127.0.0.1:61736 (admins=1)
+[harness] relay ready at ws://127.0.0.1:61736
+[harness] daemon config relays -> [ws://127.0.0.1:61736]
+connecting to ws://127.0.0.1:61736... ok.
+publishing to ws://127.0.0.1:61736... success.
+connecting to ws://127.0.0.1:61736... ok.
+publishing to ws://127.0.0.1:61736... success.
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-39-1777126383-87843/backend)
+[harness] daemon ready (pid 88379, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-39-1777126383-87843/backend/daemon/tenex.lock)
+[harness] kind:14199 listener confirmed (probe #1 round-tripped after 500ms)
+[harness] kind:24030 listener confirmed (probe #1 round-tripped after 500ms)
+[harness] daemon subscription confirmed live (all probed listener filters registered)
+connecting to ws://127.0.0.1:61736... ok.
+publishing to ws://127.0.0.1:61736... success.
+[scenario] boot event id=449d5272f6dbc459339e5d30c9bc78c6877c8e38e10f209f0abd6c18e3225b6b
+[scenario] daemon published kind:24010 ✓
+connecting to ws://127.0.0.1:61736... ok.
+publishing to ws://127.0.0.1:61736... success.
+[scenario] priming event id=57fb38c07b095e3c4837faa7c79ded842598451e5d14aa0e44d4ba7c202e2650 (attempt 1)
+[scenario] namespace captured:
+[scenario]   project_id      = nak-interop-test-20260425171303-26931
+[scenario]   agent_pubkey    = c76b97b579e34298a08f89d0339e2a672497a5e2953a914a65faa2edad71eafe
+[scenario]   conversation_id = 57fb38c07b095e3c4837faa7c79ded842598451e5d14aa0e44d4ba7c202e2650
+[scenario] stopping daemon to seed RAL journal with u64::MAX
+[harness] stopping daemon pid 88379 (SIGTERM)
+[scenario]   wrote seed record to /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-39-1777126383-87843/backend/daemon/ral/journal.jsonl
+[scenario] queue + dispatch-inputs wiped; journal seeded
+[scenario] restarting daemon
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-39-1777126383-87843/backend)
+[harness] daemon ready (pid 89220, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-39-1777126383-87843/backend/daemon/tenex.lock)
+[harness] kind:14199 listener confirmed (probe #1 round-tripped after 500ms)
+[harness] kind:24030 listener confirmed (probe #1 round-tripped after 500ms)
+[harness] daemon subscription confirmed live (all probed listener filters registered)
+[scenario] publishing fresh reply to priming event to hit exhausted namespace
+connecting to ws://127.0.0.1:61736... ok.
+publishing to ws://127.0.0.1:61736... success.
+[scenario] waiting 15s for the daemon to hit RalNumberExhausted
+[scenario]   RalNumberExhausted error observed in daemon log ✓
+[scenario]   no dispatch row for exhausted namespace ✓
+
+[scenario] PASS — scenario 3.9: RAL number exhaustion guard
+[harness] cleanup (script exit code=0)
+[harness] stopping daemon pid 89220 (SIGTERM)
+[harness] stopping relay pid 88368

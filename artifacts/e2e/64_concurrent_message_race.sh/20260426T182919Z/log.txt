@@ -1,0 +1,30 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-64-1777228160-55130
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-64-1777228160-55130
+[harness]   backend pubkey:  c1b6877e1baa6e1c3ae3c534e7dd57f2afc91d8fa1e7a3e820ad7ac5fcf7685b
+[harness]   user pubkey:     924223ac2b71de037578bf86ba5e88535d377fe884db3c45b5daa0e8f07d2705
+[harness]   agent1 pubkey:   f05f16230aef7c2cd596eed3a23db24a4b340efc7cde38dcb148c884c0860673
+[harness]   agent2 pubkey:   7a2f88d20f0a8cc3db39a1185b5a03ed36730cb485a15aa51bf27b1c2fafc86e
+[harness]   project a-tag:   31933:924223ac2b71de037578bf86ba5e88535d377fe884db3c45b5daa0e8f07d2705:nak-interop-test-20260426212920-2740
+[scenario] rewriting llms.json to use mock model 'mock/concurrent-race-64'
+[scenario] mock LLM enabled: fixture=/Users/pablofernandez/Work/TENEX-ff3ssq/scripts/e2e/fixtures/mock-llm/64_concurrent_message_race.json
+[harness] starting relay on 127.0.0.1:59772 (admins=1)
+[harness] relay ready at ws://127.0.0.1:59772
+[harness] daemon config relays -> [ws://127.0.0.1:59772]
+connecting to ws://127.0.0.1:59772... ok.
+publishing to ws://127.0.0.1:59772... success.
+connecting to ws://127.0.0.1:59772... ok.
+publishing to ws://127.0.0.1:59772... success.
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-64-1777228160-55130/backend)
+[harness] daemon ready (pid 56846, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-64-1777228160-55130/backend/daemon/tenex.lock)
+[harness] kind:14199 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] TIMEOUT: kind:24030 probe never round-tripped within 45s
+[harness] FATAL: daemon subscription never became live
+[harness] cleanup (script exit code=1)
+[harness] stopping daemon pid 56846 (SIGTERM)
+[harness] stopping relay pid 56728

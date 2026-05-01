@@ -1,0 +1,38 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-41-1777238122-95004
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-41-1777238122-95004
+[harness]   backend pubkey:  9681eac83914d4fc0b628579dbc348f51877d301f8a6ac0c5deccd59ed2f7c94
+[harness]   user pubkey:     bf11344b2f1122c47a9ec9f6678c89adb9c93cb96c6d230c9f64031d79817f80
+[harness]   agent1 pubkey:   701673ae313bb2cfb691a4ce6cd057cae799787b9d434954d31e0dc922233725
+[harness]   agent2 pubkey:   bbc982a3f5817891cabf5b475b75ac027e395c36ea5e7e2d5598a145ed384fec
+[harness]   project a-tag:   31933:bf11344b2f1122c47a9ec9f6678c89adb9c93cb96c6d230c9f64031d79817f80:nak-interop-test-20260427001522-11341
+[harness] starting relay on 127.0.0.1:64399 (admins=1)
+[harness] relay ready at ws://127.0.0.1:64399
+[harness] daemon config relays -> [ws://127.0.0.1:64399]
+connecting to ws://127.0.0.1:64399... ok.
+publishing to ws://127.0.0.1:64399... success.
+connecting to ws://127.0.0.1:64399... ok.
+publishing to ws://127.0.0.1:64399... success.
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-41-1777238122-95004/backend, binary=/Users/pablofernandez/Work/TENEX-ff3ssq/target/release/daemon)
+[harness] daemon ready (pid 95620, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-41-1777238122-95004/backend/daemon/tenex.lock)
+[harness] kind:14199 probe #1 was signed locally but never became readable on the relay; retrying
+[harness] kind:14199 listener confirmed (probe #2 round-tripped after 200ms)
+[harness] kind:24030 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] daemon subscription confirmed live (all probed listener filters registered)
+[scenario] publishing kind:24000 boot event
+connecting to ws://127.0.0.1:64399... ok.
+publishing to ws://127.0.0.1:64399... success.
+[scenario] writing schedules.json with executeAt=2026-04-26T21:15:35Z (task_id=sched-task-e2e-41-95004)
+[scenario] waiting up to 7s for scheduled task dispatch to appear in queue
+[scenario]   scheduled task dispatch enqueued ✓
+[scenario]   schedules.json finalized (tasks remaining: 0) ✓
+
+[scenario] PASS — scenario 4.1 Scheduled-task driver fires within deadline
+[harness] cleanup (script exit code=0)
+[harness] stopping daemon pid 95620 (SIGTERM)
+[harness] stopping relay pid 95603

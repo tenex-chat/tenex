@@ -1,0 +1,37 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-1113-1777259317-35725
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-1113-1777259317-35725
+[harness]   backend pubkey:  3884fddbae4f6fb85af36896e8f61d150ae36fe20a85cb5fc97097cfb3c2f71c
+[harness]   user pubkey:     06ba3d409a035b6e45681d77113ebc8a94d55eeca30fc6d1882b4566f13fb376
+[harness]   agent1 pubkey:   d2c19646b456dce384b5b5f94fa8fb789c30faa6ede793be2a85530c81af800a
+[harness]   agent2 pubkey:   a880e3816add7347b90153f65c4488b9a2b50ffe45194a4f4f39a622947bd678
+[harness]   project a-tag:   31933:06ba3d409a035b6e45681d77113ebc8a94d55eeca30fc6d1882b4566f13fb376:nak-interop-test-20260427060837-26063
+[harness] starting relay on 127.0.0.1:60177 (admins=1)
+[harness] relay ready at ws://127.0.0.1:60177
+connecting to ws://127.0.0.1:60177... ok.
+publishing to ws://127.0.0.1:60177... success.
+connecting to ws://127.0.0.1:60177... ok.
+publishing to ws://127.0.0.1:60177... success.
+[harness] stopping relay pid 36193
+[scenario] pre-publish relay stopped (port 60177 is now unreachable)
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-1113-1777259317-35725/backend)
+[scenario]   daemon started despite relay being unreachable ✓
+[scenario] waiting for 'relay disconnected, reconnecting after backoff' in daemon log
+[scenario]   daemon logged reconnect-backoff ✓
+[scenario]   daemon alive with relay unreachable ✓
+[scenario] restarting relay on port 60177 (daemon config unchanged)
+[scenario]   relay restarted on port 60177 ✓
+[scenario] waiting for daemon to reconnect and re-authenticate
+[scenario]   daemon re-authenticated after reconnect ✓
+[scenario]   no daemon panic ✓
+
+[scenario] PASS — scenario 11.13: publish outbox retry with backoff
+[harness] RESULT status=pass scenario=1113_publish_outbox_retry_backoff.sh detail=
+[harness] cleanup (script exit code=0)
+[harness] stopping daemon pid 36204 (SIGTERM)
+[harness] stopping relay pid 36230

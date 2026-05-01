@@ -1,0 +1,41 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-72-1777234982-52886
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-72-1777234982-52886
+[harness]   backend pubkey:  15c3137b87585acd1621435c58b268ce12ba38e4d5bdd4cb1a364359923148e0
+[harness]   user pubkey:     48c7aa162ec77d173fa8d100358b28d7d53838701c2da3ed6c5172debddc6f30
+[harness]   agent1 pubkey:   1c1c39f3f3931cba369ae49a90e32b457dd03ae1adf149bc035348c50152eee5
+[harness]   agent2 pubkey:   c363209b5384fa127c53fddb53d1b798894ce4ad5f75d8b2c0fdf4d12b5b0651
+[harness]   project a-tag:   31933:48c7aa162ec77d173fa8d100358b28d7d53838701c2da3ed6c5172debddc6f30:nak-interop-test-20260426232302-10901
+[harness] starting relay on 127.0.0.1:60464 (admins=1)
+[harness] relay ready at ws://127.0.0.1:60464
+[harness] daemon config relays -> [ws://127.0.0.1:60464]
+connecting to ws://127.0.0.1:60464... ok.
+publishing to ws://127.0.0.1:60464... success.
+connecting to ws://127.0.0.1:60464... ok.
+publishing to ws://127.0.0.1:60464... success.
+[harness] starting daemon with bad-protocol-version worker
+[harness] daemon ready (pid 53361)
+[harness] kind:14199 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] kind:24030 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] daemon subscription confirmed live (all probed listener filters registered)
+[scenario] publishing kind:24000 (boot)
+connecting to ws://127.0.0.1:60464... ok.
+publishing to ws://127.0.0.1:60464... success.
+[scenario] publishing kind:1 to trigger worker spawn
+connecting to ws://127.0.0.1:60464... ok.
+publishing to ws://127.0.0.1:60464... success.
+[scenario] waiting for protocol version error in daemon log...
+[scenario]   daemon process still alive ✓
+[scenario]   protocol version mismatch error logged ✓
+[scenario]   no Rust panic in daemon log ✓
+
+[scenario] PASS — scenario 7.2 Worker protocol version mismatch
+[harness] RESULT status=pass scenario=72_worker_protocol_version_mismatch.sh detail=daemon survives protocol version mismatch; error logged; no panic
+[harness] cleanup (script exit code=0)
+[harness] stopping daemon pid 53361 (SIGTERM)
+[harness] stopping relay pid 53349

@@ -1,0 +1,32 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-125-1777224163-81598
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-125-1777224163-81598
+[harness]   backend pubkey:  61d2fa7ff9eac714ea6a756cc038da6e375a6ad36d1516505e57786d34034d9d
+[harness]   user pubkey:     7844bc251de79a83b3a0a6144176fd9c7206c33ca244bfae548c72d2af3d52c1
+[harness]   agent1 pubkey:   0930e2ac913db5f2964916307c13e2df10046d68599201f00748329cbccf7356
+[harness]   agent2 pubkey:   ac823d7e1d635ad27caefd250922de5770475269d222e83079f2c247e192cc66
+[harness]   project a-tag:   31933:7844bc251de79a83b3a0a6144176fd9c7206c33ca244bfae548c72d2af3d52c1:nak-interop-test-20260426202243-29725
+[harness] starting relay on 127.0.0.1:56531 (admins=1)
+[harness] relay ready at ws://127.0.0.1:56531
+[harness] daemon config relays -> [ws://127.0.0.1:56531]
+connecting to ws://127.0.0.1:56531... ok.
+publishing to ws://127.0.0.1:56531... success.
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-125-1777224163-81598/backend)
+[harness] daemon ready (pid 82082, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-125-1777224163-81598/backend/daemon/tenex.lock)
+[harness] kind:14199 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] kind:24030 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] daemon subscription confirmed live (all probed listener filters registered)
+[scenario] waiting up to 15s for NIP-46 timeout log entry
+[scenario]   NIP-46 timeout logged ✓
+[scenario]   daemon survived NIP-46 timeout (still responsive) ✓
+
+[scenario] PASS — scenario 12.5 NIP-46 sign request timeout
+[harness] RESULT status=pass scenario=125_nip46_sign_timeout.sh detail=timeout logged and daemon continued without crash
+[harness] cleanup (script exit code=0)
+[harness] stopping daemon pid 82082 (SIGTERM)
+[harness] stopping relay pid 82070

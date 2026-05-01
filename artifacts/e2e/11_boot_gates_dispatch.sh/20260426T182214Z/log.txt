@@ -1,0 +1,37 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-11-1777227734-8214
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-11-1777227734-8214
+[harness]   backend pubkey:  66df31d266569fb18abf82ffcb4fca0ff176c032dd280f4f21f19b813d323b98
+[harness]   user pubkey:     b554599f133519ac638feaa539dac9bad4fb967e934a42d832d55232f025c80a
+[harness]   agent1 pubkey:   57f3176d759abf647dc5b0ec129fb7901f80811350a32ca5f6646cffb3461496
+[harness]   agent2 pubkey:   67732330343d90da084c2438db96efaab15e29b8eea5ea3b3cf02fd451190ead
+[harness]   project a-tag:   31933:b554599f133519ac638feaa539dac9bad4fb967e934a42d832d55232f025c80a:nak-interop-test-20260426212214-32205
+[harness] starting relay on 127.0.0.1:65311 (admins=1)
+[harness] relay ready at ws://127.0.0.1:65311
+[harness] daemon config relays -> [ws://127.0.0.1:65311]
+connecting to ws://127.0.0.1:65311... ok.
+publishing to ws://127.0.0.1:65311... success.
+connecting to ws://127.0.0.1:65311... ok.
+publishing to ws://127.0.0.1:65311... success.
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-11-1777227734-8214/backend)
+[harness] daemon ready (pid 8684, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-11-1777227734-8214/backend/daemon/tenex.lock)
+[harness] kind:14199 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] kind:24030 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] daemon subscription confirmed live (all probed listener filters registered)
+[scenario] publishing kind:1 without a prior boot event
+connecting to ws://127.0.0.1:65311... ok.
+publishing to ws://127.0.0.1:65311... success.
+[scenario]   user message id=782c03be1aa25395c8a43cd775608020409e535ed9331d50f653db0289403e91
+[scenario]   no 24010 published for unbooted project ✓
+[scenario]   daemon log contains project_not_booted ignored entry ✓
+[scenario]   no dispatch queued for unbooted project ✓
+
+[scenario] PASS — scenario 1.1 Boot gates dispatch (boot gate enforced by daemon)
+[harness] cleanup (script exit code=0)
+[harness] stopping daemon pid 8684 (SIGTERM)
+[harness] stopping relay pid 8673

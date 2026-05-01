@@ -1,0 +1,55 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-37-1777014644-63824
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-37-1777014644-63824
+[harness]   backend pubkey:  b73cce06bda97a93c804b4376a7e1824b17e20dcb74c1120a1dc0ceabe0de4e1
+[harness]   user pubkey:     0ca2d928a7566b605c873b79af0c6de9d642feb9de3d2af1fce8e6cf1e2104e7
+[harness]   agent1 pubkey:   3753413112078a27ac3782c697ee319db088500f2f22db5631f730d599deef47
+[harness]   agent2 pubkey:   680055b35f45de71e25165f21cd187090d9c28f75d53301aa56b6a43cc082ab9
+[harness]   project a-tag:   31933:0ca2d928a7566b605c873b79af0c6de9d642feb9de3d2af1fce8e6cf1e2104e7:nak-interop-test-20260424101044-20585
+[harness] starting relay on 127.0.0.1:57300 (admins=1)
+[harness] relay ready at ws://127.0.0.1:57300
+[harness] daemon config relays -> [ws://127.0.0.1:57300]
+connecting to ws://127.0.0.1:57300... ok.
+publishing to ws://127.0.0.1:57300... success.
+connecting to ws://127.0.0.1:57300... ok.
+publishing to ws://127.0.0.1:57300... success.
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-37-1777014644-63824/backend)
+[harness] daemon ready (pid 64373, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-37-1777014644-63824/backend/daemon/tenex.lock)
+[harness] kind:14199 listener confirmed (probe #1 round-tripped after 500ms)
+[harness] kind:24030 listener confirmed (probe #1 round-tripped after 500ms)
+[harness] daemon subscription confirmed live (all probed listener filters registered)
+connecting to ws://127.0.0.1:57300... ok.
+publishing to ws://127.0.0.1:57300... success.
+[scenario] boot event id=b910f6c13818c23bdf1d969ce0483af74daa1e637423791e48e07a6cb9bc87db
+connecting to ws://127.0.0.1:57300... ok.
+publishing to ws://127.0.0.1:57300... success.
+[scenario] inbound event id=1c0d882c42fbc2318466ee0692606f52ee598e496d4a72d6ead4be71633a55af (attempt 1)
+[scenario] dispatch_id=inbound-430ffeaea67e072b3e344433
+[scenario] sidecar present at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-37-1777014644-63824/backend/daemon/workers/dispatch-inputs/inbound-430ffeaea67e072b3e344433.json
+[scenario] stopping daemon to corrupt sidecar
+[harness] stopping daemon pid 64373 (SIGTERM)
+[scenario] sidecar corrupted: triggeringEventId 1c0d882c42fbc2318466ee0692606f52ee598e496d4a72d6ead4be71633a55af -> deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef
+[scenario] restarting daemon
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-37-1777014644-63824/backend)
+[harness] daemon ready (pid 64806, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-37-1777014644-63824/backend/daemon/tenex.lock)
+[scenario] waiting 10s for dispatch tick to attempt admission + fail
+[scenario] daemon log (post-restart tail):
+[2m07:11:02[0m  [1m[31m✖[0m  [1m[31mdaemon tick #13 failed[0m  daemon worker runtime failed: worker dispatch input read failed for dispatch inbound-430ffeaea67e072b3e344433: worker dispatch input validation failed: execute field triggeringEventId deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef does not match triggeringEnvelope.message.nativeId 1c0d882c42fbc2318466ee0692606f52ee598e496d4a72d6ead4be71633a55af
+[2m07:11:03[0m  [1m[31m✖[0m  [1m[31mdaemon tick #14 failed[0m  daemon worker runtime failed: worker dispatch input read failed for dispatch inbound-430ffeaea67e072b3e344433: worker dispatch input validation failed: execute field triggeringEventId deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef does not match triggeringEnvelope.message.nativeId 1c0d882c42fbc2318466ee0692606f52ee598e496d4a72d6ead4be71633a55af
+[2m07:11:04[0m  [1m[31m✖[0m  [1m[31mdaemon tick #15 failed[0m  daemon worker runtime failed: worker dispatch input read failed for dispatch inbound-430ffeaea67e072b3e344433: worker dispatch input validation failed: execute field triggeringEventId deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef does not match triggeringEnvelope.message.nativeId 1c0d882c42fbc2318466ee0692606f52ee598e496d4a72d6ead4be71633a55af
+[2m07:11:05[0m  [1m[31m✖[0m  [1m[31mdaemon tick #16 failed[0m  daemon worker runtime failed: worker dispatch input read failed for dispatch inbound-430ffeaea67e072b3e344433: worker dispatch input validation failed: execute field triggeringEventId deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef does not match triggeringEnvelope.message.nativeId 1c0d882c42fbc2318466ee0692606f52ee598e496d4a72d6ead4be71633a55af
+[2m07:11:06[0m  [1m[31m✖[0m  [1m[31mdaemon tick #17 failed[0m  daemon worker runtime failed: worker dispatch input read failed for dispatch inbound-430ffeaea67e072b3e344433: worker dispatch input validation failed: execute field triggeringEventId deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef does not match triggeringEnvelope.message.nativeId 1c0d882c42fbc2318466ee0692606f52ee598e496d4a72d6ead4be71633a55af
+[2m07:11:07[0m  [1m[31m✖[0m  [1m[31mdaemon tick #18 failed[0m  daemon worker runtime failed: worker dispatch input read failed for dispatch inbound-430ffeaea67e072b3e344433: worker dispatch input validation failed: execute field triggeringEventId deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef does not match triggeringEnvelope.message.nativeId 1c0d882c42fbc2318466ee0692606f52ee598e496d4a72d6ead4be71633a55af
+[2m07:11:08[0m  [1m[31m✖[0m  [1m[31mdaemon tick #19 failed[0m  daemon worker runtime failed: worker dispatch input read failed for dispatch inbound-430ffeaea67e072b3e344433: worker dispatch input validation failed: execute field triggeringEventId deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef does not match triggeringEnvelope.message.nativeId 1c0d882c42fbc2318466ee0692606f52ee598e496d4a72d6ead4be71633a55af
+[2m07:11:09[0m  [1m[31m✖[0m  [1m[31mdaemon tick #20 failed[0m  daemon worker runtime failed: worker dispatch input read failed for dispatch inbound-430ffeaea67e072b3e344433: worker dispatch input validation failed: execute field triggeringEventId deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef does not match triggeringEnvelope.message.nativeId 1c0d882c42fbc2318466ee0692606f52ee598e496d4a72d6ead4be71633a55af
+[2m07:11:10[0m  [1m[31m✖[0m  [1m[31mdaemon tick #21 failed[0m  daemon worker runtime failed: worker dispatch input read failed for dispatch inbound-430ffeaea67e072b3e344433: worker dispatch input validation failed: execute field triggeringEventId deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef does not match triggeringEnvelope.message.nativeId 1c0d882c42fbc2318466ee0692606f52ee598e496d4a72d6ead4be71633a55af
+[2m07:11:11[0m  [1m[31m✖[0m  [1m[31mdaemon tick #22 failed[0m  daemon worker runtime failed: worker dispatch input read failed for dispatch inbound-430ffeaea67e072b3e344433: worker dispatch input validation failed: execute field triggeringEventId deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef does not match triggeringEnvelope.message.nativeId 1c0d882c42fbc2318466ee0692606f52ee598e496d4a72d6ead4be71633a55af
+[harness] FATAL: ASSERT: expected triggering event mismatch error in daemon log
+[harness] cleanup (script exit code=1)
+[harness] stopping daemon pid 64806 (SIGTERM)
+[harness] stopping relay pid 64361

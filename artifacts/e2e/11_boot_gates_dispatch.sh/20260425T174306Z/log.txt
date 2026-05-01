@@ -1,0 +1,56 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-11-1777138986-57761
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-11-1777138986-57761
+[harness]   backend pubkey:  3b6f0d05f491335dfeb2f087a4a457161cab68c5b35cc03637d49b428b95b5d5
+[harness]   user pubkey:     fb1437d76c07264754475ff393115112470d1d71f6d403a1985a30588a070b96
+[harness]   agent1 pubkey:   ce87ff969fc4c5f8850bf710e24493ce31f6bf89fe1affee36efec731aa73394
+[harness]   agent2 pubkey:   8b2c5b7c8cfa73dbab30b7b77da9bfe9dcd12f85e93b3ec0b0278dbd3fe879f0
+[harness]   project a-tag:   31933:fb1437d76c07264754475ff393115112470d1d71f6d403a1985a30588a070b96:nak-interop-test-20260425204306-32350
+[harness] starting relay on 127.0.0.1:50282 (admins=1)
+[harness] relay ready at ws://127.0.0.1:50282
+[harness] daemon config relays -> [ws://127.0.0.1:50282]
+connecting to ws://127.0.0.1:50282... ok.
+publishing to ws://127.0.0.1:50282... success.
+connecting to ws://127.0.0.1:50282... ok.
+publishing to ws://127.0.0.1:50282... success.
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-11-1777138986-57761/backend)
+[harness] daemon log tail:
+    |
+334 -         spawner,
+335 -         publisher,
+334 +         spawner,
+    |
+
+error[E0308]: mismatched types
+   --> crates/tenex-daemon/src/daemon_loop.rs:451:25
+    |
+444 |                     let result = run_started_worker_session_from_filesystem(
+    |                                  ------------------------------------------ arguments to this function are incorrect
+...
+451 |                         publish_enqueued_tx_for_spawn,
+    |                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `Option<...>`, found `Option<UnboundedSender<PublishEnqueued>>`
+    |
+    = note: expected enum `std::option::Option<DaemonWorkerLivePublishMaintenance<'_>>`
+               found enum `std::option::Option<UnboundedSender<PublishEnqueued>>`
+note: function defined here
+   --> crates/tenex-daemon/src/daemon_worker_runtime.rs:854:8
+    |
+854 | pub fn run_started_worker_session_from_filesystem<S>(
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+861 |     live_publish_maintenance: Option<DaemonWorkerLivePublishMaintenance<'_>>,
+    |     ------------------------------------------------------------------------
+
+Some errors have detailed explanations: E0061, E0063, E0308.
+For more information about an error, try `rustc --explain E0061`.
+warning: `tenex-daemon` (lib) generated 1 warning
+error: could not compile `tenex-daemon` (lib) due to 5 previous errors; 1 warning emitted
+[harness] FATAL: daemon never wrote lockfile
+[harness] cleanup (script exit code=1)
+[harness] stopping daemon pid 58228 (SIGTERM)
+[harness] stopping relay pid 58217

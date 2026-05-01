@@ -1,0 +1,38 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-112-1777204049-46115
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-112-1777204049-46115
+[harness]   backend pubkey:  6133fcab4bed2d280bc75110a0817cc70774fd083398a453a3671cb4017452e6
+[harness]   user pubkey:     c0b9c158413e3a5ef8019be06d6ede21bf65028c970ce934ca372a1565499ded
+[harness]   agent1 pubkey:   8f177b1027a0e50872b81982b23cb4cab9abed37792e723a012c1ef5989b7204
+[harness]   agent2 pubkey:   cdda20dc32cdcc59fd84d0b7a2bc526c1b80eb35ec607e6a54f1297c71f65203
+[harness]   project a-tag:   31933:c0b9c158413e3a5ef8019be06d6ede21bf65028c970ce934ca372a1565499ded:nak-interop-test-20260426144729-31210
+[harness] starting relay on 127.0.0.1:59340 (admins=1)
+[harness] relay ready at ws://127.0.0.1:59340
+[harness] daemon config relays -> [ws://127.0.0.1:59340]
+connecting to ws://127.0.0.1:59340... ok.
+publishing to ws://127.0.0.1:59340... success.
+connecting to ws://127.0.0.1:59340... ok.
+publishing to ws://127.0.0.1:59340... success.
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-112-1777204049-46115/backend)
+[harness] daemon ready (pid 51534, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-112-1777204049-46115/backend/daemon/tenex.lock)
+[harness] kind:14199 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] kind:24030 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] daemon subscription confirmed live (all probed listener filters registered)
+[scenario]   daemon authenticated as admin ✓
+connecting to ws://127.0.0.1:59340... ok.
+publishing to ws://127.0.0.1:59340... success.
+[scenario] boot event id=332e971e809916066c7a84bb0952472aee55bdd7b1fe8580a7d4651238d90e4c
+[scenario] waiting for kind:24010 on relay (backend admin publish)
+[scenario]   kind:24010 published with project a-tag ✓
+[scenario]   daemon.log confirms 'nostr event published' ✓
+
+[scenario] PASS — scenario 11.2: backend publishes via admin path
+[harness] RESULT status=pass scenario=112_backend_publishes_via_admin.sh detail=
+[harness] cleanup (script exit code=0)
+[harness] stopping daemon pid 51534 (SIGTERM)
+[harness] stopping relay pid 50730

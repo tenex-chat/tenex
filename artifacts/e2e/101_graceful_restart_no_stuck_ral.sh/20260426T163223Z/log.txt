@@ -1,0 +1,89 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-101-1777221143-95765
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-101-1777221143-95765
+[harness]   backend pubkey:  bd128464258d53d791f59cb7f8280408d1ddebdbd65d6accf5e1aa9e4de697c6
+[harness]   user pubkey:     8e090951c777121f05426fc89880bb4ec4d2b69884fba9e93996cd23f07c8713
+[harness]   agent1 pubkey:   9c73d1ce9575d8e823f9c80759750b2f14eb417ff653860fb27581df6bdd6287
+[harness]   agent2 pubkey:   697e902761667ef05da0744f36057e867f3d6019860489f60e5711779abbe8a1
+[harness]   project a-tag:   31933:8e090951c777121f05426fc89880bb4ec4d2b69884fba9e93996cd23f07c8713:nak-interop-test-20260426193223-31222
+[scenario] rewriting llms.json to use mock fixture model 'mock/delegation-02'
+[harness] starting relay on 127.0.0.1:49821 (admins=1)
+[harness] relay ready at ws://127.0.0.1:49821
+[harness] daemon config relays -> [ws://127.0.0.1:49821]
+[scenario] publishing 14199 (whitelist) as user
+connecting to ws://127.0.0.1:49821... ok.
+publishing to ws://127.0.0.1:49821... success.
+[scenario] publishing 31933 (project) as user
+connecting to ws://127.0.0.1:49821... ok.
+publishing to ws://127.0.0.1:49821... success.
+
+[scenario] === Phase 1: first daemon incarnation ===
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-101-1777221143-95765/backend)
+[harness] daemon ready (pid 96331, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-101-1777221143-95765/backend/daemon/tenex.lock)
+[harness] kind:14199 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] kind:24030 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] daemon subscription confirmed live (all probed listener filters registered)
+[scenario] publishing kind:24000 (boot) as user
+connecting to ws://127.0.0.1:49821... ok.
+publishing to ws://127.0.0.1:49821... success.
+[scenario]   boot event id=ad4d3de5e4dc38c9b30a2c63d2b9e002dbc4acb42bed7c03bbdb919b2df71758
+[scenario]   kind:24010 published (project boot confirmed) ✓
+[scenario] publishing kind:1 from user to agent1 (attempt 1)
+connecting to ws://127.0.0.1:49821... ok.
+publishing to ws://127.0.0.1:49821... success.
+[scenario]   user message id=4fa19fc1e3182caeafdd461c1ff8aa63aeece2b8cb0dc72b4e013aba9aab2023
+[scenario]   dispatch enqueued ✓
+[scenario] waiting for mock-driven delegation to complete (up to 15s)...
+[scenario]   agent1 published final kind:1 with fixture content ✓
+[scenario]   RAL journal has a terminal record ✓
+[scenario] === Phase 1 complete: delegation finished; daemon is idle ===
+[scenario]   pre-restart RAL journal lines: 16
+
+[scenario] === Phase 2: graceful SIGTERM ===
+[harness] stopping daemon pid 96331 (SIGTERM)
+[scenario]   daemon stopped via SIGTERM ✓
+[scenario]   leased dispatch entries after stop (informational): 5
+
+[scenario] === Phase 3: restart daemon against same fixture ===
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-101-1777221143-95765/backend)
+[harness] daemon ready (pid 96579, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-101-1777221143-95765/backend/daemon/tenex.lock)
+[harness] kind:14199 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] kind:24030 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] daemon subscription confirmed live (all probed listener filters registered)
+[scenario]   restarted daemon subscription is live ✓
+[scenario]   restarted daemon is running (pid 96579) ✓
+
+[scenario] === Phase 4: assert no stuck RAL after restart ===
+[scenario]   stuck (non-terminal) RAL identities after restart: 0
+[scenario]   no stuck RALs ✓
+[scenario]   leased dispatch entries after restart (informational): 5
+
+[scenario] === Phase 5: rebooted daemon accepts new inbound event ===
+[scenario] re-publishing kind:24000 (boot) for restarted daemon
+connecting to ws://127.0.0.1:49821... ok.
+publishing to ws://127.0.0.1:49821... success.
+[scenario]   boot event id=c960f89b1d37691115bacc2892330755e0030c11dfd92011be1e53c7f46b6be6
+[scenario]   kind:24010 published by restarted daemon ✓
+[scenario] publishing second kind:1 from user to agent1 (attempt 1)
+connecting to ws://127.0.0.1:49821... ok.
+publishing to ws://127.0.0.1:49821... success.
+[scenario]   second user message id=bcb73f3d7b22646f704f87edb27473cec04bdbf3cc2ee1b8a2c6e39a15bebfcc
+[scenario]   second dispatch enqueued by restarted daemon ✓
+[scenario] waiting for second delegation to complete (up to 15s)...
+[scenario]   second delegation produced a terminal RAL record ✓ (total terminal: 6)
+
+[scenario] === All phases passed ===
+[scenario]   Phase 1: delegation completed before restart ✓
+[scenario]   Phase 2: graceful SIGTERM accepted ✓
+[scenario]   Phase 3: restarted daemon started cleanly ✓
+[scenario]   Phase 4: no stuck (non-terminal) RALs after restart ✓
+[scenario]   Phase 5: rebooted daemon dispatched + completed second inbound event ✓
+[harness] RESULT status=pass scenario=101_graceful_restart_no_stuck_ral.sh detail=
+[harness] cleanup (script exit code=0)
+[harness] stopping daemon pid 96579 (SIGTERM)
+[harness] stopping relay pid 96308

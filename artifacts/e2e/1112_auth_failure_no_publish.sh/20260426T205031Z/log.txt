@@ -1,0 +1,38 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-1112-1777236631-5557
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-1112-1777236631-5557
+[harness]   backend pubkey:  28731ec10f0c6e8bc7c061823b5f7ab3e0245ff299fa41436c34c9f35ace0d84
+[harness]   user pubkey:     7f7579929966a72d74e7037b3ce02b88626d079ff92babd9aa21c30bc5c286f1
+[harness]   agent1 pubkey:   c02c70b50813e01f686fe82b02dd57962ffffdf9b590642c164bc19ad6fb7ecb
+[harness]   agent2 pubkey:   a859d46ef62a69bec33ea81cf9456f69448ce3a04567f018c0149ff7b6d2627f
+[harness]   project a-tag:   31933:7f7579929966a72d74e7037b3ce02b88626d079ff92babd9aa21c30bc5c286f1:nak-interop-test-20260426235031-331
+[harness] starting relay on 127.0.0.1:61284 (admins=1)
+[harness] relay ready at ws://127.0.0.1:61284
+[harness] daemon config relays -> [ws://127.0.0.1:61284]
+connecting to ws://127.0.0.1:61284... ok.
+publishing to ws://127.0.0.1:61284... success.
+connecting to ws://127.0.0.1:61284... ok.
+publishing to ws://127.0.0.1:61284... success.
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-1112-1777236631-5557/backend, binary=/Users/pablofernandez/Work/TENEX-ff3ssq/target/release/daemon)
+[harness] daemon ready (pid 6033, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-1112-1777236631-5557/backend/daemon/tenex.lock)
+[harness] kind:14199 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] kind:24030 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] daemon subscription confirmed live (all probed listener filters registered)
+[scenario] daemon subscribed; relay healthy ✓
+[scenario] stopping relay — simulate unreachable relay for publish
+[harness] stopping relay pid 6022
+[scenario] injecting boot event into relay outbox artificially via daemon boot
+[scenario]   daemon now configured to publish to unreachable ws://127.0.0.1:61295
+[scenario] waiting for daemon to attempt and fail a publish (relay unreachable)
+[scenario]   daemon process alive after relay goes unreachable ✓
+[scenario]   no daemon panic ✓
+
+[scenario] PASS — scenario 11.12: relay unreachable → no silent drop, daemon survives
+[harness] RESULT status=pass scenario=1112_auth_failure_no_publish.sh detail=
+[harness] cleanup (script exit code=0)
+[harness] stopping daemon pid 6033 (SIGTERM)

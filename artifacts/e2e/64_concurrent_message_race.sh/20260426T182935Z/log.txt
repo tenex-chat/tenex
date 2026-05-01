@@ -1,0 +1,29 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-64-1777228175-56902
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-64-1777228175-56902
+[harness]   backend pubkey:  8b6fa59b98813680e404ffae464f1a42f2ecab93931ceb70525b6dd85f08af70
+[harness]   user pubkey:     ecd5f63cd475ee71f8439fc3df5e0695956e4f7edd9e832a2c86609356eac74b
+[harness]   agent1 pubkey:   6c0294ac9506c9820afbd42af35bda39403262b6cd3f423a1f2e5580ef32b5d4
+[harness]   agent2 pubkey:   73b7fe4250dcd308fc344420e320dbbd86c0dbeee2a140c58f306a3fd57652c1
+[harness]   project a-tag:   31933:ecd5f63cd475ee71f8439fc3df5e0695956e4f7edd9e832a2c86609356eac74b:nak-interop-test-20260426212935-4500
+[scenario] rewriting llms.json to use mock model 'mock/concurrent-race-64'
+[scenario] mock LLM enabled: fixture=/Users/pablofernandez/Work/TENEX-ff3ssq/scripts/e2e/fixtures/mock-llm/64_concurrent_message_race.json
+[harness] starting relay on 127.0.0.1:60623 (admins=1)
+[harness] relay ready at ws://127.0.0.1:60623
+[harness] daemon config relays -> [ws://127.0.0.1:60623]
+connecting to ws://127.0.0.1:60623... ok.
+publishing to ws://127.0.0.1:60623... success.
+connecting to ws://127.0.0.1:60623... ok.
+publishing to ws://127.0.0.1:60623... success.
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-64-1777228175-56902/backend)
+[harness] daemon ready (pid 58157, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-64-1777228175-56902/backend/daemon/tenex.lock)
+[harness] TIMEOUT: kind:14199 probe never round-tripped within 45s
+[harness] FATAL: daemon subscription never became live
+[harness] cleanup (script exit code=1)
+[harness] stopping daemon pid 58157 (SIGTERM)
+[harness] stopping relay pid 58034

@@ -1,0 +1,80 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-37-1777115545-68130
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-37-1777115545-68130
+[harness]   backend pubkey:  ec659b2bc84e9e7e247abd410def78d50c320351f5c4aa2cb71575b691f74968
+[harness]   user pubkey:     b04dc3890ed43a42d8bfc248cadb44f1bf3221f7e7b8675404df283f8cd13204
+[harness]   agent1 pubkey:   3b33d219acd0e5aecdf15e5e3baf53384606f843b171be4b2b9ba8266200b674
+[harness]   agent2 pubkey:   7eea4d4a35b9f276f8388c31a5b792c80284e8bb7dc5ee0fdb140c7003561819
+[harness]   project a-tag:   31933:b04dc3890ed43a42d8bfc248cadb44f1bf3221f7e7b8675404df283f8cd13204:nak-interop-test-20260425141225-24665
+[harness] starting relay on 127.0.0.1:59729 (admins=1)
+[harness] relay ready at ws://127.0.0.1:59729
+[harness] daemon config relays -> [ws://127.0.0.1:59729]
+connecting to ws://127.0.0.1:59729... ok.
+publishing to ws://127.0.0.1:59729... success.
+connecting to ws://127.0.0.1:59729... ok.
+publishing to ws://127.0.0.1:59729... success.
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-37-1777115545-68130/backend)
+[harness] daemon ready (pid 68653, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-37-1777115545-68130/backend/daemon/tenex.lock)
+[harness] kind:14199 listener confirmed (probe #1 round-tripped after 500ms)
+[harness] kind:24030 listener confirmed (probe #1 round-tripped after 500ms)
+[harness] daemon subscription confirmed live (all probed listener filters registered)
+connecting to ws://127.0.0.1:59729... ok.
+publishing to ws://127.0.0.1:59729... success.
+[scenario] boot event id=4fc938bed11df460f843ec934a3295f7647330fc565ad1f368bc62d57f6a9e6e
+connecting to ws://127.0.0.1:59729... ok.
+publishing to ws://127.0.0.1:59729... success.
+[scenario] inbound event id=12b668634fa8576ce0e13f171dd36e4b71cc07253bb930b744a44bdf1c5c9de6 (attempt 1)
+[scenario] dispatch_id=inbound-92edefa2ad486aab3eebc966
+[scenario] sidecar present at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-37-1777115545-68130/backend/daemon/workers/dispatch-inputs/inbound-92edefa2ad486aab3eebc966.json
+[scenario] stopping daemon to corrupt sidecar
+[harness] stopping daemon pid 68653 (SIGTERM)
+[scenario] sidecar corrupted: triggeringEventId 12b668634fa8576ce0e13f171dd36e4b71cc07253bb930b744a44bdf1c5c9de6 -> deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef
+[scenario] restarting daemon
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-37-1777115545-68130/backend)
+[harness] daemon ready (pid 69093, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-37-1777115545-68130/backend/daemon/tenex.lock)
+[scenario] waiting 10s for dispatch tick to attempt admission + fail
+[scenario]   mismatch error observed in daemon log ✓
+[scenario] dispatch rows:
+[
+  {
+    "schemaVersion": 1,
+    "sequence": 1,
+    "timestamp": 1777115562322,
+    "correlationId": "inbound-dispatch-92edefa2ad486aab3eebc966",
+    "dispatchId": "inbound-92edefa2ad486aab3eebc966",
+    "ral": {
+      "projectId": "nak-interop-test-20260425141225-24665",
+      "agentPubkey": "3b33d219acd0e5aecdf15e5e3baf53384606f843b171be4b2b9ba8266200b674",
+      "conversationId": "12b668634fa8576ce0e13f171dd36e4b71cc07253bb930b744a44bdf1c5c9de6",
+      "ralNumber": 1
+    },
+    "triggeringEventId": "12b668634fa8576ce0e13f171dd36e4b71cc07253bb930b744a44bdf1c5c9de6",
+    "claimToken": "inbound-claim-92edefa2ad486aab3eebc966",
+    "status": "queued"
+  },
+  {
+    "schemaVersion": 1,
+    "sequence": 2,
+    "timestamp": 1777115562780,
+    "correlationId": "daemon-foreground-worker:1777115562780:admission-0:lease",
+    "dispatchId": "inbound-92edefa2ad486aab3eebc966",
+    "ral": {
+      "projectId": "nak-interop-test-20260425141225-24665",
+      "agentPubkey": "3b33d219acd0e5aecdf15e5e3baf53384606f843b171be4b2b9ba8266200b674",
+      "conversationId": "12b668634fa8576ce0e13f171dd36e4b71cc07253bb930b744a44bdf1c5c9de6",
+      "ralNumber": 1
+    },
+    "triggeringEventId": "12b668634fa8576ce0e13f171dd36e4b71cc07253bb930b744a44bdf1c5c9de6",
+    "claimToken": "inbound-claim-92edefa2ad486aab3eebc966",
+    "status": "leased"
+  }
+]
+[harness] FATAL: ASSERT: dispatch transitioned to leased despite sidecar mismatch
+[harness] cleanup (script exit code=1)
+[harness] stopping daemon pid 69093 (SIGTERM)
+[harness] stopping relay pid 68586

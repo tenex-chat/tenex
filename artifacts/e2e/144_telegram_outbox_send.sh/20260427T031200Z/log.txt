@@ -1,0 +1,68 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-144-1777259520-43999
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-144-1777259520-43999
+[harness]   backend pubkey:  2c2006cdce21d42a51ba5a02767cb688a5e6a9f2d0633d1d88b672e0aa7e5474
+[harness]   user pubkey:     597808dc07f71741e270047817fe4ba18b42e66726be93e85110a231093b3c2b
+[harness]   agent1 pubkey:   8b3ac3ce99f58b9e14b776e1156122fe1ed24b4adc3d73f43107a3add242561d
+[harness]   agent2 pubkey:   b3d3a5ed9e5856b503b8b2b67f37e37ced109ac3568a2d89c05c862455308aff
+[harness]   project a-tag:   31933:597808dc07f71741e270047817fe4ba18b42e66726be93e85110a231093b3c2b:nak-interop-test-20260427061200-26978
+[harness] starting relay on 127.0.0.1:60399 (admins=1)
+[harness] relay ready at ws://127.0.0.1:60399
+[harness] daemon config relays -> [ws://127.0.0.1:60399]
+[harness] wrote 2 pubkey(s) to /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-144-1777259520-43999/backend/daemon/whitelist.txt
+connecting to ws://127.0.0.1:60399... ok.
+publishing to ws://127.0.0.1:60399... success.
+connecting to ws://127.0.0.1:60399... ok.
+publishing to ws://127.0.0.1:60399... success.
+[scenario] mock Telegram server on port 60404 (pid 44476)
+[scenario] pending outbox record written: tg-fbf5f4fbe5fae8c2f4b483b604d1866e
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-144-1777259520-43999/backend, binary=/Users/pablofernandez/Work/TENEX-ff3ssq/target/release/daemon)
+[harness] daemon ready (pid 44492, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-144-1777259520-43999/backend/daemon/tenex.lock)
+[harness] kind:14199 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] kind:24030 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] daemon subscription confirmed live (all probed listener filters registered)
+[scenario] waiting up to 15s for outbox record to be delivered
+[scenario]   outbox record delivered ✓
+/Users/pablofernandez/Work/TENEX-ff3ssq/scripts/e2e/scenarios/144_telegram_outbox_send.sh: line 203: 44476 Terminated: 15          python3  > "$mock_log" 2>&1 <<PYEOF
+import http.server, json, sys
+
+class Handler(http.server.BaseHTTPRequestHandler):
+    def do_POST(self):
+        length = int(self.headers.get('Content-Length', 0))
+        body = self.rfile.read(length)
+        with open('$mock_received', 'a') as f:
+            f.write(self.path + '\n')
+            f.write(body.decode('utf-8', errors='replace') + '\n')
+        resp = json.dumps({
+            'ok': True,
+            'result': {'message_id': 42, 'chat': {'id': -100123, 'type': 'supergroup'}}
+        }).encode()
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/json')
+        self.send_header('Content-Length', str(len(resp)))
+        self.end_headers()
+        self.wfile.write(resp)
+    def do_GET(self):
+        resp = b'mock telegram server'
+        self.send_response(200)
+        self.send_header('Content-Length', str(len(resp)))
+        self.end_headers()
+        self.wfile.write(resp)
+    def log_message(self, fmt, *args):
+        pass
+
+http.server.HTTPServer(('127.0.0.1', $mock_port), Handler).serve_forever()
+PYEOF
+
+[scenario]   mock Telegram server received sendMessage ✓
+
+[scenario] PASS — scenario 14.4 Telegram outbox drain round-trip
+[harness] RESULT status=pass scenario=144_telegram_outbox_send.sh detail=outbox record delivered and sendMessage confirmed
+[harness] cleanup (script exit code=0)
+[harness] stopping daemon pid 44492 (SIGTERM)
+[harness] stopping relay pid 44461

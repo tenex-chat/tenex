@@ -1,0 +1,118 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-21-1777053672-76706
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-21-1777053672-76706
+[harness]   backend pubkey:  9e0b8fb51680de6848114a62521b83688adfb059e43a630bae3465de1172cf75
+[harness]   user pubkey:     0c274725980ccb6edd9177e227d92e68421ceedaf01ee2086e3705848231c960
+[harness]   agent1 pubkey:   865dcd5cc9db5386ba1dd63714875cb1f753d7987da2fc77ce1c8ec04191c7a7
+[harness]   agent2 pubkey:   bb87a473de220789e8ef7c83ae1855699e73b6ce874084a20f5aa72446b071bf
+[harness]   project a-tag:   31933:0c274725980ccb6edd9177e227d92e68421ceedaf01ee2086e3705848231c960:nak-interop-test-20260424210112-27506
+[scenario] rewriting llms.json to use mock fixture model 'mock/agent-hot-reload-21'
+[scenario] mock LLM enabled: fixture=/Users/pablofernandez/Work/TENEX-ff3ssq/scripts/e2e/fixtures/mock-llm/21_agent_hot_reload.json
+[harness] starting relay on 127.0.0.1:53090 (admins=1)
+[harness] relay ready at ws://127.0.0.1:53090
+[harness] daemon config relays -> [ws://127.0.0.1:53090]
+[scenario] publishing kind:14199 (whitelist) with agent1 only for now
+connecting to ws://127.0.0.1:53090... ok.
+publishing to ws://127.0.0.1:53090... success.
+[scenario] publishing initial kind:31933 (project) with agent1 ONLY in p-tags (ts=1777053614)
+connecting to ws://127.0.0.1:53090... ok.
+publishing to ws://127.0.0.1:53090... success.
+[scenario]   initial 31933 id=a871e99b25bce45bdaf4b4d609117650b72f60a80e9fab2477ae5c25982b43ff (agent1 only)
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-21-1777053672-76706/backend)
+[harness] daemon ready (pid 77306, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-21-1777053672-76706/backend/daemon/tenex.lock)
+[harness] kind:14199 listener confirmed (probe #1 round-tripped after 500ms)
+[harness] kind:24030 listener confirmed (probe #1 round-tripped after 500ms)
+[harness] daemon subscription confirmed live (all probed listener filters registered)
+[scenario] phase 1: booting project and dispatching to agent1
+[scenario]   publishing kind:24000 (boot) as user
+connecting to ws://127.0.0.1:53090... ok.
+publishing to ws://127.0.0.1:53090... success.
+[scenario]   boot event id=e56a31fc5912d7fdbbd2d0788966ccdd10893a0390f60fd6dbd7ceedbd8a343d
+[scenario]   waiting for project_booted log line...
+[scenario]   project_booted logged ✓
+[scenario]   publishing kind:1 to agent1
+connecting to ws://127.0.0.1:53090... ok.
+publishing to ws://127.0.0.1:53090... success.
+[scenario]   agent1 kind:1 id=05e4108439f27ec85eb8ca1e3ae8517afc070ada05dfabf4c331cebaffabda32
+[scenario]   waiting for agent1 dispatch to appear in queue...
+[scenario]   agent1 dispatch enqueued ✓
+[scenario] === Phase 1 complete: initial dispatch to agent1 OK ===
+[scenario] phase 2: publishing NEWER kind:31933 adding agent2 (ts=1777053734)
+connecting to ws://127.0.0.1:53090... ok.
+publishing to ws://127.0.0.1:53090... success.
+[scenario]   updated 31933 id=e6cf9c66737e80c6fcb4cd391543f476ab13fead23b38c7d7ed4551b9f543bb7 (agent1 + agent2)
+[scenario]   waiting for daemon to log project_updated for the new 31933...
+[scenario]   project_updated logged for new 31933 ✓
+[scenario] phase 3: verifying agents/index.json byProject contains agent2
+[scenario]   agents/index.json byProject[nak-interop-test-20260424210112-27506] contains agent2 ✓
+[scenario]   agents/index.json still contains agent1 (regression guard ✓)
+[scenario] === Phase 3 complete: index updated correctly ===
+[scenario] phase 4: verifying subscription filter refresh in daemon log
+[scenario]   subscription filter refresh logged ✓
+[scenario] === Phase 4 complete: filter refresh confirmed ===
+[scenario] phase 5: dispatching to agent2 after hot-reload
+[scenario]   publishing kind:1 to agent2 (attempt 1)
+connecting to ws://127.0.0.1:53090... ok.
+publishing to ws://127.0.0.1:53090... success.
+[scenario]   agent2 kind:1 id=a77714029da4df6c53305438a80cd79ee0b533f30f54fef01c10a932cf3ca3ff
+[scenario]   publishing kind:1 to agent2 (attempt 2)
+connecting to ws://127.0.0.1:53090... ok.
+publishing to ws://127.0.0.1:53090... success.
+[scenario]   agent2 kind:1 id=86ef9582b374038b9b8a5379442dfca2c8cc3cbac47d78ecb59bf6a857904455
+[scenario]   publishing kind:1 to agent2 (attempt 3)
+connecting to ws://127.0.0.1:53090... ok.
+publishing to ws://127.0.0.1:53090... success.
+[scenario]   agent2 kind:1 id=d45ac3300bceb5ded941ee38dc801980d6f0ec1a9e51203c22551f72551109e1
+[scenario]   publishing kind:1 to agent2 (attempt 4)
+connecting to ws://127.0.0.1:53090... ok.
+publishing to ws://127.0.0.1:53090... success.
+[scenario]   agent2 kind:1 id=e83acd142b17b3d970382dc303d688703f111777580e77923c806859a69428cd
+{"timestamp":"2026-04-24T18:01:40.050450Z","level":"INFO","fields":{"message":"project-status filter trace","index_descriptor_count":1,"boot_state_count":1,"booted_descriptor_count":1,"resulting_projects":1,"index_coordinates":"[\"0c274725:nak-interop-test-20260424210112-27506\"]","boot_coordinates":"[\"0c274725:nak-interop-test-20260424210112-27506\"]"},"target":"tenex_daemon::daemon_maintenance::project_status_filter"}
+{"timestamp":"2026-04-24T18:01:40.088242Z","level":"DEBUG","fields":{"message":"worker runtime: no queued dispatches"},"target":"tenex_daemon::daemon_worker_runtime"}
+{"timestamp":"2026-04-24T18:01:40.088967Z","level":"DEBUG","fields":{"message":"daemon tick publish summary","tick_kind":"daemon worker tick","now_ms":1777053700050,"backend_due_task_count":0,"backend_enqueued_event_count":0,"project_descriptor_count":1,"booted_project_descriptor_count":1,"project_status_count":0,"worker_outcome":"Some([\"not_admitted\"])","publish_pending_after":0,"publish_published_after":9,"publish_failed_after":0,"publish_retry_due_after":0},"target":"tenex_daemon::daemon_loop"}
+{"timestamp":"2026-04-24T18:01:41.115755Z","level":"INFO","fields":{"message":"project-status filter trace","index_descriptor_count":1,"boot_state_count":1,"booted_descriptor_count":1,"resulting_projects":1,"index_coordinates":"[\"0c274725:nak-interop-test-20260424210112-27506\"]","boot_coordinates":"[\"0c274725:nak-interop-test-20260424210112-27506\"]"},"target":"tenex_daemon::daemon_maintenance::project_status_filter"}
+{"timestamp":"2026-04-24T18:01:41.138809Z","level":"DEBUG","fields":{"message":"worker runtime: no queued dispatches"},"target":"tenex_daemon::daemon_worker_runtime"}
+{"timestamp":"2026-04-24T18:01:41.139279Z","level":"DEBUG","fields":{"message":"daemon tick publish summary","tick_kind":"daemon worker tick","now_ms":1777053701115,"backend_due_task_count":0,"backend_enqueued_event_count":0,"project_descriptor_count":1,"booted_project_descriptor_count":1,"project_status_count":0,"worker_outcome":"Some([\"not_admitted\"])","publish_pending_after":0,"publish_published_after":9,"publish_failed_after":0,"publish_retry_due_after":0},"target":"tenex_daemon::daemon_loop"}
+{"timestamp":"2026-04-24T18:01:42.162502Z","level":"INFO","fields":{"message":"project-status filter trace","index_descriptor_count":1,"boot_state_count":1,"booted_descriptor_count":1,"resulting_projects":1,"index_coordinates":"[\"0c274725:nak-interop-test-20260424210112-27506\"]","boot_coordinates":"[\"0c274725:nak-interop-test-20260424210112-27506\"]"},"target":"tenex_daemon::daemon_maintenance::project_status_filter"}
+{"timestamp":"2026-04-24T18:01:42.206786Z","level":"DEBUG","fields":{"message":"worker runtime: no queued dispatches"},"target":"tenex_daemon::daemon_worker_runtime"}
+{"timestamp":"2026-04-24T18:01:42.207421Z","level":"DEBUG","fields":{"message":"daemon tick publish summary","tick_kind":"daemon worker tick","now_ms":1777053702162,"backend_due_task_count":0,"backend_enqueued_event_count":0,"project_descriptor_count":1,"booted_project_descriptor_count":1,"project_status_count":0,"worker_outcome":"Some([\"not_admitted\"])","publish_pending_after":0,"publish_published_after":9,"publish_failed_after":0,"publish_retry_due_after":0},"target":"tenex_daemon::daemon_loop"}
+{"timestamp":"2026-04-24T18:01:43.230090Z","level":"INFO","fields":{"message":"project-status filter trace","index_descriptor_count":1,"boot_state_count":1,"booted_descriptor_count":1,"resulting_projects":1,"index_coordinates":"[\"0c274725:nak-interop-test-20260424210112-27506\"]","boot_coordinates":"[\"0c274725:nak-interop-test-20260424210112-27506\"]"},"target":"tenex_daemon::daemon_maintenance::project_status_filter"}
+{"timestamp":"2026-04-24T18:01:43.254727Z","level":"DEBUG","fields":{"message":"worker runtime: no queued dispatches"},"target":"tenex_daemon::daemon_worker_runtime"}
+{"timestamp":"2026-04-24T18:01:43.255163Z","level":"DEBUG","fields":{"message":"daemon tick publish summary","tick_kind":"daemon worker tick","now_ms":1777053703230,"backend_due_task_count":0,"backend_enqueued_event_count":0,"project_descriptor_count":1,"booted_project_descriptor_count":1,"project_status_count":0,"worker_outcome":"Some([\"not_admitted\"])","publish_pending_after":0,"publish_published_after":9,"publish_failed_after":0,"publish_retry_due_after":0},"target":"tenex_daemon::daemon_loop"}
+{"timestamp":"2026-04-24T18:01:44.276467Z","level":"INFO","fields":{"message":"project-status filter trace","index_descriptor_count":1,"boot_state_count":1,"booted_descriptor_count":1,"resulting_projects":1,"index_coordinates":"[\"0c274725:nak-interop-test-20260424210112-27506\"]","boot_coordinates":"[\"0c274725:nak-interop-test-20260424210112-27506\"]"},"target":"tenex_daemon::daemon_maintenance::project_status_filter"}
+{"timestamp":"2026-04-24T18:01:44.312626Z","level":"DEBUG","fields":{"message":"worker runtime: no queued dispatches"},"target":"tenex_daemon::daemon_worker_runtime"}
+{"timestamp":"2026-04-24T18:01:44.313105Z","level":"DEBUG","fields":{"message":"daemon tick publish summary","tick_kind":"daemon worker tick","now_ms":1777053704276,"backend_due_task_count":0,"backend_enqueued_event_count":0,"project_descriptor_count":1,"booted_project_descriptor_count":1,"project_status_count":0,"worker_outcome":"Some([\"not_admitted\"])","publish_pending_after":0,"publish_published_after":9,"publish_failed_after":0,"publish_retry_due_after":0},"target":"tenex_daemon::daemon_loop"}
+{"timestamp":"2026-04-24T18:01:45.336633Z","level":"INFO","fields":{"message":"project-status filter trace","index_descriptor_count":1,"boot_state_count":1,"booted_descriptor_count":1,"resulting_projects":1,"index_coordinates":"[\"0c274725:nak-interop-test-20260424210112-27506\"]","boot_coordinates":"[\"0c274725:nak-interop-test-20260424210112-27506\"]"},"target":"tenex_daemon::daemon_maintenance::project_status_filter"}
+{"timestamp":"2026-04-24T18:01:45.357752Z","level":"DEBUG","fields":{"message":"worker runtime: no queued dispatches"},"target":"tenex_daemon::daemon_worker_runtime"}
+{"timestamp":"2026-04-24T18:01:45.358293Z","level":"DEBUG","fields":{"message":"daemon tick publish summary","tick_kind":"daemon worker tick","now_ms":1777053705336,"backend_due_task_count":0,"backend_enqueued_event_count":0,"project_descriptor_count":1,"booted_project_descriptor_count":1,"project_status_count":0,"worker_outcome":"Some([\"not_admitted\"])","publish_pending_after":0,"publish_published_after":9,"publish_failed_after":0,"publish_retry_due_after":0},"target":"tenex_daemon::daemon_loop"}
+{"timestamp":"2026-04-24T18:01:46.384456Z","level":"INFO","fields":{"message":"project-status filter trace","index_descriptor_count":1,"boot_state_count":1,"booted_descriptor_count":1,"resulting_projects":1,"index_coordinates":"[\"0c274725:nak-interop-test-20260424210112-27506\"]","boot_coordinates":"[\"0c274725:nak-interop-test-20260424210112-27506\"]"},"target":"tenex_daemon::daemon_maintenance::project_status_filter"}
+{"timestamp":"2026-04-24T18:01:46.403853Z","level":"DEBUG","fields":{"message":"worker runtime: no queued dispatches"},"target":"tenex_daemon::daemon_worker_runtime"}
+{"timestamp":"2026-04-24T18:01:46.404359Z","level":"DEBUG","fields":{"message":"daemon tick publish summary","tick_kind":"daemon worker tick","now_ms":1777053706384,"backend_due_task_count":0,"backend_enqueued_event_count":0,"project_descriptor_count":1,"booted_project_descriptor_count":1,"project_status_count":0,"worker_outcome":"Some([\"not_admitted\"])","publish_pending_after":0,"publish_published_after":9,"publish_failed_after":0,"publish_retry_due_after":0},"target":"tenex_daemon::daemon_loop"}
+{"timestamp":"2026-04-24T18:01:47.428986Z","level":"INFO","fields":{"message":"project-status filter trace","index_descriptor_count":1,"boot_state_count":1,"booted_descriptor_count":1,"resulting_projects":1,"index_coordinates":"[\"0c274725:nak-interop-test-20260424210112-27506\"]","boot_coordinates":"[\"0c274725:nak-interop-test-20260424210112-27506\"]"},"target":"tenex_daemon::daemon_maintenance::project_status_filter"}
+{"timestamp":"2026-04-24T18:01:47.451719Z","level":"DEBUG","fields":{"message":"worker runtime: no queued dispatches"},"target":"tenex_daemon::daemon_worker_runtime"}
+{"timestamp":"2026-04-24T18:01:47.452248Z","level":"INFO","fields":{"message":"daemon tick publish summary","tick_kind":"daemon worker tick","now_ms":1777053707428,"backend_due_task_count":1,"backend_enqueued_event_count":0,"project_descriptor_count":1,"booted_project_descriptor_count":1,"project_status_count":0,"worker_outcome":"Some([\"not_admitted\"])","publish_pending_before":0,"publish_failed_before":0,"publish_requeued_count":0,"publish_drained_count":0,"publish_pending_after":0,"publish_published_after":9,"publish_failed_after":0,"publish_retry_due_after":0},"target":"tenex_daemon::daemon_loop"}
+{"timestamp":"2026-04-24T18:01:48.475447Z","level":"INFO","fields":{"message":"project-status filter trace","index_descriptor_count":1,"boot_state_count":1,"booted_descriptor_count":1,"resulting_projects":1,"index_coordinates":"[\"0c274725:nak-interop-test-20260424210112-27506\"]","boot_coordinates":"[\"0c274725:nak-interop-test-20260424210112-27506\"]"},"target":"tenex_daemon::daemon_maintenance::project_status_filter"}
+{"timestamp":"2026-04-24T18:01:48.505897Z","level":"DEBUG","fields":{"message":"worker runtime: no queued dispatches"},"target":"tenex_daemon::daemon_worker_runtime"}
+{"timestamp":"2026-04-24T18:01:48.506281Z","level":"DEBUG","fields":{"message":"daemon tick publish summary","tick_kind":"daemon worker tick","now_ms":1777053708475,"backend_due_task_count":0,"backend_enqueued_event_count":0,"project_descriptor_count":1,"booted_project_descriptor_count":1,"project_status_count":0,"worker_outcome":"Some([\"not_admitted\"])","publish_pending_after":0,"publish_published_after":9,"publish_failed_after":0,"publish_retry_due_after":0},"target":"tenex_daemon::daemon_loop"}
+{"timestamp":"2026-04-24T18:01:49.531127Z","level":"INFO","fields":{"message":"project-status filter trace","index_descriptor_count":1,"boot_state_count":1,"booted_descriptor_count":1,"resulting_projects":1,"index_coordinates":"[\"0c274725:nak-interop-test-20260424210112-27506\"]","boot_coordinates":"[\"0c274725:nak-interop-test-20260424210112-27506\"]"},"target":"tenex_daemon::daemon_maintenance::project_status_filter"}
+{"timestamp":"2026-04-24T18:01:49.627650Z","level":"INFO","fields":{"message":"publish outbox draining event","event_id":"01d9300f7b45dde26d6241ab785989182ef13ea182e79102d01732d5c502a3a6","event_kind":24010,"request_id":"project-status:nak-interop-test-20260424210112-27506:1777053709","project_id":"nak-interop-test-20260424210112-27506","conversation_id":"nak-interop-test-20260424210112-27506","agent_pubkey":"9e0b8fb51680de6848114a62521b83688adfb059e43a630bae3465de1172cf75"},"target":"tenex_daemon::publish_outbox"}
+{"timestamp":"2026-04-24T18:01:49.627694Z","level":"INFO","fields":{"message":"publishing nostr event to relay","relay_url":"ws://127.0.0.1:53090","event_id":"01d9300f7b45dde26d6241ab785989182ef13ea182e79102d01732d5c502a3a6","event_kind":24010},"target":"tenex_daemon::relay_publisher","span":{"event_id":"01d9300f7b45dde26d6241ab785989182ef13ea182e79102d01732d5c502a3a6","event_kind":24010,"relay_url":"ws://127.0.0.1:53090","name":"nostr.publish"},"spans":[{"event_id":"01d9300f7b45dde26d6241ab785989182ef13ea182e79102d01732d5c502a3a6","event_kind":24010,"relay_url":"ws://127.0.0.1:53090","name":"nostr.publish"}]}
+{"timestamp":"2026-04-24T18:01:49.628076Z","level":"INFO","fields":{"message":"nostr event published","relay_url":"ws://127.0.0.1:53090","event_id":"01d9300f7b45dde26d6241ab785989182ef13ea182e79102d01732d5c502a3a6"},"target":"tenex_daemon::relay_publisher"}
+{"timestamp":"2026-04-24T18:01:49.628384Z","level":"INFO","fields":{"message":"publish outbox event published","event_id":"01d9300f7b45dde26d6241ab785989182ef13ea182e79102d01732d5c502a3a6","request_id":"project-status:nak-interop-test-20260424210112-27506:1777053709","relay_results":"Some([PublishRelayResult { relay_url: \"ws://127.0.0.1:53090\", accepted: true, message: Some(\"broadcasted to 0 listeners\") }])"},"target":"tenex_daemon::publish_outbox"}
+{"timestamp":"2026-04-24T18:01:49.639007Z","level":"DEBUG","fields":{"message":"worker runtime: no queued dispatches"},"target":"tenex_daemon::daemon_worker_runtime"}
+{"timestamp":"2026-04-24T18:01:49.639428Z","level":"INFO","fields":{"message":"daemon tick publish summary","tick_kind":"daemon worker tick","now_ms":1777053709531,"backend_due_task_count":1,"backend_enqueued_event_count":1,"project_descriptor_count":1,"booted_project_descriptor_count":1,"project_status_count":1,"worker_outcome":"Some([\"not_admitted\"])","publish_pending_before":1,"publish_failed_before":0,"publish_requeued_count":0,"publish_drained_count":0,"publish_pending_after":1,"publish_published_after":9,"publish_failed_after":0,"publish_retry_due_after":0},"target":"tenex_daemon::daemon_loop"}
+{"timestamp":"2026-04-24T18:01:50.660324Z","level":"INFO","fields":{"message":"project-status filter trace","index_descriptor_count":1,"boot_state_count":1,"booted_descriptor_count":1,"resulting_projects":1,"index_coordinates":"[\"0c274725:nak-interop-test-20260424210112-27506\"]","boot_coordinates":"[\"0c274725:nak-interop-test-20260424210112-27506\"]"},"target":"tenex_daemon::daemon_maintenance::project_status_filter"}
+{"timestamp":"2026-04-24T18:01:50.703702Z","level":"DEBUG","fields":{"message":"worker runtime: no queued dispatches"},"target":"tenex_daemon::daemon_worker_runtime"}
+{"timestamp":"2026-04-24T18:01:50.704292Z","level":"DEBUG","fields":{"message":"daemon tick publish summary","tick_kind":"daemon worker tick","now_ms":1777053710660,"backend_due_task_count":0,"backend_enqueued_event_count":0,"project_descriptor_count":1,"booted_project_descriptor_count":1,"project_status_count":0,"worker_outcome":"Some([\"not_admitted\"])","publish_pending_after":0,"publish_published_after":10,"publish_failed_after":0,"publish_retry_due_after":0},"target":"tenex_daemon::daemon_loop"}
+{"timestamp":"2026-04-24T18:01:51.726517Z","level":"INFO","fields":{"message":"project-status filter trace","index_descriptor_count":1,"boot_state_count":1,"booted_descriptor_count":1,"resulting_projects":1,"index_coordinates":"[\"0c274725:nak-interop-test-20260424210112-27506\"]","boot_coordinates":"[\"0c274725:nak-interop-test-20260424210112-27506\"]"},"target":"tenex_daemon::daemon_maintenance::project_status_filter"}
+{"timestamp":"2026-04-24T18:01:51.750804Z","level":"DEBUG","fields":{"message":"worker runtime: no queued dispatches"},"target":"tenex_daemon::daemon_worker_runtime"}
+{"timestamp":"2026-04-24T18:01:51.751370Z","level":"DEBUG","fields":{"message":"daemon tick publish summary","tick_kind":"daemon worker tick","now_ms":1777053711726,"backend_due_task_count":0,"backend_enqueued_event_count":0,"project_descriptor_count":1,"booted_project_descriptor_count":1,"project_status_count":0,"worker_outcome":"Some([\"not_admitted\"])","publish_pending_after":0,"publish_published_after":10,"publish_failed_after":0,"publish_retry_due_after":0},"target":"tenex_daemon::daemon_loop"}
+[harness] RESULT status=fail scenario=21_agent_hot_reload.sh detail=ASSERT: no dispatch for agent2 kind:1 after hot-reload
+[harness] cleanup (script exit code=1)
+[harness] stopping daemon pid 77306 (SIGTERM)
+[harness] stopping relay pid 77291

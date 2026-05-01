@@ -1,0 +1,33 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-101-1777054427-41285
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-101-1777054427-41285
+[harness]   backend pubkey:  e1dd3add103b7c9b1ff6ad64f41e9567a7b3005787f8764b1de2bfde549b6909
+[harness]   user pubkey:     74445dde7d52d9b9907c70600f790b4d3eaa2def713048984ae12f7e230035ff
+[harness]   agent1 pubkey:   41e789119a53ccaecd4173347b06ac7a010ddb7640ddbc5fed7ba99fe5b6a901
+[harness]   agent2 pubkey:   6fb5557a61bc806196609a9194997604eca491e1d8013e3af7287d0a7c5893b6
+[harness]   project a-tag:   31933:74445dde7d52d9b9907c70600f790b4d3eaa2def713048984ae12f7e230035ff:nak-interop-test-20260424211347-7162
+[scenario] rewriting llms.json to use mock fixture model 'mock/graceful-restart-101'
+[harness] starting relay on 127.0.0.1:51036 (admins=1)
+[harness] relay ready at ws://127.0.0.1:51036
+[harness] daemon config relays -> [ws://127.0.0.1:51036]
+[scenario] publishing 14199 (whitelist) as user
+connecting to ws://127.0.0.1:51036... ok.
+publishing to ws://127.0.0.1:51036... success.
+[scenario] publishing 31933 (project) as user
+connecting to ws://127.0.0.1:51036... ok.
+publishing to ws://127.0.0.1:51036... success.
+
+[scenario] === Phase 1: first daemon incarnation ===
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-101-1777054427-41285/backend)
+[harness] daemon ready (pid 42281, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-101-1777054427-41285/backend/daemon/tenex.lock)
+[harness] kind:14199 listener confirmed (probe #1 round-tripped after 500ms)
+[harness] TIMEOUT: kind:24030 probe never round-tripped within 45s
+[harness] RESULT status=fail scenario=101_graceful_restart_no_stuck_ral.sh detail=harness-flake: daemon subscription never became live (first boot)
+[harness] cleanup (script exit code=1)
+[harness] stopping daemon pid 42281 (SIGTERM)
+[harness] stopping relay pid 42102

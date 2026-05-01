@@ -1,0 +1,40 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-1777264587-32431
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-1777264587-32431
+[harness]   backend pubkey:  4fdd8ee30610b22163cc1080971b8d54639fa6cba8d6a091f0f1569de101dfc7
+[harness]   user pubkey:     47036801f377c29c01402ac32b33783ec84a56fa581b9ba33fb3572cccb38457
+[harness]   agent1 pubkey:   26872e6fd2e7ae096e1491e12d95b289d6ab0619e802104bddd5b84273256c74
+[harness]   agent2 pubkey:   0fce6faba217c426d3daea6be7b229cc3a90be338abfa1ce920838b0d413879f
+[harness]   project a-tag:   31933:47036801f377c29c01402ac32b33783ec84a56fa581b9ba33fb3572cccb38457:nak-interop-test-20260427073627-22198
+[harness] starting relay on 127.0.0.1:63545 (admins=1)
+[harness] relay ready at ws://127.0.0.1:63545
+[scenario] backend_nsec=nsec12va2d3h…
+[scenario] step 1: backend publishes 3 historical kind:1 events
+connecting to ws://127.0.0.1:63545... ok.
+publishing to ws://127.0.0.1:63545... success.
+connecting to ws://127.0.0.1:63545... ok.
+publishing to ws://127.0.0.1:63545... success.
+connecting to ws://127.0.0.1:63545... ok.
+publishing to ws://127.0.0.1:63545... success.
+[scenario]   backend (admin) sees 3 events ✓
+[scenario] step 2: user (non-whitelisted) subscribes for kind:1; expect 0 historical events
+[scenario]   user saw 0 events before whitelist (expect 0)
+[scenario] step 3: user publishes kind:14199 with self + agent2 in p-tags
+connecting to ws://127.0.0.1:63545... ok.
+publishing to ws://127.0.0.1:63545... success.
+[scenario]   14199 event id=62694a70a87a1cc44b110575deac00d6702ccd1dbc1dbcaa508d96680b4940d8
+[scenario] step 4: user (now whitelisted) re-subscribes; expect 3+ historical events
+[scenario]   user saw 3 events after whitelist
+[scenario] step 5: backend publishes a kind:1 for agent2; agent2 reads it
+connecting to ws://127.0.0.1:63545... ok.
+publishing to ws://127.0.0.1:63545... success.
+[scenario]   agent2 (transitively whitelisted via user's 14199) saw 4 events
+
+[scenario] PASS — scenario 11.5: NIP-42 dynamic whitelist via 14199 backfill
+[harness] cleanup (script exit code=0)
+[harness] stopping relay pid 32910

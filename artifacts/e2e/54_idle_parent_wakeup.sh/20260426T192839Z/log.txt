@@ -1,0 +1,58 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-54-1777231719-68388
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-54-1777231719-68388
+[harness]   backend pubkey:  b935ec4dd34da676cf81f738c6453d1fb5413b39a070d449b7338128a6df7a7a
+[harness]   user pubkey:     34f0e0bd1f252b00194c6016fdb9a1ac77538a745b71b80bee3ef9d2bb1e969c
+[harness]   agent1 pubkey:   48e1865076a9572e05d1749c2965245974d970f29998045e1311671ab6a26485
+[harness]   agent2 pubkey:   872d2638d97428c41b354f03cd39af1ccc006ccd09a386258317c4447ace5739
+[harness]   project a-tag:   31933:34f0e0bd1f252b00194c6016fdb9a1ac77538a745b71b80bee3ef9d2bb1e969c:nak-interop-test-20260426222839-24249
+[scenario] rewriting llms.json to use mock fixture model 'mock/idle-parent-54'
+[scenario] mock LLM enabled: fixture=/Users/pablofernandez/Work/TENEX-ff3ssq/scripts/e2e/fixtures/mock-llm/54_idle_parent_wakeup.json
+[scenario] pre-seeded project descriptor at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-54-1777231719-68388/backend/projects/nak-interop-test-20260426222839-24249/project.json
+[harness] starting relay on 127.0.0.1:57940 (admins=1)
+[harness] relay ready at ws://127.0.0.1:57940
+[harness] daemon config relays -> [ws://127.0.0.1:57940]
+[scenario] publishing 14199 (whitelist) as user
+connecting to ws://127.0.0.1:57940... ok.
+publishing to ws://127.0.0.1:57940... success.
+[scenario] publishing 31933 (project) as user
+connecting to ws://127.0.0.1:57940... ok.
+publishing to ws://127.0.0.1:57940... success.
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-54-1777231719-68388/backend, binary=/Users/pablofernandez/Work/TENEX-ff3ssq/target/release/daemon)
+[harness] daemon ready (pid 69213, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-54-1777231719-68388/backend/daemon/tenex.lock)
+[harness] kind:14199 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] kind:24030 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] daemon subscription confirmed live (all probed listener filters registered)
+[scenario] publishing 24000 (boot) as user
+connecting to ws://127.0.0.1:57940... ok.
+publishing to ws://127.0.0.1:57940... success.
+[scenario]   boot event id=5ceae09eec1901ebed79556c77265f808975b224487cd831f21265745d7b7c1f
+[scenario] waiting for daemon to publish kind:24010...
+[scenario] publishing kind:1 from user to agent1 (attempt 1)
+connecting to ws://127.0.0.1:57940... ok.
+publishing to ws://127.0.0.1:57940... success.
+[scenario]   user message id=26ce1a4aa18bf532c53c2214069feb034c929043c5f3d47e211153226609ab7b
+[scenario]   initial dispatch enqueued ✓
+
+[scenario] === Phase B: idle-parent wakeup ===
+[scenario]   observed: dispatch queue has 3 records for agent1 (initial + resume)
+
+[scenario] === Phase B results ===
+[scenario]   agent1 published delegation kind:1  : no
+[scenario]   agent2 replied (hello-from-agent2)  : no
+[scenario]   agent1 resumed (idle-parent wakeup) : no
+[scenario]   RAL DelegationCompleted recorded    : no
+[scenario]   resume dispatch enqueued (>=2 total): yes
+[2m19:28:43[0m  [1m[32m✓[0m  [1m[32mdaemon ready[0m  [2m(nostr on, telegram off)[0m
+[2m19:28:43[0m  ↑  [1m[95mnak-interop-test-20260426222839-24249[0m  [2m(1 booted)[0m
+[2m19:28:44[0m  [1m[33m●[0m  [1m[92magent1[0m  [2minbound-worker-081abd459ce2d9d3ff614a78[0m  [1m[95mnak-interop-test-20260426222839-24249[0m
+[2m19:28:44[0m  [1m[32m✓[0m  [1m[92magent1[0m  [2minbound-worker-081abd459ce2d9d3ff614a78[0m  [1m[95mnak-interop-test-20260426222839-24249[0m
+[harness] RESULT status=fail scenario=54_idle_parent_wakeup.sh detail=agent1 never published a delegation kind:1
+[harness] cleanup (script exit code=1)
+[harness] stopping daemon pid 69213 (SIGTERM)
+[harness] stopping relay pid 69202

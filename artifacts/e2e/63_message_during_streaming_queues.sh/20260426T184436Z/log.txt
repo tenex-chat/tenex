@@ -1,0 +1,80 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-63-1777229076-7979
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-63-1777229076-7979
+[harness]   backend pubkey:  fe45e7dcd56a0a84203a43b2a7645a5b5738b57c35f589e149235e2b9b1a4512
+[harness]   user pubkey:     762499a24621067acca7ea26c13e27370efcc4a80f93690d43f402f3e670b8fe
+[harness]   agent1 pubkey:   cce5c11b39501a31368040eb8307f0b8ee713aa1d0d70c0902489c78df4fea7a
+[harness]   agent2 pubkey:   ddf1d2ce937a121449820866dd37b4256f0c6ee17d09d5c7162ecfd0a46187c3
+[harness]   project a-tag:   31933:762499a24621067acca7ea26c13e27370efcc4a80f93690d43f402f3e670b8fe:nak-interop-test-20260426214436-11289
+[scenario] rewriting llms.json to use mock model 'mock/streaming-63'
+[scenario] mock LLM enabled: fixture=/Users/pablofernandez/Work/TENEX-ff3ssq/scripts/e2e/fixtures/mock-llm/63_message_during_streaming.json
+[harness] starting relay on 127.0.0.1:56059 (admins=1)
+[harness] relay ready at ws://127.0.0.1:56059
+[harness] daemon config relays -> [ws://127.0.0.1:56059]
+connecting to ws://127.0.0.1:56059... ok.
+publishing to ws://127.0.0.1:56059... success.
+connecting to ws://127.0.0.1:56059... ok.
+publishing to ws://127.0.0.1:56059... success.
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-63-1777229076-7979/backend, binary=/Users/pablofernandez/Work/TENEX-ff3ssq/target/release/daemon)
+[harness] daemon ready (pid 8459, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-63-1777229076-7979/backend/daemon/tenex.lock)
+[harness] kind:14199 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] kind:24030 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] daemon subscription confirmed live (all probed listener filters registered)
+connecting to ws://127.0.0.1:56059... ok.
+publishing to ws://127.0.0.1:56059... success.
+[scenario] publishing first kind:1 (triggers 3s streaming response)
+connecting to ws://127.0.0.1:56059... ok.
+publishing to ws://127.0.0.1:56059... success.
+[scenario]   first message id=32d694f58a372ee2bb6c35d0f44db5497668da18d7c160aacd547305d7afc277
+[scenario] waiting for first dispatch to be LEASED (worker active)...
+[scenario]   first dispatch is LEASED (agent1 streaming) ✓
+[scenario] publishing second kind:1 mid-stream
+connecting to ws://127.0.0.1:56059... ok.
+publishing to ws://127.0.0.1:56059... success.
+[scenario]   second message id=aacc247b30d7fb868dcbf97fb5c3dab1cfdd2ca3644ffb2cfd1a2df69892330f
+[scenario] waiting for second dispatch to appear as QUEUED...
+/Users/pablofernandez/Work/TENEX-ff3ssq/scripts/e2e/scenarios/63_message_during_streaming_queues.sh: line 161:  8459 Killed: 9               TENEX_BASE_DIR="$TENEX_BASE_DIR" "$daemon_bin" --tenex-base-dir "$TENEX_BASE_DIR" >> "$HARNESS_DAEMON_LOG" 2>&1
+[scenario] dispatch queue state:
+[
+  {
+    "schemaVersion": 1,
+    "sequence": 1,
+    "timestamp": 1777229080428,
+    "correlationId": "inbound-dispatch-d249517f1de6f8f6943770e0",
+    "dispatchId": "inbound-d249517f1de6f8f6943770e0",
+    "ral": {
+      "projectId": "nak-interop-test-20260426214436-11289",
+      "agentPubkey": "cce5c11b39501a31368040eb8307f0b8ee713aa1d0d70c0902489c78df4fea7a",
+      "conversationId": "32d694f58a372ee2bb6c35d0f44db5497668da18d7c160aacd547305d7afc277",
+      "ralNumber": 1
+    },
+    "triggeringEventId": "32d694f58a372ee2bb6c35d0f44db5497668da18d7c160aacd547305d7afc277",
+    "claimToken": "inbound-claim-d249517f1de6f8f6943770e0",
+    "status": "queued"
+  },
+  {
+    "schemaVersion": 1,
+    "sequence": 2,
+    "timestamp": 1777229080463,
+    "correlationId": "worker-admission-driver:1777229080463:admission-0:lease",
+    "dispatchId": "inbound-d249517f1de6f8f6943770e0",
+    "ral": {
+      "projectId": "nak-interop-test-20260426214436-11289",
+      "agentPubkey": "cce5c11b39501a31368040eb8307f0b8ee713aa1d0d70c0902489c78df4fea7a",
+      "conversationId": "32d694f58a372ee2bb6c35d0f44db5497668da18d7c160aacd547305d7afc277",
+      "ralNumber": 1
+    },
+    "triggeringEventId": "32d694f58a372ee2bb6c35d0f44db5497668da18d7c160aacd547305d7afc277",
+    "claimToken": "inbound-claim-d249517f1de6f8f6943770e0",
+    "status": "leased"
+  }
+]
+[harness] RESULT status=fail scenario=63_message_during_streaming_queues.sh detail=second dispatch never appeared as QUEUED within 8s
+[harness] cleanup (script exit code=1)
+[harness] stopping daemon pid 8459 (SIGTERM)
+[harness] stopping relay pid 8448

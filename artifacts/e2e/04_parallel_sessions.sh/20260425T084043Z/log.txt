@@ -1,0 +1,82 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-04-1777106443-82803
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-04-1777106443-82803
+[harness]   backend pubkey:  b0be0bc350aa9d008a59b4c5eee8b07edb5e58481780fef861898c7ceeab69df
+[harness]   user pubkey:     c72e498d95aff27edbb41975b9c11d2db829e98202f3d4116a00af91a2b25899
+[harness]   agent1 pubkey:   43c50af2ef9e9a259b8062a51bd5c84b4c8d12c718c0d0912528c5c8f698fa96
+[harness]   agent2 pubkey:   eccc4efb78dfe73da3566d63aa080c9e7fdcf149a4ddc55cf915e3d839dc56dd
+[harness]   project a-tag:   31933:c72e498d95aff27edbb41975b9c11d2db829e98202f3d4116a00af91a2b25899:nak-interop-test-20260425114043-12877
+[scenario] rewriting llms.json to use mock fixture model 'mock/parallel-04'
+[scenario] mock LLM enabled: fixture=/Users/pablofernandez/Work/TENEX-ff3ssq/scripts/e2e/fixtures/mock-llm/04_parallel_sessions.json
+[scenario] pre-seeded project descriptor at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-04-1777106443-82803/backend/projects/nak-interop-test-20260425114043-12877/project.json
+[harness] starting relay on 127.0.0.1:53290 (admins=1)
+[harness] relay ready at ws://127.0.0.1:53290
+[harness] daemon config relays -> [ws://127.0.0.1:53290]
+[scenario] publishing 14199 (whitelist) as user
+connecting to ws://127.0.0.1:53290... ok.
+publishing to ws://127.0.0.1:53290... success.
+[scenario] publishing 31933 (project) as user
+connecting to ws://127.0.0.1:53290... ok.
+publishing to ws://127.0.0.1:53290... success.
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-04-1777106443-82803/backend)
+[harness] daemon ready (pid 84820, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-04-1777106443-82803/backend/daemon/tenex.lock)
+[harness] kind:14199 listener confirmed (probe #1 round-tripped after 500ms)
+[harness] kind:24030 listener confirmed (probe #1 round-tripped after 500ms)
+[harness] daemon subscription confirmed live (all probed listener filters registered)
+[scenario] publishing 24000 (boot) as user
+connecting to ws://127.0.0.1:53290... ok.
+publishing to ws://127.0.0.1:53290... success.
+[scenario]   boot event id=478eb0c6e56fd120ad55c6290657fe98967eb636f702e53eb23b74fed8da38f5
+[scenario] waiting for daemon to process boot and publish kind:24010...
+[scenario]   24010 status published for our project ✓
+[scenario] publishing kind:1 SESSION-ALPHA → agent1
+connecting to ws://127.0.0.1:53290... ok.
+publishing to ws://127.0.0.1:53290... success.
+[scenario]   msg1 id=47db18546345774a00b834daf9e1fb993c68cc9544a710aaa8ef72eb7d0b3f0a
+[scenario] publishing kind:1 SESSION-BETA → agent2
+connecting to ws://127.0.0.1:53290... ok.
+publishing to ws://127.0.0.1:53290... success.
+[scenario]   msg2 id=38ace8c8098383504870021b7f617a9be63613b962fe99772943a7c23345c5d3
+[scenario] waiting up to 20s for both dispatches to be enqueued...
+[scenario]   SESSION-BETA dispatch enqueued ✓
+[scenario]   SESSION-ALPHA dispatch enqueued ✓
+[scenario] === Phase A complete: both dispatches enqueued ===
+
+[scenario] === Phase B: asserting both sessions complete and ran in parallel ===
+
+[scenario] === Phase B observations ===
+[scenario]   agent1 kind:1 (session-alpha result: 100) : no
+[scenario]   agent2 kind:1 (session-beta result: 200)  : no
+[scenario]   RAL journal >=2 terminal entries           : no
+[scenario] daemon log (last 80 lines):
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on build directory
+warning: field `status` is never read
+  --> crates/tenex-daemon/src/per_agent_config_snapshot.rs:64:5
+   |
+61 | struct RawStoredAgent {
+   |        -------------- field in this struct
+...
+64 |     status: Option<String>,
+   |     ^^^^^^
+   |
+   = note: `RawStoredAgent` has a derived impl for the trait `Debug`, but this is intentionally ignored during dead code analysis
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `tenex-daemon` (lib) generated 1 warning
+    Finished `release` profile [optimized] target(s) in 0.14s
+     Running `target/release/daemon --tenex-base-dir /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-04-1777106443-82803/backend`
+[2m08:40:48[0m  [1m[32m✓[0m  [1m[32mdaemon ready[0m  [2m(nostr on, telegram off)[0m
+[2m08:40:49[0m  ↑  [1m[95mnak-interop-test-20260425114043-12877[0m  [2m(1 booted)[0m
+[2m08:40:50[0m  ↻  [1m[95mnak-interop-test-20260425114043-12877[0m  [2m(1 booted)[0m
+[2m08:40:51[0m  [1m[33m●[0m  [1m[96magent1[0m  [2minbound-worker-9f00d7cdc5fb63c38e5dfa12[0m  [1m[95mnak-interop-test-20260425114043-12877[0m
+[2m08:40:52[0m  [1m[33m●[0m  [1m[93magent2[0m  [2minbound-worker-792451fef7021c95a4176448[0m  [1m[95mnak-interop-test-20260425114043-12877[0m
+[harness] RESULT status=fail scenario=04_parallel_sessions.sh detail=agent1 never published kind:1 with 'session-alpha result: 100'
+[harness] cleanup (script exit code=1)
+[harness] stopping daemon pid 84820 (SIGTERM)
+[harness] stopping relay pid 84780

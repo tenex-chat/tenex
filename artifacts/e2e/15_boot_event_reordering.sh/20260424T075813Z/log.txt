@@ -1,0 +1,44 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-15-1777017493-59810
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-15-1777017493-59810
+[harness]   backend pubkey:  5b2e967d11c5d316a376860778fcf9dc3fc28e56c6a52d3a3bbb7b266577da9f
+[harness]   user pubkey:     8915376fe75b4c445d78180edcb86f5787a2c329f6abdd0328c389d8b39b6a79
+[harness]   agent1 pubkey:   c626a56b47c735bcda4a6cc3fb38450df94f8f0e03f0b46f28ce9f5280c5dede
+[harness]   agent2 pubkey:   e4835a96d05aae6918889290e47bf3d41af6773af50da15036984100b1ac7bba
+[harness]   project a-tag:   31933:8915376fe75b4c445d78180edcb86f5787a2c329f6abdd0328c389d8b39b6a79:nak-interop-test-20260424105813-16060
+[harness] starting relay on 127.0.0.1:65148 (admins=1)
+[harness] relay ready at ws://127.0.0.1:65148
+[harness] daemon config relays -> [ws://127.0.0.1:65148]
+connecting to ws://127.0.0.1:65148... ok.
+publishing to ws://127.0.0.1:65148... success.
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-15-1777017493-59810/backend)
+[harness] daemon ready (pid 61123, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-15-1777017493-59810/backend/daemon/tenex.lock)
+[harness] kind:14199 listener confirmed (probe #1 round-tripped after 500ms)
+[harness] kind:24030 listener confirmed (probe #1 round-tripped after 500ms)
+[harness] daemon subscription confirmed live (all probed listener filters registered)
+[scenario] phase 1: publishing NEWER kind:31933 (created_at=1777021100)
+connecting to ws://127.0.0.1:65148... ok.
+publishing to ws://127.0.0.1:65148... success.
+[scenario]   newer 31933 id=6cedd6dabca2767eae43484d9436029fcf0bfbca564a0d0a326b7753627ef6c3 created_at=1777021100
+[scenario]   daemon log project_updated count after newer 31933: 1
+[scenario]   newer 31933 accepted (project_updated logged) ✓
+[scenario] phase 2: publishing OLDER kind:31933 (created_at=1777013900)
+connecting to ws://127.0.0.1:65148... ok.
+publishing to ws://127.0.0.1:65148... success.
+[scenario]   older 31933 id=14645f93bba6b3b88ecd19d1d82b25a0a9058c535ce2d4985e68cdfe16f6c109 created_at=1777013900
+[scenario]   daemon log project_updated count after older 31933: 1 (informational)
+[scenario]   relay stored 31933 created_at=1777021100 (expected=1777021100)
+[scenario]   relay correctly retains the newer revision ✓
+[scenario] phase 3: checking daemon process is still alive
+[scenario]   daemon still running (pid 61123) ✓
+[scenario]   re-confirming daemon subscription is live before boot
+[harness] TIMEOUT: kind:14199 probe never round-tripped within 45s
+[harness] RESULT status=fail scenario=15_boot_event_reordering.sh detail=daemon subscription lost after out-of-order 31933 delivery
+[harness] cleanup (script exit code=1)
+[harness] stopping daemon pid 61123 (SIGTERM)
+[harness] stopping relay pid 61105

@@ -1,0 +1,32 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-101-1777125721-42873
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-101-1777125721-42873
+[harness]   backend pubkey:  21dc42c989424d2d2f126f631cc01eb479d7f25678c4a4c52fa32ecb6f57584b
+[harness]   user pubkey:     455ba66b21cabb8aabb2891f5c6929b44c20636e54ffed3b4ce005b9ed40384a
+[harness]   agent1 pubkey:   66b16851d0402656083059eb092cad2b7bd60176cb672e28fdb5a29e1e38bbe7
+[harness]   agent2 pubkey:   c18c66a3566a04621dd25a8c2e4259d5d03e4cc3956507294a05b5ecd8f335b8
+[harness]   project a-tag:   31933:455ba66b21cabb8aabb2891f5c6929b44c20636e54ffed3b4ce005b9ed40384a:nak-interop-test-20260425170201-19028
+[scenario] rewriting llms.json to use mock fixture model 'mock/delegation-02'
+[harness] starting relay on 127.0.0.1:53635 (admins=1)
+[harness] relay ready at ws://127.0.0.1:53635
+[harness] daemon config relays -> [ws://127.0.0.1:53635]
+[scenario] publishing 14199 (whitelist) as user
+connecting to ws://127.0.0.1:53635... ok.
+publishing to ws://127.0.0.1:53635... success.
+[scenario] publishing 31933 (project) as user
+connecting to ws://127.0.0.1:53635... ok.
+publishing to ws://127.0.0.1:53635... success.
+
+[scenario] === Phase 1: first daemon incarnation ===
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-101-1777125721-42873/backend)
+[harness] daemon ready (pid 43475, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-101-1777125721-42873/backend/daemon/tenex.lock)
+[harness] TIMEOUT: kind:14199 probe never round-tripped within 45s
+[harness] RESULT status=fail scenario=101_graceful_restart_no_stuck_ral.sh detail=harness-flake: daemon subscription never became live (first boot)
+[harness] cleanup (script exit code=1)
+[harness] stopping daemon pid 43475 (SIGTERM)
+[harness] stopping relay pid 43464

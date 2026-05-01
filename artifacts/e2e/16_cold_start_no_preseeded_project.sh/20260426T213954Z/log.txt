@@ -1,0 +1,31 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-16-1777239594-56543
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-16-1777239594-56543
+[harness]   backend pubkey:  aece88df4584c5d4127261613ffc00a29cd65ce54cb871ded1e25031de1110e3
+[harness]   user pubkey:     6bf9e7421f92828422b8a07741aca6fc8ab9874352e2cbeff5b75ee990a58972
+[harness]   agent1 pubkey:   b7f76e1231387e7a46aed5285ea79360f06deed6e63b2db01fe5a549dc263fe5
+[harness]   agent2 pubkey:   e0e6e19fd637122fe27c9244c26e689bfa2ce06768ffd769426f862c56b7fab8
+[harness]   project a-tag:   31933:6bf9e7421f92828422b8a07741aca6fc8ab9874352e2cbeff5b75ee990a58972:nak-interop-test-20260427003954-15624
+[scenario] projects/ cleared — cold-start environment confirmed empty
+[harness] starting relay on 127.0.0.1:50578 (admins=1)
+[harness] relay ready at ws://127.0.0.1:50578
+[harness] daemon config relays -> [ws://127.0.0.1:50578]
+connecting to ws://127.0.0.1:50578... ok.
+publishing to ws://127.0.0.1:50578... success.
+connecting to ws://127.0.0.1:50578... ok.
+publishing to ws://127.0.0.1:50578... success.
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-16-1777239594-56543/backend, binary=/Users/pablofernandez/Work/TENEX-ff3ssq/target/release/daemon)
+[harness] daemon ready (pid 57060, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-16-1777239594-56543/backend/daemon/tenex.lock)
+[harness] kind:14199 probe #1 was signed locally but never became readable on the relay; retrying
+/Users/pablofernandez/Work/TENEX-ff3ssq/scripts/e2e-test-harness.sh: line 206: 57060 Killed: 9               TENEX_BASE_DIR="$TENEX_BASE_DIR" "$daemon_bin" --tenex-base-dir "$TENEX_BASE_DIR" >> "$HARNESS_DAEMON_LOG" 2>&1
+[harness] kind:14199 listener confirmed (probe #2 round-tripped after 200ms)
+[harness] TIMEOUT: kind:24030 probe never round-tripped within 45s
+[harness] FATAL: daemon subscription never became live
+[harness] cleanup (script exit code=1)
+[harness] stopping daemon pid 57060 (SIGTERM)
+[harness] stopping relay pid 57041

@@ -1,0 +1,84 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-43-1777141744-4598
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-43-1777141744-4598
+[harness]   backend pubkey:  ce50a7f8c2537a00d8a2312ef85528c1ec5c6d9a917a9f3424af264ca7ee31cf
+[harness]   user pubkey:     4701d209ee1ae7d2886faeac6e5ba7018694e72971c3c436007c7b3d1c83aa2a
+[harness]   agent1 pubkey:   ecaea0d174b57b7aa520499224dfc8ec0fa2b188196f5ee02726d7c6d2da6655
+[harness]   agent2 pubkey:   543b283cdcadba78bfa24864e1c40c8860215bb0a05ee7b2df56119b1a81b6c4
+[harness]   project a-tag:   31933:4701d209ee1ae7d2886faeac6e5ba7018694e72971c3c436007c7b3d1c83aa2a:nak-interop-test-20260425212904-5557
+[scenario] rewriting llms.json to use mock fixture model 'mock/delegation-02'
+[scenario] mock LLM enabled: fixture=/Users/pablofernandez/Work/TENEX-ff3ssq/scripts/e2e/fixtures/mock-llm/02_delegation.json
+[scenario] pre-seeded project descriptor at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-43-1777141744-4598/backend/projects/nak-interop-test-20260425212904-5557/project.json
+[harness] starting relay on 127.0.0.1:54744 (admins=1)
+[harness] relay ready at ws://127.0.0.1:54744
+[harness] daemon config relays -> [ws://127.0.0.1:54744]
+[scenario] publishing 14199 (whitelist) as user
+connecting to ws://127.0.0.1:54744... ok.
+publishing to ws://127.0.0.1:54744... success.
+[scenario] publishing 31933 (project) as user
+connecting to ws://127.0.0.1:54744... ok.
+publishing to ws://127.0.0.1:54744... success.
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-43-1777141744-4598/backend)
+[harness] daemon ready (pid 5070, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-43-1777141744-4598/backend/daemon/tenex.lock)
+[harness] kind:14199 listener confirmed (probe #1 round-tripped after 500ms)
+[harness] kind:24030 listener confirmed (probe #1 round-tripped after 500ms)
+[harness] daemon subscription confirmed live (all probed listener filters registered)
+[scenario] publishing kind:24000 (boot)
+connecting to ws://127.0.0.1:54744... ok.
+publishing to ws://127.0.0.1:54744... success.
+[scenario]   boot event id=58c2ecf3678603e7167683b12fdc32b6f8ed64d4247aab13f2ae8d5c5609e595
+[scenario] waiting for daemon to publish kind:24010...
+[scenario] publishing kind:1 from user to agent1 (attempt 1)
+connecting to ws://127.0.0.1:54744... ok.
+publishing to ws://127.0.0.1:54744... success.
+[scenario]   user message id=281cd3a0aa4e4f527866188adb4b3913f8b8a0d18dd1edf1da6b9968e032456f
+[scenario]   dispatch enqueued ✓
+
+[scenario] waiting for mock-driven delegation flow to complete (timeout=60s)...
+[scenario]   observed: RAL journal has a terminal record
+[scenario]   observed: agent2 published kind:1 with fixture content
+[scenario] daemon log (last 80 lines):
+warning: unused import: `Path`
+  --> crates/tenex-daemon/src/daemon_signals.rs:12:17
+   |
+12 | use std::path::{Path, PathBuf};
+   |                 ^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: field `status` is never read
+  --> crates/tenex-daemon/src/per_agent_config_snapshot.rs:64:5
+   |
+61 | struct RawStoredAgent {
+   |        -------------- field in this struct
+...
+64 |     status: Option<String>,
+   |     ^^^^^^
+   |
+   = note: `RawStoredAgent` has a derived impl for the trait `Debug`, but this is intentionally ignored during dead code analysis
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `tenex-daemon` (lib) generated 2 warnings (run `cargo fix --lib -p tenex-daemon` to apply 1 suggestion)
+    Finished `release` profile [optimized] target(s) in 0.08s
+     Running `target/release/daemon --tenex-base-dir /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-43-1777141744-4598/backend`
+[2m18:29:08[0m  [1m[32m✓[0m  [1m[32mdaemon ready[0m  [2m(nostr on, telegram off)[0m
+[2m18:29:09[0m  ↑  [1m[93mnak-interop-test-20260425212904-5557[0m  [2m(1 booted)[0m
+[2m18:29:09[0m  ↻  [1m[93mnak-interop-test-20260425212904-5557[0m  [2m(1 booted)[0m
+[2m18:29:10[0m  [1m[33m●[0m  [1m[94magent1[0m  [2minbound-worker-d2a70788eec7cd1115f5c23b[0m  [1m[93mnak-interop-test-20260425212904-5557[0m
+[2m18:29:11[0m  [1m[33m●[0m  [1m[95magent2[0m  [2minbound-worker-69f7c92f9ad55a778cc88100[0m  [1m[93mnak-interop-test-20260425212904-5557[0m
+[2m18:29:11[0m  [1m[33m●[0m  [1m[95magent2[0m  [2minbound-worker-bb77dc4988aee2bce6fa87e8[0m  [1m[93mnak-interop-test-20260425212904-5557[0m
+
+thread 'notify-rs kqueue loop' (12049933) panicked at /Users/pablofernandez/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/kqueue-1.1.1/src/lib.rs:661:86:
+called `Option::unwrap()` on a `None` value
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+[2m18:29:12[0m  [1m[32m✓[0m  [1m[95magent2[0m  [2minbound-worker-69f7c92f9ad55a778cc88100[0m  [1m[93mnak-interop-test-20260425212904-5557[0m
+[2m18:29:12[0m  [1m[32m✓[0m  [1m[95magent2[0m  [2minbound-worker-bb77dc4988aee2bce6fa87e8[0m  [1m[93mnak-interop-test-20260425212904-5557[0m
+[harness] FATAL: ASSERT: agent1 never published its final kind:1 ('Final answer: agent2 says 4.')
+[harness] cleanup (script exit code=1)
+[harness] stopping daemon pid 5070 (SIGTERM)
+[harness] stopping relay pid 5059

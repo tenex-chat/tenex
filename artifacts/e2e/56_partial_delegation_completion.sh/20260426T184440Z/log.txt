@@ -1,0 +1,61 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-56-1777229080-8581
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-56-1777229080-8581
+[harness]   backend pubkey:  adf53202bd8993270c2b9a8d09be093c3abf74c5f5f8532a2dd8dae5c4ad3d9f
+[harness]   user pubkey:     b71340256187384192a8f8fd7c4952dca78ae42008ff797d686c9d2df0019a2b
+[harness]   agent1 pubkey:   b183540196040b618f42cd9353b9ab0e165831d7e2ea94ab0215bcc5938f799e
+[harness]   agent2 pubkey:   2312c7bf43bcca3e2e79641a4286d4c36e2eebec2a86972cd730302836269282
+[harness]   project a-tag:   31933:b71340256187384192a8f8fd7c4952dca78ae42008ff797d686c9d2df0019a2b:nak-interop-test-20260426214440-24454
+[scenario] generating agent3 key pair
+[scenario]   agent3 pubkey=7c167dd5f62e1981176a0445c28fea8b677e9321821a8a52762be5f2044f36a4
+[scenario]   agent3 JSON written
+[scenario] rewriting llms.json to use mock fixture model 'mock/partial-delegation-56'
+[scenario] mock LLM enabled: fixture=/Users/pablofernandez/Work/TENEX-ff3ssq/scripts/e2e/fixtures/mock-llm/56_partial_delegation_completion.json
+[harness] starting relay on 127.0.0.1:56074 (admins=1)
+[harness] relay ready at ws://127.0.0.1:56074
+[harness] daemon config relays -> [ws://127.0.0.1:56074]
+[scenario] publishing 14199 (whitelist) — includes agent3
+connecting to ws://127.0.0.1:56074... ok.
+publishing to ws://127.0.0.1:56074... success.
+[scenario] publishing 31933 (project) — includes agent3
+connecting to ws://127.0.0.1:56074... ok.
+publishing to ws://127.0.0.1:56074... success.
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-56-1777229080-8581/backend, binary=/Users/pablofernandez/Work/TENEX-ff3ssq/target/release/daemon)
+[harness] daemon ready (pid 9113, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-56-1777229080-8581/backend/daemon/tenex.lock)
+[harness] kind:14199 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] kind:24030 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] daemon subscription confirmed live (all probed listener filters registered)
+[scenario] publishing 24000 (boot)
+connecting to ws://127.0.0.1:56074... ok.
+publishing to ws://127.0.0.1:56074... success.
+[scenario]   boot event id=8831ab05f16ebca305b6c8c0a244ceb4af563fe73ff56099b7b21e1df5c363a6
+[scenario] publishing kind:1 from user to agent1 (attempt 1)
+connecting to ws://127.0.0.1:56074... ok.
+publishing to ws://127.0.0.1:56074... success.
+[scenario]   initial dispatch enqueued ✓
+
+[scenario] === Phase B: partial delegation completion ===
+[scenario]   observed: agent1 published delegation kind:1
+[scenario]   observed: agent2 published 'agent2-task-B-done'
+[scenario]   observed: agent3 published 'agent3-task-C-done'
+[scenario]   observed: RAL journal has 2 DelegationCompleted entries
+scripts/e2e/scenarios/56_partial_delegation_completion.sh: line 181:  9113 Killed: 9               TENEX_BASE_DIR="$TENEX_BASE_DIR" "$daemon_bin" --tenex-base-dir "$TENEX_BASE_DIR" >> "$HARNESS_DAEMON_LOG" 2>&1
+[scenario]   observed: agent1 published final kind:1
+
+[scenario] === Phase B results ===
+[scenario]   agent1 issued multi-delegation        : yes
+[scenario]   agent2 (B) published completion       : yes
+[scenario]   agent3 (C) published completion       : yes
+[scenario]   RAL journal >=2 DelegationCompleted   : yes
+[scenario]   agent1 published final kind:1         : yes
+
+[scenario] PASS — scenario 5.6: parallel delegation completions recorded in RAL journal
+[harness] RESULT status=pass scenario=56_partial_delegation_completion.sh detail=both B and C delegation completions recorded; agent1 resumed and published final answer
+[harness] cleanup (script exit code=0)
+[harness] stopping daemon pid 9113 (SIGTERM)
+[harness] stopping relay pid 9096

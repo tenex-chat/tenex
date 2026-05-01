@@ -1,0 +1,1 @@
+[harness] RESULT status=skip scenario=55_active_parent_receives_via_injection.sh detail=bash cannot reliably drive mid-stream injection; see cargo test proposal in script header

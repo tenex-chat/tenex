@@ -1,0 +1,42 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-15-1777228791-85859
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-15-1777228791-85859
+[harness]   backend pubkey:  5ba4fdf0e772c895abfcade8935207cc7f207a76c5e6c7440b4cb1f1f41de17f
+[harness]   user pubkey:     006699a6fa18f1baff2d9949bf226294d4b8e2247c757021b59b8f773d831c87
+[harness]   agent1 pubkey:   f661af5b8ed2a82a4f10c3bbcc33fe7a47ccbe68d73b92d8faf63404d1350c2a
+[harness]   agent2 pubkey:   541bcaa51eec2ab8fc77db204ebca058890438c44a5a841b34adb0199cc95ed0
+[harness]   project a-tag:   31933:006699a6fa18f1baff2d9949bf226294d4b8e2247c757021b59b8f773d831c87:nak-interop-test-20260426213951-23932
+[harness] starting relay on 127.0.0.1:55453 (admins=1)
+[harness] relay ready at ws://127.0.0.1:55453
+[harness] daemon config relays -> [ws://127.0.0.1:55453]
+connecting to ws://127.0.0.1:55453... ok.
+publishing to ws://127.0.0.1:55453... success.
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-15-1777228791-85859/backend)
+[harness] daemon ready (pid 86812, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-15-1777228791-85859/backend/daemon/tenex.lock)
+[harness] kind:14199 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] kind:24030 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] daemon subscription confirmed live (all probed listener filters registered)
+[scenario] phase 1: publishing NEWER kind:31933 (created_at=1777232393)
+connecting to ws://127.0.0.1:55453... ok.
+publishing to ws://127.0.0.1:55453... success.
+[scenario]   newer 31933 id=0adaf77ba716b4710eacf88b974d170940c99744b38b273dd0e9de4e3e3579b5 created_at=1777232393
+[scenario]   daemon log project_updated count after newer 31933: 1
+[scenario]   newer 31933 accepted (project_updated logged) ✓
+[scenario] phase 2: publishing OLDER kind:31933 (created_at=1777225193)
+connecting to ws://127.0.0.1:55453... ok.
+publishing to ws://127.0.0.1:55453... success.
+[scenario]   older 31933 id=9c02a29994d2de57c77530938fab103d1e87f38ba79a4d4b2a95d789d2336756 created_at=1777225193
+/Users/pablofernandez/Work/TENEX-ff3ssq/scripts/e2e-test-harness.sh: line 175: 86815 Killed: 9               TENEX_BASE_DIR="$TENEX_BASE_DIR" cargo run --release -p tenex-daemon --bin daemon -- --tenex-base-dir "$TENEX_BASE_DIR" >> "$HARNESS_DAEMON_LOG" 2>&1
+[scenario]   daemon log project_updated count after older 31933: 2 (informational)
+[scenario]   relay stored 31933 created_at=1777232393 (expected=1777232393)
+[scenario]   relay correctly retains the newer revision ✓
+[scenario] phase 3: checking daemon process is still alive
+[harness] RESULT status=fail scenario=15_boot_event_reordering.sh detail=daemon crashed after out-of-order 31933 delivery
+[harness] cleanup (script exit code=1)
+[harness] stopping daemon pid 86812 (SIGTERM)
+[harness] stopping relay pid 86792

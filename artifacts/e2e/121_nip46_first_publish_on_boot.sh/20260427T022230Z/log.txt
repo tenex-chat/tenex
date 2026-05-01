@@ -1,0 +1,26 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-121-1777256550-95837
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-121-1777256550-95837
+[harness]   backend pubkey:  a90cdb4ae21a43224dddf0fd6e0c9fed18a527afa5ceb326d13f7c75f042abd7
+[harness]   user pubkey:     c43d9e3ce8e8d835e9fbc1b1133a27fae857f5d97f6b1aba376daaaf6eceb88a
+[harness]   agent1 pubkey:   38563d940534ab12d442710b78a8a08e8f7e17f3d7fbeeb449d322a40be68248
+[harness]   agent2 pubkey:   7cb47a7875481477659016bdb2eddf78eb811a4075101238744c4392d1b356cf
+[harness]   project a-tag:   31933:c43d9e3ce8e8d835e9fbc1b1133a27fae857f5d97f6b1aba376daaaf6eceb88a:nak-interop-test-20260427052230-13134
+[harness] starting relay on 127.0.0.1:58857 (admins=1)
+[harness] relay ready at ws://127.0.0.1:58857
+[harness] daemon config relays -> [ws://127.0.0.1:58857]
+[harness] wrote 2 pubkey(s) to /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-121-1777256550-95837/backend/daemon/whitelist.txt
+[scenario] nak bunker pid=96772
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-121-1777256550-95837/backend, binary=/Users/pablofernandez/Work/TENEX-ff3ssq/target/release/daemon)
+[harness] daemon ready (pid 96810, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-121-1777256550-95837/backend/daemon/tenex.lock)
+/Users/pablofernandez/Work/TENEX-ff3ssq/scripts/e2e-test-harness.sh: line 206: 96810 Killed: 9               TENEX_BASE_DIR="$TENEX_BASE_DIR" "$daemon_bin" --tenex-base-dir "$TENEX_BASE_DIR" >> "$HARNESS_DAEMON_LOG" 2>&1
+[harness] TIMEOUT: kind:14199 probe never round-tripped within 45s
+[harness] FATAL: daemon subscription never became live
+[harness] cleanup (script exit code=1)
+[harness] stopping daemon pid 96810 (SIGTERM)
+[harness] stopping relay pid 96749

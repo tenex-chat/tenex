@@ -1,0 +1,29 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-71-1777256451-89460
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-71-1777256451-89460
+[harness]   backend pubkey:  7872ff2262faf251f77286150a5cdd0205811c0dec170a569b5e87aa09db2cc8
+[harness]   user pubkey:     0324c7b90636bf6b3147b9f04d47cf2f11f5581f9a194481314dde020d1ba3ed
+[harness]   agent1 pubkey:   e2e45ef39a4dcca42d3251ed9f614389cb41af68c0fd0a8f8366760346212547
+[harness]   agent2 pubkey:   ddc26cced0858bbdfe7e107ff58b349b5231a143f560c6d351ae57eaa0146e50
+[harness]   project a-tag:   31933:0324c7b90636bf6b3147b9f04d47cf2f11f5581f9a194481314dde020d1ba3ed:nak-interop-test-20260427052051-20166
+[harness] starting relay on 127.0.0.1:58673 (admins=1)
+[harness] relay ready at ws://127.0.0.1:58673
+[harness] daemon config relays -> [ws://127.0.0.1:58673]
+connecting to ws://127.0.0.1:58673... ok.
+publishing to ws://127.0.0.1:58673... success.
+connecting to ws://127.0.0.1:58673... ok.
+publishing to ws://127.0.0.1:58673... success.
+[harness] starting daemon with slow-boot worker (boot timeout=300ms)
+[harness] daemon ready (pid 90397)
+/Users/pablofernandez/Work/TENEX-ff3ssq/scripts/e2e-test-harness.sh: line 206: 90397 Killed: 9               TENEX_BASE_DIR="$TENEX_BASE_DIR" BUN_BIN="$SLOW_BOOT_WORKER" TENEX_WORKER_BOOT_TIMEOUT_MS=300 "$DAEMON_BIN" --tenex-base-dir "$TENEX_BASE_DIR" >> "$HARNESS_DAEMON_LOG" 2>&1
+[harness] kind:14199 probe #1 was signed locally but never became readable on the relay; retrying
+[harness] TIMEOUT: kind:14199 probe never round-tripped within 45s
+[harness] FATAL: daemon subscription never became live
+[harness] cleanup (script exit code=1)
+[harness] stopping daemon pid 90397 (SIGTERM)
+[harness] stopping relay pid 90374

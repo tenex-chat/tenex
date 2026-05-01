@@ -1,0 +1,42 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-37-1777136058-97809
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-37-1777136058-97809
+[harness]   backend pubkey:  e36f82253aaec09732ebedadc13cefeee4caa383a39e422942cae5bf26064ffa
+[harness]   user pubkey:     e2d110f5bc5f13d37a14551fdc00c41f353fee261c18212d9d7450ddff676bb6
+[harness]   agent1 pubkey:   bbef262ab9dfade2ba59a8ef8367c4baf71b08e11e3a2d62fae398cb89f23d13
+[harness]   agent2 pubkey:   91ab2ec2b4466ac94555ae317f8bed012013c7fadf8cafb73b4f95a84dabaa59
+[harness]   project a-tag:   31933:e2d110f5bc5f13d37a14551fdc00c41f353fee261c18212d9d7450ddff676bb6:nak-interop-test-20260425195418-5661
+[harness] starting relay on 127.0.0.1:54220 (admins=1)
+[harness] relay ready at ws://127.0.0.1:54220
+[harness] daemon config relays -> [ws://127.0.0.1:54220]
+connecting to ws://127.0.0.1:54220... ok.
+publishing to ws://127.0.0.1:54220... success.
+connecting to ws://127.0.0.1:54220... ok.
+publishing to ws://127.0.0.1:54220... success.
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-37-1777136058-97809/backend)
+/Users/pablofernandez/Work/TENEX-ff3ssq/scripts/e2e-test-harness.sh: line 175: 98374 Killed: 9               TENEX_BASE_DIR="$TENEX_BASE_DIR" cargo run --release -p tenex-daemon --bin daemon -- --tenex-base-dir "$TENEX_BASE_DIR" >> "$HARNESS_DAEMON_LOG" 2>&1
+[harness] daemon log tail:
+warning: field `status` is never read
+  --> crates/tenex-daemon/src/per_agent_config_snapshot.rs:64:5
+   |
+61 | struct RawStoredAgent {
+   |        -------------- field in this struct
+...
+64 |     status: Option<String>,
+   |     ^^^^^^
+   |
+   = note: `RawStoredAgent` has a derived impl for the trait `Debug`, but this is intentionally ignored during dead code analysis
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `tenex-daemon` (lib) generated 1 warning
+    Finished `release` profile [optimized] target(s) in 0.18s
+     Running `target/release/daemon --tenex-base-dir /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-37-1777136058-97809/backend`
+[harness] FATAL: daemon never wrote lockfile
+[harness] cleanup (script exit code=1)
+[harness] stopping daemon pid 98369 (SIGTERM)
+[harness] stopping relay pid 98343

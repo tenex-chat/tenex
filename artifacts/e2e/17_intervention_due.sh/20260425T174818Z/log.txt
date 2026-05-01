@@ -1,0 +1,27 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-17-1777139298-61643
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-17-1777139298-61643
+[harness]   backend pubkey:  aad7d9492fffc1ee03e19796c7f45253957c3b7d247b98780e4f869a8e94e135
+[harness]   user pubkey:     a6cc8af435cf39ddaa6b7e544230425e5ac08b7f87967ec6304c6769a7f87420
+[harness]   agent1 pubkey:   c42e143657720bec19f8c629c121b097942ec2e89a4b70b7d6eb578192007578
+[harness]   agent2 pubkey:   2e3810bc749fa357f1783d4b9e05624c3e7e405b6fafc3abeda238b5208c01e6
+[harness]   project a-tag:   31933:a6cc8af435cf39ddaa6b7e544230425e5ac08b7f87967ec6304c6769a7f87420:nak-interop-test-20260425204818-21237
+[scenario] seeded RAL journal (sequence=1, completed, ts=1777139290000ms)
+[scenario] seeded conversation file (root author=a6cc8af435cf39ddaa6b7e544230425e5ac08b7f87967ec6304c6769a7f87420)
+[scenario] pre-seeded agents/index.json: byProject[nak-interop-test-20260425204818-21237] = [c42e143657720bec19f8c629c121b097942ec2e89a4b70b7d6eb578192007578]
+[scenario] configured intervention (enabled, agent=agent1, timeoutSeconds=2, user whitelisted)
+[harness] starting relay on 127.0.0.1:50846 (admins=1)
+[harness] relay ready at ws://127.0.0.1:50846
+[harness] daemon config relays -> [ws://127.0.0.1:50846]
+[scenario] publishing kind:14199 (whitelist)
+connecting to ws://127.0.0.1:50846... ok.
+publishing to ws://127.0.0.1:50846... success.
+[scenario] publishing kind:31933 (project)
+connecting to ws://127.0.0.1:50846... ok.
+publishing to ws://127.0.0.1:50846... success.
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-17-1777139298-61643/backend)

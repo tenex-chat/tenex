@@ -1,0 +1,31 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-64-1777237764-71779
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-64-1777237764-71779
+[harness]   backend pubkey:  ed84c664e9605a4e09b77fa0a035d985de07aa2ebc6dfe45d23a4804cb2a22b5
+[harness]   user pubkey:     5ea29b964233cb9b3a25d902e51415fcbdc1188e385ea4221d2a2af490a51ffc
+[harness]   agent1 pubkey:   7e2c71013fd334c8369d117fa0cdabf7357054cd45ea687e9bc089e28971ad09
+[harness]   agent2 pubkey:   4ef2c42ae92178c4ff872db18d18abfc7abfc519e84c0c275f3eea8916e34202
+[harness]   project a-tag:   31933:5ea29b964233cb9b3a25d902e51415fcbdc1188e385ea4221d2a2af490a51ffc:nak-interop-test-20260427000924-13933
+[scenario] rewriting llms.json to use mock model 'mock/concurrent-race-64'
+[scenario] mock LLM enabled: fixture=/Users/pablofernandez/Work/TENEX-ff3ssq/scripts/e2e/fixtures/mock-llm/64_concurrent_message_race.json
+[harness] starting relay on 127.0.0.1:63570 (admins=1)
+[harness] relay ready at ws://127.0.0.1:63570
+[harness] daemon config relays -> [ws://127.0.0.1:63570]
+connecting to ws://127.0.0.1:63570... ok.
+publishing to ws://127.0.0.1:63570... success.
+connecting to ws://127.0.0.1:63570... ok.
+publishing to ws://127.0.0.1:63570... success.
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-64-1777237764-71779/backend, binary=/Users/pablofernandez/Work/TENEX-ff3ssq/target/release/daemon)
+[harness] daemon ready (pid 72814, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-64-1777237764-71779/backend/daemon/tenex.lock)
+[harness] kind:14199 probe #1 was signed locally but never became readable on the relay; retrying
+/Users/pablofernandez/Work/TENEX-ff3ssq/scripts/e2e-test-harness.sh: line 283: 72814 Killed: 9               TENEX_BASE_DIR="$TENEX_BASE_DIR" "$daemon_bin" --tenex-base-dir "$TENEX_BASE_DIR" >> "$HARNESS_DAEMON_LOG" 2>&1
+[harness] TIMEOUT: kind:14199 probe never round-tripped within 45s
+[harness] FATAL: daemon subscription never became live
+[harness] cleanup (script exit code=1)
+[harness] stopping daemon pid 72814 (SIGTERM)
+[harness] stopping relay pid 72787

@@ -1,0 +1,53 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-64-1777231944-78822
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-64-1777231944-78822
+[harness]   backend pubkey:  fc5682fcf68706115b39d27557e0f5b6b77323e94d626bc13edf63c7b0ea88b4
+[harness]   user pubkey:     3bd9d66f600822ca68f9028e9eb900a474a48bee8aa03ce4f5aa1f753a7ea21a
+[harness]   agent1 pubkey:   705ae5e20e5528c7e8bbf30eb19a85e6d528c0427f83b14f2a1c0e8c625a1698
+[harness]   agent2 pubkey:   4646eb3485b50f5a5853b2c78e56758b2eed83a91712df1de92ca7ecbde9763d
+[harness]   project a-tag:   31933:3bd9d66f600822ca68f9028e9eb900a474a48bee8aa03ce4f5aa1f753a7ea21a:nak-interop-test-20260426223224-26152
+[scenario] rewriting llms.json to use mock model 'mock/concurrent-race-64'
+[scenario] mock LLM enabled: fixture=/Users/pablofernandez/Work/TENEX-ff3ssq/scripts/e2e/fixtures/mock-llm/64_concurrent_message_race.json
+[harness] starting relay on 127.0.0.1:58265 (admins=1)
+[harness] relay ready at ws://127.0.0.1:58265
+[harness] daemon config relays -> [ws://127.0.0.1:58265]
+connecting to ws://127.0.0.1:58265... ok.
+publishing to ws://127.0.0.1:58265... success.
+connecting to ws://127.0.0.1:58265... ok.
+publishing to ws://127.0.0.1:58265... success.
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-64-1777231944-78822/backend, binary=/Users/pablofernandez/Work/TENEX-ff3ssq/target/release/daemon)
+[harness] daemon ready (pid 79293, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-64-1777231944-78822/backend/daemon/tenex.lock)
+[harness] kind:14199 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] kind:24030 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] daemon subscription confirmed live (all probed listener filters registered)
+connecting to ws://127.0.0.1:58265... ok.
+publishing to ws://127.0.0.1:58265... success.
+[scenario] publishing first kind:1 (root of conversation)
+connecting to ws://127.0.0.1:58265... ok.
+publishing to ws://127.0.0.1:58265... success.
+[scenario]   first message id=e8e96b54219f8ec651eabaec16e5d234798e5a695f8d58bf4bd9d7f5bdf4b794
+[scenario] publishing second kind:1 (3ms later, same conversation via e-tag)
+connecting to ws://127.0.0.1:58265... ok.
+publishing to ws://127.0.0.1:58265... success.
+[scenario]   second message id=46e78177c525ef9902fcbeaedd01d11eb1815eb4c38da7ad1f7e0e7242594f45
+[scenario] waiting for both dispatches to appear in queue...
+[scenario]   first dispatch_id=inbound-e980b1229cab0cbdb70bfc6b
+[scenario]   second dispatch_id=inbound-76fbfea18c6769df3ac6f0eb
+[scenario]   dispatch_ids are distinct ✓
+[scenario] waiting for first dispatch to be LEASED...
+[scenario]   no simultaneous LEASED pair ✓
+[2m19:32:28[0m  [1m[32m✓[0m  [1m[32mdaemon ready[0m  [2m(nostr on, telegram off)[0m
+[2m19:32:28[0m  ↑  [1m[93mnak-interop-test-20260426223224-26152[0m  [2m(1 booted)[0m
+[2m19:32:29[0m  [1m[33m●[0m  [1m[94magent1[0m  [2minbound-worker-e980b1229cab0cbdb70bfc6b[0m  [1m[93mnak-interop-test-20260426223224-26152[0m
+[2m19:32:29[0m  [1m[32m✓[0m  [1m[94magent1[0m  [2minbound-worker-e980b1229cab0cbdb70bfc6b[0m  [1m[93mnak-interop-test-20260426223224-26152[0m
+[2m19:32:29[0m  [1m[33m●[0m  [1m[94magent1[0m  [2minbound-worker-76fbfea18c6769df3ac6f0eb[0m  [1m[93mnak-interop-test-20260426223224-26152[0m
+[2m19:32:29[0m  [1m[32m✓[0m  [1m[94magent1[0m  [2minbound-worker-76fbfea18c6769df3ac6f0eb[0m  [1m[93mnak-interop-test-20260426223224-26152[0m
+[harness] RESULT status=fail scenario=64_concurrent_message_race.sh detail=first dispatch never reached LEASED within 15s
+[harness] cleanup (script exit code=1)
+[harness] stopping daemon pid 79293 (SIGTERM)
+[harness] stopping relay pid 79282

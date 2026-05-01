@@ -1,0 +1,61 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-1777238564-12410
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-1777238564-12410
+[harness]   backend pubkey:  715f6a6996aec1bdc401493d97eee07a149dae8aed276e65ccee2c48826aa59b
+[harness]   user pubkey:     09f5070a62aae5bae99339487467771313d3b7ddf34342cc4cc98dd6b9d7e641
+[harness]   agent1 pubkey:   bb6f5f90ec94ffeb72cb140f57593ae17937d066a3829f73f0439c4858ed333d
+[harness]   agent2 pubkey:   ba59fe972eee5a1997111a4145c2fb93325420e42d37753964858178eb69ca07
+[harness]   project a-tag:   31933:09f5070a62aae5bae99339487467771313d3b7ddf34342cc4cc98dd6b9d7e641:nak-interop-test-20260427002244-19186
+[scenario] rewriting llms.json to use mock fixture model 'mock/parallel-delegation-05'
+[scenario] mock LLM enabled: fixture=/Users/pablofernandez/Work/TENEX-ff3ssq/scripts/e2e/fixtures/mock-llm/05_parallel_delegation.json
+[scenario] pre-seeded project descriptor at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-1777238564-12410/backend/projects/nak-interop-test-20260427002244-19186/project.json
+[harness] starting relay on 127.0.0.1:65240 (admins=1)
+[harness] relay ready at ws://127.0.0.1:65240
+[harness] daemon config relays -> [ws://127.0.0.1:65240]
+[scenario] publishing 14199 (whitelist) as user
+connecting to ws://127.0.0.1:65240... ok.
+publishing to ws://127.0.0.1:65240... success.
+[scenario] publishing 31933 (project) as user
+connecting to ws://127.0.0.1:65240... ok.
+publishing to ws://127.0.0.1:65240... success.
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-1777238564-12410/backend, binary=/Users/pablofernandez/Work/TENEX-ff3ssq/target/release/daemon)
+[harness] daemon ready (pid 14248, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-1777238564-12410/backend/daemon/tenex.lock)
+[harness] kind:14199 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] kind:24030 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] daemon subscription confirmed live (all probed listener filters registered)
+[scenario] publishing 24000 (boot) as user
+connecting to ws://127.0.0.1:65240... ok.
+publishing to ws://127.0.0.1:65240... success.
+[scenario]   boot event id=4dde5c706adc674f6eb1113ce4db1638b1a81a9601ea2c6b29a42a7954630965
+[scenario] waiting for daemon to process boot and publish kind:24010...
+[scenario]   24010 status published for our project ✓
+[scenario] publishing kind:1 from user to agent1 (attempt 1)
+connecting to ws://127.0.0.1:65240... ok.
+publishing to ws://127.0.0.1:65240... success.
+[scenario]   user message id=ac737ec4c7f4efd32ce0da9a1c29c65e12487fe66a5f54e8875427e4e99a5cae
+[scenario]   dispatch enqueued ✓
+[scenario] === Phase A complete: daemon plumbing OK ===
+
+[scenario] === Phase B: asserting mock-driven parallel delegation ===
+/Users/pablofernandez/Work/TENEX-ff3ssq/scripts/e2e/scenarios/05_parallel_delegation_q_tags.sh: line 315: 14248 Killed: 9               TENEX_BASE_DIR="$TENEX_BASE_DIR" "$daemon_bin" --tenex-base-dir "$TENEX_BASE_DIR" >> "$HARNESS_DAEMON_LOG" 2>&1
+
+[scenario] === Phase B observations ===
+[scenario]   agent1 published kind:1                     : no
+[scenario]   agent2 published alpha response              : no
+[scenario]   agent2 published beta response               : no
+[scenario]   agent1 >=1 tool_use(delegate) event          : no
+[scenario]   agent1 >=2 tool_use(delegate) events         : no
+[scenario]   agent1 final kind:1 (post-delegation)        : no
+[scenario]   RAL journal >=2 completion records           : no
+[2m21:22:48[0m  [1m[32m✓[0m  [1m[32mdaemon ready[0m  [2m(nostr on, telegram off)[0m
+[2m21:22:48[0m  ↑  [1m[96mnak-interop-test-20260427002244-19186[0m  [2m(1 booted)[0m
+[2m21:22:49[0m  [1m[33m●[0m  [1m[34magent1[0m  [2minbound-worker-f6f92868edd03d245dfc2fae[0m  [1m[96mnak-interop-test-20260427002244-19186[0m
+[harness] FATAL: ASSERT: agent1 never published any kind:1 event
+[harness] cleanup (script exit code=1)
+[harness] stopping daemon pid 14248 (SIGTERM)
+[harness] stopping relay pid 14204

@@ -1,0 +1,43 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-12-1777256495-94512
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-12-1777256495-94512
+[harness]   backend pubkey:  0fdf1621d25b9918b60d7f96e04b9f66795bc5a13fcefcbf90339a323da8d3ee
+[harness]   user pubkey:     98e86d2af077ac7d967b8f74ee3a5b30ad23ea03e711a05d7ebf87f9a9eb7ed0
+[harness]   agent1 pubkey:   38958dc9d181c4bc1b9ae445f12b47ba88f9db2589336a813716510d6a7e1c9a
+[harness]   agent2 pubkey:   558afe16710bd0f59ed74eb2c5fc6fb46710b0a41b51dca6cb19a5f9db86567d
+[harness]   project a-tag:   31933:98e86d2af077ac7d967b8f74ee3a5b30ad23ea03e711a05d7ebf87f9a9eb7ed0:nak-interop-test-20260427052135-22896
+[harness] starting relay on 127.0.0.1:58825 (admins=1)
+[harness] relay ready at ws://127.0.0.1:58825
+[harness] daemon config relays -> [ws://127.0.0.1:58825]
+connecting to ws://127.0.0.1:58825... ok.
+publishing to ws://127.0.0.1:58825... success.
+connecting to ws://127.0.0.1:58825... ok.
+publishing to ws://127.0.0.1:58825... success.
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-12-1777256495-94512/backend, binary=/Users/pablofernandez/Work/TENEX-ff3ssq/target/release/daemon)
+[harness] daemon ready (pid 95017, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-12-1777256495-94512/backend/daemon/tenex.lock)
+[harness] kind:14199 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] kind:24030 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] daemon subscription confirmed live (all probed listener filters registered)
+[scenario] phase 1: verifying no 24010 is published before boot
+[scenario]   pre-boot: no 24010 for our project ✓
+[scenario] phase 2: publishing kind:24000 boot event
+connecting to ws://127.0.0.1:58825... ok.
+publishing to ws://127.0.0.1:58825... success.
+[scenario]   boot event id=5031b8e6d38f447b5af284f74f1f09a567e021ba3b48e7f1ca2840de013d8768
+[scenario]   waiting for boot + project-status publish (stream)
+[scenario]   post-boot: 24010 published for our a-tag ✓
+[scenario]   ingress recorded project_booted for our d-tag ✓
+[scenario] phase 3: publishing kind:1 after boot
+connecting to ws://127.0.0.1:58825... ok.
+publishing to ws://127.0.0.1:58825... success.
+[scenario]   post-boot dispatch enqueued ✓
+
+[scenario] PASS — scenario 1.2 Boot activates dispatch
+[harness] cleanup (script exit code=0)
+[harness] stopping daemon pid 95017 (SIGTERM)
+[harness] stopping relay pid 94999

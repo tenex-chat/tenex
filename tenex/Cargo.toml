@@ -24,7 +24,7 @@ tenex-telemetry = { path = "../crates/tenex-telemetry" }
 libc = "0.2"
 shell-words = "1"
 console = "0.15"
-inquire = "0.7"
+inquire = { version = "0.7", features = ["editor"] }
 indexmap = { version = "2", features = ["serde"] }
 url = "2"
 crossterm = "0.25"

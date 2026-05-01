@@ -1,0 +1,32 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-1777220188-21605
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-1777220188-21605
+[harness]   backend pubkey:  93862d7081105573d852917695b50b50cdc0c988d7ce49d87665764d88f5b93d
+[harness]   user pubkey:     1ae759a9eb1299e5158a33169bed86850182d79e34ee88fd00c86156378cb586
+[harness]   agent1 pubkey:   043b4c4028c65ee0c5fb42788587eea4792da03539922ac8b52d432db46938ee
+[harness]   agent2 pubkey:   849d023e5882d4df2f21aadc621d04787272e1f324589c8b38ea5a9facb084dc
+[harness]   project a-tag:   31933:1ae759a9eb1299e5158a33169bed86850182d79e34ee88fd00c86156378cb586:nak-interop-test-20260426191628-20668
+[scenario] rewriting llms.json to use mock fixture model 'mock/parallel-delegation-05'
+[scenario] mock LLM enabled: fixture=/Users/pablofernandez/Work/TENEX-ff3ssq/scripts/e2e/fixtures/mock-llm/05_parallel_delegation.json
+[scenario] pre-seeded project descriptor at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-1777220188-21605/backend/projects/nak-interop-test-20260426191628-20668/project.json
+[harness] starting relay on 127.0.0.1:64031 (admins=1)
+[harness] relay ready at ws://127.0.0.1:64031
+[harness] daemon config relays -> [ws://127.0.0.1:64031]
+[scenario] publishing 14199 (whitelist) as user
+connecting to ws://127.0.0.1:64031... ok.
+publishing to ws://127.0.0.1:64031... success.
+[scenario] publishing 31933 (project) as user
+connecting to ws://127.0.0.1:64031... ok.
+publishing to ws://127.0.0.1:64031... success.
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-1777220188-21605/backend)
+[harness] daemon ready (pid 22544, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-1777220188-21605/backend/daemon/tenex.lock)
+[harness] TIMEOUT: kind:14199 probe never round-tripped within 45s
+[harness] FATAL: daemon subscription never became live
+[harness] cleanup (script exit code=1)
+[harness] stopping daemon pid 22544 (SIGTERM)
+[harness] stopping relay pid 22522

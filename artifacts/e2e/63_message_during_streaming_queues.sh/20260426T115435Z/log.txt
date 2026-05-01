@@ -1,0 +1,112 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-63-1777204475-43109
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-63-1777204475-43109
+[harness]   backend pubkey:  8d52cda2c699b28067e13f2d196c94b4dea8fe4572309557db5d327242c9bf54
+[harness]   user pubkey:     5e56308dfa85b2e6b172ce1e15512c515a339ac842e63a15d1ee3086e8c73674
+[harness]   agent1 pubkey:   7462bbb6e55e6ba86b355a55cd781831520f1ced0ec38a9787a096ea7c332812
+[harness]   agent2 pubkey:   67b06d5314e7b8241502663261ee8b19ca6c753151c6bb2f115cb981654469d5
+[harness]   project a-tag:   31933:5e56308dfa85b2e6b172ce1e15512c515a339ac842e63a15d1ee3086e8c73674:nak-interop-test-20260426145435-23727
+[scenario] rewriting llms.json to use mock model 'mock/streaming-63'
+[scenario] mock LLM enabled: fixture=/Users/pablofernandez/Work/TENEX-ff3ssq/scripts/e2e/fixtures/mock-llm/63_message_during_streaming.json
+[harness] starting relay on 127.0.0.1:54112 (admins=1)
+[harness] relay ready at ws://127.0.0.1:54112
+[harness] daemon config relays -> [ws://127.0.0.1:54112]
+connecting to ws://127.0.0.1:54112... ok.
+publishing to ws://127.0.0.1:54112... success.
+connecting to ws://127.0.0.1:54112... ok.
+publishing to ws://127.0.0.1:54112... success.
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-63-1777204475-43109/backend)
+[harness] daemon ready (pid 48781, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-63-1777204475-43109/backend/daemon/tenex.lock)
+[harness] kind:14199 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] kind:24030 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] daemon subscription confirmed live (all probed listener filters registered)
+connecting to ws://127.0.0.1:54112... ok.
+publishing to ws://127.0.0.1:54112... success.
+[scenario] publishing first kind:1 (triggers 3s streaming response)
+connecting to ws://127.0.0.1:54112... ok.
+publishing to ws://127.0.0.1:54112... success.
+[scenario]   first message id=8f168af3125a2a526f649f96bc60acb538b6525e85b6a5e1753f577dbaf8b0bb
+[scenario] waiting for first dispatch to be LEASED (worker active)...
+[scenario]   first dispatch is LEASED (agent1 streaming) ✓
+[scenario] publishing second kind:1 mid-stream
+connecting to ws://127.0.0.1:54112... ok.
+publishing to ws://127.0.0.1:54112... success.
+[scenario]   second message id=1dcca43bc1653c916b33c80130d8afba91b2249e80a8a17655a9ef736191475e
+[scenario] waiting for second dispatch to appear as QUEUED...
+[scenario]   second dispatch is QUEUED (not pre-empting first stream) ✓
+[scenario] dispatch queue state:
+[
+  {
+    "schemaVersion": 1,
+    "sequence": 1,
+    "timestamp": 1777204479973,
+    "correlationId": "inbound-dispatch-c0bb5142e49ce9a8fe859436",
+    "dispatchId": "inbound-c0bb5142e49ce9a8fe859436",
+    "ral": {
+      "projectId": "nak-interop-test-20260426145435-23727",
+      "agentPubkey": "7462bbb6e55e6ba86b355a55cd781831520f1ced0ec38a9787a096ea7c332812",
+      "conversationId": "8f168af3125a2a526f649f96bc60acb538b6525e85b6a5e1753f577dbaf8b0bb",
+      "ralNumber": 1
+    },
+    "triggeringEventId": "8f168af3125a2a526f649f96bc60acb538b6525e85b6a5e1753f577dbaf8b0bb",
+    "claimToken": "inbound-claim-c0bb5142e49ce9a8fe859436",
+    "status": "queued"
+  },
+  {
+    "schemaVersion": 1,
+    "sequence": 2,
+    "timestamp": 1777204480037,
+    "correlationId": "worker-admission-driver:1777204480037:admission-0:lease",
+    "dispatchId": "inbound-c0bb5142e49ce9a8fe859436",
+    "ral": {
+      "projectId": "nak-interop-test-20260426145435-23727",
+      "agentPubkey": "7462bbb6e55e6ba86b355a55cd781831520f1ced0ec38a9787a096ea7c332812",
+      "conversationId": "8f168af3125a2a526f649f96bc60acb538b6525e85b6a5e1753f577dbaf8b0bb",
+      "ralNumber": 1
+    },
+    "triggeringEventId": "8f168af3125a2a526f649f96bc60acb538b6525e85b6a5e1753f577dbaf8b0bb",
+    "claimToken": "inbound-claim-c0bb5142e49ce9a8fe859436",
+    "status": "leased"
+  },
+  {
+    "schemaVersion": 1,
+    "sequence": 3,
+    "timestamp": 1777204480290,
+    "correlationId": "inbound-dispatch-7dd0e3d04fe1c40f625f05c7",
+    "dispatchId": "inbound-7dd0e3d04fe1c40f625f05c7",
+    "ral": {
+      "projectId": "nak-interop-test-20260426145435-23727",
+      "agentPubkey": "7462bbb6e55e6ba86b355a55cd781831520f1ced0ec38a9787a096ea7c332812",
+      "conversationId": "1dcca43bc1653c916b33c80130d8afba91b2249e80a8a17655a9ef736191475e",
+      "ralNumber": 1
+    },
+    "triggeringEventId": "1dcca43bc1653c916b33c80130d8afba91b2249e80a8a17655a9ef736191475e",
+    "claimToken": "inbound-claim-7dd0e3d04fe1c40f625f05c7",
+    "status": "queued"
+  },
+  {
+    "schemaVersion": 1,
+    "sequence": 4,
+    "timestamp": 1777204480037,
+    "correlationId": "worker-admission-driver:1777204480037:admission-1:lease",
+    "dispatchId": "inbound-7dd0e3d04fe1c40f625f05c7",
+    "ral": {
+      "projectId": "nak-interop-test-20260426145435-23727",
+      "agentPubkey": "7462bbb6e55e6ba86b355a55cd781831520f1ced0ec38a9787a096ea7c332812",
+      "conversationId": "1dcca43bc1653c916b33c80130d8afba91b2249e80a8a17655a9ef736191475e",
+      "ralNumber": 1
+    },
+    "triggeringEventId": "1dcca43bc1653c916b33c80130d8afba91b2249e80a8a17655a9ef736191475e",
+    "claimToken": "inbound-claim-7dd0e3d04fe1c40f625f05c7",
+    "status": "leased"
+  }
+]
+[harness] RESULT status=fail scenario=63_message_during_streaming_queues.sh detail=ASSERT: 2 dispatches simultaneously in LEASED state (expected <=1)
+[harness] cleanup (script exit code=1)
+[harness] stopping daemon pid 48781 (SIGTERM)
+[harness] stopping relay pid 47965

@@ -1,0 +1,35 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-17-1777239631-60440
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-17-1777239631-60440
+[harness]   backend pubkey:  c3b3ce1b4724ef2983d5a12b47ee4d5eb0c2696464cee35a80f1c448a5aef167
+[harness]   user pubkey:     a7830a17885eaff57c96efac25fdef746936041b2bf1f176a52971f3b5db76eb
+[harness]   agent1 pubkey:   6cf64c3f9260fa0b2c6b37f050843eb994a161d69b35789569288a8dd4965cc0
+[harness]   agent2 pubkey:   47260802e50636aa16bac5cd802cd2dc8235be2dd5094bb0655a80088f8c73bd
+[harness]   project a-tag:   31933:a7830a17885eaff57c96efac25fdef746936041b2bf1f176a52971f3b5db76eb:nak-interop-test-20260427004031-626
+[scenario] seeded RAL journal (sequence=1, completed, ts=1777239623000ms)
+[scenario] seeded conversation file (root author=a7830a17885eaff57c96efac25fdef746936041b2bf1f176a52971f3b5db76eb)
+[scenario] pre-seeded agents/index.json: byProject[nak-interop-test-20260427004031-626] = [6cf64c3f9260fa0b2c6b37f050843eb994a161d69b35789569288a8dd4965cc0]
+[scenario] configured intervention (enabled, agent=agent1, timeoutSeconds=2, user whitelisted)
+[harness] starting relay on 127.0.0.1:50755 (admins=1)
+[harness] relay ready at ws://127.0.0.1:50755
+[harness] daemon config relays -> [ws://127.0.0.1:50755]
+[scenario] publishing kind:14199 (whitelist)
+connecting to ws://127.0.0.1:50755... ok.
+publishing to ws://127.0.0.1:50755... success.
+[scenario] publishing kind:31933 (project)
+connecting to ws://127.0.0.1:50755... ok.
+publishing to ws://127.0.0.1:50755... success.
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-17-1777239631-60440/backend, binary=/Users/pablofernandez/Work/TENEX-ff3ssq/target/release/daemon)
+[harness] daemon ready (pid 61348, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-17-1777239631-60440/backend/daemon/tenex.lock)
+/Users/pablofernandez/Work/TENEX-ff3ssq/scripts/e2e-test-harness.sh: line 206: 61348 Killed: 9               TENEX_BASE_DIR="$TENEX_BASE_DIR" "$daemon_bin" --tenex-base-dir "$TENEX_BASE_DIR" >> "$HARNESS_DAEMON_LOG" 2>&1
+[harness] kind:14199 probe #1 was signed locally but never became readable on the relay; retrying
+[harness] TIMEOUT: kind:14199 probe never round-tripped within 45s
+[harness] FATAL: daemon subscription never became live
+[harness] cleanup (script exit code=1)
+[harness] stopping daemon pid 61348 (SIGTERM)
+[harness] stopping relay pid 61316

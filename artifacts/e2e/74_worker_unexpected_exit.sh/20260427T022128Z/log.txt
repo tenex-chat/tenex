@@ -1,0 +1,27 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-74-1777256488-93020
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-74-1777256488-93020
+[harness]   backend pubkey:  2eb5a82fd952f62af1c1069a1c814ceefc44e916e987d91a70eed10d303f796b
+[harness]   user pubkey:     e360844e27edfcb469771f3f2a0dd50655352ae82f3a0c024dc1ccae86d011f9
+[harness]   agent1 pubkey:   50ced091da9c41130f9f982429844183a249946fd3f0246533a86da8d6eb7b41
+[harness]   agent2 pubkey:   da4c08ce642f30401b6c3ae880aabf3fe7869901f9d03eb1ff119507c1d39342
+[harness]   project a-tag:   31933:e360844e27edfcb469771f3f2a0dd50655352ae82f3a0c024dc1ccae86d011f9:nak-interop-test-20260427052128-32290
+[harness] starting relay on 127.0.0.1:58798 (admins=1)
+[harness] relay ready at ws://127.0.0.1:58798
+[harness] daemon config relays -> [ws://127.0.0.1:58798]
+connecting to ws://127.0.0.1:58798... ok.
+publishing to ws://127.0.0.1:58798... success.
+connecting to ws://127.0.0.1:58798... ok.
+publishing to ws://127.0.0.1:58798... success.
+[harness] starting daemon with long-running worker
+/Users/pablofernandez/Work/TENEX-ff3ssq/scripts/e2e-test-harness.sh: line 691: 93911 Killed: 9               TENEX_BASE_DIR="$TENEX_BASE_DIR" BUN_BIN="$LONG_RUNNING_WORKER" "$DAEMON_BIN" --tenex-base-dir "$TENEX_BASE_DIR" >> "$HARNESS_DAEMON_LOG" 2>&1
+[harness] daemon log tail:
+[harness] FATAL: daemon never wrote lockfile
+[harness] cleanup (script exit code=1)
+[harness] stopping daemon pid 93911 (SIGTERM)
+[harness] stopping relay pid 93885

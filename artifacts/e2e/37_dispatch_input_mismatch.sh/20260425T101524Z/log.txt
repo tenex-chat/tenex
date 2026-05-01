@@ -1,0 +1,46 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-37-1777112124-1643
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-37-1777112124-1643
+[harness]   backend pubkey:  13517bc08d05dd1c5c3175b32e3f19852320175ff41e395b544baa434f557434
+[harness]   user pubkey:     cd4db286aaedceead77469812a03bdd9450ceddee0c706ac1944bd780893d0e8
+[harness]   agent1 pubkey:   498b03a866e8f767e1b211928d0b356faeb1da46572515d618146c890de2bab1
+[harness]   agent2 pubkey:   1492045e28ca33be96d909860154d71273dafc315cb71cb46d6d1d9a0bca9c21
+[harness]   project a-tag:   31933:cd4db286aaedceead77469812a03bdd9450ceddee0c706ac1944bd780893d0e8:nak-interop-test-20260425131524-17209
+[harness] starting relay on 127.0.0.1:56013 (admins=1)
+[harness] relay ready at ws://127.0.0.1:56013
+[harness] daemon config relays -> [ws://127.0.0.1:56013]
+connecting to ws://127.0.0.1:56013... ok.
+publishing to ws://127.0.0.1:56013... success.
+connecting to ws://127.0.0.1:56013... ok.
+publishing to ws://127.0.0.1:56013... success.
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-37-1777112124-1643/backend)
+[harness] daemon ready (pid 2134, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-37-1777112124-1643/backend/daemon/tenex.lock)
+[harness] kind:14199 listener confirmed (probe #1 round-tripped after 500ms)
+[harness] kind:24030 listener confirmed (probe #1 round-tripped after 500ms)
+[harness] daemon subscription confirmed live (all probed listener filters registered)
+connecting to ws://127.0.0.1:56013... ok.
+publishing to ws://127.0.0.1:56013... success.
+[scenario] boot event id=44e722c7bb651f6113bf5cd1029bd76c1e7d50696ad31f3b77dbdec01ac60993
+connecting to ws://127.0.0.1:56013... ok.
+publishing to ws://127.0.0.1:56013... success.
+[scenario] inbound event id=0f7a351490c9e6db4e5218f63d416ee4e106b41104d6d015468c28ae01d27199 (attempt 1)
+[scenario] dispatch_id=inbound-8bb1dabed0b2895bb650e6b0
+[scenario] sidecar present at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-37-1777112124-1643/backend/daemon/workers/dispatch-inputs/inbound-8bb1dabed0b2895bb650e6b0.json
+[scenario] stopping daemon to corrupt sidecar
+[harness] stopping daemon pid 2134 (SIGTERM)
+[scenario] sidecar corrupted: triggeringEventId 0f7a351490c9e6db4e5218f63d416ee4e106b41104d6d015468c28ae01d27199 -> deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef
+[scenario] restarting daemon
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-37-1777112124-1643/backend)
+[harness] daemon ready (pid 2589, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-37-1777112124-1643/backend/daemon/tenex.lock)
+[scenario] waiting 10s for dispatch tick to attempt admission + fail
+[scenario] daemon log (post-restart tail):
+[2m10:15:43[0m  [1m[33m●[0m  [1m[92magent1[0m  [2minbound-worker-8bb1dabed0b2895bb650e6b0[0m  [1m[92mnak-interop-test-20260425131524-17209[0m
+[harness] FATAL: ASSERT: expected triggering event mismatch error in daemon log
+[harness] cleanup (script exit code=1)
+[harness] stopping daemon pid 2589 (SIGTERM)
+[harness] stopping relay pid 2123

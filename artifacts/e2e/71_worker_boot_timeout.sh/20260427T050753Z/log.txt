@@ -1,0 +1,41 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-71-1777266473-69080
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-71-1777266473-69080
+[harness]   backend pubkey:  5af03a561100b3a2ec3e4ef21188c4efb109b54ffc61fc6ed2e67f173571e036
+[harness]   user pubkey:     2100eb9253170ffe9faab7a59921adec7aab8e40449ee59fc4d247ef5084e4ec
+[harness]   agent1 pubkey:   e9d47f500c86075c322d4d1ea13f877e96c408b60a462495f23a231cfe90fc5d
+[harness]   agent2 pubkey:   546e66fe8427f2e2d635c0451e20cbf36ed3cc67d4ced18dfaf5733fd938ed66
+[harness]   project a-tag:   31933:2100eb9253170ffe9faab7a59921adec7aab8e40449ee59fc4d247ef5084e4ec:nak-interop-test-20260427080753-31235
+[harness] starting relay on 127.0.0.1:64852 (admins=1)
+[harness] relay ready at ws://127.0.0.1:64852
+[harness] daemon config relays -> [ws://127.0.0.1:64852]
+connecting to ws://127.0.0.1:64852... ok.
+publishing to ws://127.0.0.1:64852... success.
+connecting to ws://127.0.0.1:64852... ok.
+publishing to ws://127.0.0.1:64852... success.
+[harness] starting daemon with slow-boot worker (boot timeout=300ms)
+[harness] daemon ready (pid 69559)
+[harness] kind:14199 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] kind:24030 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] daemon subscription confirmed live (all probed listener filters registered)
+[scenario] publishing kind:24000 (boot)
+connecting to ws://127.0.0.1:64852... ok.
+publishing to ws://127.0.0.1:64852... success.
+[scenario] publishing kind:1 to trigger worker spawn
+connecting to ws://127.0.0.1:64852... ok.
+publishing to ws://127.0.0.1:64852... success.
+[scenario] waiting for boot timeout error in daemon log...
+[scenario]   daemon process still alive ✓
+[scenario]   boot timeout error logged ✓
+[scenario]   no Rust panic in daemon log ✓
+
+[scenario] PASS — scenario 7.1 Worker boot timeout
+[harness] RESULT status=pass scenario=71_worker_boot_timeout.sh detail=daemon survives worker boot timeout; error logged; no panic
+[harness] cleanup (script exit code=0)
+[harness] stopping daemon pid 69559 (SIGTERM)
+[harness] stopping relay pid 69545

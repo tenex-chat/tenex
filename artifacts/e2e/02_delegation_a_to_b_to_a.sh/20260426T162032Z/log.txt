@@ -1,0 +1,85 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-1777220432-32995
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-1777220432-32995
+[harness]   backend pubkey:  f7ad7eeecbbdbaa8329ad621cbf5600e0f205721b896c2f1c9b3d03b8c08dddd
+[harness]   user pubkey:     ab6cd0e165c846b0a57f164478c140a709e334b860f027f3d96748174a5feb33
+[harness]   agent1 pubkey:   bbc1a83e4345bd099cca881fdc57f0ceb2a16358fd894df4b37f018b4f3955f4
+[harness]   agent2 pubkey:   7e2ceb1697113bdfc65feb10c56f369c63d8dabbb8374adac7fff865baf7ddc7
+[harness]   project a-tag:   31933:ab6cd0e165c846b0a57f164478c140a709e334b860f027f3d96748174a5feb33:nak-interop-test-20260426192032-12673
+[scenario] rewriting llms.json to use mock fixture model 'mock/delegation-02'
+[scenario] mock LLM enabled: fixture=/Users/pablofernandez/Work/TENEX-ff3ssq/scripts/e2e/fixtures/mock-llm/02_delegation.json
+[scenario] pre-seeded project descriptor at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-1777220432-32995/backend/projects/nak-interop-test-20260426192032-12673/project.json
+[harness] starting relay on 127.0.0.1:52882 (admins=1)
+[harness] relay ready at ws://127.0.0.1:52882
+[harness] daemon config relays -> [ws://127.0.0.1:52882]
+[scenario] publishing 14199 (whitelist) as user
+connecting to ws://127.0.0.1:52882... ok.
+publishing to ws://127.0.0.1:52882... success.
+[scenario] publishing 31933 (project) as user
+connecting to ws://127.0.0.1:52882... ok.
+publishing to ws://127.0.0.1:52882... success.
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-1777220432-32995/backend)
+[harness] daemon ready (pid 33697, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-1777220432-32995/backend/daemon/tenex.lock)
+[harness] kind:14199 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] kind:24030 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] daemon subscription confirmed live (all probed listener filters registered)
+[scenario] publishing 24000 (boot) as user
+connecting to ws://127.0.0.1:52882... ok.
+publishing to ws://127.0.0.1:52882... success.
+[scenario]   boot event id=804c751943838896432ba918e31e86fd846d9fed3e891b20877c708bf840839c
+[scenario] waiting for daemon to process boot and publish kind:24010...
+[scenario] querying for kind:24010 from backend...
+[scenario]   24010 status published for our project ✓ (proves boot was recorded)
+[scenario] publishing kind:1 from user to agent1 (attempt 1)
+connecting to ws://127.0.0.1:52882... ok.
+publishing to ws://127.0.0.1:52882... success.
+[scenario]   user message id=47c19fc6dd0d857b842e3b9704d7cce5b8dfaad7240944083e2c14a6d2364a4f
+[scenario] waiting up to 15s for daemon to enqueue dispatch...
+[scenario]   dispatch enqueued ✓
+[scenario] === Phase A complete: daemon plumbing OK ===
+
+[scenario] === Phase B: asserting mock-driven delegation ===
+[scenario]   observed: agent1 published kind:1 (historical)
+[scenario]   observed: agent2 published kind:1 with fixture content 'agent2 says 4'
+[scenario]   observed: RAL journal has a completion/terminal record
+
+[scenario] === Phase B observations ===
+[scenario]   agent1 published kind:1           : yes
+[scenario]   agent2 replied with fixture text  : yes
+[scenario]   agent1 final kind:1 (post-delegation): no
+[scenario]   RAL journal completion record     : yes
+[scenario] daemon log (last 80 lines):
+warning: field `status` is never read
+  --> crates/tenex-daemon/src/per_agent_config_snapshot.rs:64:5
+   |
+61 | struct RawStoredAgent {
+   |        -------------- field in this struct
+...
+64 |     status: Option<String>,
+   |     ^^^^^^
+   |
+   = note: `RawStoredAgent` has a derived impl for the trait `Debug`, but this is intentionally ignored during dead code analysis
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `tenex-daemon` (lib) generated 1 warning
+    Finished `release` profile [optimized] target(s) in 0.16s
+     Running `target/release/daemon --tenex-base-dir /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-1777220432-32995/backend`
+[2m16:20:38[0m  [1m[32m✓[0m  [1m[32mdaemon ready[0m  [2m(nostr on, telegram off)[0m
+[2m16:20:38[0m  ↑  [1m[35mnak-interop-test-20260426192032-12673[0m  [2m(1 booted)[0m
+[2m16:20:40[0m  [1m[33m●[0m  [1m[34magent1[0m  [2minbound-worker-93bf892420b1ce56a2cb8146[0m  [1m[35mnak-interop-test-20260426192032-12673[0m
+[2m16:20:42[0m  [1m[33m●[0m  [1m[34magent2[0m  [2minbound-worker-3fe0f7b99ffe3ebafc344bf6[0m  [1m[35mnak-interop-test-20260426192032-12673[0m
+[2m16:20:45[0m  [1m[32m✓[0m  [1m[34magent2[0m  [2minbound-worker-3fe0f7b99ffe3ebafc344bf6[0m  [1m[35mnak-interop-test-20260426192032-12673[0m
+[2m16:20:47[0m  [1m[33m●[0m  [1m[34magent2[0m  [2minbound-worker-98250aa87800b0c2057c3579[0m  [1m[35mnak-interop-test-20260426192032-12673[0m
+[2m16:20:50[0m  [1m[32m✓[0m  [1m[34magent2[0m  [2minbound-worker-98250aa87800b0c2057c3579[0m  [1m[35mnak-interop-test-20260426192032-12673[0m
+[2m16:20:51[0m  [1m[32m✓[0m  [1m[34magent1[0m  [2minbound-worker-93bf892420b1ce56a2cb8146[0m  [1m[35mnak-interop-test-20260426192032-12673[0m
+[2m16:20:51[0m  [1m[33m●[0m  [1m[34magent1[0m  [2mpre-completed-resume-worker-97cc78a8af2eedd160b41672[0m  [1m[35mnak-interop-test-20260426192032-12673[0m
+[2m16:20:53[0m  [1m[32m✓[0m  [1m[34magent1[0m  [2mpre-completed-resume-worker-97cc78a8af2eedd160b41672[0m  [1m[35mnak-interop-test-20260426192032-12673[0m
+[harness] FATAL: ASSERT: agent1 never published its final kind:1 ('Final answer: agent2 says 4.')
+[harness] cleanup (script exit code=1)
+[harness] stopping daemon pid 33697 (SIGTERM)
+[harness] stopping relay pid 33682

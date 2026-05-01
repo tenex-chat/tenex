@@ -1,0 +1,32 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-144-1777237803-78717
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-144-1777237803-78717
+[harness]   backend pubkey:  fd9d9d66d04a6fd9316161df6b870d1d152eed72532ee504254737734edee911
+[harness]   user pubkey:     341f87be1939822da9d4c8173ca0b71c7a91c53a7acf0164043b69bc957e2551
+[harness]   agent1 pubkey:   05c56ced01085a4455ae98721b7570bc351aa1ee5444c03c477f5e8182258fca
+[harness]   agent2 pubkey:   bb3002656f998fb77fbd306b818ec1a5cadc1ae4269168503cca17a832b7b421
+[harness]   project a-tag:   31933:341f87be1939822da9d4c8173ca0b71c7a91c53a7acf0164043b69bc957e2551:nak-interop-test-20260427001003-18791
+[harness] starting relay on 127.0.0.1:63829 (admins=1)
+[harness] relay ready at ws://127.0.0.1:63829
+[harness] daemon config relays -> [ws://127.0.0.1:63829]
+[harness] wrote 2 pubkey(s) to /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-144-1777237803-78717/backend/daemon/whitelist.txt
+connecting to ws://127.0.0.1:63829... ok.
+publishing to ws://127.0.0.1:63829... success.
+connecting to ws://127.0.0.1:63829... ok.
+publishing to ws://127.0.0.1:63829... success.
+[scenario] mock Telegram server on port 63834 (pid 79579)
+[scenario] pending outbox record written: tg-fbf5f4fbe5fae8c2f4b483b604d1866e
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-144-1777237803-78717/backend, binary=/Users/pablofernandez/Work/TENEX-ff3ssq/target/release/daemon)
+[harness] daemon ready (pid 79605, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-144-1777237803-78717/backend/daemon/tenex.lock)
+[harness] kind:14199 listener confirmed (probe #1 round-tripped after 200ms)
+/Users/pablofernandez/Work/TENEX-ff3ssq/scripts/e2e-test-harness.sh: line 310: 79605 Killed: 9               TENEX_BASE_DIR="$TENEX_BASE_DIR" "$daemon_bin" --tenex-base-dir "$TENEX_BASE_DIR" >> "$HARNESS_DAEMON_LOG" 2>&1
+[harness] TIMEOUT: kind:24030 probe never round-tripped within 45s
+[harness] FATAL: daemon subscription never became live
+[harness] cleanup (script exit code=1)
+[harness] stopping daemon pid 79605 (SIGTERM)
+[harness] stopping relay pid 79404

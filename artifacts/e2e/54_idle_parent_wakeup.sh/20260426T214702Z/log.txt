@@ -1,0 +1,34 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-54-1777240022-75351
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-54-1777240022-75351
+[harness]   backend pubkey:  3f764df4ad2f03f0a6306719557e0c55a2ec1158865f86c4ce7c50f2fbf73256
+[harness]   user pubkey:     6a323302fa4f96baa14a778a998ce8dd02a5a0689a12de1cb5f62d845bfca6b0
+[harness]   agent1 pubkey:   6f7f03fbe702147a9b1afd9ae0cc227db8bb45b8759421ccafdb9cf8f876b5be
+[harness]   agent2 pubkey:   d7f00ac795cf67ea8f86cfc2e0c86975b95e22618b8c2c52a4ab66e70f25d070
+[harness]   project a-tag:   31933:6a323302fa4f96baa14a778a998ce8dd02a5a0689a12de1cb5f62d845bfca6b0:nak-interop-test-20260427004702-5605
+[scenario] rewriting llms.json to use mock fixture model 'mock/idle-parent-54'
+[scenario] mock LLM enabled: fixture=/Users/pablofernandez/Work/TENEX-ff3ssq/scripts/e2e/fixtures/mock-llm/54_idle_parent_wakeup.json
+[scenario] pre-seeded project descriptor at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-54-1777240022-75351/backend/projects/nak-interop-test-20260427004702-5605/project.json
+[harness] starting relay on 127.0.0.1:51247 (admins=1)
+[harness] relay ready at ws://127.0.0.1:51247
+[harness] daemon config relays -> [ws://127.0.0.1:51247]
+[scenario] publishing 14199 (whitelist) as user
+connecting to ws://127.0.0.1:51247... ok.
+publishing to ws://127.0.0.1:51247... success.
+[scenario] publishing 31933 (project) as user
+connecting to ws://127.0.0.1:51247... ok.
+publishing to ws://127.0.0.1:51247... success.
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-54-1777240022-75351/backend, binary=/Users/pablofernandez/Work/TENEX-ff3ssq/target/release/daemon)
+[harness] daemon ready (pid 75868, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-54-1777240022-75351/backend/daemon/tenex.lock)
+[harness] kind:14199 listener confirmed (probe #1 round-tripped after 200ms)
+/Users/pablofernandez/Work/TENEX-ff3ssq/scripts/e2e-test-harness.sh: line 310: 75868 Killed: 9               TENEX_BASE_DIR="$TENEX_BASE_DIR" "$daemon_bin" --tenex-base-dir "$TENEX_BASE_DIR" >> "$HARNESS_DAEMON_LOG" 2>&1
+[harness] TIMEOUT: kind:24030 probe never round-tripped within 45s
+[harness] FATAL: daemon subscription never became live
+[harness] cleanup (script exit code=1)
+[harness] stopping daemon pid 75868 (SIGTERM)
+[harness] stopping relay pid 75848

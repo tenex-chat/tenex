@@ -1,0 +1,1 @@
+[harness] RESULT status=skip scenario=510_killed_delegation_propagates.sh detail=DelegationKilled requires worker-protocol message from kill tool; delegation ID is unknown at fixture time; see cargo test proposal in script header

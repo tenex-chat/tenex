@@ -537,16 +537,11 @@ fn prompt_add_task() -> Result<Option<TaskEntry>> {
     );
     println!();
 
-    // Project dTag.
-    let d_tag = match prompts::input("Project dTag:")
-        .with_help_message("The project directory name under ~/.tenex/projects/")
-        .prompt()
-    {
-        Ok(s) if !s.trim().is_empty() => s.trim().to_string(),
-        Ok(_) => return Ok(None),
-        Err(inquire::InquireError::OperationCanceled)
-        | Err(inquire::InquireError::OperationInterrupted) => return Ok(None),
-        Err(e) => return Err(anyhow!("project prompt: {e}")),
+    // Project dTag — pick from the on-disk project list when available.
+    let base = base_dir()?;
+    let d_tag = match select_project_dtag(&base)? {
+        Some(s) => s,
+        None => return Ok(None),
     };
 
     // Type.
@@ -597,13 +592,11 @@ fn prompt_add_task() -> Result<Option<TaskEntry>> {
         Err(e) => return Err(anyhow!("prompt text prompt: {e}")),
     };
 
-    // Target agent slug.
-    let target = match prompts::input("Target agent slug:").prompt() {
-        Ok(s) if !s.trim().is_empty() => s.trim().to_string(),
-        Ok(_) => return Ok(None),
-        Err(inquire::InquireError::OperationCanceled)
-        | Err(inquire::InquireError::OperationInterrupted) => return Ok(None),
-        Err(e) => return Err(anyhow!("target prompt: {e}")),
+    // Target agent slug — pick from the global agent index, filtered to
+    // agents installed in this project.
+    let target = match select_agent_slug_for_project(&base, &d_tag)? {
+        Some(s) => s,
+        None => return Ok(None),
     };
 
     // Optional title.
@@ -639,4 +632,69 @@ fn prompt_add_task() -> Result<Option<TaskEntry>> {
     };
 
     Ok(Some(TaskEntry { d_tag, task }))
+}
+
+/// Pick a project dTag from the on-disk listing. Falls back to a freeform
+/// text input when no projects are present (fresh install / scratch dir).
+/// Returns `None` when the user cancels.
+fn select_project_dtag(base_dir: &std::path::Path) -> Result<Option<String>> {
+    use crate::store::project_members::list_assignable_project_dtags;
+
+    let dtags = list_assignable_project_dtags(base_dir).unwrap_or_default();
+
+    if dtags.is_empty() {
+        return match prompts::input("Project dTag:")
+            .with_help_message("The project directory name under ~/.tenex/projects/")
+            .prompt()
+        {
+            Ok(s) if !s.trim().is_empty() => Ok(Some(s.trim().to_owned())),
+            Ok(_) => Ok(None),
+            Err(inquire::InquireError::OperationCanceled)
+            | Err(inquire::InquireError::OperationInterrupted) => Ok(None),
+            Err(e) => Err(anyhow!("project prompt: {e}")),
+        };
+    }
+
+    match prompts::select("Project dTag:", dtags).prompt() {
+        Ok(s) => Ok(Some(s)),
+        Err(inquire::InquireError::OperationCanceled)
+        | Err(inquire::InquireError::OperationInterrupted) => Ok(None),
+        Err(e) => Err(anyhow!("project select: {e}")),
+    }
+}
+
+/// Pick an agent slug from the global agent index, restricted to agents
+/// that are installed in `project_dtag`. Falls back to freeform text
+/// input when the project has no agents (or the index is empty/missing).
+/// Returns `None` when the user cancels.
+fn select_agent_slug_for_project(
+    base_dir: &std::path::Path,
+    project_dtag: &str,
+) -> Result<Option<String>> {
+    let slugs: Vec<String> = match tenex_agent_registry::AgentIndexDoc::load(base_dir) {
+        Ok(idx) => idx
+            .by_slug()
+            .iter()
+            .filter(|(_, e)| e.project_ids.iter().any(|p| p == project_dtag))
+            .map(|(slug, _)| slug.clone())
+            .collect(),
+        Err(_) => Vec::new(),
+    };
+
+    if slugs.is_empty() {
+        return match prompts::input("Target agent slug:").prompt() {
+            Ok(s) if !s.trim().is_empty() => Ok(Some(s.trim().to_owned())),
+            Ok(_) => Ok(None),
+            Err(inquire::InquireError::OperationCanceled)
+            | Err(inquire::InquireError::OperationInterrupted) => Ok(None),
+            Err(e) => Err(anyhow!("target prompt: {e}")),
+        };
+    }
+
+    match prompts::select("Target agent slug:", slugs).prompt() {
+        Ok(s) => Ok(Some(s)),
+        Err(inquire::InquireError::OperationCanceled)
+        | Err(inquire::InquireError::OperationInterrupted) => Ok(None),
+        Err(e) => Err(anyhow!("target select: {e}")),
+    }
 }

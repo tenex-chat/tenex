@@ -1,0 +1,68 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-43-1777220486-36535
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-43-1777220486-36535
+[harness]   backend pubkey:  79fbf04d8f7989cc724f5670c34d91f5cf206c578d5da895ac2a7837aaa0872b
+[harness]   user pubkey:     6c38cbb821c5e4f015a198e460248a6a1f3e2a99b800d6471e4aa5f10f3eb77c
+[harness]   agent1 pubkey:   3e23ba050103e00b77f2050cc0a92ff6c3bd35530ed1966f882b9309abdb7975
+[harness]   agent2 pubkey:   3388c51ffb2f326370870a8390109c3cc67ae6d076429f1bbac3778df7d98f59
+[harness]   project a-tag:   31933:6c38cbb821c5e4f015a198e460248a6a1f3e2a99b800d6471e4aa5f10f3eb77c:nak-interop-test-20260426192126-5233
+[scenario] rewriting llms.json to use mock fixture model 'mock/delegation-02'
+[scenario] mock LLM enabled: fixture=/Users/pablofernandez/Work/TENEX-ff3ssq/scripts/e2e/fixtures/mock-llm/02_delegation.json
+[scenario] pre-seeded project descriptor at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-43-1777220486-36535/backend/projects/nak-interop-test-20260426192126-5233/project.json
+[harness] starting relay on 127.0.0.1:57150 (admins=1)
+[harness] relay ready at ws://127.0.0.1:57150
+[harness] daemon config relays -> [ws://127.0.0.1:57150]
+[scenario] publishing 14199 (whitelist) as user
+connecting to ws://127.0.0.1:57150... ok.
+publishing to ws://127.0.0.1:57150... success.
+[scenario] publishing 31933 (project) as user
+connecting to ws://127.0.0.1:57150... ok.
+publishing to ws://127.0.0.1:57150... success.
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-43-1777220486-36535/backend)
+[harness] daemon ready (pid 37470, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-43-1777220486-36535/backend/daemon/tenex.lock)
+[harness] kind:14199 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] kind:24030 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] daemon subscription confirmed live (all probed listener filters registered)
+[scenario] publishing kind:24000 (boot)
+connecting to ws://127.0.0.1:57150... ok.
+publishing to ws://127.0.0.1:57150... success.
+[scenario]   boot event id=3f3adf47962f3fadfc71d1abff962940bcc3eb32b11778ae5ce5d0251dc383ad
+[scenario] waiting for daemon to publish kind:24010...
+[scenario] publishing kind:1 from user to agent1 (attempt 1)
+connecting to ws://127.0.0.1:57150... ok.
+publishing to ws://127.0.0.1:57150... success.
+[scenario]   user message id=aac342c7aa2ee52c97bec0e40267bfdfa1991af1f847f2d6f15a3e39b28800f6
+[scenario]   dispatch enqueued ✓
+
+[scenario] waiting for mock-driven delegation flow to complete (timeout=60s)...
+[scenario]   observed: agent2 published kind:1 with fixture content
+[scenario]   observed: RAL journal has a terminal record
+[scenario]   observed: agent1 published its final kind:1
+[scenario] delegation flow complete ✓
+
+[scenario] === RAL journal assertions ===
+[scenario]   total journal records: 15
+[scenario]   all 15 records use known event types ✓
+[scenario]   sequences strictly monotonic (1..15) ✓
+[scenario]   distinct RAL identities observed: 3
+[scenario]   every identity starts with 'allocated' ✓
+[scenario]   no active events after terminal event for any identity ✓
+[scenario]   at least one identity claimed ✓
+[scenario]   at least one identity completed ✓
+[scenario]   delegation events present in journal ✓
+[scenario]   event sequences per identity:
+[scenario]     ral=1 agent=3e23ba050103... conv=aac342c7aa2e...: allocated → claimed → delegation_registered → delegation_completed → delegation_registered → delegation_completed → waiting_for_delegation → claimed → completed [TERMINAL]
+[scenario]     ral=1 agent=3388c51ffb2f... conv=a906c82a831c...: allocated → claimed → completed [TERMINAL]
+[scenario]     ral=1 agent=3388c51ffb2f... conv=76c0784a8c45...: allocated → claimed → completed [TERMINAL]
+[scenario]   all RAL status class transition assertions passed ✓
+
+[scenario] PASS — scenario 4.3 (RAL status class transitions)
+[harness] RESULT status=pass scenario=43_ral_status_transitions.sh detail=ral journal: monotonic sequences, all identities start allocated, no active-after-terminal, claimed+completed+delegation observed
+[harness] cleanup (script exit code=0)
+[harness] stopping daemon pid 37470 (SIGTERM)
+[harness] stopping relay pid 37320

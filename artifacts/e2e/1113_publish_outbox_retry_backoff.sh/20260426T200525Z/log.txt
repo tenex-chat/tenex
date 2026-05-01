@@ -1,0 +1,55 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-1113-1777233925-15179
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-1113-1777233925-15179
+[harness]   backend pubkey:  e0da0c3eb52a333c771594c01bf846aa79bed1b33c65c7786cf1133c13efff17
+[harness]   user pubkey:     7263d18384a863735df0d86d46a2f8ef08c15a05c15db621a95ba5356fe514f2
+[harness]   agent1 pubkey:   abc104cf07ec722dcad79999fea94cfea95ffde8d1e676d10fce257d20f33733
+[harness]   agent2 pubkey:   c034f86577b1f3ac308cc0510ca37d040e8e5f80b2e0eb92d33ccbcdc88ca53c
+[harness]   project a-tag:   31933:7263d18384a863735df0d86d46a2f8ef08c15a05c15db621a95ba5356fe514f2:nak-interop-test-20260426230525-29354
+[harness] starting relay on 127.0.0.1:59641 (admins=1)
+[harness] relay ready at ws://127.0.0.1:59641
+connecting to ws://127.0.0.1:59641... ok.
+publishing to ws://127.0.0.1:59641... success.
+connecting to ws://127.0.0.1:59641... ok.
+publishing to ws://127.0.0.1:59641... success.
+[harness] stopping relay pid 15634
+[scenario] pre-publish relay stopped (port 59641 is now unreachable)
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-1113-1777233925-15179/backend)
+    |
+815 |                 dispatch_id: leased_record.dispatch_id.clone(),
+    |                 ^^^^^^^^^^^ `OwnedTerminalContext` does not have this field
+    |
+    = note: available fields are: `journal_sequence`, `dispatch_sequence`, `dispatch_timestamp`
+
+error[E0560]: struct `OwnedTerminalContext` has no field named `claim_token`
+   --> crates/tenex-daemon/src/worker_admission_driver.rs:816:17
+    |
+816 |                 claim_token: leased_record.claim_token.clone(),
+    |                 ^^^^^^^^^^^ `OwnedTerminalContext` does not have this field
+    |
+    = note: available fields are: `journal_sequence`, `dispatch_sequence`, `dispatch_timestamp`
+
+error[E0560]: struct `OwnedTerminalContext` has no field named `journal_sequence_hint`
+   --> crates/tenex-daemon/src/worker_admission_driver.rs:817:17
+    |
+817 |                 journal_sequence_hint: leased_record.sequence,
+    |                 ^^^^^^^^^^^^^^^^^^^^^ unknown field
+    |
+help: a field with a similar name exists
+    |
+817 -                 journal_sequence_hint: leased_record.sequence,
+817 +                 journal_sequence: leased_record.sequence,
+    |
+
+Some errors have detailed explanations: E0061, E0308, E0412, E0422, E0425, E0559, E0560, E0592.
+For more information about an error, try `rustc --explain E0061`.
+warning: `tenex-daemon` (lib) generated 6 warnings
+error: could not compile `tenex-daemon` (lib) due to 16 previous errors; 6 warnings emitted
+[harness] FATAL: daemon never wrote lockfile even with unreachable relay
+[harness] cleanup (script exit code=1)
+[harness] stopping daemon pid 15711 (SIGTERM)

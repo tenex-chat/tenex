@@ -1,0 +1,34 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-56-1777227035-85511
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-56-1777227035-85511
+[harness]   backend pubkey:  5240b313bcf5d4ba49cc2e5e0580656c1527cf4d4eb5d8294241cb6be70c0498
+[harness]   user pubkey:     b7478236bdc1b46a5ec109753d38ba5f2199f0fa27ec5fc4936e0b7cc470c052
+[harness]   agent1 pubkey:   e0ffb76dedc6dff96fe71a0e4c7dac433871596c594ae1feed8758d645ce32c1
+[harness]   agent2 pubkey:   9ee7c38c5ddcfe5c0265c6bb497d88683ef030be7d96e0d33910d212501e10f5
+[harness]   project a-tag:   31933:b7478236bdc1b46a5ec109753d38ba5f2199f0fa27ec5fc4936e0b7cc470c052:nak-interop-test-20260426211035-15617
+[scenario] generating agent3 key pair
+[scenario]   agent3 pubkey=789ce39d94f1ce36cf3bc62a25b652ea0292040140b984002ca5353e8f0306bd
+[scenario]   agent3 JSON written
+[scenario] rewriting llms.json to use mock fixture model 'mock/partial-delegation-56'
+[scenario] mock LLM enabled: fixture=/Users/pablofernandez/Work/TENEX-ff3ssq/scripts/e2e/fixtures/mock-llm/56_partial_delegation_completion.json
+[harness] starting relay on 127.0.0.1:61874 (admins=1)
+[harness] relay ready at ws://127.0.0.1:61874
+[harness] daemon config relays -> [ws://127.0.0.1:61874]
+[scenario] publishing 14199 (whitelist) — includes agent3
+connecting to ws://127.0.0.1:61874... ok.
+publishing to ws://127.0.0.1:61874... success.
+[scenario] publishing 31933 (project) — includes agent3
+connecting to ws://127.0.0.1:61874... ok.
+publishing to ws://127.0.0.1:61874... success.
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-56-1777227035-85511/backend)
+[harness] daemon log tail:
+    Blocking waiting for file lock on build directory
+[harness] FATAL: daemon never wrote lockfile
+[harness] cleanup (script exit code=1)
+[harness] stopping daemon pid 86027 (SIGTERM)
+[harness] stopping relay pid 85998

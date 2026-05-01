@@ -1,0 +1,82 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-101-1777227981-26237
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-101-1777227981-26237
+[harness]   backend pubkey:  de98d80213c1c1d8691f10921b582cf435b92479748aaf2722c0493a68070031
+[harness]   user pubkey:     2af00996f1820d86adee39ffbd9b0a94b20e17b992617340b612aee0b65c7536
+[harness]   agent1 pubkey:   82c7767a4f37c2ab277a532e13419dd37b9e96f08eeffc97bf87a6f89d4c0c08
+[harness]   agent2 pubkey:   a8c12d4aa72c97766d40abe6efff5886fd1953098f4a720472e86725e216d53a
+[harness]   project a-tag:   31933:2af00996f1820d86adee39ffbd9b0a94b20e17b992617340b612aee0b65c7536:nak-interop-test-20260426212621-13853
+[scenario] rewriting llms.json to use mock fixture model 'mock/delegation-02'
+[harness] starting relay on 127.0.0.1:54693 (admins=1)
+[harness] relay ready at ws://127.0.0.1:54693
+[harness] daemon config relays -> [ws://127.0.0.1:54693]
+[scenario] publishing 14199 (whitelist) as user
+connecting to ws://127.0.0.1:54693... ok.
+publishing to ws://127.0.0.1:54693... success.
+[scenario] publishing 31933 (project) as user
+connecting to ws://127.0.0.1:54693... ok.
+publishing to ws://127.0.0.1:54693... success.
+
+[scenario] === Phase 1: first daemon incarnation ===
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-101-1777227981-26237/backend)
+[harness] daemon ready (pid 27683, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-101-1777227981-26237/backend/daemon/tenex.lock)
+[harness] kind:14199 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] kind:24030 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] daemon subscription confirmed live (all probed listener filters registered)
+[scenario] publishing kind:24000 (boot) as user
+connecting to ws://127.0.0.1:54693... ok.
+publishing to ws://127.0.0.1:54693... success.
+[scenario]   boot event id=5db5b0aa1a49e388680c4cf205d5c1aa4e8327d550e2664eaa231c26f0ccbd90
+[scenario]   kind:24010 published (project boot confirmed) ✓
+[scenario] publishing kind:1 from user to agent1 (attempt 1)
+connecting to ws://127.0.0.1:54693... ok.
+publishing to ws://127.0.0.1:54693... success.
+[scenario]   user message id=68ac6936a7770b511bbd2c69a02c678d9e912616f07c38b60fc97bf6a977f320
+[scenario]   dispatch enqueued ✓
+[scenario] waiting for mock-driven delegation to complete (up to 15s)...
+[scenario]   agent1 published final kind:1 with fixture content ✓
+[scenario]   RAL journal has a terminal record ✓
+[scenario] === Phase 1 complete: delegation finished; daemon is idle ===
+[scenario]   pre-restart RAL journal lines: 16
+
+[scenario] === Phase 2: graceful SIGTERM ===
+[harness] stopping daemon pid 27683 (SIGTERM)
+[scenario]   daemon stopped via SIGTERM ✓
+[scenario]   leased dispatch entries after stop (informational): 5
+
+[scenario] === Phase 3: restart daemon against same fixture ===
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-101-1777227981-26237/backend)
+[harness] daemon ready (pid 29041, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-101-1777227981-26237/backend/daemon/tenex.lock)
+[harness] kind:14199 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] kind:24030 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] daemon subscription confirmed live (all probed listener filters registered)
+[scenario]   restarted daemon subscription is live ✓
+[scenario]   restarted daemon is running (pid 29041) ✓
+
+[scenario] === Phase 4: assert no stuck RAL after restart ===
+[scenario]   stuck (non-terminal) RAL identities after restart: 1
+[scenario] stuck RAL identities:
+{
+  "schemaVersion": 1,
+  "writer": "rust-daemon",
+  "writerVersion": "tenex-daemon@0.1.0",
+  "sequence": 16,
+  "timestamp": 1777227995747,
+  "correlationId": "pre-completed-delegation-resume-037c6210fafa375102a85bee",
+  "event": "claimed",
+  "projectId": "nak-interop-test-20260426212621-13853",
+  "agentPubkey": "82c7767a4f37c2ab277a532e13419dd37b9e96f08eeffc97bf87a6f89d4c0c08",
+  "conversationId": "68ac6936a7770b511bbd2c69a02c678d9e912616f07c38b60fc97bf6a977f320",
+  "ralNumber": 1,
+  "workerId": "pre-completed-resume-worker-037c6210fafa375102a85bee",
+  "claimToken": "pre-completed-resume-claim-037c6210fafa375102a85bee"
+}
+[harness] FATAL: ASSERT: 1 stuck (non-terminal) RAL(s) found after graceful restart
+[harness] cleanup (script exit code=1)
+[harness] stopping daemon pid 29041 (SIGTERM)
+[harness] stopping relay pid 27503

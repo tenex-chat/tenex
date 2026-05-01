@@ -1,0 +1,45 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-36-1777053855-90945
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-36-1777053855-90945
+[harness]   backend pubkey:  564ce92740cada3d243964d8923f775a2ecd47b6af73e2099b54c0e6d7ac318e
+[harness]   user pubkey:     993bcfb9adf80a9461133dd510f784f2727311ec226034d693d793936e3d7dff
+[harness]   agent1 pubkey:   50d113a1ed9c1bc11be97e7c0fcbce567ccbf8e2f5101f5cc890d7c183698012
+[harness]   agent2 pubkey:   1b79fced6faca291c164119ff9e7176db33eddb11b641a9ccbd61dca5321432f
+[harness]   project a-tag:   31933:993bcfb9adf80a9461133dd510f784f2727311ec226034d693d793936e3d7dff:nak-interop-test-20260424210415-9074
+[harness] starting relay on 127.0.0.1:63224 (admins=1)
+[harness] relay ready at ws://127.0.0.1:63224
+[harness] daemon config relays -> [ws://127.0.0.1:63224]
+connecting to ws://127.0.0.1:63224... ok.
+publishing to ws://127.0.0.1:63224... success.
+connecting to ws://127.0.0.1:63224... ok.
+publishing to ws://127.0.0.1:63224... success.
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-36-1777053855-90945/backend)
+[harness] daemon ready (pid 91581, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-36-1777053855-90945/backend/daemon/tenex.lock)
+[harness] kind:14199 listener confirmed (probe #1 round-tripped after 500ms)
+[harness] kind:24030 listener confirmed (probe #1 round-tripped after 500ms)
+[harness] daemon subscription confirmed live (all probed listener filters registered)
+connecting to ws://127.0.0.1:63224... ok.
+publishing to ws://127.0.0.1:63224... success.
+[scenario] boot event id=6a16367b262e0fe8e52b7a789c1561b2cf2787d300a0022f62d4f753ca9be1ff
+[scenario] waiting for kind:24010 from daemon (proves boot recorded)
+[scenario]   kind:24010 observed ✓
+[scenario] publishing kind:1 from user to agent1 (attempt 1)
+connecting to ws://127.0.0.1:63224... ok.
+publishing to ws://127.0.0.1:63224... success.
+[scenario]   first delivery enqueued (1 record) ✓
+[scenario] republishing identical event id=4fa2eb556280a01318c207d2cefe853807aa083f740ba7f6203878245e4265e3
+[scenario]   nak: connecting to ws://127.0.0.1:63224... ok.
+[scenario]   nak: {"kind":1,"id":"4fa2eb556280a01318c207d2cefe853807aa083f740ba7f6203878245e4265e3","pubkey":"993bcfb9adf80a9461133dd510f784f2727311ec226034d693d793936e3d7dff","created_at":1777053873,"tags":[["p","50d113a1ed9c1bc11be97e7c0fcbce567ccbf8e2f5101f5cc890d7c183698012"],["a","31933:993bcfb9adf80a9461133dd510f784f2727311ec226034d693d793936e3d7dff:nak-interop-test-20260424210415-9074"]],"content":"Dedup test message.","sig":"1c0ff48c8b1f7e5a1da0e53f3504cff9e2cd3b92773ecf328b446fb891c6449fdab2a665af228f0bd2fb9a1721124ee482bc4cd41af3c922bef4fbc61aa96161"}
+[scenario]   nak: publishing to ws://127.0.0.1:63224... success.
+[scenario]   exactly 1 queued row for event after replay ✓
+[scenario]   (info) already_existed flag not observed in log — the queue-count assertion above is authoritative
+
+[scenario] PASS — scenario 3.6: triggering-event dedup
+[harness] cleanup (script exit code=0)
+[harness] stopping daemon pid 91581 (SIGTERM)
+[harness] stopping relay pid 91569

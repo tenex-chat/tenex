@@ -1,0 +1,47 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-74-1777217987-63708
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-74-1777217987-63708
+[harness]   backend pubkey:  38484cdff4da26cb29cf124b0e74a7c5c1423464a9b838314ad645809531a0ff
+[harness]   user pubkey:     c8202cec71437ccebe98e9c26c73b9db7079107c452658b70c2e7dc9892c804d
+[harness]   agent1 pubkey:   55df44f3b36e39b5d29149459a20d9627edd8cbfcbdb1029f6e28adb8f995f8f
+[harness]   agent2 pubkey:   7135597bd0f25edb5a0f4ff4599760b9f580945601a512378d3ab9dc7f0bc106
+[harness]   project a-tag:   31933:c8202cec71437ccebe98e9c26c73b9db7079107c452658b70c2e7dc9892c804d:nak-interop-test-20260426183947-9041
+[harness] starting relay on 127.0.0.1:55765 (admins=1)
+[harness] relay ready at ws://127.0.0.1:55765
+[harness] daemon config relays -> [ws://127.0.0.1:55765]
+connecting to ws://127.0.0.1:55765... ok.
+publishing to ws://127.0.0.1:55765... success.
+connecting to ws://127.0.0.1:55765... ok.
+publishing to ws://127.0.0.1:55765... success.
+[harness] starting daemon with long-running worker
+[harness] daemon ready (pid 64219)
+[harness] kind:14199 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] kind:24030 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] daemon subscription confirmed live (all probed listener filters registered)
+[scenario] publishing kind:24000 (boot)
+connecting to ws://127.0.0.1:55765... ok.
+publishing to ws://127.0.0.1:55765... success.
+[scenario] publishing kind:1 to trigger worker spawn
+connecting to ws://127.0.0.1:55765... ok.
+publishing to ws://127.0.0.1:55765... success.
+[scenario]   user message id=fb99b69061607ba453fb76433cbb37da738c1addde8c1c2e29732f4451f47e2d
+[scenario] waiting for dispatch to reach leased...
+[scenario]   dispatch reached 'leased' (worker is running) ✓
+[scenario]   worker pid=64315 ✓
+[scenario] sending SIGKILL to worker (pid 64315)...
+[scenario]   worker killed ✓
+[scenario] waiting for session error in daemon log...
+[scenario]   session error logged ✓
+[scenario]   daemon process still alive ✓
+[scenario]   no Rust panic in daemon log ✓
+
+[scenario] PASS — scenario 7.4 Worker unexpected exit
+[harness] RESULT status=pass scenario=74_worker_unexpected_exit.sh detail=daemon survives worker SIGKILL; session error logged; no panic
+[harness] cleanup (script exit code=0)
+[harness] stopping daemon pid 64219 (SIGTERM)
+[harness] stopping relay pid 64204

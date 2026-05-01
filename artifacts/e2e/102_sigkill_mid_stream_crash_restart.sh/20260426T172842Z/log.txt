@@ -1,0 +1,92 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-102-1777224522-10028
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-102-1777224522-10028
+[harness]   backend pubkey:  386e9c9b40cfa1237d913d25f72057d9cc4d998f2de1c69821660c050816185d
+[harness]   user pubkey:     a856b18a34e0215579bc40d41e4a1a87cf5b5c5b29781552d691edac7934257a
+[harness]   agent1 pubkey:   168722c0e1a4705f2bb2cceab9221dbb715de4924c4152a2d8576f4e0df46698
+[harness]   agent2 pubkey:   41971605ae03c48fe57ca02fe883994f02aa1f5f7a2fd429c6e0edf296a4cbbb
+[harness]   project a-tag:   31933:a856b18a34e0215579bc40d41e4a1a87cf5b5c5b29781552d691edac7934257a:nak-interop-test-20260426202842-3747
+[scenario] rewriting llms.json to use mock fixture model 'mock/delegation-02'
+[harness] starting relay on 127.0.0.1:63132 (admins=1)
+[harness] relay ready at ws://127.0.0.1:63132
+[harness] daemon config relays -> [ws://127.0.0.1:63132]
+[scenario] publishing 14199 (whitelist) as user
+connecting to ws://127.0.0.1:63132... ok.
+publishing to ws://127.0.0.1:63132... success.
+[scenario] publishing 31933 (project) as user
+connecting to ws://127.0.0.1:63132... ok.
+publishing to ws://127.0.0.1:63132... success.
+
+[scenario] === Phase 1: first daemon incarnation; SIGKILL mid-stream ===
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-102-1777224522-10028/backend, binary=/Users/pablofernandez/Work/TENEX-ff3ssq/target/release/daemon)
+[harness] daemon ready (pid 10515, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-102-1777224522-10028/backend/daemon/tenex.lock)
+[harness] kind:14199 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] kind:24030 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] kind:21 agent-mentions listener confirmed (probe #1 round-tripped after 200ms)
+[harness] daemon subscription confirmed live (all probed listener filters registered)
+[scenario] publishing kind:24000 (boot) as user
+connecting to ws://127.0.0.1:63132... ok.
+publishing to ws://127.0.0.1:63132... success.
+[scenario]   boot event id=e584fb6f5dfbf2ec8bdcdd510ed4e949a67a95b459270244566de7a65f4f01a9
+[scenario]   kind:24010 published (project boot confirmed) ✓
+[scenario] publishing kind:1 from user to agent1
+connecting to ws://127.0.0.1:63132... ok.
+publishing to ws://127.0.0.1:63132... success.
+[scenario]   user message id=e36c6a01160070b31e1339d5247ce1174bdde1e8a8db23caa805c51d04e9c9fb
+[scenario] waiting for dispatch to reach 'leased' state (mid-stream window)...
+[scenario]   dispatch reached 'leased' (worker mid-stream) ✓
+[scenario]   pre-crash worker pids: <none>
+[scenario] sending SIGKILL to daemon (pid 10515)...
+[harness] crashing daemon pid 10515 (SIGKILL)
+[scenario]   daemon killed ✓
+
+[scenario] === Phase 2: post-crash state observation ===
+[scenario]   dispatch-queue: 2 total entries, 1 leased after crash
+[scenario]   ral/journal.jsonl: 2 lines
+[scenario]   stale tenex.lock present (expected after SIGKILL) ✓
+
+[scenario] === Phase 3: restart daemon against same fixture ===
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-102-1777224522-10028/backend, binary=/Users/pablofernandez/Work/TENEX-ff3ssq/target/release/daemon)
+[harness] daemon ready (pid 10618, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-102-1777224522-10028/backend/daemon/tenex.lock)
+[harness] kind:14199 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] kind:24030 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] kind:21 agent-mentions listener confirmed (probe #1 round-tripped after 200ms)
+[harness] daemon subscription confirmed live (all probed listener filters registered)
+[scenario]   restarted daemon subscription is live ✓
+[scenario]   restarted daemon is running (pid 10618) ✓
+[scenario]   no panic in restarted daemon log ✓
+
+[scenario] === Phase 4: orphan reconciliation assertion ===
+[scenario]   RAL journal: 'crashed' records=1, non-terminal records=2
+
+[scenario] === Phase 5: assert no zombie worker processes ===
+[scenario]   no stale pre-crash worker processes ✓
+
+[scenario] === Phase 6: post-restart dispatch verification ===
+[scenario] re-publishing kind:24000 (boot) for restarted daemon
+connecting to ws://127.0.0.1:63132... ok.
+publishing to ws://127.0.0.1:63132... success.
+[scenario]   boot2 event id=734374d21def1d5631ee910e8dfa9778d3d80b0fdf4a3c42c758b76407230bf4
+[scenario]   kind:24010 published by restarted daemon ✓
+[scenario] publishing second kind:1 to test post-restart dispatch
+connecting to ws://127.0.0.1:63132... ok.
+publishing to ws://127.0.0.1:63132... success.
+[scenario]   second user message id=9ebd1e69d0c3a31a56009e7f9d8da218f333e9ee6d5b034c5897b30b151a5688
+[scenario]   restarted daemon dispatched the second message ✓ (project index re-populated)
+
+[scenario] === Summary ===
+[scenario]   Phase 1: kind:1 dispatched (leased or queued) before SIGKILL ✓
+[scenario]   Phase 2: post-crash state observed (informational)
+[scenario]   Phase 3: clean restart — no panic, lockfile written, subscription live ✓
+[scenario]   Phase 4: startup reconciliation recorded a crashed RAL entry ✓
+[scenario]   Phase 5: no zombie pre-crash worker processes ✓
+[scenario]   Phase 6: post-restart dispatch succeeded ✓
+[harness] RESULT status=pass scenario=102_sigkill_mid_stream_crash_restart.sh detail=passes:clean-restart+crash-reconciliation+post-restart-dispatch+no-zombies
+[harness] cleanup (script exit code=0)
+[harness] stopping daemon pid 10618 (SIGTERM)
+[harness] stopping relay pid 10503

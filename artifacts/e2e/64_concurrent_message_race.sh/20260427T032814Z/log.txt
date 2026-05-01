@@ -1,0 +1,57 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-64-1777260494-55695
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-64-1777260494-55695
+[harness]   backend pubkey:  fac2ba8455fd424d4b484415d1ca04364c4d7abd49f52f17604a46b7cfae8f26
+[harness]   user pubkey:     3c5f0a2dc20061b06a41735a9eeddd00f19543fe05c809a5aff8c0bc18852847
+[harness]   agent1 pubkey:   a83060ffced893a2896d54872b7dfcdec0706e63dc7402e4e51b18a797f0dfd4
+[harness]   agent2 pubkey:   aa95ed207271f5ba124ab667eb4b66580df98e2fdf71d06328007432956ba08f
+[harness]   project a-tag:   31933:3c5f0a2dc20061b06a41735a9eeddd00f19543fe05c809a5aff8c0bc18852847:nak-interop-test-20260427062814-15871
+[scenario] rewriting llms.json to use mock model 'mock/concurrent-race-64'
+[scenario] mock LLM enabled: fixture=/Users/pablofernandez/Work/TENEX-ff3ssq/scripts/e2e/fixtures/mock-llm/64_concurrent_message_race.json
+[harness] starting relay on 127.0.0.1:60880 (admins=1)
+[harness] relay ready at ws://127.0.0.1:60880
+[harness] daemon config relays -> [ws://127.0.0.1:60880]
+connecting to ws://127.0.0.1:60880... ok.
+publishing to ws://127.0.0.1:60880... success.
+connecting to ws://127.0.0.1:60880... ok.
+publishing to ws://127.0.0.1:60880... success.
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-64-1777260494-55695/backend, binary=/Users/pablofernandez/Work/TENEX-ff3ssq/target/release/daemon)
+[harness] daemon ready (pid 56177, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-64-1777260494-55695/backend/daemon/tenex.lock)
+[harness] kind:14199 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] kind:24030 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] daemon subscription confirmed live (all probed listener filters registered)
+connecting to ws://127.0.0.1:60880... ok.
+publishing to ws://127.0.0.1:60880... success.
+[scenario] publishing first kind:1 (root of conversation)
+connecting to ws://127.0.0.1:60880... ok.
+publishing to ws://127.0.0.1:60880... success.
+[scenario]   first message id=fcbc39760e933a821cde71306b1224ad6bed596b8b0b7f72614e8f2cc44f4bb3
+[scenario] publishing second kind:1 (3ms later, same conversation via e-tag)
+connecting to ws://127.0.0.1:60880... ok.
+publishing to ws://127.0.0.1:60880... success.
+[scenario]   second message id=02af7fe56df64dc827277498ec4ad85abe038a7fc02ffbeaf47a3c0637396db0
+[scenario] waiting for both dispatches to appear in queue...
+[scenario]   first dispatch_id=inbound-b3423bd4ec8971d77eff5d6e
+[scenario]   second dispatch_id=inbound-3b20b753d6288960bf6f6591
+[scenario]   dispatch_ids are distinct ✓
+[scenario] waiting for first dispatch to be LEASED...
+[scenario]   no simultaneous LEASED pair ✓
+[scenario]   first=leased, second=queued at snapshot ✓
+[scenario]   observed: agent1 published both responses (2x kind:1) ✓
+
+[scenario] === Results ===
+[scenario]   two distinct dispatch_ids generated          : yes
+[scenario]   no simultaneous LEASED pair                  : yes
+[scenario]   second dispatch eventually admitted (LEASED) : yes
+[scenario]   agent1 published both responses (2x kind:1) : yes
+
+[scenario] PASS — scenario 6.4: concurrent race → single execution; second queued then admitted
+[harness] RESULT status=pass scenario=64_concurrent_message_race.sh detail=two 3ms-apart messages dispatched sequentially; only one LEASED at a time; both processed
+[harness] cleanup (script exit code=0)
+[harness] stopping daemon pid 56177 (SIGTERM)
+[harness] stopping relay pid 56166

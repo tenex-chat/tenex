@@ -1,0 +1,61 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-102-1777034590-54111
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-102-1777034590-54111
+[harness]   backend pubkey:  2cd152393b3f967c3ebf39aa68e7b561203d9bfc7ee1d2a2473c64b2147b2c8c
+[harness]   user pubkey:     795df1241c15fe3d25cd02ee5e51e9f23dc6d6d78b32a14ed8d32770135fa279
+[harness]   agent1 pubkey:   436338a7c141a07ee4f737fb27d08c85232a1c5a7182c4f55c9b7b79730f54fc
+[harness]   agent2 pubkey:   ea70ce7f2a4ac47163ab4842ea0cdfc5550625d00dc870210f95d10097d74bb1
+[harness]   project a-tag:   31933:795df1241c15fe3d25cd02ee5e51e9f23dc6d6d78b32a14ed8d32770135fa279:nak-interop-test-20260424154310-1879
+[scenario] rewriting llms.json to use mock fixture model 'mock/delegation-02'
+[harness] starting relay on 127.0.0.1:55980 (admins=1)
+[harness] relay ready at ws://127.0.0.1:55980
+[harness] daemon config relays -> [ws://127.0.0.1:55980]
+[scenario] publishing 14199 (whitelist) as user
+connecting to ws://127.0.0.1:55980... ok.
+publishing to ws://127.0.0.1:55980... success.
+[scenario] publishing 31933 (project) as user
+connecting to ws://127.0.0.1:55980... ok.
+publishing to ws://127.0.0.1:55980... success.
+
+[scenario] === Phase 1: first daemon incarnation; SIGKILL mid-stream ===
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-102-1777034590-54111/backend)
+[harness] daemon log tail:
+295 ~     let outcome = publish_backend_agent_config(
+296 +         BackendEventPublishContext {
+297 +             daemon_dir: input.daemon_dir,
+298 +             accepted_at,
+299 +             request_id: &request_id,
+300 +             request_sequence: 1,
+301 +             request_timestamp,
+302 +             correlation_id: &request_id,
+303 +             project_id: "agent-config",
+304 +             conversation_id: &snapshot.agent_pubkey,
+305 +             ral_number: 0,
+306 +             wait_for_relay_ok: false,
+307 +             timeout_ms: 30_000,
+308 +         },
+309 +         &signer,
+310 +         /* publisher */,
+311 ~     )?;
+    |
+
+error[E0609]: no field `record` on type `BackendDirectPublishOutcome`
+   --> crates/tenex-daemon/src/nostr_ingress.rs:333:21
+    |
+333 |     Ok(Some(outcome.record.event.id))
+    |                     ^^^^^^ unknown field
+    |
+    = note: available fields are: `event_id`, `event_kind`, `relay_report`
+
+Some errors have detailed explanations: E0061, E0308, E0432, E0560, E0599, E0609.
+For more information about an error, try `rustc --explain E0061`.
+error: could not compile `tenex-daemon` (lib) due to 23 previous errors
+[harness] FATAL: daemon never wrote lockfile
+[harness] cleanup (script exit code=1)
+[harness] stopping daemon pid 55057 (SIGTERM)
+[harness] stopping relay pid 55027

@@ -1,0 +1,29 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-112-1777239459-39624
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-112-1777239459-39625
+[harness]   backend pubkey:  0e39f259660da3ad6532fdcd2270ae40e7b46c3a6d717163aa400b365fe598f3
+[harness]   user pubkey:     e806e16c7e93d6c6c467d94d5cab8d166accf362b93eb2e06c34392b941681f5
+[harness]   agent1 pubkey:   fa04768b10ab6ff856ecf4b26d9358028a7f2cc5f400a7fa3068a1cacf5608de
+[harness]   agent2 pubkey:   54cb5f754ffef2f892eef527dde58ba475f2a5e929077a50e64fbd64b323638e
+[harness]   project a-tag:   31933:e806e16c7e93d6c6c467d94d5cab8d166accf362b93eb2e06c34392b941681f5:nak-interop-test-20260427003739-23422
+[harness] starting relay on 127.0.0.1:49989 (admins=1)[[harness] relay ready at ws://127.0.0.1:49989
+[harness] daemon config relays -> [ws://127.0.0.1:49989]cconnecting to ws://127.0.0.1:49989... ok.
+publishing to ws://127.0.0.1:49989... success.cconnecting to ws://127.0.0.1:49989... ok.
+publishing to ws://127.0.0.1:49989... success.
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-112-1777239459-39625/backend, binary=/Users/pablofernandez/Work/TENEX-ff3ssq/target/release/daemon)[[harness] daemon ready (pid 40583, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-112-1777239459-39625/backend/daemon/tenex.lock)[[harness] kind:14199 probe #1 was signed locally but never became readable on the relay; retrying[[harness] kind:14199 listener confirmed (probe #2 round-tripped after 200ms)[[harness] kind:24030 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] daemon subscription confirmed live (all probed listener filters registered)
+[scenario]   daemon authenticated as admin ✓cconnecting to ws://127.0.0.1:49989... ok.
+publishing to ws://127.0.0.1:49989... success.
+[scenario] boot event id=eeb167778bc0651be0136a2eef2d0066be192a2b36901abf9654a897af4cc12a
+[scenario] waiting for kind:24010 on relay (backend admin publish)[[scenario]   kind:24010 published with project a-tag ✓
+[scenario]   daemon.log confirms 'nostr event published' ✓
+
+[scenario] PASS — scenario 11.2: backend publishes via admin path
+[harness] RESULT status=pass scenario=112_backend_publishes_via_admin.sh detail=
+[harness] cleanup (script exit code=0)
+[harness] stopping daemon pid 40583 (SIGTERM)[[harness] stopping relay pid 40562

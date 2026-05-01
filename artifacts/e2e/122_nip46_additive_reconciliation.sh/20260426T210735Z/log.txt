@@ -1,0 +1,59 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-122-1777237655-57722
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-122-1777237655-57722
+[harness]   backend pubkey:  563ddf4ef614159512dd7f4c57dcc075f11632654d1ff619fb717037e7e226a2
+[harness]   user pubkey:     58e6257a0654bc236dc617ee395b78c0bd689bf4eb5d7ba06a49e11aa1037a7d
+[harness]   agent1 pubkey:   9a3128ebd0820269b1fbabd4d9817829fd3f140ad245ead87ffed0d599bfe8e3
+[harness]   agent2 pubkey:   f87cb3bf372abff7b45fcbd3aeb54ea073cd86a0c15427a97d76a925c2615c42
+[harness]   project a-tag:   31933:58e6257a0654bc236dc617ee395b78c0bd689bf4eb5d7ba06a49e11aa1037a7d:nak-interop-test-20260427000735-30800
+[harness] starting relay on 127.0.0.1:63055 (admins=1)
+[harness] relay ready at ws://127.0.0.1:63055
+[harness] daemon config relays -> [ws://127.0.0.1:63055]
+[harness] wrote 2 pubkey(s) to /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-122-1777237655-57722/backend/daemon/whitelist.txt
+connecting to ws://127.0.0.1:63055... ok.
+publishing to ws://127.0.0.1:63055... success.
+[scenario] pre-seeded 14199 id=acc714ad03e8bb8512db06998f0c6af5df698c09e6c5a27e935b5429ddfbaf5b (agent1+backend only)
+[scenario] nak bunker pid=58269
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-122-1777237655-57722/backend, binary=/Users/pablofernandez/Work/TENEX-ff3ssq/target/release/daemon)
+[harness] daemon ready (pid 58301, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-122-1777237655-57722/backend/daemon/tenex.lock)
+[harness] kind:14199 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] kind:24030 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] daemon subscription confirmed live (all probed listener filters registered)
+[scenario] waiting up to 25s for updated kind:14199 with agent2
+/Users/pablofernandez/Work/TENEX-ff3ssq/scripts/e2e/scenarios/122_nip46_additive_reconciliation.sh: line 101: 58301 Killed: 9               TENEX_BASE_DIR="$TENEX_BASE_DIR" "$daemon_bin" --tenex-base-dir "$TENEX_BASE_DIR" >> "$HARNESS_DAEMON_LOG" 2>&1
+[scenario] daemon log (last 60 lines):
+{"timestamp":"2026-04-26T21:07:39.176523Z","level":"INFO","fields":{"message":"nostr relay task started","relay_url":"ws://127.0.0.1:63055"},"target":"tenex_daemon::nostr_subscription_gateway"}
+{"timestamp":"2026-04-26T21:07:39.176543Z","level":"DEBUG","fields":{"message":"connecting subscription relay session","relay_url":"ws://127.0.0.1:63055"},"target":"tenex_daemon::nostr_subscription_gateway"}
+{"timestamp":"2026-04-26T21:07:39.176549Z","level":"DEBUG","fields":{"message":"connecting to relay","relay_url":"ws://127.0.0.1:63055","subscription_id":"tenex-main"},"target":"tenex_daemon::nostr_subscription_gateway"}
+{"timestamp":"2026-04-26T21:07:39.177092Z","level":"DEBUG","fields":{"message":"relay sent AUTH challenge, authenticating","relay_url":"ws://127.0.0.1:63055"},"target":"tenex_daemon::nostr_subscription_gateway"}
+{"timestamp":"2026-04-26T21:07:39.177133Z","level":"DEBUG","fields":{"message":"ignoring duplicate AUTH challenge","relay_url":"ws://127.0.0.1:63055"},"target":"tenex_daemon::nostr_subscription_gateway"}
+{"timestamp":"2026-04-26T21:07:39.177433Z","level":"INFO","fields":{"message":"relay authenticated, resubscribed","relay_url":"ws://127.0.0.1:63055"},"target":"tenex_daemon::nostr_subscription_gateway"}
+{"timestamp":"2026-04-26T21:07:39.177673Z","level":"DEBUG","fields":{"message":"nostr event received","relay_url":"ws://127.0.0.1:63055","event_id":"acc714ad03e8bb8512db06998f0c6af5df698c09e6c5a27e935b5429ddfbaf5b","event_kind":14199,"event_pubkey":"58e6257a0654bc236dc617ee395b78c0bd689bf4eb5d7ba06a49e11aa1037a7d","class":"NeverRoute"},"target":"tenex_daemon::nostr_subscription_gateway"}
+{"timestamp":"2026-04-26T21:07:39.177677Z","level":"INFO","fields":{"message":"inbound nostr event ignored","relay_url":"ws://127.0.0.1:63055","event_id":"acc714ad03e8bb8512db06998f0c6af5df698c09e6c5a27e935b5429ddfbaf5b","code":"never_route","detail":"nostr event class NeverRoute is not a worker conversation","class":"Some(NeverRoute)","project_id":"None","pubkeys":"[]","dispatch_id":"None"},"target":"tenex_daemon::nostr_subscription_gateway"}
+{"timestamp":"2026-04-26T21:07:39.194711Z","level":"DEBUG","fields":{"message":"worker runtime: no queued dispatches"},"target":"tenex_daemon::daemon_worker_runtime"}
+{"timestamp":"2026-04-26T21:07:39.194729Z","level":"DEBUG","fields":{"message":"worker-admission-driver: not admitted; waiting for signal","reason":"NoQueuedDispatches"},"target":"tenex_daemon::worker_admission_driver"}
+{"timestamp":"2026-04-26T21:07:39.345787Z","level":"DEBUG","fields":{"message":"nostr event received","relay_url":"ws://127.0.0.1:63055","event_id":"0aa0331419c201da6fcaf401a774549e6fa3b42814e55c9f6d0d0e3c6f8ac7b9","event_kind":14199,"event_pubkey":"58e6257a0654bc236dc617ee395b78c0bd689bf4eb5d7ba06a49e11aa1037a7d","class":"NeverRoute"},"target":"tenex_daemon::nostr_subscription_gateway"}
+{"timestamp":"2026-04-26T21:07:39.345802Z","level":"INFO","fields":{"message":"inbound nostr event ignored","relay_url":"ws://127.0.0.1:63055","event_id":"0aa0331419c201da6fcaf401a774549e6fa3b42814e55c9f6d0d0e3c6f8ac7b9","code":"never_route","detail":"nostr event class NeverRoute is not a worker conversation","class":"Some(NeverRoute)","project_id":"None","pubkeys":"[]","dispatch_id":"None"},"target":"tenex_daemon::nostr_subscription_gateway"}
+{"timestamp":"2026-04-26T21:07:39.530684Z","level":"DEBUG","fields":{"message":"nostr event received","relay_url":"ws://127.0.0.1:63055","event_id":"147a07e281b676b29cc7746b9af1279aa010167adc3854971974287b6f25f5cb","event_kind":24030,"event_pubkey":"58e6257a0654bc236dc617ee395b78c0bd689bf4eb5d7ba06a49e11aa1037a7d","class":"Other"},"target":"tenex_daemon::nostr_subscription_gateway"}
+{"timestamp":"2026-04-26T21:07:39.530695Z","level":"INFO","fields":{"message":"inbound nostr event ignored","relay_url":"ws://127.0.0.1:63055","event_id":"147a07e281b676b29cc7746b9af1279aa010167adc3854971974287b6f25f5cb","code":"unsupported_nostr_event_class","detail":"nostr event class Other is not a worker conversation","class":"Some(Other)","project_id":"None","pubkeys":"[]","dispatch_id":"None"},"target":"tenex_daemon::nostr_subscription_gateway"}
+/Users/pablofernandez/Work/TENEX-ff3ssq/scripts/e2e/scenarios/122_nip46_additive_reconciliation.sh: line 112: 58269 Terminated: 15          nak bunker --sec "$USER_NSEC" --authorized-keys "$BACKEND_PUBKEY" "$HARNESS_RELAY_URL" > "$bunker_log" 2>&1
+[scenario] bunker log:
+connecting to ws://127.0.0.1:63055... ok.
+listening at [ws://127.0.0.1:63055]:
+  pubkey: 58e6257a0654bc236dc617ee395b78c0bd689bf4eb5d7ba06a49e11aa1037a7d 
+  npub: npub1trnz27sx2j7zxmwxzlhrjkmccz7k3xl5adwhhgr2f8s34ggr0f7ssq4f7c
+  authorized keys:
+    - 563ddf4ef614159512dd7f4c57dcc075f11632654d1ff619fb717037e7e226a2
+  to restart: nak bunker --sec nsec1wm4cw9lq38qj4pq0tew9nccy9q0z2ak409y4hvf0gmkmvmnpgrnqs6p9l8 -k 563ddf4ef614159512dd7f4c57dcc075f11632654d1ff619fb717037e7e226a2 ws://127.0.0.1:63055
+  bunker: bunker://58e6257a0654bc236dc617ee395b78c0bd689bf4eb5d7ba06a49e11aa1037a7d?relay=ws%3A%2F%2F127.0.0.1%3A63055&secret=PCIAcBoDjDGq
+
+[harness] RESULT status=fail scenario=122_nip46_additive_reconciliation.sh detail=updated kind:14199 with agent2 not published within 25s
+[harness] FATAL: ASSERT: additive reconciliation did not produce new 14199
+[harness] cleanup (script exit code=1)
+[harness] stopping daemon pid 58301 (SIGTERM)
+[harness] stopping relay pid 58243

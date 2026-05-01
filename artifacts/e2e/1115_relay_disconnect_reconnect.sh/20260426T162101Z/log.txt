@@ -1,0 +1,48 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-1115-1777220461-35198
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-1115-1777220461-35198
+[harness]   backend pubkey:  ffb6dd00cc485faa96dd2b8cb4f69fcf880ce5e250166d8501e28017f2c9e360
+[harness]   user pubkey:     8b16a987191527b3d6377222a449e98f990af2a5b6355a862d33f928ae74dc24
+[harness]   agent1 pubkey:   f52c4691696d9dc6a35cf1f8a3f42eccdc5df7da3fd66cd930d1209b4143123b
+[harness]   agent2 pubkey:   715d66dc921b39a60afb1bbdf10e8ceb4e32b3cab9a7822eed8e8edc279ef131
+[harness]   project a-tag:   31933:8b16a987191527b3d6377222a449e98f990af2a5b6355a862d33f928ae74dc24:nak-interop-test-20260426192101-9060
+[harness] starting relay on 127.0.0.1:55181 (admins=1)
+[harness] relay ready at ws://127.0.0.1:55181
+[harness] daemon config relays -> [ws://127.0.0.1:55181]
+connecting to ws://127.0.0.1:55181... ok.
+publishing to ws://127.0.0.1:55181... success.
+connecting to ws://127.0.0.1:55181... ok.
+publishing to ws://127.0.0.1:55181... success.
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-1115-1777220461-35198/backend)
+[harness] daemon ready (pid 35665, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-1115-1777220461-35198/backend/daemon/tenex.lock)
+[harness] kind:14199 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] kind:24030 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] daemon subscription confirmed live (all probed listener filters registered)
+[scenario]   daemon subscribed and relay authenticated ✓
+[scenario]   log_offset_before_kill=    5365
+[scenario] killing relay (SIGTERM via stop_local_relay)
+[harness] stopping relay pid 35654
+[scenario]   relay killed ✓
+[scenario] waiting for daemon to log relay disconnect
+[scenario]   daemon logged 'relay disconnected, reconnecting after backoff' ✓
+[scenario]   daemon survived relay disconnect ✓
+[scenario] restarting relay on port 55181
+[scenario]   relay restarted and healthy ✓
+[scenario] waiting for daemon to reconnect and re-authenticate
+[scenario]   daemon re-authenticated after reconnect ✓
+[scenario] verifying live event delivery after reconnect
+connecting to ws://127.0.0.1:55181... ok.
+publishing to ws://127.0.0.1:55181... success.
+[scenario]   probe event id=28b23bf60a3112700b14806f0ee62a813c13f631d0421873ce8cbe5e43327524 (kind:24030)
+[scenario]   probe event stored on relay after reconnect ✓
+
+[scenario] PASS — scenario 11.15: relay disconnect/reconnect with re-subscription
+[harness] RESULT status=pass scenario=1115_relay_disconnect_reconnect.sh detail=
+[harness] cleanup (script exit code=0)
+[harness] stopping daemon pid 35665 (SIGTERM)
+[harness] stopping relay pid 35708

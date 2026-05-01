@@ -1,0 +1,77 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-64-1777204480-51851
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-64-1777204480-51851
+[harness]   backend pubkey:  0a8f76d7862b5c120fc2ee46a349521d04a363657dfc3de8a8d9daf30a42a6e7
+[harness]   user pubkey:     edf37693322fdd719e2fbef36139a08197a5e8a81177611e1513dd8f9cb75e4e
+[harness]   agent1 pubkey:   c9c328bba4ec16a45eb68c818e5c3a58b62f0606fb488e5b88fdbccdfa83ddb8
+[harness]   agent2 pubkey:   9f649e581e57e786d2d8e813de201953039c9d1f7127852fbb5e5b39e1fe49a0
+[harness]   project a-tag:   31933:edf37693322fdd719e2fbef36139a08197a5e8a81177611e1513dd8f9cb75e4e:nak-interop-test-20260426145440-15324
+[scenario] rewriting llms.json to use mock model 'mock/concurrent-race-64'
+[scenario] mock LLM enabled: fixture=/Users/pablofernandez/Work/TENEX-ff3ssq/scripts/e2e/fixtures/mock-llm/64_concurrent_message_race.json
+[harness] starting relay on 127.0.0.1:54352 (admins=1)
+[harness] relay ready at ws://127.0.0.1:54352
+[harness] daemon config relays -> [ws://127.0.0.1:54352]
+connecting to ws://127.0.0.1:54352... ok.
+publishing to ws://127.0.0.1:54352... success.
+connecting to ws://127.0.0.1:54352... ok.
+publishing to ws://127.0.0.1:54352... success.
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-64-1777204480-51851/backend)
+[harness] daemon ready (pid 56938, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-64-1777204480-51851/backend/daemon/tenex.lock)
+[harness] kind:14199 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] kind:24030 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] daemon subscription confirmed live (all probed listener filters registered)
+connecting to ws://127.0.0.1:54352... ok.
+publishing to ws://127.0.0.1:54352... success.
+[scenario] publishing first kind:1 (root of conversation)
+connecting to ws://127.0.0.1:54352... ok.
+publishing to ws://127.0.0.1:54352... success.
+[scenario]   first message id=3967c102928261c41a329fc93cf83e61c46a2da4e0773155863c577e1ef66fa7
+[scenario] publishing second kind:1 (3ms later, same conversation via e-tag)
+connecting to ws://127.0.0.1:54352... ok.
+publishing to ws://127.0.0.1:54352... success.
+[scenario]   second message id=4a2a9853776eae2a9978bb5e52da2fe0c98420312b668e59cb044bcf5cf9c952
+[scenario] waiting for both dispatches to appear in queue...
+[scenario]   first dispatch_id=inbound-875a8a71bffcf0e9abfc6523
+[scenario]   second dispatch_id=inbound-1283640a824de86958116218
+[scenario]   dispatch_ids are distinct ✓
+[scenario] waiting for first dispatch to be LEASED...
+[scenario]   no simultaneous LEASED pair ✓
+[scenario]   first=leased, second=queued at snapshot ✓
+[scenario]   observed: agent1 published second response ✓
+
+[scenario] === Results ===
+[scenario]   two distinct dispatch_ids generated          : yes
+[scenario]   no simultaneous LEASED pair                  : yes
+[scenario]   agent1 published first response              : no
+[scenario]   second dispatch eventually admitted (LEASED) : yes
+[scenario]   agent1 published second response             : yes
+warning: field `status` is never read
+  --> crates/tenex-daemon/src/per_agent_config_snapshot.rs:64:5
+   |
+61 | struct RawStoredAgent {
+   |        -------------- field in this struct
+...
+64 |     status: Option<String>,
+   |     ^^^^^^
+   |
+   = note: `RawStoredAgent` has a derived impl for the trait `Debug`, but this is intentionally ignored during dead code analysis
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `tenex-daemon` (lib) generated 1 warning
+    Finished `release` profile [optimized] target(s) in 0.08s
+     Running `target/release/daemon --tenex-base-dir /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-64-1777204480-51851/backend`
+[2m11:54:44[0m  [1m[32m✓[0m  [1m[32mdaemon ready[0m  [2m(nostr on, telegram off)[0m
+[2m11:54:44[0m  ↑  [1m[34mnak-interop-test-20260426145440-15324[0m  [2m(1 booted)[0m
+[2m11:54:45[0m  [1m[33m●[0m  [1m[96magent1[0m  [2minbound-worker-875a8a71bffcf0e9abfc6523[0m  [1m[34mnak-interop-test-20260426145440-15324[0m
+[2m11:54:46[0m  [1m[32m✓[0m  [1m[96magent1[0m  [2minbound-worker-875a8a71bffcf0e9abfc6523[0m  [1m[34mnak-interop-test-20260426145440-15324[0m
+[2m11:54:46[0m  [1m[33m●[0m  [1m[96magent1[0m  [2minbound-worker-1283640a824de86958116218[0m  [1m[34mnak-interop-test-20260426145440-15324[0m
+[2m11:54:47[0m  [1m[32m✓[0m  [1m[96magent1[0m  [2minbound-worker-1283640a824de86958116218[0m  [1m[34mnak-interop-test-20260426145440-15324[0m
+[harness] RESULT status=fail scenario=64_concurrent_message_race.sh detail=agent1 never published first concurrent message response
+[harness] cleanup (script exit code=1)
+[harness] stopping daemon pid 56938 (SIGTERM)
+[harness] stopping relay pid 56119

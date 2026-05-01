@@ -1,0 +1,9 @@
+[scenario] running crate-local unit tests for per-agent admission...
+[scenario]   running blocks_when_agent_limit_is_saturated
+[scenario]   running allows_start_when_counts_are_below_limits
+[scenario]   running treats_none_limits_as_unlimited_and_zero_as_block_all
+
+[scenario] PASS — scenario 3.3: per-agent concurrency cap
+[scenario]   NOTE: verified via unit tests. The daemon binary does not
+[scenario]   currently expose --per-agent-concurrent-workers, so live
+[scenario]   daemon verification requires a small CLI change.

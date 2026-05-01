@@ -1,0 +1,42 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-17-1777259544-45920
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-17-1777259544-45920
+[harness]   backend pubkey:  ee4e90fced46a772abc0a96a807525cbaed58718c63565fc6000025035e6dbb1
+[harness]   user pubkey:     dd2fa9b5234c5a1e54698070bf20628a6cfcf0230fd18968582bb7162e8b9b52
+[harness]   agent1 pubkey:   3279f366c1ac9c1006577bafc97a57377776385b87704f3debe94d989a2720b0
+[harness]   agent2 pubkey:   b3dcf57bd8f10ca6f1f18014a0745d3b16f822354627dda4ebb32440d78f62b1
+[harness]   project a-tag:   31933:dd2fa9b5234c5a1e54698070bf20628a6cfcf0230fd18968582bb7162e8b9b52:nak-interop-test-20260427061224-26322
+[scenario] seeded RAL journal (sequence=1, completed, ts=1777259537000ms)
+[scenario] seeded conversation file (root author=dd2fa9b5234c5a1e54698070bf20628a6cfcf0230fd18968582bb7162e8b9b52)
+[scenario] pre-seeded agents/index.json: byProject[nak-interop-test-20260427061224-26322] = [3279f366c1ac9c1006577bafc97a57377776385b87704f3debe94d989a2720b0]
+[scenario] configured intervention (enabled, agent=agent1, timeoutSeconds=2, user whitelisted)
+[harness] starting relay on 127.0.0.1:60480 (admins=1)
+[harness] relay ready at ws://127.0.0.1:60480
+[harness] daemon config relays -> [ws://127.0.0.1:60480]
+[scenario] publishing kind:14199 (whitelist)
+connecting to ws://127.0.0.1:60480... ok.
+publishing to ws://127.0.0.1:60480... success.
+[scenario] publishing kind:31933 (project)
+connecting to ws://127.0.0.1:60480... ok.
+publishing to ws://127.0.0.1:60480... success.
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-17-1777259544-45920/backend, binary=/Users/pablofernandez/Work/TENEX-ff3ssq/target/release/daemon)
+[harness] daemon ready (pid 46422, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-17-1777259544-45920/backend/daemon/tenex.lock)
+[harness] kind:14199 probe #1 was signed locally but never became readable on the relay; retrying
+[harness] kind:14199 listener confirmed (probe #2 round-tripped after 200ms)
+[harness] kind:24030 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] daemon subscription confirmed live (all probed listener filters registered)
+
+[scenario] waiting up to 10s for intervention review event (kind:1, context=intervention-review, author=backend)...
+[scenario]   received intervention review event ✓
+[scenario]   event id=4037b939fa45be965e909e160dfb27d63d0d58ffc5258cf2da903c1f590f4f53 pubkey=ee4e90fced46a772abc0a96a807525cbaed58718c63565fc6000025035e6dbb1 kind=1
+
+[scenario] PASS — scenario 1.7 (intervention arm driver + fire driver)
+[harness] RESULT status=pass scenario=17_intervention_due.sh detail=intervention review kind:1 published to relay within 20s of daemon start
+[harness] cleanup (script exit code=0)
+[harness] stopping daemon pid 46422 (SIGTERM)
+[harness] stopping relay pid 46409

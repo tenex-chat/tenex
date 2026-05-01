@@ -1,0 +1,33 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-113-1777254421-23394
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-113-1777254421-23394
+[harness]   backend pubkey:  d78fcb7c785feba5d54c5e7705683a78ed3000f840311634079a0f7c8dc6f039
+[harness]   user pubkey:     d03d015f1792122c6f563061a88db6d64126f5186b2cec88cd4b512d55105d56
+[harness]   agent1 pubkey:   9aab61783e1a1fdd3d0570af4fde8c7db4350ecaf116ff346d40f3b23d3c619b
+[harness]   agent2 pubkey:   4a66bf4010fe5500f1a38f40538b4ea826383a0d1bec1907b548edd798c5c787
+[harness]   project a-tag:   31933:d03d015f1792122c6f563061a88db6d64126f5186b2cec88cd4b512d55105d56:nak-interop-test-20260427044701-14895
+[harness] starting relay on 127.0.0.1:56353 (admins=1)
+[harness] relay ready at ws://127.0.0.1:56353
+connecting to ws://127.0.0.1:56353... ok.
+publishing to ws://127.0.0.1:56353... success.
+connecting to ws://127.0.0.1:56353... ok.
+publishing to ws://127.0.0.1:56353... success.
+connecting to ws://127.0.0.1:56353... ok.
+publishing to ws://127.0.0.1:56353... success.
+[scenario] step 1: subscribe WITHOUT auth — expect 0 events and relay denies
+[scenario]   unauthenticated_count=0 (expect 0)
+[scenario]   relay denied unauthenticated subscribe ✓
+[scenario] step 2: subscribe WITH auth (user not whitelisted) — expect 0 historical events
+[scenario]   authenticated_count=0 (expect 0; non-whitelisted)
+[scenario]   non-whitelisted AUTH returns 0 events ✓
+[scenario]   relay log confirms NIP-42 AUTH was exercised (deferred sub recorded) ✓
+
+[scenario] PASS — scenario 11.3: non-admin gets auth-required
+[harness] RESULT status=pass scenario=113_non_admin_auth_required.sh detail=
+[harness] cleanup (script exit code=0)
+[harness] stopping relay pid 24303

@@ -1,0 +1,37 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-53-1777237663-58553
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-53-1777237663-58553
+[harness]   backend pubkey:  9aa223ad38be067232a8fd0fee92851e790e6e89e5cc01437dc08d09cc6f628b
+[harness]   user pubkey:     fbfed40ae219e959316667b57a63da44cee6739f46f4f919cc3b25c0bd2e6188
+[harness]   agent1 pubkey:   9a904bdd393c2634b6209ad6c0d5806c99afd76f174127958d22f2e620588496
+[harness]   agent2 pubkey:   3337b674cc3ae1d8e93adbf28ac532934c5a72e3d0dd08be1a8bf909ba3a528a
+[harness]   project a-tag:   31933:fbfed40ae219e959316667b57a63da44cee6739f46f4f919cc3b25c0bd2e6188:nak-interop-test-20260427000743-2363
+[scenario] generating agent3 key pair
+[scenario]   agent3 pubkey=9bc946865c67fe2dcc63098729661a53b3a14728c4d0d2cf76842a24c10560f7
+[scenario]   agent3 JSON written to /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-53-1777237663-58553/backend/agents/9bc946865c67fe2dcc63098729661a53b3a14728c4d0d2cf76842a24c10560f7.json
+[scenario] rewriting llms.json to use mock fixture model 'mock/three-hop-53'
+[scenario] mock LLM enabled: fixture=/Users/pablofernandez/Work/TENEX-ff3ssq/scripts/e2e/fixtures/mock-llm/53_three_hop.json
+[scenario] pre-seeded project descriptor at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-53-1777237663-58553/backend/projects/nak-interop-test-20260427000743-2363/project.json
+[harness] starting relay on 127.0.0.1:63082 (admins=1)
+[harness] relay ready at ws://127.0.0.1:63082
+[harness] daemon config relays -> [ws://127.0.0.1:63082]
+[scenario] publishing 14199 (whitelist) as user — includes agent3
+connecting to ws://127.0.0.1:63082... ok.
+publishing to ws://127.0.0.1:63082... success.
+[scenario] publishing 31933 (project) as user — includes agent3
+connecting to ws://127.0.0.1:63082... ok.
+publishing to ws://127.0.0.1:63082... success.
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-53-1777237663-58553/backend, binary=/Users/pablofernandez/Work/TENEX-ff3ssq/target/release/daemon)
+[harness] daemon ready (pid 59152, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-53-1777237663-58553/backend/daemon/tenex.lock)
+/Users/pablofernandez/Work/TENEX-ff3ssq/scripts/e2e-test-harness.sh: line 206: 59152 Killed: 9               TENEX_BASE_DIR="$TENEX_BASE_DIR" "$daemon_bin" --tenex-base-dir "$TENEX_BASE_DIR" >> "$HARNESS_DAEMON_LOG" 2>&1
+[harness] kind:14199 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] TIMEOUT: kind:24030 probe never round-tripped within 45s
+[harness] FATAL: daemon subscription never became live
+[harness] cleanup (script exit code=1)
+[harness] stopping daemon pid 59152 (SIGTERM)
+[harness] stopping relay pid 59135

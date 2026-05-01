@@ -1,0 +1,82 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-54-1777220737-64358
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-54-1777220737-64358
+[harness]   backend pubkey:  ea0296646b7fd78c6cf6f1aef2d4df28196ac57ac8e4b0bb2d806bbdcf4e2326
+[harness]   user pubkey:     38305e1bdc6cb8a4cb11a04a34eaa75d658469d05b6d130dbd5c76583260e25a
+[harness]   agent1 pubkey:   c07b35095d701642201d726082b85ad9497e9acf6632fd6782227b2633c815cf
+[harness]   agent2 pubkey:   9c5efd4fcf4596d5ab40ee018d9894c99aa48cded5097e97a2cf2bc59bc051c2
+[harness]   project a-tag:   31933:38305e1bdc6cb8a4cb11a04a34eaa75d658469d05b6d130dbd5c76583260e25a:nak-interop-test-20260426192537-12678
+[scenario] rewriting llms.json to use mock fixture model 'mock/idle-parent-54'
+[scenario] mock LLM enabled: fixture=/Users/pablofernandez/Work/TENEX-ff3ssq/scripts/e2e/fixtures/mock-llm/54_idle_parent_wakeup.json
+[scenario] pre-seeded project descriptor at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-54-1777220737-64358/backend/projects/nak-interop-test-20260426192537-12678/project.json
+[harness] starting relay on 127.0.0.1:50749 (admins=1)
+[harness] relay ready at ws://127.0.0.1:50749
+[harness] daemon config relays -> [ws://127.0.0.1:50749]
+[scenario] publishing 14199 (whitelist) as user
+connecting to ws://127.0.0.1:50749... ok.
+publishing to ws://127.0.0.1:50749... success.
+[scenario] publishing 31933 (project) as user
+connecting to ws://127.0.0.1:50749... ok.
+publishing to ws://127.0.0.1:50749... success.
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-54-1777220737-64358/backend)
+[harness] daemon ready (pid 64936, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-54-1777220737-64358/backend/daemon/tenex.lock)
+[harness] kind:14199 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] kind:24030 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] daemon subscription confirmed live (all probed listener filters registered)
+[scenario] publishing 24000 (boot) as user
+connecting to ws://127.0.0.1:50749... ok.
+publishing to ws://127.0.0.1:50749... success.
+[scenario]   boot event id=4b9f00a54c54f282a11ff2d65d71047a34b90a1133f08806ff009e9c7d526460
+[scenario] waiting for daemon to publish kind:24010...
+[scenario] publishing kind:1 from user to agent1 (attempt 1)
+connecting to ws://127.0.0.1:50749... ok.
+publishing to ws://127.0.0.1:50749... success.
+[scenario]   user message id=e912bc6dc7bbab7ce24303ea1c0d28e8eb3d7abb54a28bd7a2d38548f763e53d
+[scenario]   initial dispatch enqueued ✓
+
+[scenario] === Phase B: idle-parent wakeup ===
+[scenario]   observed: agent1 published delegation kind:1
+[scenario]   observed: agent2 published kind:1 with 'hello-from-agent2'
+[scenario]   observed: RAL journal has DelegationCompleted record
+
+[scenario] === Phase B results ===
+[scenario]   agent1 published delegation kind:1  : yes
+[scenario]   agent2 replied (hello-from-agent2)  : yes
+[scenario]   agent1 resumed (idle-parent wakeup) : no
+[scenario]   RAL DelegationCompleted recorded    : yes
+[scenario]   resume dispatch enqueued (>=2 total): no
+warning: field `status` is never read
+  --> crates/tenex-daemon/src/per_agent_config_snapshot.rs:64:5
+   |
+61 | struct RawStoredAgent {
+   |        -------------- field in this struct
+...
+64 |     status: Option<String>,
+   |     ^^^^^^
+   |
+   = note: `RawStoredAgent` has a derived impl for the trait `Debug`, but this is intentionally ignored during dead code analysis
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `tenex-daemon` (lib) generated 1 warning
+    Finished `release` profile [optimized] target(s) in 0.27s
+     Running `target/release/daemon --tenex-base-dir /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-54-1777220737-64358/backend`
+[2m16:25:43[0m  [1m[32m✓[0m  [1m[32mdaemon ready[0m  [2m(nostr on, telegram off)[0m
+[2m16:25:43[0m  ↑  [1m[36mnak-interop-test-20260426192537-12678[0m  [2m(1 booted)[0m
+[2m16:25:45[0m  [1m[33m●[0m  [1m[93magent1[0m  [2minbound-worker-29348ae421ad0f5eb51123e7[0m  [1m[36mnak-interop-test-20260426192537-12678[0m
+[2m16:25:48[0m  [1m[33m●[0m  [1m[34magent2[0m  [2minbound-worker-1561e2e451df09a43b8fee9d[0m  [1m[36mnak-interop-test-20260426192537-12678[0m
+[2m16:25:53[0m  [1m[32m✓[0m  [1m[34magent2[0m  [2minbound-worker-1561e2e451df09a43b8fee9d[0m  [1m[36mnak-interop-test-20260426192537-12678[0m
+[2m16:25:57[0m  [1m[33m●[0m  [1m[34magent2[0m  [2minbound-worker-104a7fde9a03a226b13ba5d5[0m  [1m[36mnak-interop-test-20260426192537-12678[0m
+[2m16:26:02[0m  [1m[32m✓[0m  [1m[34magent2[0m  [2minbound-worker-104a7fde9a03a226b13ba5d5[0m  [1m[36mnak-interop-test-20260426192537-12678[0m
+[2m16:26:04[0m  [1m[33m●[0m  [1m[34magent2[0m  [2minbound-worker-73fd6166e85329770ffd4b2d[0m  [1m[36mnak-interop-test-20260426192537-12678[0m
+[2m16:26:08[0m  [1m[32m✓[0m  [1m[34magent2[0m  [2minbound-worker-73fd6166e85329770ffd4b2d[0m  [1m[36mnak-interop-test-20260426192537-12678[0m
+[2m16:26:11[0m  [1m[33m●[0m  [1m[34magent2[0m  [2minbound-worker-baa035c68bee2002afcf6928[0m  [1m[36mnak-interop-test-20260426192537-12678[0m
+[2m16:26:21[0m  [1m[33m●[0m  [1m[34magent2[0m  [2minbound-worker-e7261ac12de06b8353030d14[0m  [1m[36mnak-interop-test-20260426192537-12678[0m
+[harness] RESULT status=fail scenario=54_idle_parent_wakeup.sh detail=agent1 never published resume kind:1 after idle-parent wakeup
+[harness] cleanup (script exit code=1)
+[harness] stopping daemon pid 64936 (SIGTERM)
+[harness] stopping relay pid 64918

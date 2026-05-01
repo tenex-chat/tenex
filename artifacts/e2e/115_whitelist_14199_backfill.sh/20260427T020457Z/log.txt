@@ -1,0 +1,50 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-115-1777255497-64073
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-115-1777255497-64073
+[harness]   backend pubkey:  6e55359281e6489f575233b3f84b83a5f48b577aece206b424c9a41d8eb11204
+[harness]   user pubkey:     5bf14e893fd4ed256808e3e9281bc2742c968fd24b5680316dfd45fd64001430
+[harness]   agent1 pubkey:   de8a4c592b6f544a65674899765d4f93710c52b4b72d31e7917d7f448ebafaf9
+[harness]   agent2 pubkey:   773f673413841ae2a4f4b39382b3609d6172f602b16b6765834a0d19b9a1790f
+[harness]   project a-tag:   31933:5bf14e893fd4ed256808e3e9281bc2742c968fd24b5680316dfd45fd64001430:nak-interop-test-20260427050457-28169
+[harness] starting relay on 127.0.0.1:57760 (admins=1)
+[harness] relay ready at ws://127.0.0.1:57760
+[harness] daemon config relays -> [ws://127.0.0.1:57760]
+connecting to ws://127.0.0.1:57760... ok.
+publishing to ws://127.0.0.1:57760... success.
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-115-1777255497-64073/backend, binary=/Users/pablofernandez/Work/TENEX-ff3ssq/target/release/daemon)
+[harness] daemon ready (pid 64548, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-115-1777255497-64073/backend/daemon/tenex.lock)
+[scenario] waiting for daemon to authenticate with relay
+[scenario]   daemon authenticated ✓
+[scenario] step 1: backend publishes 3 historical kind:1 events
+connecting to ws://127.0.0.1:57760... ok.
+publishing to ws://127.0.0.1:57760... success.
+connecting to ws://127.0.0.1:57760... ok.
+publishing to ws://127.0.0.1:57760... success.
+connecting to ws://127.0.0.1:57760... ok.
+publishing to ws://127.0.0.1:57760... success.
+[scenario] step 2: user subscribes before whitelist — expect 0 historical events
+[scenario]   user_before=0 (expect 0)
+[scenario]   relay correctly deferred non-whitelisted user ✓
+[scenario] step 3: user publishes kind:14199 whitelisting self and agent2
+connecting to ws://127.0.0.1:57760... ok.
+publishing to ws://127.0.0.1:57760... success.
+[scenario]   whitelist event id=87b2bddde93afe68809c0ff6f786ebac483a3fbda190cc9f52ede07956d46614
+[scenario] step 4: user re-subscribes after whitelist — expect >=3 events
+[scenario]   user_after=3 (expect >=3)
+[scenario]   user backfill received ✓
+[scenario] step 5: agent2 (transitively whitelisted via p-tag) subscribes
+connecting to ws://127.0.0.1:57760... ok.
+publishing to ws://127.0.0.1:57760... success.
+[scenario]   agent2_count=4 (expect >=1)
+[scenario]   transitive whitelist (agent2) confirmed ✓
+
+[scenario] PASS — scenario 11.5: dynamic whitelist via 14199 with backfill
+[harness] RESULT status=pass scenario=115_whitelist_14199_backfill.sh detail=
+[harness] cleanup (script exit code=0)
+[harness] stopping daemon pid 64548 (SIGTERM)
+[harness] stopping relay pid 64538

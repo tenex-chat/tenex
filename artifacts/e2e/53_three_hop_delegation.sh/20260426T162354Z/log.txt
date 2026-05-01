@@ -1,0 +1,79 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-53-1777220634-51000
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-53-1777220634-51000
+[harness]   backend pubkey:  a8881c554ae847f1bb3f8789c43a2abca113ae8df15db075593397b53c34d0f6
+[harness]   user pubkey:     06e0ad0405e777136dd17ea0602ddfdd1db30d2756ddaf57d2f8f153551b768e
+[harness]   agent1 pubkey:   b603fbb4436d7c8ab643edcf57911212dfb435e5bb45c2bc9903aaccf06e9888
+[harness]   agent2 pubkey:   d357b09a8811f804eeea4982de6d64c3eea495467a0da3ea26d47c8250b01a46
+[harness]   project a-tag:   31933:06e0ad0405e777136dd17ea0602ddfdd1db30d2756ddaf57d2f8f153551b768e:nak-interop-test-20260426192354-27147
+[scenario] generating agent3 key pair
+[scenario]   agent3 pubkey=11714306c049c40a9daf3d456a12d11d1c92ba0d9ba5f642a77e4e31b0bda69e
+[scenario]   agent3 JSON written to /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-53-1777220634-51000/backend/agents/11714306c049c40a9daf3d456a12d11d1c92ba0d9ba5f642a77e4e31b0bda69e.json
+[scenario] rewriting llms.json to use mock fixture model 'mock/three-hop-53'
+[scenario] mock LLM enabled: fixture=/Users/pablofernandez/Work/TENEX-ff3ssq/scripts/e2e/fixtures/mock-llm/53_three_hop.json
+[scenario] pre-seeded project descriptor at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-53-1777220634-51000/backend/projects/nak-interop-test-20260426192354-27147/project.json
+[harness] starting relay on 127.0.0.1:55897 (admins=1)
+[harness] relay ready at ws://127.0.0.1:55897
+[harness] daemon config relays -> [ws://127.0.0.1:55897]
+[scenario] publishing 14199 (whitelist) as user — includes agent3
+connecting to ws://127.0.0.1:55897... ok.
+publishing to ws://127.0.0.1:55897... success.
+[scenario] publishing 31933 (project) as user — includes agent3
+connecting to ws://127.0.0.1:55897... ok.
+publishing to ws://127.0.0.1:55897... success.
+[harness] starting daemon via pre-built binary (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-53-1777220634-51000/backend)
+[harness] daemon ready (pid 52085, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-53-1777220634-51000/backend/daemon/tenex.lock)
+[harness] kind:14199 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] kind:24030 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] daemon subscription confirmed live (all probed listener filters registered)
+[scenario] publishing 24000 (boot) as user
+connecting to ws://127.0.0.1:55897... ok.
+publishing to ws://127.0.0.1:55897... success.
+[scenario]   boot event id=e7c4e4eda886ce2a086c98bc7256cea8ce6d107725667ac89e1820ee3f400240
+[scenario] waiting for daemon to process boot and publish kind:24010...
+[scenario]   24010 status published for our project ✓
+[scenario] publishing kind:1 from user to agent1 (attempt 1)
+connecting to ws://127.0.0.1:55897... ok.
+publishing to ws://127.0.0.1:55897... success.
+[scenario]   user message id=138a6e15b6a1c6fbd94e2e492579dac090e178ed8a6e61138124493131cb8a46
+[scenario] waiting up to 15s for daemon to enqueue dispatch...
+[scenario]   dispatch enqueued ✓
+[scenario] === Phase A complete: daemon plumbing OK ===
+
+[scenario] === Phase B: asserting mock-driven three-hop delegation ===
+[scenario]   observed: agent3 published terminal reply 'agent3 says result is 42'
+[scenario]   observed: agent1 published final answer incorporating the full chain
+[scenario]   observed: RAL journal has 7 delegation completion records
+
+[scenario] === Phase B observations ===
+[scenario]   agent1 published delegation kind:1      : no
+[scenario]   agent2 published delegation kind:1      : no
+[scenario]   agent3 terminal reply (fixture content) : yes
+[scenario]   agent2 resume (agent3 result relayed)   : no
+[scenario]   agent1 final answer (full chain)        : yes
+[scenario]   RAL journal >=2 completion records      : yes
+[scenario] daemon log (last 80 lines):
+[2m16:23:58[0m  [1m[32m✓[0m  [1m[32mdaemon ready[0m  [2m(nostr on, telegram off)[0m
+[2m16:23:59[0m  ↑  [1m[34mnak-interop-test-20260426192354-27147[0m  [2m(1 booted)[0m
+[2m16:24:01[0m  [1m[33m●[0m  [1m[34magent1[0m  [2minbound-worker-fbaf53e0912c74609998c571[0m  [1m[34mnak-interop-test-20260426192354-27147[0m
+[2m16:24:04[0m  [1m[33m●[0m  [1m[92magent2[0m  [2minbound-worker-28af991b0ae6bf19bfe206fc[0m  [1m[34mnak-interop-test-20260426192354-27147[0m
+[2m16:24:07[0m  [1m[33m●[0m  [1m[93magent3[0m  [2minbound-worker-541c3b5091bff9e55e1cdcbc[0m  [1m[34mnak-interop-test-20260426192354-27147[0m
+[2m16:24:12[0m  [1m[33m●[0m  [1m[92magent2[0m  [2minbound-worker-b32fefb3dece2a5d5f4ccc57[0m  [1m[34mnak-interop-test-20260426192354-27147[0m
+[2m16:24:14[0m  [1m[33m●[0m  [1m[93magent3[0m  [2minbound-worker-9e79494e02a4a6407591d832[0m  [1m[34mnak-interop-test-20260426192354-27147[0m
+[2m16:24:15[0m  [1m[32m✓[0m  [1m[93magent3[0m  [2minbound-worker-541c3b5091bff9e55e1cdcbc[0m  [1m[34mnak-interop-test-20260426192354-27147[0m
+[2m16:24:15[0m  [1m[32m✓[0m  [1m[92magent2[0m  [2minbound-worker-28af991b0ae6bf19bfe206fc[0m  [1m[34mnak-interop-test-20260426192354-27147[0m
+[2m16:24:18[0m  [1m[33m●[0m  [1m[93magent3[0m  [2minbound-worker-ad903b3d49ce6d122b3fc014[0m  [1m[34mnak-interop-test-20260426192354-27147[0m
+[2m16:24:20[0m  [1m[33m●[0m  [1m[92magent2[0m  [2mdelegation-resume-worker-4e1a5ebcc682484ec5286ecb[0m  [1m[34mnak-interop-test-20260426192354-27147[0m
+[2m16:24:21[0m  [1m[32m✓[0m  [1m[93magent3[0m  [2minbound-worker-9e79494e02a4a6407591d832[0m  [1m[34mnak-interop-test-20260426192354-27147[0m
+[2m16:24:21[0m  [1m[33m●[0m  [1m[92magent2[0m  [2minbound-worker-3f655a1dfca6a1df825a0f7d[0m  [1m[34mnak-interop-test-20260426192354-27147[0m
+[2m16:24:26[0m  [1m[33m●[0m  [1m[93magent3[0m  [2minbound-worker-12127b031bce9340756c79e9[0m  [1m[34mnak-interop-test-20260426192354-27147[0m
+[2m16:24:28[0m  [1m[33m●[0m  [1m[93magent3[0m  [2minbound-worker-464882c7df06986e002932eb[0m  [1m[34mnak-interop-test-20260426192354-27147[0m
+[harness] RESULT status=fail scenario=53_three_hop_delegation.sh detail=agent1 never published any kind:1 delegation event
+[harness] cleanup (script exit code=1)
+[harness] stopping daemon pid 52085 (SIGTERM)
+[harness] stopping relay pid 51924

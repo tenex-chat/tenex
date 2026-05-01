@@ -1,0 +1,31 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-127-1777237435-30727
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-127-1777237435-30727
+[harness]   backend pubkey:  7bd42ee0b90f5ecb4cfa5d1b17b5a053a9164efe87de7e71a3c049d80312e803
+[harness]   user pubkey:     89cd4a20ff500d89ef2eacbdb5e60adf1d9f336a81597718c418693450438f63
+[harness]   agent1 pubkey:   580082c640dbbb935a972149fcdd48cd0ac03c5a34733d027e0ba7500ab2d872
+[harness]   agent2 pubkey:   aaffa46f82bbea6d664c34a0104f0ec655640f6c68d025d64885e9603f2f03a6
+[harness]   project a-tag:   31933:89cd4a20ff500d89ef2eacbdb5e60adf1d9f336a81597718c418693450438f63:nak-interop-test-20260427000355-4004
+[harness] starting relay on 127.0.0.1:61926 (admins=1)
+[harness] relay ready at ws://127.0.0.1:61926
+[harness] daemon config relays -> [ws://127.0.0.1:61926]
+[harness] wrote 2 pubkey(s) to /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-127-1777237435-30727/backend/daemon/whitelist.txt
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-127-1777237435-30727/backend, binary=/Users/pablofernandez/Work/TENEX-ff3ssq/target/release/daemon)
+[harness] daemon ready (pid 31241, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-127-1777237435-30727/backend/daemon/tenex.lock)
+[harness] kind:14199 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] kind:24030 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] daemon subscription confirmed live (all probed listener filters registered)
+[scenario] waiting up to 12s for initial reconcile failure with bunker A
+/Users/pablofernandez/Work/TENEX-ff3ssq/scripts/e2e/scenarios/127_nip46_sighup_reloads_owners.sh: line 85: 31241 Killed: 9               TENEX_BASE_DIR="$TENEX_BASE_DIR" "$daemon_bin" --tenex-base-dir "$TENEX_BASE_DIR" >> "$HARNESS_DAEMON_LOG" 2>&1
+[scenario]   initial bunker-A timeout (saw_fail=0)
+[scenario] nak bunker B pid=32266
+[scenario] sending SIGHUP to daemon pid=31241 (lockfile PID)
+/Users/pablofernandez/Work/TENEX-ff3ssq/scripts/e2e/scenarios/127_nip46_sighup_reloads_owners.sh: line 117: kill: (31241) - No such process
+[harness] cleanup (script exit code=1)
+[harness] stopping daemon pid 31241 (SIGTERM)
+[harness] stopping relay pid 31226

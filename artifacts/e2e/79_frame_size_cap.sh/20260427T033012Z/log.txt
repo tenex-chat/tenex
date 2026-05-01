@@ -1,0 +1,44 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-79-1777260612-58568
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-79-1777260612-58568
+[harness]   backend pubkey:  0371282e417ece211eac1537def3fc1042f6270315a0a89b31648bfac7345404
+[harness]   user pubkey:     2288f0883ef6fcdbd0bc7a869a759991ad10caf9eaadb77d48dd3c956277fa5e
+[harness]   agent1 pubkey:   334214ac87a62c3d59076f745349690dc65d9e9a6e9778d9788dcb273b1bb43d
+[harness]   agent2 pubkey:   8252ae09a903e8845046bcfa654b7ef4a660aedea1cf480af3a4e037e1f40518
+[harness]   project a-tag:   31933:2288f0883ef6fcdbd0bc7a869a759991ad10caf9eaadb77d48dd3c956277fa5e:nak-interop-test-20260427063012-14830
+[harness] starting relay on 127.0.0.1:60971 (admins=1)
+[harness] relay ready at ws://127.0.0.1:60971
+[harness] daemon config relays -> [ws://127.0.0.1:60971]
+connecting to ws://127.0.0.1:60971... ok.
+publishing to ws://127.0.0.1:60971... success.
+connecting to ws://127.0.0.1:60971... ok.
+publishing to ws://127.0.0.1:60971... success.
+[harness] starting daemon with oversized-frame worker
+[harness] daemon ready (pid 59056)
+[harness] kind:14199 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] kind:24030 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] daemon subscription confirmed live (all probed listener filters registered)
+[scenario] publishing kind:24000 (boot)
+connecting to ws://127.0.0.1:60971... ok.
+publishing to ws://127.0.0.1:60971... success.
+[scenario] publishing kind:1 to trigger worker spawn
+connecting to ws://127.0.0.1:60971... ok.
+publishing to ws://127.0.0.1:60971... success.
+[scenario]   user message id=aa638a304d8febb54aed37e66619dc485617de8056ca9378fca5a00a18d7aad2
+[scenario] waiting for dispatch to reach leased...
+[scenario]   dispatch reached 'leased' ✓
+[scenario] waiting for frame-size error in daemon log...
+[scenario]   frame-size-cap error logged ✓
+[scenario]   daemon process still alive ✓
+[scenario]   no Rust panic in daemon log ✓
+
+[scenario] PASS — scenario 7.9 Frame size cap
+[harness] RESULT status=pass scenario=79_frame_size_cap.sh detail=daemon rejects oversized frame; session error logged; no panic
+[harness] cleanup (script exit code=0)
+[harness] stopping daemon pid 59056 (SIGTERM)
+[harness] stopping relay pid 59041

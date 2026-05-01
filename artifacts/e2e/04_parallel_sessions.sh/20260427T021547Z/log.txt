@@ -1,0 +1,70 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-04-1777256147-77722
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-04-1777256147-77722
+[harness]   backend pubkey:  141e18f9b6bbe0f4ca0ca8df01bc0d1812e02c9c13687c3f6d8edf7d5e294631
+[harness]   user pubkey:     9eb276ce96d62c19f6e549a9ab37af14d9062cf8935763fbf1725ab2602ecbda
+[harness]   agent1 pubkey:   8ea843b25db902e46c7c09abc4fb3b6c1d7e996d09108b10bde711eb47cc8b07
+[harness]   agent2 pubkey:   e749e0d3883ba737a0a3ce068895928dd88a13ba40c23aa81c385f7a517f85da
+[harness]   project a-tag:   31933:9eb276ce96d62c19f6e549a9ab37af14d9062cf8935763fbf1725ab2602ecbda:nak-interop-test-20260427051547-20756
+[scenario] rewriting llms.json to use mock fixture model 'mock/parallel-04'
+[scenario] mock LLM enabled: fixture=/Users/pablofernandez/Work/TENEX-ff3ssq/scripts/e2e/fixtures/mock-llm/04_parallel_sessions.json
+[scenario] pre-seeded project descriptor at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-04-1777256147-77722/backend/projects/nak-interop-test-20260427051547-20756/project.json
+[harness] starting relay on 127.0.0.1:58174 (admins=1)
+[harness] relay ready at ws://127.0.0.1:58174
+[harness] daemon config relays -> [ws://127.0.0.1:58174]
+[scenario] publishing 14199 (whitelist) as user
+connecting to ws://127.0.0.1:58174... ok.
+publishing to ws://127.0.0.1:58174... success.
+[scenario] publishing 31933 (project) as user
+connecting to ws://127.0.0.1:58174... ok.
+publishing to ws://127.0.0.1:58174... success.
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-04-1777256147-77722/backend, binary=/Users/pablofernandez/Work/TENEX-ff3ssq/target/release/daemon)
+[harness] daemon ready (pid 78296, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-04-1777256147-77722/backend/daemon/tenex.lock)
+[harness] kind:14199 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] kind:24030 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] daemon subscription confirmed live (all probed listener filters registered)
+[scenario] publishing 24000 (boot) as user
+connecting to ws://127.0.0.1:58174... ok.
+publishing to ws://127.0.0.1:58174... success.
+[scenario]   boot event id=295398fbf4d2d5ae105030a75922bf1ef1ff26b475ba85ddb7c9fba04dee447f
+[scenario] waiting for daemon to process boot and publish kind:24010...
+[scenario]   24010 status published for our project ✓
+[scenario] publishing kind:1 SESSION-ALPHA → agent1 and SESSION-BETA → agent2 in parallel
+connecting to ws://127.0.0.1:58174... ok.
+connecting to ws://127.0.0.1:58174... ok.
+publishing to ws://127.0.0.1:58174... success.
+publishing to ws://127.0.0.1:58174... success.
+[scenario]   msg1 (SESSION-ALPHA) id=36ccf4ea4dc59cc4f5620b844b4704ee959c2f66017d757c5f19cc7818fa79f3
+[scenario]   msg2 (SESSION-BETA)  id=59d7f4edb7b33e2269ad729283664e9ae85cb57b265a657a2c32c09bbdeb66fc
+[scenario] waiting up to 20s for both dispatches to be enqueued...
+[scenario]   SESSION-BETA dispatch enqueued ✓
+[scenario]   SESSION-ALPHA dispatch enqueued ✓
+[scenario] === Phase A complete: both dispatches enqueued ===
+
+[scenario] === Phase B: asserting both sessions complete and ran in parallel ===
+[scenario]   observed: agent1 published kind:1 with 'session-alpha result: 100'
+[scenario]   observed: agent2 published kind:1 with 'session-beta result: 200'
+[scenario]   observed: RAL journal has 2 terminal entries
+
+[scenario] === Phase B observations ===
+[scenario]   agent1 kind:1 (session-alpha result: 100) : yes
+[scenario]   agent2 kind:1 (session-beta result: 200)  : yes
+[scenario]   RAL journal >=2 terminal entries           : yes
+
+[scenario] === Phase C: proving temporal overlap from RAL journal ===
+[scenario]   RAL overlap analysis:
+[scenario]     OVERLAP_MS=753
+[scenario]       agent1: [1777256151802, 1777256152650] duration=848ms
+[scenario]       agent2: [1777256151766, 1777256152555] duration=789ms
+[scenario]   temporal overlap confirmed ✓
+
+[scenario] PASS — scenario 4 (both agents ran in parallel; RAL timestamps prove overlap)
+[harness] RESULT status=pass scenario=04_parallel_sessions.sh detail=parallel execution confirmed: RAL claimed→terminal windows overlap
+[harness] cleanup (script exit code=0)
+[harness] stopping daemon pid 78296 (SIGTERM)
+[harness] stopping relay pid 78271

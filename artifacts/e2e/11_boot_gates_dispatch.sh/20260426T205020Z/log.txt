@@ -1,0 +1,38 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-11-1777236620-4924
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-11-1777236620-4924
+[harness]   backend pubkey:  32b33a1be965195afd8fa76acb74e590ff6983869345020b472e0aa3829e990e
+[harness]   user pubkey:     58a951b78636ea5be1ef61aff3dd2dde0eb47d173f51524532d2c733962c763d
+[harness]   agent1 pubkey:   95a1445153fe30a24fc98e6942b1e0668db2731954004414138c3c3d123c5dc9
+[harness]   agent2 pubkey:   bd54ebce551e8f9ae514e9d54d971dd3aae3a72b9c25047433b0dd2fe4a519da
+[harness]   project a-tag:   31933:58a951b78636ea5be1ef61aff3dd2dde0eb47d173f51524532d2c733962c763d:nak-interop-test-20260426235020-2670
+[harness] starting relay on 127.0.0.1:61256 (admins=1)
+[harness] relay ready at ws://127.0.0.1:61256
+[harness] daemon config relays -> [ws://127.0.0.1:61256]
+connecting to ws://127.0.0.1:61256... ok.
+publishing to ws://127.0.0.1:61256... success.
+connecting to ws://127.0.0.1:61256... ok.
+publishing to ws://127.0.0.1:61256... success.
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-11-1777236620-4924/backend, binary=/Users/pablofernandez/Work/TENEX-ff3ssq/target/release/daemon)
+[harness] daemon ready (pid 5411, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-11-1777236620-4924/backend/daemon/tenex.lock)
+[harness] kind:14199 probe #1 was signed locally but never became readable on the relay; retrying
+[harness] kind:14199 listener confirmed (probe #2 round-tripped after 200ms)
+[harness] kind:24030 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] daemon subscription confirmed live (all probed listener filters registered)
+[scenario] publishing kind:1 without a prior boot event
+connecting to ws://127.0.0.1:61256... ok.
+publishing to ws://127.0.0.1:61256... success.
+[scenario]   user message id=78b009f010abf973c06e5797070e221f32109bc0f083fbd63d774d0391626836
+[scenario]   no 24010 published for unbooted project ✓
+[scenario]   daemon log contains project_not_booted ignored entry ✓
+[scenario]   no dispatch queued for unbooted project ✓
+
+[scenario] PASS — scenario 1.1 Boot gates dispatch (boot gate enforced by daemon)
+[harness] cleanup (script exit code=0)
+[harness] stopping daemon pid 5411 (SIGTERM)
+[harness] stopping relay pid 5400

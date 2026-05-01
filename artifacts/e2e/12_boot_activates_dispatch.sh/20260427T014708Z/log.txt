@@ -1,0 +1,44 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-12-1777254428-25012
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-12-1777254428-25012
+[harness]   backend pubkey:  f6ea071d764ce633995c40a9264d422f1c4015f0a826595b2043c74a37625f29
+[harness]   user pubkey:     78c85b23dae4f88fb523d6787abf91d77d683b4c33da3e53a2d3436a79bf50ee
+[harness]   agent1 pubkey:   09229e5f1d38b43a221cce7f680f3d0c7e9c66839bba51c8a9393bf565d821c3
+[harness]   agent2 pubkey:   ae168d2e475632b144812b8b460352af55be36cdd6834e6a26e9923d85ba5fc2
+[harness]   project a-tag:   31933:78c85b23dae4f88fb523d6787abf91d77d683b4c33da3e53a2d3436a79bf50ee:nak-interop-test-20260427044708-31793
+[harness] starting relay on 127.0.0.1:56398 (admins=1)
+[harness] relay ready at ws://127.0.0.1:56398
+[harness] daemon config relays -> [ws://127.0.0.1:56398]
+connecting to ws://127.0.0.1:56398... ok.
+publishing to ws://127.0.0.1:56398... success.
+connecting to ws://127.0.0.1:56398... ok.
+publishing to ws://127.0.0.1:56398... success.
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-12-1777254428-25012/backend, binary=/Users/pablofernandez/Work/TENEX-ff3ssq/target/release/daemon)
+[harness] daemon ready (pid 25528, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-12-1777254428-25012/backend/daemon/tenex.lock)
+[harness] kind:14199 probe #1 was signed locally but never became readable on the relay; retrying
+[harness] kind:14199 listener confirmed (probe #2 round-tripped after 200ms)
+[harness] kind:24030 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] daemon subscription confirmed live (all probed listener filters registered)
+[scenario] phase 1: verifying no 24010 is published before boot
+[scenario]   pre-boot: no 24010 for our project ✓
+[scenario] phase 2: publishing kind:24000 boot event
+connecting to ws://127.0.0.1:56398... ok.
+publishing to ws://127.0.0.1:56398... success.
+[scenario]   boot event id=6de63bcabde611f61dcf5e0ef4bd60d036110384768717d5e4124b9de8aaa9ff
+[scenario]   waiting for boot + project-status publish (stream)
+[scenario]   post-boot: 24010 published for our a-tag ✓
+[scenario]   ingress recorded project_booted for our d-tag ✓
+[scenario] phase 3: publishing kind:1 after boot
+connecting to ws://127.0.0.1:56398... ok.
+publishing to ws://127.0.0.1:56398... success.
+[scenario]   post-boot dispatch enqueued ✓
+
+[scenario] PASS — scenario 1.2 Boot activates dispatch
+[harness] cleanup (script exit code=0)
+[harness] stopping daemon pid 25528 (SIGTERM)
+[harness] stopping relay pid 25510

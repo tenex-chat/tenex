@@ -1,0 +1,86 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-1777223849-59740
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-1777223849-59740
+[harness]   backend pubkey:  adb57efb70ea9fed16d2105c8657658eac61ca725c9dd71b36f98b944c438e39
+[harness]   user pubkey:     61d594f367458e3898a4217bf247b63f1704a8c1149b9a22850add8a5bdb8075
+[harness]   agent1 pubkey:   6504b8e6ea221993a9c8bd659c4f150f4d997424bfc1679caac79b11b190edc5
+[harness]   agent2 pubkey:   6d67bd5f3f1ee1ce6328e4fdf12a741104faef06343c5b5d321b455b2a6038fd
+[harness]   project a-tag:   31933:61d594f367458e3898a4217bf247b63f1704a8c1149b9a22850add8a5bdb8075:nak-interop-test-20260426201729-6142
+[scenario] rewriting llms.json to use mock fixture model 'mock/delegation-02'
+[scenario] mock LLM enabled: fixture=/Users/pablofernandez/Work/TENEX-ff3ssq/scripts/e2e/fixtures/mock-llm/02_delegation.json
+[scenario] pre-seeded project descriptor at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-1777223849-59740/backend/projects/nak-interop-test-20260426201729-6142/project.json
+[harness] starting relay on 127.0.0.1:63259 (admins=1)
+[harness] relay ready at ws://127.0.0.1:63259
+[harness] daemon config relays -> [ws://127.0.0.1:63259]
+[scenario] publishing 14199 (whitelist) as user
+connecting to ws://127.0.0.1:63259... ok.
+publishing to ws://127.0.0.1:63259... success.
+[scenario] publishing 31933 (project) as user
+connecting to ws://127.0.0.1:63259... ok.
+publishing to ws://127.0.0.1:63259... success.
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-1777223849-59740/backend)
+[harness] daemon ready (pid 60535, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-1777223849-59740/backend/daemon/tenex.lock)
+[harness] kind:14199 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] kind:24030 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] daemon subscription confirmed live (all probed listener filters registered)
+[scenario] publishing 24000 (boot) as user
+connecting to ws://127.0.0.1:63259... ok.
+publishing to ws://127.0.0.1:63259... success.
+[scenario]   boot event id=4ea1cdafec715f840ab575572545a369a81901e11c444638680efe2d185844dc
+[scenario] waiting for daemon to process boot and publish kind:24010...
+[scenario] querying for kind:24010 from backend...
+[scenario]   24010 status published for our project ✓ (proves boot was recorded)
+[scenario] publishing kind:1 from user to agent1 (attempt 1)
+connecting to ws://127.0.0.1:63259... ok.
+publishing to ws://127.0.0.1:63259... success.
+[scenario]   user message id=7d9904ff36465b1d33da9d84a662803755a4413974028938e04fc66a8e8986e1
+[scenario] waiting up to 15s for daemon to enqueue dispatch...
+[scenario]   dispatch enqueued ✓
+[scenario] === Phase A complete: daemon plumbing OK ===
+
+[scenario] === Phase B: asserting mock-driven delegation ===
+[scenario]   observed: agent1 published kind:1 (historical)
+[scenario]   observed: agent2 published kind:1 with fixture content 'agent2 says 4'
+[scenario]   observed: RAL journal has a completion/terminal record
+
+[scenario] === Phase B observations ===
+[scenario]   agent1 published kind:1           : yes
+[scenario]   agent2 replied with fixture text  : yes
+[scenario]   agent1 final kind:1 (post-delegation): no
+[scenario]   RAL journal completion record     : yes
+[scenario] daemon log (last 80 lines):
+   Compiling tenex-daemon v0.1.0 (/Users/pablofernandez/Work/TENEX-ff3ssq/crates/tenex-daemon)
+warning: field `status` is never read
+  --> crates/tenex-daemon/src/per_agent_config_snapshot.rs:64:5
+   |
+61 | struct RawStoredAgent {
+   |        -------------- field in this struct
+...
+64 |     status: Option<String>,
+   |     ^^^^^^
+   |
+   = note: `RawStoredAgent` has a derived impl for the trait `Debug`, but this is intentionally ignored during dead code analysis
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `tenex-daemon` (lib) generated 1 warning
+    Finished `release` profile [optimized] target(s) in 22.31s
+     Running `target/release/daemon --tenex-base-dir /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-1777223849-59740/backend`
+[2m17:17:56[0m  [1m[32m✓[0m  [1m[32mdaemon ready[0m  [2m(nostr on, telegram off)[0m
+[2m17:17:56[0m  ↑  [1m[96mnak-interop-test-20260426201729-6142[0m  [2m(1 booted)[0m
+[2m17:17:58[0m  [1m[33m●[0m  [1m[95magent1[0m  [2minbound-worker-cee2ad99a7bc888325dfe689[0m  [1m[96mnak-interop-test-20260426201729-6142[0m
+[2m17:17:59[0m  [1m[33m●[0m  [1m[96magent2[0m  [2minbound-worker-4a40063cf2bd1c4beeb89f3d[0m  [1m[96mnak-interop-test-20260426201729-6142[0m
+[2m17:18:00[0m  [1m[32m✓[0m  [1m[96magent2[0m  [2minbound-worker-4a40063cf2bd1c4beeb89f3d[0m  [1m[96mnak-interop-test-20260426201729-6142[0m
+[2m17:18:01[0m  [1m[33m●[0m  [1m[96magent2[0m  [2minbound-worker-482103e746ded6fe133dfb51[0m  [1m[96mnak-interop-test-20260426201729-6142[0m
+[2m17:18:03[0m  [1m[32m✓[0m  [1m[96magent2[0m  [2minbound-worker-482103e746ded6fe133dfb51[0m  [1m[96mnak-interop-test-20260426201729-6142[0m
+[2m17:18:03[0m  [1m[32m✓[0m  [1m[95magent1[0m  [2minbound-worker-cee2ad99a7bc888325dfe689[0m  [1m[96mnak-interop-test-20260426201729-6142[0m
+[2m17:18:04[0m  [1m[33m●[0m  [1m[95magent1[0m  [2mpre-completed-resume-worker-df72e00a12ee860c92d513fa[0m  [1m[96mnak-interop-test-20260426201729-6142[0m
+[2m17:18:04[0m  [1m[32m✓[0m  [1m[95magent1[0m  [2mpre-completed-resume-worker-df72e00a12ee860c92d513fa[0m  [1m[96mnak-interop-test-20260426201729-6142[0m
+[harness] FATAL: ASSERT: agent1 never published its final kind:1 ('Final answer: agent2 says 4.')
+[harness] cleanup (script exit code=1)
+[harness] stopping daemon pid 60535 (SIGTERM)
+[harness] stopping relay pid 60524

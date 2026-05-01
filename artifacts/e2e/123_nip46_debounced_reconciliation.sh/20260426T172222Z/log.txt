@@ -1,0 +1,36 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-123-1777224142-80108
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-123-1777224142-80108
+[harness]   backend pubkey:  6adbf0c5be8396039f6248237af679cbd6be73c5f01f9aa57e3d8d5ddadd1a06
+[harness]   user pubkey:     38da427cfcf477f72229f8e286225e89211cf0d785b055e517b0adf2bdbcbb49
+[harness]   agent1 pubkey:   531720c01e1e85ef79775e1017ed6160612d064f5b079d0d52d9924ef666a2ae
+[harness]   agent2 pubkey:   6cfa81fdfa91c8217c6564aea0c13e8357323369fa2824d7da3a02d047254405
+[harness]   project a-tag:   31933:38da427cfcf477f72229f8e286225e89211cf0d785b055e517b0adf2bdbcbb49:nak-interop-test-20260426202222-15012
+[harness] starting relay on 127.0.0.1:55874 (admins=1)
+[harness] relay ready at ws://127.0.0.1:55874
+[harness] daemon config relays -> [ws://127.0.0.1:55874]
+[harness] wrote 2 pubkey(s) to /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-123-1777224142-80108/backend/daemon/whitelist.txt
+connecting to ws://127.0.0.1:55874... ok.
+publishing to ws://127.0.0.1:55874... success.
+[scenario] pre-seeded 14199 id=d2d4cff2d96fead9f22a18336b94f6b370f5102bb745613210223aa0280714e6
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-123-1777224142-80108/backend)
+[harness] daemon ready (pid 80707, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-123-1777224142-80108/backend/daemon/tenex.lock)
+[harness] kind:14199 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] kind:24030 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] daemon subscription confirmed live (all probed listener filters registered)
+[scenario] waiting up to 25s for debounced kind:14199 with agent2
+[scenario]   new 14199 found — watching 10s for spurious duplicate
+[scenario]   new 14199 events from owner: 1
+[scenario]   exactly 1 new kind:14199 published (debounce confirmed) ✓
+
+[scenario] PASS — scenario 12.3 Debounced reconciliation
+[harness] RESULT status=pass scenario=123_nip46_debounced_reconciliation.sh detail=single 14199 published despite multiple poller triggers
+/Users/pablofernandez/Work/TENEX-ff3ssq/scripts/e2e/scenarios/123_nip46_debounced_reconciliation.sh: line 135: 80692 Terminated: 15          nak bunker --sec "$USER_NSEC" --authorized-keys "$BACKEND_PUBKEY" "$HARNESS_RELAY_URL" > "$bunker_log" 2>&1
+[harness] cleanup (script exit code=0)
+[harness] stopping daemon pid 80707 (SIGTERM)
+[harness] stopping relay pid 80642

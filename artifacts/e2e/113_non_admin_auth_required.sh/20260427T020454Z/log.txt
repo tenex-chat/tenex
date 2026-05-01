@@ -1,0 +1,33 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-113-1777255494-63549
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-113-1777255494-63549
+[harness]   backend pubkey:  652b1d0a9e7d204d3207edd0abc3b6ed024767f81eb553d67b4ab1c3e37becbd
+[harness]   user pubkey:     41281ef62cbd77902059a72afa80ca09bbca737f50fbebea1bd8f2c0007b0e94
+[harness]   agent1 pubkey:   7d49ae548cda5f920e3cad767644cfcc39396f5c7855ba85dc1d16ecd5db0a9e
+[harness]   agent2 pubkey:   7993374ad28f81e14443401ebe310362eeb30deffb11bed69b54478ab6922349
+[harness]   project a-tag:   31933:41281ef62cbd77902059a72afa80ca09bbca737f50fbebea1bd8f2c0007b0e94:nak-interop-test-20260427050454-2650
+[harness] starting relay on 127.0.0.1:57752 (admins=1)
+[harness] relay ready at ws://127.0.0.1:57752
+connecting to ws://127.0.0.1:57752... ok.
+publishing to ws://127.0.0.1:57752... success.
+connecting to ws://127.0.0.1:57752... ok.
+publishing to ws://127.0.0.1:57752... success.
+connecting to ws://127.0.0.1:57752... ok.
+publishing to ws://127.0.0.1:57752... success.
+[scenario] step 1: subscribe WITHOUT auth — expect 0 events and relay denies
+[scenario]   unauthenticated_count=0 (expect 0)
+[scenario]   relay denied unauthenticated subscribe ✓
+[scenario] step 2: subscribe WITH auth (user not whitelisted) — expect 0 historical events
+[scenario]   authenticated_count=0 (expect 0; non-whitelisted)
+[scenario]   non-whitelisted AUTH returns 0 events ✓
+[scenario]   relay log confirms NIP-42 AUTH was exercised (deferred sub recorded) ✓
+
+[scenario] PASS — scenario 11.3: non-admin gets auth-required
+[harness] RESULT status=pass scenario=113_non_admin_auth_required.sh detail=
+[harness] cleanup (script exit code=0)
+[harness] stopping relay pid 64036

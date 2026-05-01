@@ -1,0 +1,34 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-121-1777217842-43616
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-121-1777217842-43616
+[harness]   backend pubkey:  40778cdb19744bf2f5db85b76e77cda074cd5bcf37c79c3b1f66d749987fc810
+[harness]   user pubkey:     3384244789ca3ae32c290f976551aad741eca758c28aa931add32c0683d9cf74
+[harness]   agent1 pubkey:   8e1e5d3a52f92a51f7d4a06b08761a0541f05985173ab64d7ac3545dcd095ac2
+[harness]   agent2 pubkey:   b1cc18b11c01d983f0c94e6661529d5b839358f176c3500b6ff2f2a5e49c783b
+[harness]   project a-tag:   31933:3384244789ca3ae32c290f976551aad741eca758c28aa931add32c0683d9cf74:nak-interop-test-20260426183722-25323
+[harness] starting relay on 127.0.0.1:51086 (admins=1)
+[harness] relay ready at ws://127.0.0.1:51086
+[harness] daemon config relays -> [ws://127.0.0.1:51086]
+[harness] wrote 2 pubkey(s) to /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-121-1777217842-43616/backend/daemon/whitelist.txt
+[scenario] nak bunker pid=44394
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-121-1777217842-43616/backend)
+[harness] daemon ready (pid 44458, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-121-1777217842-43616/backend/daemon/tenex.lock)
+[harness] kind:14199 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] kind:24030 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] daemon subscription confirmed live (all probed listener filters registered)
+[scenario] waiting up to 25s for kind:14199 from owner with agent1 p-tag
+[scenario]   kind:14199 appeared on relay ✓
+/Users/pablofernandez/Work/TENEX-ff3ssq/scripts/e2e/scenarios/121_nip46_first_publish_on_boot.sh: line 120: 44394 Terminated: 15          nak bunker --sec "$USER_NSEC" --authorized-keys "$BACKEND_PUBKEY" "$HARNESS_RELAY_URL" > "$bunker_log" 2>&1
+[scenario]   p-tags: 3384244789ca3ae32c290f976551aad741eca758c28aa931add32c0683d9cf74 40778cdb19744bf2f5db85b76e77cda074cd5bcf37c79c3b1f66d749987fc810 8e1e5d3a52f92a51f7d4a06b08761a0541f05985173ab64d7ac3545dcd095ac2
+[scenario]   backend and agent1 p-tags present ✓
+
+[scenario] PASS — scenario 12.1 First kind:14199 publish on boot
+[harness] RESULT status=pass scenario=121_nip46_first_publish_on_boot.sh detail=kind:14199 published with correct p-tags
+[harness] cleanup (script exit code=0)
+[harness] stopping daemon pid 44458 (SIGTERM)
+[harness] stopping relay pid 44372

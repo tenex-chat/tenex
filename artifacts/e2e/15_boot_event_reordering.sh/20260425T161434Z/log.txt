@@ -1,0 +1,89 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-15-1777133674-99211
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-15-1777133674-99211
+[harness]   backend pubkey:  5c4652728d5413738b128342f56044d45e59028791794eb4abe4145f9d13c532
+[harness]   user pubkey:     971399ec0276e92c91d45e4abf4ce6150a0760a9a08bf58bb6c2525e7053ae63
+[harness]   agent1 pubkey:   9dfe6eb01ea0a8ef2ad6a0c94d202fdda9909314449a004ecd1b0bd5bfd8f55b
+[harness]   agent2 pubkey:   9a5454f60b6fe25f518224127dd67d6590efb5b213e77353b22fb580d8f2a3e6
+[harness]   project a-tag:   31933:971399ec0276e92c91d45e4abf4ce6150a0760a9a08bf58bb6c2525e7053ae63:nak-interop-test-20260425191434-17375
+[harness] starting relay on 127.0.0.1:49826 (admins=1)
+[harness] relay ready at ws://127.0.0.1:49826
+[harness] daemon config relays -> [ws://127.0.0.1:49826]
+connecting to ws://127.0.0.1:49826... ok.
+publishing to ws://127.0.0.1:49826... success.
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-15-1777133674-99211/backend)
+[harness] daemon ready (pid 99754, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-15-1777133674-99211/backend/daemon/tenex.lock)
+[harness] kind:14199 listener confirmed (probe #1 round-tripped after 500ms)
+[harness] kind:24030 listener confirmed (probe #1 round-tripped after 500ms)
+[harness] daemon subscription confirmed live (all probed listener filters registered)
+[scenario] phase 1: publishing NEWER kind:31933 (created_at=1777137277)
+connecting to ws://127.0.0.1:49826... ok.
+publishing to ws://127.0.0.1:49826... success.
+[scenario]   newer 31933 id=3445befc7d7f6b7763a7933f17e3a00f5d84af9dcc24aa770337f97ae91a391d created_at=1777137277
+[scenario]   daemon log project_updated count after newer 31933: 1
+[scenario]   newer 31933 accepted (project_updated logged) ✓
+[scenario] phase 2: publishing OLDER kind:31933 (created_at=1777130077)
+connecting to ws://127.0.0.1:49826... ok.
+publishing to ws://127.0.0.1:49826... success.
+[scenario]   older 31933 id=d5a6e7a92af1f8f2734903d5d07ec1b4add62aa46a955d3df35329fe5d4d8484 created_at=1777130077
+[scenario]   daemon log project_updated count after older 31933: 1 (informational)
+[scenario]   relay stored 31933 created_at=1777137277 (expected=1777137277)
+[scenario]   relay correctly retains the newer revision ✓
+[scenario] phase 3: checking daemon process is still alive
+[scenario]   daemon still running (pid 99754) ✓
+[scenario] phase 4: polling-boot kind:24000 for project nak-interop-test-20260425191434-17375
+[scenario]   boot attempt #1 id=c198ff986192a1ab5632aa51b69908fbc6a1a959f755289b3a92adb7de50cbe3
+[scenario]   boot attempt #2 id=c460a1816749d56fb9a098516b4d9021a02d4c0ea9c191d2dffe75f15abf5542
+[scenario]   boot attempt #3 id=d6ec9663b049161536c086917c147a60ba6308c319f31115570e8694e6d5d0bb
+[scenario]   boot attempt #4 id=e3c72562705d6a8ce8be6b06f7684a22b3911507ef9a18d0ddf48590ea0e56c2
+[scenario]   boot attempt #5 id=b70b6bf8f1a0f45c3f85125df34f0cc28cc9180d223b1a3027034a039a335f44
+[scenario]   boot attempt #6 id=7255cda559b8e834318e8151db0306b9988fb871e3bd2f13249e76a2cb9b5d57
+{"timestamp":"2026-04-25T16:15:32.066126Z","level":"DEBUG","fields":{"message":"daemon tick publish summary","tick_kind":"daemon worker tick","now_ms":1777133732055,"project_descriptor_count":1,"booted_project_descriptor_count":0,"worker_outcome":"Some([\"not_admitted\"])","publish_pending_after":0,"publish_published_after":5,"publish_failed_after":0,"publish_retry_due_after":0},"target":"tenex_daemon::daemon_loop"}
+{"timestamp":"2026-04-25T16:15:33.091364Z","level":"INFO","fields":{"message":"project-status filter trace","index_descriptor_count":1,"boot_state_count":0,"booted_descriptor_count":0,"index_coordinates":"[\"971399ec:nak-interop-test-20260425191434-17375\"]","boot_coordinates":"[]"},"target":"tenex_daemon::daemon_maintenance::project_status_filter"}
+{"timestamp":"2026-04-25T16:15:33.102196Z","level":"DEBUG","fields":{"message":"worker runtime: no queued dispatches"},"target":"tenex_daemon::daemon_worker_runtime"}
+{"timestamp":"2026-04-25T16:15:33.102813Z","level":"DEBUG","fields":{"message":"daemon tick publish summary","tick_kind":"daemon worker tick","now_ms":1777133733091,"project_descriptor_count":1,"booted_project_descriptor_count":0,"worker_outcome":"Some([\"not_admitted\"])","publish_pending_after":0,"publish_published_after":5,"publish_failed_after":0,"publish_retry_due_after":0},"target":"tenex_daemon::daemon_loop"}
+{"timestamp":"2026-04-25T16:15:34.129616Z","level":"INFO","fields":{"message":"project-status filter trace","index_descriptor_count":1,"boot_state_count":0,"booted_descriptor_count":0,"index_coordinates":"[\"971399ec:nak-interop-test-20260425191434-17375\"]","boot_coordinates":"[]"},"target":"tenex_daemon::daemon_maintenance::project_status_filter"}
+{"timestamp":"2026-04-25T16:15:34.139988Z","level":"DEBUG","fields":{"message":"worker runtime: no queued dispatches"},"target":"tenex_daemon::daemon_worker_runtime"}
+{"timestamp":"2026-04-25T16:15:34.140535Z","level":"DEBUG","fields":{"message":"daemon tick publish summary","tick_kind":"daemon worker tick","now_ms":1777133734129,"project_descriptor_count":1,"booted_project_descriptor_count":0,"worker_outcome":"Some([\"not_admitted\"])","publish_pending_after":0,"publish_published_after":5,"publish_failed_after":0,"publish_retry_due_after":0},"target":"tenex_daemon::daemon_loop"}
+{"timestamp":"2026-04-25T16:15:35.163701Z","level":"INFO","fields":{"message":"project-status filter trace","index_descriptor_count":1,"boot_state_count":0,"booted_descriptor_count":0,"index_coordinates":"[\"971399ec:nak-interop-test-20260425191434-17375\"]","boot_coordinates":"[]"},"target":"tenex_daemon::daemon_maintenance::project_status_filter"}
+{"timestamp":"2026-04-25T16:15:35.174161Z","level":"DEBUG","fields":{"message":"worker runtime: no queued dispatches"},"target":"tenex_daemon::daemon_worker_runtime"}
+{"timestamp":"2026-04-25T16:15:35.174688Z","level":"DEBUG","fields":{"message":"daemon tick publish summary","tick_kind":"daemon worker tick","now_ms":1777133735163,"project_descriptor_count":1,"booted_project_descriptor_count":0,"worker_outcome":"Some([\"not_admitted\"])","publish_pending_after":0,"publish_published_after":5,"publish_failed_after":0,"publish_retry_due_after":0},"target":"tenex_daemon::daemon_loop"}
+{"timestamp":"2026-04-25T16:15:36.199212Z","level":"INFO","fields":{"message":"project-status filter trace","index_descriptor_count":1,"boot_state_count":0,"booted_descriptor_count":0,"index_coordinates":"[\"971399ec:nak-interop-test-20260425191434-17375\"]","boot_coordinates":"[]"},"target":"tenex_daemon::daemon_maintenance::project_status_filter"}
+{"timestamp":"2026-04-25T16:15:36.209357Z","level":"DEBUG","fields":{"message":"worker runtime: no queued dispatches"},"target":"tenex_daemon::daemon_worker_runtime"}
+{"timestamp":"2026-04-25T16:15:36.210029Z","level":"DEBUG","fields":{"message":"daemon tick publish summary","tick_kind":"daemon worker tick","now_ms":1777133736199,"project_descriptor_count":1,"booted_project_descriptor_count":0,"worker_outcome":"Some([\"not_admitted\"])","publish_pending_after":0,"publish_published_after":5,"publish_failed_after":0,"publish_retry_due_after":0},"target":"tenex_daemon::daemon_loop"}
+{"timestamp":"2026-04-25T16:15:37.236253Z","level":"INFO","fields":{"message":"project-status filter trace","index_descriptor_count":1,"boot_state_count":0,"booted_descriptor_count":0,"index_coordinates":"[\"971399ec:nak-interop-test-20260425191434-17375\"]","boot_coordinates":"[]"},"target":"tenex_daemon::daemon_maintenance::project_status_filter"}
+{"timestamp":"2026-04-25T16:15:37.249621Z","level":"DEBUG","fields":{"message":"worker runtime: no queued dispatches"},"target":"tenex_daemon::daemon_worker_runtime"}
+{"timestamp":"2026-04-25T16:15:37.250145Z","level":"DEBUG","fields":{"message":"daemon tick publish summary","tick_kind":"daemon worker tick","now_ms":1777133737236,"project_descriptor_count":1,"booted_project_descriptor_count":0,"worker_outcome":"Some([\"not_admitted\"])","publish_pending_after":0,"publish_published_after":5,"publish_failed_after":0,"publish_retry_due_after":0},"target":"tenex_daemon::daemon_loop"}
+{"timestamp":"2026-04-25T16:15:38.275866Z","level":"INFO","fields":{"message":"project-status filter trace","index_descriptor_count":1,"boot_state_count":0,"booted_descriptor_count":0,"index_coordinates":"[\"971399ec:nak-interop-test-20260425191434-17375\"]","boot_coordinates":"[]"},"target":"tenex_daemon::daemon_maintenance::project_status_filter"}
+{"timestamp":"2026-04-25T16:15:38.301192Z","level":"DEBUG","fields":{"message":"worker runtime: no queued dispatches"},"target":"tenex_daemon::daemon_worker_runtime"}
+{"timestamp":"2026-04-25T16:15:38.301807Z","level":"DEBUG","fields":{"message":"daemon tick publish summary","tick_kind":"daemon worker tick","now_ms":1777133738275,"project_descriptor_count":1,"booted_project_descriptor_count":0,"worker_outcome":"Some([\"not_admitted\"])","publish_pending_after":0,"publish_published_after":5,"publish_failed_after":0,"publish_retry_due_after":0},"target":"tenex_daemon::daemon_loop"}
+{"timestamp":"2026-04-25T16:15:39.329292Z","level":"INFO","fields":{"message":"project-status filter trace","index_descriptor_count":1,"boot_state_count":0,"booted_descriptor_count":0,"index_coordinates":"[\"971399ec:nak-interop-test-20260425191434-17375\"]","boot_coordinates":"[]"},"target":"tenex_daemon::daemon_maintenance::project_status_filter"}
+{"timestamp":"2026-04-25T16:15:39.339468Z","level":"DEBUG","fields":{"message":"worker runtime: no queued dispatches"},"target":"tenex_daemon::daemon_worker_runtime"}
+{"timestamp":"2026-04-25T16:15:39.340052Z","level":"DEBUG","fields":{"message":"daemon tick publish summary","tick_kind":"daemon worker tick","now_ms":1777133739329,"project_descriptor_count":1,"booted_project_descriptor_count":0,"worker_outcome":"Some([\"not_admitted\"])","publish_pending_after":0,"publish_published_after":5,"publish_failed_after":0,"publish_retry_due_after":0},"target":"tenex_daemon::daemon_loop"}
+{"timestamp":"2026-04-25T16:15:40.369751Z","level":"INFO","fields":{"message":"project-status filter trace","index_descriptor_count":1,"boot_state_count":0,"booted_descriptor_count":0,"index_coordinates":"[\"971399ec:nak-interop-test-20260425191434-17375\"]","boot_coordinates":"[]"},"target":"tenex_daemon::daemon_maintenance::project_status_filter"}
+{"timestamp":"2026-04-25T16:15:40.379972Z","level":"DEBUG","fields":{"message":"worker runtime: no queued dispatches"},"target":"tenex_daemon::daemon_worker_runtime"}
+{"timestamp":"2026-04-25T16:15:40.380751Z","level":"DEBUG","fields":{"message":"daemon tick publish summary","tick_kind":"daemon worker tick","now_ms":1777133740369,"project_descriptor_count":1,"booted_project_descriptor_count":0,"worker_outcome":"Some([\"not_admitted\"])","publish_pending_after":0,"publish_published_after":5,"publish_failed_after":0,"publish_retry_due_after":0},"target":"tenex_daemon::daemon_loop"}
+{"timestamp":"2026-04-25T16:15:41.407108Z","level":"INFO","fields":{"message":"project-status filter trace","index_descriptor_count":1,"boot_state_count":0,"booted_descriptor_count":0,"index_coordinates":"[\"971399ec:nak-interop-test-20260425191434-17375\"]","boot_coordinates":"[]"},"target":"tenex_daemon::daemon_maintenance::project_status_filter"}
+{"timestamp":"2026-04-25T16:15:41.417063Z","level":"DEBUG","fields":{"message":"worker runtime: no queued dispatches"},"target":"tenex_daemon::daemon_worker_runtime"}
+{"timestamp":"2026-04-25T16:15:41.417508Z","level":"DEBUG","fields":{"message":"daemon tick publish summary","tick_kind":"daemon worker tick","now_ms":1777133741406,"project_descriptor_count":1,"booted_project_descriptor_count":0,"worker_outcome":"Some([\"not_admitted\"])","publish_pending_after":0,"publish_published_after":5,"publish_failed_after":0,"publish_retry_due_after":0},"target":"tenex_daemon::daemon_loop"}
+{"timestamp":"2026-04-25T16:15:42.445664Z","level":"INFO","fields":{"message":"project-status filter trace","index_descriptor_count":1,"boot_state_count":0,"booted_descriptor_count":0,"index_coordinates":"[\"971399ec:nak-interop-test-20260425191434-17375\"]","boot_coordinates":"[]"},"target":"tenex_daemon::daemon_maintenance::project_status_filter"}
+{"timestamp":"2026-04-25T16:15:42.467630Z","level":"DEBUG","fields":{"message":"worker runtime: no queued dispatches"},"target":"tenex_daemon::daemon_worker_runtime"}
+{"timestamp":"2026-04-25T16:15:42.468234Z","level":"DEBUG","fields":{"message":"daemon tick publish summary","tick_kind":"daemon worker tick","now_ms":1777133742445,"project_descriptor_count":1,"booted_project_descriptor_count":0,"worker_outcome":"Some([\"not_admitted\"])","publish_pending_after":0,"publish_published_after":5,"publish_failed_after":0,"publish_retry_due_after":0},"target":"tenex_daemon::daemon_loop"}
+{"timestamp":"2026-04-25T16:15:43.497064Z","level":"INFO","fields":{"message":"project-status filter trace","index_descriptor_count":1,"boot_state_count":0,"booted_descriptor_count":0,"index_coordinates":"[\"971399ec:nak-interop-test-20260425191434-17375\"]","boot_coordinates":"[]"},"target":"tenex_daemon::daemon_maintenance::project_status_filter"}
+{"timestamp":"2026-04-25T16:15:43.507109Z","level":"DEBUG","fields":{"message":"worker runtime: no queued dispatches"},"target":"tenex_daemon::daemon_worker_runtime"}
+{"timestamp":"2026-04-25T16:15:43.507862Z","level":"DEBUG","fields":{"message":"daemon tick publish summary","tick_kind":"daemon worker tick","now_ms":1777133743496,"project_descriptor_count":1,"booted_project_descriptor_count":0,"worker_outcome":"Some([\"not_admitted\"])","publish_pending_after":0,"publish_published_after":5,"publish_failed_after":0,"publish_retry_due_after":0},"target":"tenex_daemon::daemon_loop"}
+{"timestamp":"2026-04-25T16:15:44.536757Z","level":"INFO","fields":{"message":"project-status filter trace","index_descriptor_count":1,"boot_state_count":0,"booted_descriptor_count":0,"index_coordinates":"[\"971399ec:nak-interop-test-20260425191434-17375\"]","boot_coordinates":"[]"},"target":"tenex_daemon::daemon_maintenance::project_status_filter"}
+{"timestamp":"2026-04-25T16:15:44.547673Z","level":"DEBUG","fields":{"message":"worker runtime: no queued dispatches"},"target":"tenex_daemon::daemon_worker_runtime"}
+{"timestamp":"2026-04-25T16:15:44.548351Z","level":"DEBUG","fields":{"message":"daemon tick publish summary","tick_kind":"daemon worker tick","now_ms":1777133744536,"project_descriptor_count":1,"booted_project_descriptor_count":0,"worker_outcome":"Some([\"not_admitted\"])","publish_pending_after":0,"publish_published_after":5,"publish_failed_after":0,"publish_retry_due_after":0},"target":"tenex_daemon::daemon_loop"}
+{"timestamp":"2026-04-25T16:15:45.571668Z","level":"INFO","fields":{"message":"project-status filter trace","index_descriptor_count":1,"boot_state_count":0,"booted_descriptor_count":0,"index_coordinates":"[\"971399ec:nak-interop-test-20260425191434-17375\"]","boot_coordinates":"[]"},"target":"tenex_daemon::daemon_maintenance::project_status_filter"}
+{"timestamp":"2026-04-25T16:15:45.581775Z","level":"DEBUG","fields":{"message":"worker runtime: no queued dispatches"},"target":"tenex_daemon::daemon_worker_runtime"}
+{"timestamp":"2026-04-25T16:15:45.582191Z","level":"DEBUG","fields":{"message":"daemon tick publish summary","tick_kind":"daemon worker tick","now_ms":1777133745571,"project_descriptor_count":1,"booted_project_descriptor_count":0,"worker_outcome":"Some([\"not_admitted\"])","publish_pending_after":0,"publish_published_after":5,"publish_failed_after":0,"publish_retry_due_after":0},"target":"tenex_daemon::daemon_loop"}
+[harness] RESULT status=fail scenario=15_boot_event_reordering.sh detail=daemon.log has no project_booted line after boot event (tried 6 time(s))
+[harness] cleanup (script exit code=1)
+[harness] stopping daemon pid 99754 (SIGTERM)
+[harness] stopping relay pid 99742

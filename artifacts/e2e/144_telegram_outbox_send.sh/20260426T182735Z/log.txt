@@ -1,0 +1,30 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-144-1777228055-42496
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-144-1777228055-42496
+[harness]   backend pubkey:  97075b870f6d79bf166cf5a67dd99e9e3a635c5cbf3c98a03cf4c175c7cc59c4
+[harness]   user pubkey:     67b573a22996d7739b6caaaa358e11916f60d854a029ddff4c5dcc2594e42d86
+[harness]   agent1 pubkey:   81a92cbbd781949accd72bcd5d2d21349c89f5ddc7843f95edba3e418350020d
+[harness]   agent2 pubkey:   36c261fd3c140a8b13df16c133e8c8670b3408689522e9f4b1c34d2fc7f59986
+[harness]   project a-tag:   31933:67b573a22996d7739b6caaaa358e11916f60d854a029ddff4c5dcc2594e42d86:nak-interop-test-20260426212735-26199
+[harness] starting relay on 127.0.0.1:56479 (admins=1)
+[harness] relay ready at ws://127.0.0.1:56479
+[harness] daemon config relays -> [ws://127.0.0.1:56479]
+[harness] wrote 2 pubkey(s) to /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-144-1777228055-42496/backend/daemon/whitelist.txt
+connecting to ws://127.0.0.1:56479... ok.
+publishing to ws://127.0.0.1:56479... success.
+connecting to ws://127.0.0.1:56479... ok.
+publishing to ws://127.0.0.1:56479... success.
+[scenario] mock Telegram server on port 56514 (pid 43545)
+[scenario] pending outbox record written: tg-fbf5f4fbe5fae8c2f4b483b604d1866e
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-144-1777228055-42496/backend)
+[harness] daemon ready (pid 43565, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-144-1777228055-42496/backend/daemon/tenex.lock)
+[harness] TIMEOUT: kind:14199 probe never round-tripped within 45s
+[harness] FATAL: daemon subscription never became live
+[harness] cleanup (script exit code=1)
+[harness] stopping daemon pid 43565 (SIGTERM)
+[harness] stopping relay pid 43508

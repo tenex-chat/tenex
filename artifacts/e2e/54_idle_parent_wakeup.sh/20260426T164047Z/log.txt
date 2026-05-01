@@ -1,0 +1,113 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-54-1777221647-12309
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-54-1777221647-12309
+[harness]   backend pubkey:  dfa446fad83d8be68a4bb52054b64f966fa75feaf76d21dc94d5d43521af00f6
+[harness]   user pubkey:     5b5e31298c093ba5d98a1659d39adcfedccbcf236b1266d103e605bf3fddba0a
+[harness]   agent1 pubkey:   98c21e33b5c9f65de5d166236ad08ba9e1422e3c858fb499940ba5985fdd1d79
+[harness]   agent2 pubkey:   8b07b5c913dc12b896683969eaccf7600fa56422c358f82f35fd7594d356d3c3
+[harness]   project a-tag:   31933:5b5e31298c093ba5d98a1659d39adcfedccbcf236b1266d103e605bf3fddba0a:nak-interop-test-20260426194047-28801
+[scenario] rewriting llms.json to use mock fixture model 'mock/idle-parent-54'
+[scenario] mock LLM enabled: fixture=/Users/pablofernandez/Work/TENEX-ff3ssq/scripts/e2e/fixtures/mock-llm/54_idle_parent_wakeup.json
+[scenario] pre-seeded project descriptor at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-54-1777221647-12309/backend/projects/nak-interop-test-20260426194047-28801/project.json
+[harness] starting relay on 127.0.0.1:51977 (admins=1)
+[harness] relay ready at ws://127.0.0.1:51977
+[harness] daemon config relays -> [ws://127.0.0.1:51977]
+[scenario] publishing 14199 (whitelist) as user
+connecting to ws://127.0.0.1:51977... ok.
+publishing to ws://127.0.0.1:51977... success.
+[scenario] publishing 31933 (project) as user
+connecting to ws://127.0.0.1:51977... ok.
+publishing to ws://127.0.0.1:51977... success.
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-54-1777221647-12309/backend)
+[harness] daemon ready (pid 12791, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-54-1777221647-12309/backend/daemon/tenex.lock)
+[harness] kind:14199 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] kind:24030 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] daemon subscription confirmed live (all probed listener filters registered)
+[scenario] publishing 24000 (boot) as user
+connecting to ws://127.0.0.1:51977... ok.
+publishing to ws://127.0.0.1:51977... success.
+[scenario]   boot event id=37f5250df1069b5d674c2c5450394f20d5f0b99159921c2f8f012f213549e123
+[scenario] waiting for daemon to publish kind:24010...
+[scenario] publishing kind:1 from user to agent1 (attempt 1)
+connecting to ws://127.0.0.1:51977... ok.
+publishing to ws://127.0.0.1:51977... success.
+[scenario]   user message id=325ecfa9ae3fc9b7f338965214a7df9abacbaa5297f02f9151b3c674aaaf0eec
+[scenario]   initial dispatch enqueued ✓
+
+[scenario] === Phase B: idle-parent wakeup ===
+[scenario]   observed: agent1 published delegation kind:1
+[scenario]   observed: agent2 published kind:1 with 'hello-from-agent2'
+[scenario]   observed: agent1 published resume kind:1 incorporating child response
+[scenario]   observed: RAL journal has DelegationCompleted record
+
+[scenario] === Phase B results ===
+[scenario]   agent1 published delegation kind:1  : yes
+[scenario]   agent2 replied (hello-from-agent2)  : yes
+[scenario]   agent1 resumed (idle-parent wakeup) : yes
+[scenario]   RAL DelegationCompleted recorded    : yes
+[scenario]   resume dispatch enqueued (>=2 total): no
+warning: field `status` is never read
+  --> crates/tenex-daemon/src/per_agent_config_snapshot.rs:64:5
+   |
+61 | struct RawStoredAgent {
+   |        -------------- field in this struct
+...
+64 |     status: Option<String>,
+   |     ^^^^^^
+   |
+   = note: `RawStoredAgent` has a derived impl for the trait `Debug`, but this is intentionally ignored during dead code analysis
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `tenex-daemon` (lib) generated 1 warning
+    Finished `release` profile [optimized] target(s) in 0.38s
+     Running `target/release/daemon --tenex-base-dir /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-54-1777221647-12309/backend`
+[2m16:40:51[0m  [1m[32m✓[0m  [1m[32mdaemon ready[0m  [2m(nostr on, telegram off)[0m
+[2m16:40:52[0m  ↑  [1m[94mnak-interop-test-20260426194047-28801[0m  [2m(1 booted)[0m
+[2m16:40:52[0m  [1m[33m●[0m  [1m[35magent1[0m  [2minbound-worker-faa3ce4aa82ba0521d83984e[0m  [1m[94mnak-interop-test-20260426194047-28801[0m
+[2m16:40:53[0m  [1m[33m●[0m  [1m[34magent2[0m  [2minbound-worker-43ce6baaf515f9e3a205b094[0m  [1m[94mnak-interop-test-20260426194047-28801[0m
+[2m16:40:54[0m  [1m[33m●[0m  [1m[34magent2[0m  [2minbound-worker-0611841bdd81d12b7ce7a6c7[0m  [1m[94mnak-interop-test-20260426194047-28801[0m
+[2m16:40:54[0m  [1m[32m✓[0m  [1m[34magent2[0m  [2minbound-worker-43ce6baaf515f9e3a205b094[0m  [1m[94mnak-interop-test-20260426194047-28801[0m
+[2m16:40:54[0m  [1m[32m✓[0m  [1m[35magent1[0m  [2minbound-worker-faa3ce4aa82ba0521d83984e[0m  [1m[94mnak-interop-test-20260426194047-28801[0m
+[2m16:40:55[0m  [1m[33m●[0m  [1m[35magent1[0m  [2mdelegation-resume-worker-5a9fc678283d06f6cd09cd66[0m  [1m[94mnak-interop-test-20260426194047-28801[0m
+[2m16:40:55[0m  [1m[32m✓[0m  [1m[34magent2[0m  [2minbound-worker-0611841bdd81d12b7ce7a6c7[0m  [1m[94mnak-interop-test-20260426194047-28801[0m
+[2m16:40:55[0m  [1m[33m●[0m  [1m[34magent2[0m  [2minbound-worker-e7a341e00cdf7198e79553fc[0m  [1m[94mnak-interop-test-20260426194047-28801[0m
+[2m16:40:56[0m  [1m[33m●[0m  [1m[34magent2[0m  [2minbound-worker-bc793a843716267e195146fa[0m  [1m[94mnak-interop-test-20260426194047-28801[0m
+[2m16:40:56[0m  [1m[32m✓[0m  [1m[34magent2[0m  [2minbound-worker-e7a341e00cdf7198e79553fc[0m  [1m[94mnak-interop-test-20260426194047-28801[0m
+[2m16:40:56[0m  [1m[32m✓[0m  [1m[35magent1[0m  [2mdelegation-resume-worker-5a9fc678283d06f6cd09cd66[0m  [1m[94mnak-interop-test-20260426194047-28801[0m
+[2m16:40:56[0m  [1m[33m●[0m  [1m[35magent1[0m  [2mdelegation-resume-worker-9531ead6e4bfd62af65f4859[0m  [1m[94mnak-interop-test-20260426194047-28801[0m
+[2m16:40:57[0m  [1m[32m✓[0m  [1m[34magent2[0m  [2minbound-worker-bc793a843716267e195146fa[0m  [1m[94mnak-interop-test-20260426194047-28801[0m
+[2m16:40:57[0m  [1m[33m●[0m  [1m[34magent2[0m  [2minbound-worker-cd9deb750aae2614355480b8[0m  [1m[94mnak-interop-test-20260426194047-28801[0m
+[2m16:40:58[0m  [1m[33m●[0m  [1m[34magent2[0m  [2minbound-worker-e78a34098d71ba0d15ed8ec5[0m  [1m[94mnak-interop-test-20260426194047-28801[0m
+[2m16:40:58[0m  [1m[32m✓[0m  [1m[34magent2[0m  [2minbound-worker-cd9deb750aae2614355480b8[0m  [1m[94mnak-interop-test-20260426194047-28801[0m
+[2m16:40:58[0m  [1m[32m✓[0m  [1m[35magent1[0m  [2mdelegation-resume-worker-9531ead6e4bfd62af65f4859[0m  [1m[94mnak-interop-test-20260426194047-28801[0m
+[2m16:40:58[0m  [1m[33m●[0m  [1m[35magent1[0m  [2mdelegation-resume-worker-65393f81980fe1ec5d7828f4[0m  [1m[94mnak-interop-test-20260426194047-28801[0m
+[2m16:40:58[0m  [1m[32m✓[0m  [1m[34magent2[0m  [2minbound-worker-e78a34098d71ba0d15ed8ec5[0m  [1m[94mnak-interop-test-20260426194047-28801[0m
+[2m16:40:59[0m  [1m[33m●[0m  [1m[34magent2[0m  [2minbound-worker-b6928a21abd8128cb08fc6e4[0m  [1m[94mnak-interop-test-20260426194047-28801[0m
+[2m16:41:00[0m  [1m[33m●[0m  [1m[34magent2[0m  [2minbound-worker-2633174029e7c8e73e476c0a[0m  [1m[94mnak-interop-test-20260426194047-28801[0m
+[2m16:41:00[0m  [1m[32m✓[0m  [1m[34magent2[0m  [2minbound-worker-b6928a21abd8128cb08fc6e4[0m  [1m[94mnak-interop-test-20260426194047-28801[0m
+[2m16:41:00[0m  [1m[32m✓[0m  [1m[35magent1[0m  [2mdelegation-resume-worker-65393f81980fe1ec5d7828f4[0m  [1m[94mnak-interop-test-20260426194047-28801[0m
+[2m16:41:00[0m  [1m[33m●[0m  [1m[35magent1[0m  [2mdelegation-resume-worker-acfcc995d811dd5ca279f48a[0m  [1m[94mnak-interop-test-20260426194047-28801[0m
+[2m16:41:00[0m  [1m[32m✓[0m  [1m[34magent2[0m  [2minbound-worker-2633174029e7c8e73e476c0a[0m  [1m[94mnak-interop-test-20260426194047-28801[0m
+[2m16:41:01[0m  [1m[33m●[0m  [1m[34magent2[0m  [2minbound-worker-886212714cb95d9132803116[0m  [1m[94mnak-interop-test-20260426194047-28801[0m
+[2m16:41:02[0m  [1m[33m●[0m  [1m[34magent2[0m  [2minbound-worker-1076ebb33dace641c28d7228[0m  [1m[94mnak-interop-test-20260426194047-28801[0m
+[2m16:41:02[0m  [1m[32m✓[0m  [1m[34magent2[0m  [2minbound-worker-886212714cb95d9132803116[0m  [1m[94mnak-interop-test-20260426194047-28801[0m
+[2m16:41:02[0m  [1m[32m✓[0m  [1m[35magent1[0m  [2mdelegation-resume-worker-acfcc995d811dd5ca279f48a[0m  [1m[94mnak-interop-test-20260426194047-28801[0m
+[2m16:41:02[0m  [1m[33m●[0m  [1m[35magent1[0m  [2mdelegation-resume-worker-caea0356a45aa67fc7327160[0m  [1m[94mnak-interop-test-20260426194047-28801[0m
+[2m16:41:02[0m  [1m[32m✓[0m  [1m[34magent2[0m  [2minbound-worker-1076ebb33dace641c28d7228[0m  [1m[94mnak-interop-test-20260426194047-28801[0m
+[2m16:41:03[0m  [1m[33m●[0m  [1m[34magent2[0m  [2minbound-worker-e20158293f91b1e153c9aad2[0m  [1m[94mnak-interop-test-20260426194047-28801[0m
+[2m16:41:03[0m  [1m[33m●[0m  [1m[34magent2[0m  [2minbound-worker-fce5441dedb921ee057c0152[0m  [1m[94mnak-interop-test-20260426194047-28801[0m
+[2m16:41:04[0m  [1m[32m✓[0m  [1m[34magent2[0m  [2minbound-worker-e20158293f91b1e153c9aad2[0m  [1m[94mnak-interop-test-20260426194047-28801[0m
+[2m16:41:04[0m  [1m[32m✓[0m  [1m[35magent1[0m  [2mdelegation-resume-worker-caea0356a45aa67fc7327160[0m  [1m[94mnak-interop-test-20260426194047-28801[0m
+[2m16:41:04[0m  [1m[33m●[0m  [1m[35magent1[0m  [2mdelegation-resume-worker-5bdaa30050c74a47c93c8203[0m  [1m[94mnak-interop-test-20260426194047-28801[0m
+[2m16:41:04[0m  [1m[32m✓[0m  [1m[34magent2[0m  [2minbound-worker-fce5441dedb921ee057c0152[0m  [1m[94mnak-interop-test-20260426194047-28801[0m
+[2m16:41:05[0m  [1m[33m●[0m  [1m[34magent2[0m  [2minbound-worker-1ffb2b5980fcf9f5c0cb93da[0m  [1m[94mnak-interop-test-20260426194047-28801[0m
+[2m16:41:05[0m  [1m[33m●[0m  [1m[34magent2[0m  [2minbound-worker-b5d02915a888b8c0e5d84ce2[0m  [1m[94mnak-interop-test-20260426194047-28801[0m
+[harness] RESULT status=fail scenario=54_idle_parent_wakeup.sh detail=dispatch queue never showed >=2 records for agent1 (resume dispatch missing)
+[harness] cleanup (script exit code=1)
+[harness] stopping daemon pid 12791 (SIGTERM)
+[harness] stopping relay pid 12779

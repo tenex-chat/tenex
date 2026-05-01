@@ -1,0 +1,29 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-123-1777224642-17902
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-123-1777224642-17902
+[harness]   backend pubkey:  98fe9c1ce441ec8ed4bb0d9ad93bc1959a019d28ed614a4d8e7029c9f5348aa7
+[harness]   user pubkey:     8a2bd7f2b6144546b51076c28fdcb1568fdfeb05281ef17de1457d8825bb9314
+[harness]   agent1 pubkey:   906f33618d1899c296d60aa5af61292e9669fd948860ee097037c909047f7327
+[harness]   agent2 pubkey:   dd3d6b5fd8dba70be8ecd674850faa6f487be7d3cc342990227dec21496f51cd
+[harness]   project a-tag:   31933:8a2bd7f2b6144546b51076c28fdcb1568fdfeb05281ef17de1457d8825bb9314:nak-interop-test-20260426203042-30992
+[harness] starting relay on 127.0.0.1:64875 (admins=1)
+[harness] relay ready at ws://127.0.0.1:64875
+[harness] daemon config relays -> [ws://127.0.0.1:64875]
+[harness] wrote 2 pubkey(s) to /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-123-1777224642-17902/backend/daemon/whitelist.txt
+connecting to ws://127.0.0.1:64875... ok.
+publishing to ws://127.0.0.1:64875... success.
+[scenario] pre-seeded 14199 id=dff4d4191abb9d5cd5274186fa0f5db2d172739b7ca1a36dac0c41cb3b3712bd
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-123-1777224642-17902/backend)
+[harness] daemon ready (pid 18464, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-123-1777224642-17902/backend/daemon/tenex.lock)
+[harness] kind:14199 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] kind:24030 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] TIMEOUT: kind:21 agent-mentions probe never round-tripped within 45s
+[harness] FATAL: daemon subscription never became live
+[harness] cleanup (script exit code=1)
+[harness] stopping daemon pid 18464 (SIGTERM)
+[harness] stopping relay pid 18403

@@ -19,6 +19,9 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 
+pub mod create;
+mod create_llm;
+mod create_prompts;
 pub mod install;
 pub mod manager_actions;
 pub mod manager_logic;
@@ -42,6 +45,8 @@ pub struct AgentArgs {
 
 #[derive(Subcommand, Clone)]
 pub enum AgentCommand {
+    /// Create a new installed agent through an interactive wizard
+    Create,
     /// Permanently delete a stored agent
     Delete {
         /// Agent public key
@@ -86,6 +91,7 @@ pub enum ImportCommand {
 pub async fn run(args: AgentArgs) -> Result<()> {
     match args.command {
         None | Some(AgentCommand::Manage) => run_manage().await,
+        Some(AgentCommand::Create) => run_create().await,
         Some(AgentCommand::Delete { pubkey }) => run_delete(&pubkey).await,
         Some(AgentCommand::Install { nevent }) => {
             let base_dir = crate::store::resolve_base_dir(None);
@@ -98,6 +104,11 @@ pub async fn run(args: AgentArgs) -> Result<()> {
 async fn run_manage() -> Result<()> {
     let base_dir = crate::store::resolve_base_dir(None);
     manager_actions::show_main_menu(&base_dir).await
+}
+
+async fn run_create() -> Result<()> {
+    let base_dir = crate::store::resolve_base_dir(None);
+    create::run(&base_dir).await
 }
 
 /// Mirror `tenex agent delete <pubkey>` (`src/commands/agent/index.ts:26-34`,

@@ -1,0 +1,2760 @@
+{
+  "last_run": "2026-04-27T05:08:09Z",
+  "branch": "rust-agent-worker-publishing",
+  "commit": "e607cf8e1b5cc675a77da6da92bcec46bec82551",
+  "scenarios": {
+    "01_nip42_dynamic_whitelist.sh": {
+      "status": "pass",
+      "last_run": "2026-04-27T04:36:30Z",
+      "duration_s": 3,
+      "log_path": "/Users/pablofernandez/Work/TENEX-ff3ssq/artifacts/e2e/01_nip42_dynamic_whitelist.sh/20260427T043627Z/log.txt",
+      "detail": "",
+      "runs": [
+        {
+          "ts": "2026-04-26T21:22:15Z",
+          "status": "pass",
+          "duration_s": 4
+        },
+        {
+          "ts": "2026-04-26T21:22:07Z",
+          "status": "pass",
+          "duration_s": 3
+        },
+        {
+          "ts": "2026-04-27T01:31:32Z",
+          "status": "pass",
+          "duration_s": 3
+        },
+        {
+          "ts": "2026-04-27T01:42:56Z",
+          "status": "pass",
+          "duration_s": 3
+        },
+        {
+          "ts": "2026-04-27T01:53:14Z",
+          "status": "pass",
+          "duration_s": 3
+        },
+        {
+          "ts": "2026-04-27T02:14:07Z",
+          "status": "pass",
+          "duration_s": 3
+        },
+        {
+          "ts": "2026-04-27T02:56:59Z",
+          "status": "pass",
+          "duration_s": 3
+        },
+        {
+          "ts": "2026-04-27T03:32:53Z",
+          "status": "pass",
+          "duration_s": 3
+        },
+        {
+          "ts": "2026-04-27T04:12:32Z",
+          "status": "pass",
+          "duration_s": 3
+        },
+        {
+          "ts": "2026-04-27T04:36:30Z",
+          "status": "pass",
+          "duration_s": 3
+        }
+      ]
+    },
+    "11_boot_gates_dispatch.sh": {
+      "status": "pass",
+      "last_run": "2026-04-27T04:45:07Z",
+      "duration_s": 6,
+      "log_path": "/Users/pablofernandez/Work/TENEX-ff3ssq/artifacts/e2e/11_boot_gates_dispatch.sh/20260427T044501Z/log.txt",
+      "detail": "",
+      "runs": [
+        {
+          "ts": "2026-04-26T21:35:25Z",
+          "status": "pass",
+          "duration_s": 7
+        },
+        {
+          "ts": "2026-04-26T21:35:25Z",
+          "status": "pass",
+          "duration_s": 7
+        },
+        {
+          "ts": "2026-04-27T01:41:01Z",
+          "status": "pass",
+          "duration_s": 6
+        },
+        {
+          "ts": "2026-04-27T01:45:06Z",
+          "status": "pass",
+          "duration_s": 6
+        },
+        {
+          "ts": "2026-04-27T02:01:25Z",
+          "status": "pass",
+          "duration_s": 6
+        },
+        {
+          "ts": "2026-04-27T02:20:27Z",
+          "status": "pass",
+          "duration_s": 5
+        },
+        {
+          "ts": "2026-04-27T03:06:55Z",
+          "status": "pass",
+          "duration_s": 6
+        },
+        {
+          "ts": "2026-04-27T03:42:49Z",
+          "status": "pass",
+          "duration_s": 5
+        },
+        {
+          "ts": "2026-04-27T04:22:39Z",
+          "status": "pass",
+          "duration_s": 11
+        },
+        {
+          "ts": "2026-04-27T04:45:07Z",
+          "status": "pass",
+          "duration_s": 6
+        }
+      ]
+    },
+    "12_boot_activates_dispatch.sh": {
+      "status": "pass",
+      "last_run": "2026-04-27T04:50:13Z",
+      "duration_s": 89,
+      "log_path": "/Users/pablofernandez/Work/TENEX-ff3ssq/artifacts/e2e/12_boot_activates_dispatch.sh/20260427T044843Z/log.txt",
+      "detail": "",
+      "runs": [
+        {
+          "ts": "2026-04-26T21:38:16Z",
+          "status": "pass",
+          "duration_s": 20
+        },
+        {
+          "ts": "2026-04-26T21:38:16Z",
+          "status": "pass",
+          "duration_s": 20
+        },
+        {
+          "ts": "2026-04-27T01:43:30Z",
+          "status": "pass",
+          "duration_s": 13
+        },
+        {
+          "ts": "2026-04-27T01:47:34Z",
+          "status": "pass",
+          "duration_s": 26
+        },
+        {
+          "ts": "2026-04-27T02:06:41Z",
+          "status": "pass",
+          "duration_s": 100
+        },
+        {
+          "ts": "2026-04-27T02:22:30Z",
+          "status": "pass",
+          "duration_s": 55
+        },
+        {
+          "ts": "2026-04-27T03:10:28Z",
+          "status": "pass",
+          "duration_s": 76
+        },
+        {
+          "ts": "2026-04-27T03:48:10Z",
+          "status": "pass",
+          "duration_s": 100
+        },
+        {
+          "ts": "2026-04-27T04:27:59Z",
+          "status": "pass",
+          "duration_s": 102
+        },
+        {
+          "ts": "2026-04-27T04:50:13Z",
+          "status": "pass",
+          "duration_s": 89
+        }
+      ]
+    },
+    "13_boot_is_idempotent.sh": {
+      "status": "pass",
+      "last_run": "2026-04-27T04:51:30Z",
+      "duration_s": 6,
+      "log_path": "/Users/pablofernandez/Work/TENEX-ff3ssq/artifacts/e2e/13_boot_is_idempotent.sh/20260427T045124Z/log.txt",
+      "detail": "",
+      "runs": [
+        {
+          "ts": "2026-04-26T21:39:36Z",
+          "status": "pass",
+          "duration_s": 7
+        },
+        {
+          "ts": "2026-04-26T21:40:02Z",
+          "status": "fail",
+          "duration_s": 33
+        },
+        {
+          "ts": "2026-04-27T01:45:05Z",
+          "status": "pass",
+          "duration_s": 6
+        },
+        {
+          "ts": "2026-04-27T01:49:12Z",
+          "status": "pass",
+          "duration_s": 6
+        },
+        {
+          "ts": "2026-04-27T02:08:04Z",
+          "status": "pass",
+          "duration_s": 11
+        },
+        {
+          "ts": "2026-04-27T02:24:10Z",
+          "status": "pass",
+          "duration_s": 6
+        },
+        {
+          "ts": "2026-04-27T03:11:51Z",
+          "status": "pass",
+          "duration_s": 6
+        },
+        {
+          "ts": "2026-04-27T03:49:27Z",
+          "status": "pass",
+          "duration_s": 6
+        },
+        {
+          "ts": "2026-04-27T04:29:17Z",
+          "status": "pass",
+          "duration_s": 7
+        },
+        {
+          "ts": "2026-04-27T04:51:30Z",
+          "status": "pass",
+          "duration_s": 6
+        }
+      ]
+    },
+    "14_stale_boot_recovered_on_restart.sh": {
+      "status": "pass",
+      "last_run": "2026-04-27T04:51:39Z",
+      "duration_s": 9,
+      "log_path": "/Users/pablofernandez/Work/TENEX-ff3ssq/artifacts/e2e/14_stale_boot_recovered_on_restart.sh/20260427T045130Z/log.txt",
+      "detail": "",
+      "runs": [
+        {
+          "ts": "2026-04-26T21:39:45Z",
+          "status": "pass",
+          "duration_s": 9
+        },
+        {
+          "ts": "2026-04-26T21:40:12Z",
+          "status": "pass",
+          "duration_s": 10
+        },
+        {
+          "ts": "2026-04-27T01:45:19Z",
+          "status": "pass",
+          "duration_s": 14
+        },
+        {
+          "ts": "2026-04-27T01:49:21Z",
+          "status": "pass",
+          "duration_s": 9
+        },
+        {
+          "ts": "2026-04-27T02:08:13Z",
+          "status": "pass",
+          "duration_s": 9
+        },
+        {
+          "ts": "2026-04-27T02:24:24Z",
+          "status": "pass",
+          "duration_s": 14
+        },
+        {
+          "ts": "2026-04-27T03:12:00Z",
+          "status": "pass",
+          "duration_s": 8
+        },
+        {
+          "ts": "2026-04-27T03:49:36Z",
+          "status": "pass",
+          "duration_s": 9
+        },
+        {
+          "ts": "2026-04-27T04:29:26Z",
+          "status": "pass",
+          "duration_s": 8
+        },
+        {
+          "ts": "2026-04-27T04:51:39Z",
+          "status": "pass",
+          "duration_s": 9
+        }
+      ]
+    },
+    "31_concurrent_enqueue_under_flock.sh": {
+      "status": "pass",
+      "last_run": "2026-04-27T04:53:42Z",
+      "duration_s": 0,
+      "log_path": "/Users/pablofernandez/Work/TENEX-ff3ssq/artifacts/e2e/31_concurrent_enqueue_under_flock.sh/20260427T045342Z/log.txt",
+      "detail": "",
+      "runs": [
+        {
+          "ts": "2026-04-26T21:40:41Z",
+          "status": "pass",
+          "duration_s": 0
+        },
+        {
+          "ts": "2026-04-26T21:41:09Z",
+          "status": "pass",
+          "duration_s": 0
+        },
+        {
+          "ts": "2026-04-27T01:45:49Z",
+          "status": "pass",
+          "duration_s": 0
+        },
+        {
+          "ts": "2026-04-27T01:50:34Z",
+          "status": "pass",
+          "duration_s": 0
+        },
+        {
+          "ts": "2026-04-27T02:10:11Z",
+          "status": "pass",
+          "duration_s": 0
+        },
+        {
+          "ts": "2026-04-27T02:26:29Z",
+          "status": "pass",
+          "duration_s": 1
+        },
+        {
+          "ts": "2026-04-27T03:14:13Z",
+          "status": "pass",
+          "duration_s": 0
+        },
+        {
+          "ts": "2026-04-27T03:51:39Z",
+          "status": "pass",
+          "duration_s": 0
+        },
+        {
+          "ts": "2026-04-27T04:31:23Z",
+          "status": "pass",
+          "duration_s": 0
+        },
+        {
+          "ts": "2026-04-27T04:53:42Z",
+          "status": "pass",
+          "duration_s": 0
+        }
+      ]
+    },
+    "33_per_agent_concurrency_cap.sh": {
+      "status": "pass",
+      "last_run": "2026-04-24T18:03:50Z",
+      "duration_s": 1,
+      "log_path": "/Users/pablofernandez/Work/TENEX-ff3ssq/artifacts/e2e/33_per_agent_concurrency_cap.sh/20260424T180349Z/log.txt",
+      "detail": "",
+      "runs": [
+        {
+          "ts": "2026-04-24T07:10:21Z",
+          "status": "pass",
+          "duration_s": 0
+        },
+        {
+          "ts": "2026-04-24T07:59:45Z",
+          "status": "pass",
+          "duration_s": 46
+        },
+        {
+          "ts": "2026-04-24T16:16:51Z",
+          "status": "pass",
+          "duration_s": 24
+        },
+        {
+          "ts": "2026-04-24T18:03:46Z",
+          "status": "pass",
+          "duration_s": 28
+        },
+        {
+          "ts": "2026-04-24T18:03:48Z",
+          "status": "pass",
+          "duration_s": 1
+        },
+        {
+          "ts": "2026-04-24T18:03:50Z",
+          "status": "pass",
+          "duration_s": 1
+        }
+      ]
+    },
+    "36_triggering_event_dedup.sh": {
+      "status": "pass",
+      "last_run": "2026-04-27T04:54:49Z",
+      "duration_s": 67,
+      "log_path": "/Users/pablofernandez/Work/TENEX-ff3ssq/artifacts/e2e/36_triggering_event_dedup.sh/20260427T045342Z/log.txt",
+      "detail": "",
+      "runs": [
+        {
+          "ts": "2026-04-26T21:41:03Z",
+          "status": "pass",
+          "duration_s": 21
+        },
+        {
+          "ts": "2026-04-26T21:41:19Z",
+          "status": "pass",
+          "duration_s": 10
+        },
+        {
+          "ts": "2026-04-27T01:46:57Z",
+          "status": "pass",
+          "duration_s": 68
+        },
+        {
+          "ts": "2026-04-27T01:51:42Z",
+          "status": "pass",
+          "duration_s": 68
+        },
+        {
+          "ts": "2026-04-27T02:11:52Z",
+          "status": "pass",
+          "duration_s": 100
+        },
+        {
+          "ts": "2026-04-27T02:28:21Z",
+          "status": "pass",
+          "duration_s": 112
+        },
+        {
+          "ts": "2026-04-27T03:15:54Z",
+          "status": "pass",
+          "duration_s": 100
+        },
+        {
+          "ts": "2026-04-27T03:53:19Z",
+          "status": "pass",
+          "duration_s": 100
+        },
+        {
+          "ts": "2026-04-27T04:33:04Z",
+          "status": "pass",
+          "duration_s": 99
+        },
+        {
+          "ts": "2026-04-27T04:54:49Z",
+          "status": "pass",
+          "duration_s": 67
+        }
+      ]
+    },
+    "37_dispatch_input_mismatch.sh": {
+      "status": "pass",
+      "last_run": "2026-04-27T04:56:00Z",
+      "duration_s": 71,
+      "log_path": "/Users/pablofernandez/Work/TENEX-ff3ssq/artifacts/e2e/37_dispatch_input_mismatch.sh/20260427T045449Z/log.txt",
+      "detail": "",
+      "runs": [
+        {
+          "ts": "2026-04-26T21:44:35Z",
+          "status": "fail",
+          "duration_s": 196
+        },
+        {
+          "ts": "2026-04-27T01:47:02Z",
+          "status": "pass",
+          "duration_s": 5
+        },
+        {
+          "ts": "2026-04-27T01:51:48Z",
+          "status": "pass",
+          "duration_s": 6
+        },
+        {
+          "ts": "2026-04-27T02:14:07Z",
+          "status": "fail",
+          "duration_s": 135
+        },
+        {
+          "ts": "2026-04-27T02:31:36Z",
+          "status": "fail",
+          "duration_s": 195
+        },
+        {
+          "ts": "2026-04-27T02:49:49Z",
+          "status": "pass",
+          "duration_s": 100
+        },
+        {
+          "ts": "2026-04-27T03:18:02Z",
+          "status": "pass",
+          "duration_s": 128
+        },
+        {
+          "ts": "2026-04-27T03:55:00Z",
+          "status": "pass",
+          "duration_s": 101
+        },
+        {
+          "ts": "2026-04-27T04:34:44Z",
+          "status": "pass",
+          "duration_s": 100
+        },
+        {
+          "ts": "2026-04-27T04:56:00Z",
+          "status": "pass",
+          "duration_s": 71
+        }
+      ]
+    },
+    "39_ral_number_exhaustion.sh": {
+      "status": "pass",
+      "last_run": "2026-04-27T04:57:41Z",
+      "duration_s": 101,
+      "log_path": "/Users/pablofernandez/Work/TENEX-ff3ssq/artifacts/e2e/39_ral_number_exhaustion.sh/20260427T045600Z/log.txt",
+      "detail": "",
+      "runs": [
+        {
+          "ts": "2026-04-26T21:46:19Z",
+          "status": "fail",
+          "duration_s": 104
+        },
+        {
+          "ts": "2026-04-27T01:47:34Z",
+          "status": "fail",
+          "duration_s": 32
+        },
+        {
+          "ts": "2026-04-27T01:52:21Z",
+          "status": "fail",
+          "duration_s": 33
+        },
+        {
+          "ts": "2026-04-27T02:17:23Z",
+          "status": "fail",
+          "duration_s": 196
+        },
+        {
+          "ts": "2026-04-27T02:34:53Z",
+          "status": "fail",
+          "duration_s": 197
+        },
+        {
+          "ts": "2026-04-27T02:51:35Z",
+          "status": "pass",
+          "duration_s": 101
+        },
+        {
+          "ts": "2026-04-27T03:19:43Z",
+          "status": "pass",
+          "duration_s": 101
+        },
+        {
+          "ts": "2026-04-27T03:56:43Z",
+          "status": "pass",
+          "duration_s": 103
+        },
+        {
+          "ts": "2026-04-27T04:35:53Z",
+          "status": "pass",
+          "duration_s": 69
+        },
+        {
+          "ts": "2026-04-27T04:57:41Z",
+          "status": "pass",
+          "duration_s": 101
+        }
+      ]
+    },
+    "32_redispatch_sequence_under_lock.sh": {
+      "status": "pass",
+      "last_run": "2026-04-27T04:53:42Z",
+      "duration_s": 0,
+      "log_path": "/Users/pablofernandez/Work/TENEX-ff3ssq/artifacts/e2e/32_redispatch_sequence_under_lock.sh/20260427T045342Z/log.txt",
+      "detail": "ral journal resequenced correctly under concurrent inbound+completion writers",
+      "runs": [
+        {
+          "ts": "2026-04-26T21:40:42Z",
+          "status": "pass",
+          "duration_s": 1
+        },
+        {
+          "ts": "2026-04-26T21:41:09Z",
+          "status": "pass",
+          "duration_s": 0
+        },
+        {
+          "ts": "2026-04-27T01:45:49Z",
+          "status": "pass",
+          "duration_s": 0
+        },
+        {
+          "ts": "2026-04-27T01:50:34Z",
+          "status": "pass",
+          "duration_s": 0
+        },
+        {
+          "ts": "2026-04-27T02:10:12Z",
+          "status": "pass",
+          "duration_s": 1
+        },
+        {
+          "ts": "2026-04-27T02:26:29Z",
+          "status": "pass",
+          "duration_s": 0
+        },
+        {
+          "ts": "2026-04-27T03:14:14Z",
+          "status": "pass",
+          "duration_s": 1
+        },
+        {
+          "ts": "2026-04-27T03:51:39Z",
+          "status": "pass",
+          "duration_s": 0
+        },
+        {
+          "ts": "2026-04-27T04:31:23Z",
+          "status": "pass",
+          "duration_s": 0
+        },
+        {
+          "ts": "2026-04-27T04:53:42Z",
+          "status": "pass",
+          "duration_s": 0
+        }
+      ]
+    },
+    "15_boot_event_reordering.sh": {
+      "status": "pass",
+      "last_run": "2026-04-27T04:51:53Z",
+      "duration_s": 10,
+      "log_path": "/Users/pablofernandez/Work/TENEX-ff3ssq/artifacts/e2e/15_boot_event_reordering.sh/20260427T045143Z/log.txt",
+      "detail": "newer 31933 wins; older discarded; boot succeeded; no crash",
+      "runs": [
+        {
+          "ts": "2026-04-26T21:39:54Z",
+          "status": "pass",
+          "duration_s": 5
+        },
+        {
+          "ts": "2026-04-26T21:40:26Z",
+          "status": "pass",
+          "duration_s": 10
+        },
+        {
+          "ts": "2026-04-27T01:45:34Z",
+          "status": "pass",
+          "duration_s": 10
+        },
+        {
+          "ts": "2026-04-27T01:49:30Z",
+          "status": "pass",
+          "duration_s": 5
+        },
+        {
+          "ts": "2026-04-27T02:08:22Z",
+          "status": "pass",
+          "duration_s": 4
+        },
+        {
+          "ts": "2026-04-27T02:24:34Z",
+          "status": "pass",
+          "duration_s": 4
+        },
+        {
+          "ts": "2026-04-27T03:12:14Z",
+          "status": "pass",
+          "duration_s": 10
+        },
+        {
+          "ts": "2026-04-27T03:49:50Z",
+          "status": "pass",
+          "duration_s": 10
+        },
+        {
+          "ts": "2026-04-27T04:29:34Z",
+          "status": "pass",
+          "duration_s": 4
+        },
+        {
+          "ts": "2026-04-27T04:51:53Z",
+          "status": "pass",
+          "duration_s": 10
+        }
+      ]
+    },
+    "02_delegation_a_to_b_to_a.sh": {
+      "status": "pass",
+      "last_run": "2026-04-27T04:38:11Z",
+      "duration_s": 100,
+      "log_path": "/Users/pablofernandez/Work/TENEX-ff3ssq/artifacts/e2e/02_delegation_a_to_b_to_a.sh/20260427T043630Z/log.txt",
+      "detail": "",
+      "runs": [
+        {
+          "ts": "2026-04-26T21:22:44Z",
+          "status": "pass",
+          "duration_s": 29
+        },
+        {
+          "ts": "2026-04-26T21:22:15Z",
+          "status": "pass",
+          "duration_s": 8
+        },
+        {
+          "ts": "2026-04-27T01:33:14Z",
+          "status": "pass",
+          "duration_s": 102
+        },
+        {
+          "ts": "2026-04-27T01:43:06Z",
+          "status": "pass",
+          "duration_s": 10
+        },
+        {
+          "ts": "2026-04-27T01:54:55Z",
+          "status": "pass",
+          "duration_s": 101
+        },
+        {
+          "ts": "2026-04-27T02:15:47Z",
+          "status": "pass",
+          "duration_s": 100
+        },
+        {
+          "ts": "2026-04-27T02:58:05Z",
+          "status": "pass",
+          "duration_s": 65
+        },
+        {
+          "ts": "2026-04-27T03:34:33Z",
+          "status": "pass",
+          "duration_s": 100
+        },
+        {
+          "ts": "2026-04-27T04:14:13Z",
+          "status": "pass",
+          "duration_s": 101
+        },
+        {
+          "ts": "2026-04-27T04:38:11Z",
+          "status": "pass",
+          "duration_s": 100
+        }
+      ]
+    },
+    "55_active_parent_receives_via_injection.sh": {
+      "status": "skip",
+      "last_run": "2026-04-27T05:02:50Z",
+      "duration_s": 0,
+      "log_path": "/Users/pablofernandez/Work/TENEX-ff3ssq/artifacts/e2e/55_active_parent_receives_via_injection.sh/20260427T050250Z/log.txt",
+      "detail": "bash cannot reliably drive mid-stream injection; see cargo test proposal in script header",
+      "runs": [
+        {
+          "ts": "2026-04-26T21:46:49Z",
+          "status": "skip",
+          "duration_s": 0
+        },
+        {
+          "ts": "2026-04-26T21:47:35Z",
+          "status": "skip",
+          "duration_s": 0
+        },
+        {
+          "ts": "2026-04-27T01:48:38Z",
+          "status": "skip",
+          "duration_s": 0
+        },
+        {
+          "ts": "2026-04-27T01:56:35Z",
+          "status": "skip",
+          "duration_s": 0
+        },
+        {
+          "ts": "2026-04-27T02:19:52Z",
+          "status": "skip",
+          "duration_s": 0
+        },
+        {
+          "ts": "2026-04-27T02:41:38Z",
+          "status": "skip",
+          "duration_s": 0
+        },
+        {
+          "ts": "2026-04-27T03:24:54Z",
+          "status": "skip",
+          "duration_s": 0
+        },
+        {
+          "ts": "2026-04-27T04:01:19Z",
+          "status": "skip",
+          "duration_s": 0
+        },
+        {
+          "ts": "2026-04-27T04:39:51Z",
+          "status": "skip",
+          "duration_s": 0
+        },
+        {
+          "ts": "2026-04-27T05:02:50Z",
+          "status": "skip",
+          "duration_s": 0
+        }
+      ]
+    },
+    "43_ral_status_transitions.sh": {
+      "status": "pass",
+      "last_run": "2026-04-27T04:59:30Z",
+      "duration_s": 100,
+      "log_path": "/Users/pablofernandez/Work/TENEX-ff3ssq/artifacts/e2e/43_ral_status_transitions.sh/20260427T045750Z/log.txt",
+      "detail": "ral journal: monotonic sequences, all identities start allocated, no active-after-terminal, claimed+completed+delegation observed",
+      "runs": [
+        {
+          "ts": "2026-04-26T21:46:19Z",
+          "status": "pass",
+          "duration_s": 95
+        },
+        {
+          "ts": "2026-04-26T21:46:41Z",
+          "status": "pass",
+          "duration_s": 13
+        },
+        {
+          "ts": "2026-04-27T01:48:05Z",
+          "status": "pass",
+          "duration_s": 22
+        },
+        {
+          "ts": "2026-04-27T01:53:14Z",
+          "status": "pass",
+          "duration_s": 46
+        },
+        {
+          "ts": "2026-04-27T02:17:43Z",
+          "status": "pass",
+          "duration_s": 11
+        },
+        {
+          "ts": "2026-04-27T02:38:17Z",
+          "status": "pass",
+          "duration_s": 102
+        },
+        {
+          "ts": "2026-04-27T03:21:33Z",
+          "status": "pass",
+          "duration_s": 102
+        },
+        {
+          "ts": "2026-04-27T03:58:32Z",
+          "status": "pass",
+          "duration_s": 100
+        },
+        {
+          "ts": "2026-04-27T04:36:30Z",
+          "status": "pass",
+          "duration_s": 28
+        },
+        {
+          "ts": "2026-04-27T04:59:30Z",
+          "status": "pass",
+          "duration_s": 100
+        }
+      ]
+    },
+    "101_graceful_restart_no_stuck_ral.sh": {
+      "status": "pass",
+      "last_run": "2026-04-27T04:42:37Z",
+      "duration_s": 100,
+      "log_path": "/Users/pablofernandez/Work/TENEX-ff3ssq/artifacts/e2e/101_graceful_restart_no_stuck_ral.sh/20260427T044057Z/log.txt",
+      "detail": "",
+      "runs": [
+        {
+          "ts": "2026-04-26T21:32:53Z",
+          "status": "pass",
+          "duration_s": 543
+        },
+        {
+          "ts": "2026-04-27T01:38:40Z",
+          "status": "pass",
+          "duration_s": 196
+        },
+        {
+          "ts": "2026-04-27T01:44:11Z",
+          "status": "fail",
+          "duration_s": 25
+        },
+        {
+          "ts": "2026-04-27T02:00:21Z",
+          "status": "fail",
+          "duration_s": 160
+        },
+        {
+          "ts": "2026-04-27T02:18:12Z",
+          "status": "fail",
+          "duration_s": 32
+        },
+        {
+          "ts": "2026-04-27T02:55:01Z",
+          "status": "pass",
+          "duration_s": 195
+        },
+        {
+          "ts": "2026-04-27T03:04:40Z",
+          "status": "pass",
+          "duration_s": 195
+        },
+        {
+          "ts": "2026-04-27T03:40:34Z",
+          "status": "pass",
+          "duration_s": 161
+        },
+        {
+          "ts": "2026-04-27T04:20:14Z",
+          "status": "pass",
+          "duration_s": 196
+        },
+        {
+          "ts": "2026-04-27T04:42:37Z",
+          "status": "pass",
+          "duration_s": 100
+        }
+      ]
+    },
+    "102_sigkill_mid_stream_crash_restart.sh": {
+      "status": "pass",
+      "last_run": "2026-04-27T04:44:18Z",
+      "duration_s": 101,
+      "log_path": "/Users/pablofernandez/Work/TENEX-ff3ssq/artifacts/e2e/102_sigkill_mid_stream_crash_restart.sh/20260427T044237Z/log.txt",
+      "detail": "passes:clean-restart+crash-reconciliation+post-restart-dispatch+no-zombies",
+      "runs": [
+        {
+          "ts": "2026-04-26T21:34:49Z",
+          "status": "pass",
+          "duration_s": 116
+        },
+        {
+          "ts": "2026-04-26T21:34:49Z",
+          "status": "pass",
+          "duration_s": 116
+        },
+        {
+          "ts": "2026-04-27T01:40:26Z",
+          "status": "pass",
+          "duration_s": 106
+        },
+        {
+          "ts": "2026-04-27T01:44:31Z",
+          "status": "pass",
+          "duration_s": 20
+        },
+        {
+          "ts": "2026-04-27T02:00:45Z",
+          "status": "fail",
+          "duration_s": 24
+        },
+        {
+          "ts": "2026-04-27T02:19:52Z",
+          "status": "pass",
+          "duration_s": 100
+        },
+        {
+          "ts": "2026-04-27T03:06:21Z",
+          "status": "pass",
+          "duration_s": 101
+        },
+        {
+          "ts": "2026-04-27T03:42:15Z",
+          "status": "pass",
+          "duration_s": 101
+        },
+        {
+          "ts": "2026-04-27T04:21:54Z",
+          "status": "pass",
+          "duration_s": 100
+        },
+        {
+          "ts": "2026-04-27T04:44:18Z",
+          "status": "pass",
+          "duration_s": 101
+        }
+      ]
+    },
+    "21_agent_hot_reload.sh": {
+      "status": "pass",
+      "last_run": "2026-04-27T04:53:42Z",
+      "duration_s": 100,
+      "log_path": "/Users/pablofernandez/Work/TENEX-ff3ssq/artifacts/e2e/21_agent_hot_reload.sh/20260427T045202Z/log.txt",
+      "detail": "agent2 added to index; filter refreshed; agent2 dispatched; agent1 index/dispatch unchanged",
+      "runs": [
+        {
+          "ts": "2026-04-26T21:40:41Z",
+          "status": "pass",
+          "duration_s": 5
+        },
+        {
+          "ts": "2026-04-26T21:41:09Z",
+          "status": "pass",
+          "duration_s": 6
+        },
+        {
+          "ts": "2026-04-27T01:45:49Z",
+          "status": "pass",
+          "duration_s": 6
+        },
+        {
+          "ts": "2026-04-27T01:50:34Z",
+          "status": "pass",
+          "duration_s": 55
+        },
+        {
+          "ts": "2026-04-27T02:10:11Z",
+          "status": "pass",
+          "duration_s": 100
+        },
+        {
+          "ts": "2026-04-27T02:26:28Z",
+          "status": "pass",
+          "duration_s": 106
+        },
+        {
+          "ts": "2026-04-27T03:14:13Z",
+          "status": "pass",
+          "duration_s": 100
+        },
+        {
+          "ts": "2026-04-27T03:51:39Z",
+          "status": "pass",
+          "duration_s": 100
+        },
+        {
+          "ts": "2026-04-27T04:31:23Z",
+          "status": "pass",
+          "duration_s": 100
+        },
+        {
+          "ts": "2026-04-27T04:53:42Z",
+          "status": "pass",
+          "duration_s": 100
+        }
+      ]
+    },
+    "53_three_hop_delegation.sh": {
+      "status": "pass",
+      "last_run": "2026-04-27T05:01:10Z",
+      "duration_s": 100,
+      "log_path": "/Users/pablofernandez/Work/TENEX-ff3ssq/artifacts/e2e/53_three_hop_delegation.sh/20260427T045930Z/log.txt",
+      "detail": "all six Phase B assertions held: A->B->C chain + unwind both verified",
+      "runs": [
+        {
+          "ts": "2026-04-26T21:46:41Z",
+          "status": "pass",
+          "duration_s": 22
+        },
+        {
+          "ts": "2026-04-26T21:47:02Z",
+          "status": "pass",
+          "duration_s": 21
+        },
+        {
+          "ts": "2026-04-27T01:48:25Z",
+          "status": "pass",
+          "duration_s": 20
+        },
+        {
+          "ts": "2026-04-27T01:54:55Z",
+          "status": "pass",
+          "duration_s": 101
+        },
+        {
+          "ts": "2026-04-27T02:18:12Z",
+          "status": "pass",
+          "duration_s": 29
+        },
+        {
+          "ts": "2026-04-27T02:39:57Z",
+          "status": "pass",
+          "duration_s": 100
+        },
+        {
+          "ts": "2026-04-27T03:23:14Z",
+          "status": "pass",
+          "duration_s": 101
+        },
+        {
+          "ts": "2026-04-27T03:59:37Z",
+          "status": "pass",
+          "duration_s": 65
+        },
+        {
+          "ts": "2026-04-27T04:38:11Z",
+          "status": "pass",
+          "duration_s": 101
+        },
+        {
+          "ts": "2026-04-27T05:01:10Z",
+          "status": "pass",
+          "duration_s": 100
+        }
+      ]
+    },
+    "04_parallel_sessions.sh": {
+      "status": "pass",
+      "last_run": "2026-04-27T04:39:51Z",
+      "duration_s": 100,
+      "log_path": "/Users/pablofernandez/Work/TENEX-ff3ssq/artifacts/e2e/04_parallel_sessions.sh/20260427T043811Z/log.txt",
+      "detail": "parallel execution confirmed: RAL claimed→terminal windows overlap",
+      "runs": [
+        {
+          "ts": "2026-04-26T21:23:30Z",
+          "status": "fail",
+          "duration_s": 46
+        },
+        {
+          "ts": "2026-04-26T21:22:44Z",
+          "status": "pass",
+          "duration_s": 29
+        },
+        {
+          "ts": "2026-04-27T01:34:19Z",
+          "status": "pass",
+          "duration_s": 65
+        },
+        {
+          "ts": "2026-04-27T01:43:30Z",
+          "status": "fail",
+          "duration_s": 24
+        },
+        {
+          "ts": "2026-04-27T01:56:35Z",
+          "status": "pass",
+          "duration_s": 100
+        },
+        {
+          "ts": "2026-04-27T02:17:23Z",
+          "status": "pass",
+          "duration_s": 96
+        },
+        {
+          "ts": "2026-04-27T02:59:45Z",
+          "status": "pass",
+          "duration_s": 100
+        },
+        {
+          "ts": "2026-04-27T03:36:13Z",
+          "status": "pass",
+          "duration_s": 100
+        },
+        {
+          "ts": "2026-04-27T04:15:18Z",
+          "status": "pass",
+          "duration_s": 65
+        },
+        {
+          "ts": "2026-04-27T04:39:51Z",
+          "status": "pass",
+          "duration_s": 100
+        }
+      ]
+    },
+    "41_scheduled_task_fires_within_deadline.sh": {
+      "status": "pass",
+      "last_run": "2026-04-27T04:57:50Z",
+      "duration_s": 9,
+      "log_path": "/Users/pablofernandez/Work/TENEX-ff3ssq/artifacts/e2e/41_scheduled_task_fires_within_deadline.sh/20260427T045741Z/log.txt",
+      "detail": "",
+      "runs": [
+        {
+          "ts": "2026-04-26T21:44:44Z",
+          "status": "pass",
+          "duration_s": 9
+        },
+        {
+          "ts": "2026-04-26T21:46:28Z",
+          "status": "pass",
+          "duration_s": 9
+        },
+        {
+          "ts": "2026-04-27T01:47:43Z",
+          "status": "pass",
+          "duration_s": 9
+        },
+        {
+          "ts": "2026-04-27T01:52:28Z",
+          "status": "pass",
+          "duration_s": 7
+        },
+        {
+          "ts": "2026-04-27T02:17:32Z",
+          "status": "pass",
+          "duration_s": 9
+        },
+        {
+          "ts": "2026-04-27T02:36:35Z",
+          "status": "pass",
+          "duration_s": 102
+        },
+        {
+          "ts": "2026-04-27T03:19:51Z",
+          "status": "pass",
+          "duration_s": 8
+        },
+        {
+          "ts": "2026-04-27T03:56:52Z",
+          "status": "pass",
+          "duration_s": 9
+        },
+        {
+          "ts": "2026-04-27T04:36:02Z",
+          "status": "pass",
+          "duration_s": 9
+        },
+        {
+          "ts": "2026-04-27T04:57:50Z",
+          "status": "pass",
+          "duration_s": 9
+        }
+      ]
+    },
+    "17_intervention_due.sh": {
+      "status": "pass",
+      "last_run": "2026-04-27T04:52:02Z",
+      "duration_s": 4,
+      "log_path": "/Users/pablofernandez/Work/TENEX-ff3ssq/artifacts/e2e/17_intervention_due.sh/20260427T045158Z/log.txt",
+      "detail": "intervention review kind:1 published to relay within 20s of daemon start",
+      "runs": [
+        {
+          "ts": "2026-04-26T21:40:36Z",
+          "status": "pass",
+          "duration_s": 4
+        },
+        {
+          "ts": "2026-04-26T21:41:03Z",
+          "status": "fail",
+          "duration_s": 32
+        },
+        {
+          "ts": "2026-04-27T01:45:43Z",
+          "status": "pass",
+          "duration_s": 3
+        },
+        {
+          "ts": "2026-04-27T01:49:39Z",
+          "status": "pass",
+          "duration_s": 3
+        },
+        {
+          "ts": "2026-04-27T02:08:31Z",
+          "status": "pass",
+          "duration_s": 4
+        },
+        {
+          "ts": "2026-04-27T02:24:42Z",
+          "status": "pass",
+          "duration_s": 4
+        },
+        {
+          "ts": "2026-04-27T03:12:33Z",
+          "status": "pass",
+          "duration_s": 9
+        },
+        {
+          "ts": "2026-04-27T03:49:59Z",
+          "status": "pass",
+          "duration_s": 4
+        },
+        {
+          "ts": "2026-04-27T04:29:43Z",
+          "status": "pass",
+          "duration_s": 4
+        },
+        {
+          "ts": "2026-04-27T04:52:02Z",
+          "status": "pass",
+          "duration_s": 4
+        }
+      ]
+    },
+    "16_cold_start_no_preseeded_project.sh": {
+      "status": "pass",
+      "last_run": "2026-04-27T04:51:58Z",
+      "duration_s": 5,
+      "log_path": "/Users/pablofernandez/Work/TENEX-ff3ssq/artifacts/e2e/16_cold_start_no_preseeded_project.sh/20260427T045153Z/log.txt",
+      "detail": "",
+      "runs": [
+        {
+          "ts": "2026-04-26T21:40:32Z",
+          "status": "fail",
+          "duration_s": 38
+        },
+        {
+          "ts": "2026-04-26T21:40:31Z",
+          "status": "pass",
+          "duration_s": 5
+        },
+        {
+          "ts": "2026-04-27T01:45:39Z",
+          "status": "pass",
+          "duration_s": 5
+        },
+        {
+          "ts": "2026-04-27T01:49:35Z",
+          "status": "pass",
+          "duration_s": 5
+        },
+        {
+          "ts": "2026-04-27T02:08:27Z",
+          "status": "pass",
+          "duration_s": 5
+        },
+        {
+          "ts": "2026-04-27T02:24:38Z",
+          "status": "pass",
+          "duration_s": 4
+        },
+        {
+          "ts": "2026-04-27T03:12:24Z",
+          "status": "pass",
+          "duration_s": 10
+        },
+        {
+          "ts": "2026-04-27T03:49:55Z",
+          "status": "pass",
+          "duration_s": 5
+        },
+        {
+          "ts": "2026-04-27T04:29:39Z",
+          "status": "pass",
+          "duration_s": 4
+        },
+        {
+          "ts": "2026-04-27T04:51:58Z",
+          "status": "pass",
+          "duration_s": 5
+        }
+      ]
+    },
+    "1112_auth_failure_no_publish.sh": {
+      "status": "pass",
+      "last_run": "2026-04-27T04:46:47Z",
+      "duration_s": 100,
+      "log_path": "/Users/pablofernandez/Work/TENEX-ff3ssq/artifacts/e2e/1112_auth_failure_no_publish.sh/20260427T044507Z/log.txt",
+      "detail": "",
+      "runs": [
+        {
+          "ts": "2026-04-26T21:35:38Z",
+          "status": "pass",
+          "duration_s": 13
+        },
+        {
+          "ts": "2026-04-27T01:42:41Z",
+          "status": "pass",
+          "duration_s": 100
+        },
+        {
+          "ts": "2026-04-27T01:45:19Z",
+          "status": "pass",
+          "duration_s": 13
+        },
+        {
+          "ts": "2026-04-27T02:03:05Z",
+          "status": "pass",
+          "duration_s": 100
+        },
+        {
+          "ts": "2026-04-27T02:20:51Z",
+          "status": "fail",
+          "duration_s": 24
+        },
+        {
+          "ts": "2026-04-27T02:56:40Z",
+          "status": "pass",
+          "duration_s": 99
+        },
+        {
+          "ts": "2026-04-27T03:08:37Z",
+          "status": "pass",
+          "duration_s": 102
+        },
+        {
+          "ts": "2026-04-27T03:44:31Z",
+          "status": "pass",
+          "duration_s": 102
+        },
+        {
+          "ts": "2026-04-27T04:24:21Z",
+          "status": "pass",
+          "duration_s": 102
+        },
+        {
+          "ts": "2026-04-27T04:46:47Z",
+          "status": "pass",
+          "duration_s": 100
+        }
+      ]
+    },
+    "1113_publish_outbox_retry_backoff.sh": {
+      "status": "pass",
+      "last_run": "2026-04-27T04:46:53Z",
+      "duration_s": 6,
+      "log_path": "/Users/pablofernandez/Work/TENEX-ff3ssq/artifacts/e2e/1113_publish_outbox_retry_backoff.sh/20260427T044647Z/log.txt",
+      "detail": "",
+      "runs": [
+        {
+          "ts": "2026-04-26T21:36:03Z",
+          "status": "pass",
+          "duration_s": 25
+        },
+        {
+          "ts": "2026-04-26T21:36:03Z",
+          "status": "pass",
+          "duration_s": 25
+        },
+        {
+          "ts": "2026-04-27T01:42:47Z",
+          "status": "pass",
+          "duration_s": 6
+        },
+        {
+          "ts": "2026-04-27T01:45:49Z",
+          "status": "fail",
+          "duration_s": 30
+        },
+        {
+          "ts": "2026-04-27T02:03:11Z",
+          "status": "pass",
+          "duration_s": 6
+        },
+        {
+          "ts": "2026-04-27T02:20:57Z",
+          "status": "pass",
+          "duration_s": 6
+        },
+        {
+          "ts": "2026-04-27T03:08:43Z",
+          "status": "pass",
+          "duration_s": 6
+        },
+        {
+          "ts": "2026-04-27T03:44:37Z",
+          "status": "pass",
+          "duration_s": 6
+        },
+        {
+          "ts": "2026-04-27T04:24:27Z",
+          "status": "pass",
+          "duration_s": 6
+        },
+        {
+          "ts": "2026-04-27T04:46:53Z",
+          "status": "pass",
+          "duration_s": 6
+        }
+      ]
+    },
+    "1115_relay_disconnect_reconnect.sh": {
+      "status": "pass",
+      "last_run": "2026-04-27T04:48:33Z",
+      "duration_s": 100,
+      "log_path": "/Users/pablofernandez/Work/TENEX-ff3ssq/artifacts/e2e/1115_relay_disconnect_reconnect.sh/20260427T044653Z/log.txt",
+      "detail": "",
+      "runs": [
+        {
+          "ts": "2026-04-26T21:37:39Z",
+          "status": "pass",
+          "duration_s": 96
+        },
+        {
+          "ts": "2026-04-26T21:37:39Z",
+          "status": "pass",
+          "duration_s": 96
+        },
+        {
+          "ts": "2026-04-27T01:43:06Z",
+          "status": "pass",
+          "duration_s": 19
+        },
+        {
+          "ts": "2026-04-27T01:46:57Z",
+          "status": "pass",
+          "duration_s": 68
+        },
+        {
+          "ts": "2026-04-27T02:04:51Z",
+          "status": "pass",
+          "duration_s": 100
+        },
+        {
+          "ts": "2026-04-27T02:21:23Z",
+          "status": "pass",
+          "duration_s": 26
+        },
+        {
+          "ts": "2026-04-27T03:09:02Z",
+          "status": "pass",
+          "duration_s": 19
+        },
+        {
+          "ts": "2026-04-27T03:46:19Z",
+          "status": "pass",
+          "duration_s": 102
+        },
+        {
+          "ts": "2026-04-27T04:26:07Z",
+          "status": "pass",
+          "duration_s": 100
+        },
+        {
+          "ts": "2026-04-27T04:48:33Z",
+          "status": "pass",
+          "duration_s": 100
+        }
+      ]
+    },
+    "112_backend_publishes_via_admin.sh": {
+      "status": "pass",
+      "last_run": "2026-04-27T04:48:37Z",
+      "duration_s": 4,
+      "log_path": "/Users/pablofernandez/Work/TENEX-ff3ssq/artifacts/e2e/112_backend_publishes_via_admin.sh/20260427T044833Z/log.txt",
+      "detail": "",
+      "runs": [
+        {
+          "ts": "2026-04-26T21:37:48Z",
+          "status": "pass",
+          "duration_s": 9
+        },
+        {
+          "ts": "2026-04-26T21:37:48Z",
+          "status": "pass",
+          "duration_s": 9
+        },
+        {
+          "ts": "2026-04-27T01:43:10Z",
+          "status": "pass",
+          "duration_s": 4
+        },
+        {
+          "ts": "2026-04-27T01:47:01Z",
+          "status": "pass",
+          "duration_s": 4
+        },
+        {
+          "ts": "2026-04-27T02:04:54Z",
+          "status": "pass",
+          "duration_s": 3
+        },
+        {
+          "ts": "2026-04-27T02:21:28Z",
+          "status": "pass",
+          "duration_s": 4
+        },
+        {
+          "ts": "2026-04-27T03:09:06Z",
+          "status": "pass",
+          "duration_s": 4
+        },
+        {
+          "ts": "2026-04-27T03:46:23Z",
+          "status": "pass",
+          "duration_s": 4
+        },
+        {
+          "ts": "2026-04-27T04:26:11Z",
+          "status": "pass",
+          "duration_s": 4
+        },
+        {
+          "ts": "2026-04-27T04:48:37Z",
+          "status": "pass",
+          "duration_s": 4
+        }
+      ]
+    },
+    "113_non_admin_auth_required.sh": {
+      "status": "pass",
+      "last_run": "2026-04-27T04:48:39Z",
+      "duration_s": 2,
+      "log_path": "/Users/pablofernandez/Work/TENEX-ff3ssq/artifacts/e2e/113_non_admin_auth_required.sh/20260427T044837Z/log.txt",
+      "detail": "",
+      "runs": [
+        {
+          "ts": "2026-04-26T21:37:51Z",
+          "status": "pass",
+          "duration_s": 3
+        },
+        {
+          "ts": "2026-04-26T21:37:51Z",
+          "status": "pass",
+          "duration_s": 3
+        },
+        {
+          "ts": "2026-04-27T01:43:13Z",
+          "status": "pass",
+          "duration_s": 3
+        },
+        {
+          "ts": "2026-04-27T01:47:04Z",
+          "status": "pass",
+          "duration_s": 3
+        },
+        {
+          "ts": "2026-04-27T02:04:57Z",
+          "status": "pass",
+          "duration_s": 3
+        },
+        {
+          "ts": "2026-04-27T02:21:31Z",
+          "status": "pass",
+          "duration_s": 3
+        },
+        {
+          "ts": "2026-04-27T03:09:09Z",
+          "status": "pass",
+          "duration_s": 2
+        },
+        {
+          "ts": "2026-04-27T03:46:26Z",
+          "status": "pass",
+          "duration_s": 3
+        },
+        {
+          "ts": "2026-04-27T04:26:14Z",
+          "status": "pass",
+          "duration_s": 2
+        },
+        {
+          "ts": "2026-04-27T04:48:39Z",
+          "status": "pass",
+          "duration_s": 2
+        }
+      ]
+    },
+    "115_whitelist_14199_backfill.sh": {
+      "status": "pass",
+      "last_run": "2026-04-27T04:48:43Z",
+      "duration_s": 4,
+      "log_path": "/Users/pablofernandez/Work/TENEX-ff3ssq/artifacts/e2e/115_whitelist_14199_backfill.sh/20260427T044839Z/log.txt",
+      "detail": "",
+      "runs": [
+        {
+          "ts": "2026-04-26T21:37:56Z",
+          "status": "pass",
+          "duration_s": 5
+        },
+        {
+          "ts": "2026-04-26T21:37:56Z",
+          "status": "pass",
+          "duration_s": 5
+        },
+        {
+          "ts": "2026-04-27T01:43:17Z",
+          "status": "pass",
+          "duration_s": 4
+        },
+        {
+          "ts": "2026-04-27T01:47:08Z",
+          "status": "pass",
+          "duration_s": 4
+        },
+        {
+          "ts": "2026-04-27T02:05:01Z",
+          "status": "pass",
+          "duration_s": 4
+        },
+        {
+          "ts": "2026-04-27T02:21:35Z",
+          "status": "pass",
+          "duration_s": 4
+        },
+        {
+          "ts": "2026-04-27T03:09:12Z",
+          "status": "pass",
+          "duration_s": 3
+        },
+        {
+          "ts": "2026-04-27T03:46:30Z",
+          "status": "pass",
+          "duration_s": 4
+        },
+        {
+          "ts": "2026-04-27T04:26:17Z",
+          "status": "pass",
+          "duration_s": 3
+        },
+        {
+          "ts": "2026-04-27T04:48:43Z",
+          "status": "pass",
+          "duration_s": 4
+        }
+      ]
+    },
+    "121_nip46_first_publish_on_boot.sh": {
+      "status": "pass",
+      "last_run": "2026-04-27T04:50:23Z",
+      "duration_s": 10,
+      "log_path": "/Users/pablofernandez/Work/TENEX-ff3ssq/artifacts/e2e/121_nip46_first_publish_on_boot.sh/20260427T045013Z/log.txt",
+      "detail": "kind:14199 published with correct p-tags",
+      "runs": [
+        {
+          "ts": "2026-04-26T21:38:26Z",
+          "status": "pass",
+          "duration_s": 10
+        },
+        {
+          "ts": "2026-04-27T01:43:40Z",
+          "status": "pass",
+          "duration_s": 10
+        },
+        {
+          "ts": "2026-04-27T01:48:05Z",
+          "status": "fail",
+          "duration_s": 31
+        },
+        {
+          "ts": "2026-04-27T02:06:52Z",
+          "status": "pass",
+          "duration_s": 11
+        },
+        {
+          "ts": "2026-04-27T02:23:03Z",
+          "status": "fail",
+          "duration_s": 33
+        },
+        {
+          "ts": "2026-04-27T02:56:50Z",
+          "status": "pass",
+          "duration_s": 9
+        },
+        {
+          "ts": "2026-04-27T03:10:38Z",
+          "status": "pass",
+          "duration_s": 10
+        },
+        {
+          "ts": "2026-04-27T03:48:20Z",
+          "status": "pass",
+          "duration_s": 10
+        },
+        {
+          "ts": "2026-04-27T04:28:10Z",
+          "status": "pass",
+          "duration_s": 11
+        },
+        {
+          "ts": "2026-04-27T04:50:23Z",
+          "status": "pass",
+          "duration_s": 10
+        }
+      ]
+    },
+    "122_nip46_additive_reconciliation.sh": {
+      "status": "pass",
+      "last_run": "2026-04-27T04:50:33Z",
+      "duration_s": 10,
+      "log_path": "/Users/pablofernandez/Work/TENEX-ff3ssq/artifacts/e2e/122_nip46_additive_reconciliation.sh/20260427T045023Z/log.txt",
+      "detail": "additive 14199 published with all three p-tags",
+      "runs": [
+        {
+          "ts": "2026-04-26T21:38:37Z",
+          "status": "pass",
+          "duration_s": 11
+        },
+        {
+          "ts": "2026-04-26T21:38:37Z",
+          "status": "pass",
+          "duration_s": 11
+        },
+        {
+          "ts": "2026-04-27T01:44:10Z",
+          "status": "fail",
+          "duration_s": 30
+        },
+        {
+          "ts": "2026-04-27T01:48:15Z",
+          "status": "pass",
+          "duration_s": 10
+        },
+        {
+          "ts": "2026-04-27T02:07:02Z",
+          "status": "pass",
+          "duration_s": 10
+        },
+        {
+          "ts": "2026-04-27T02:23:13Z",
+          "status": "pass",
+          "duration_s": 10
+        },
+        {
+          "ts": "2026-04-27T03:10:48Z",
+          "status": "pass",
+          "duration_s": 10
+        },
+        {
+          "ts": "2026-04-27T03:48:30Z",
+          "status": "pass",
+          "duration_s": 10
+        },
+        {
+          "ts": "2026-04-27T04:28:20Z",
+          "status": "pass",
+          "duration_s": 10
+        },
+        {
+          "ts": "2026-04-27T04:50:33Z",
+          "status": "pass",
+          "duration_s": 10
+        }
+      ]
+    },
+    "123_nip46_debounced_reconciliation.sh": {
+      "status": "pass",
+      "last_run": "2026-04-27T04:50:54Z",
+      "duration_s": 21,
+      "log_path": "/Users/pablofernandez/Work/TENEX-ff3ssq/artifacts/e2e/123_nip46_debounced_reconciliation.sh/20260427T045033Z/log.txt",
+      "detail": "single 14199 published despite multiple poller triggers",
+      "runs": [
+        {
+          "ts": "2026-04-26T21:38:58Z",
+          "status": "pass",
+          "duration_s": 21
+        },
+        {
+          "ts": "2026-04-26T21:38:58Z",
+          "status": "pass",
+          "duration_s": 21
+        },
+        {
+          "ts": "2026-04-27T01:44:31Z",
+          "status": "pass",
+          "duration_s": 21
+        },
+        {
+          "ts": "2026-04-27T01:48:36Z",
+          "status": "pass",
+          "duration_s": 21
+        },
+        {
+          "ts": "2026-04-27T02:07:23Z",
+          "status": "pass",
+          "duration_s": 21
+        },
+        {
+          "ts": "2026-04-27T02:23:34Z",
+          "status": "pass",
+          "duration_s": 21
+        },
+        {
+          "ts": "2026-04-27T03:11:09Z",
+          "status": "pass",
+          "duration_s": 21
+        },
+        {
+          "ts": "2026-04-27T03:48:51Z",
+          "status": "pass",
+          "duration_s": 21
+        },
+        {
+          "ts": "2026-04-27T04:28:40Z",
+          "status": "pass",
+          "duration_s": 20
+        },
+        {
+          "ts": "2026-04-27T04:50:54Z",
+          "status": "pass",
+          "duration_s": 21
+        }
+      ]
+    },
+    "125_nip46_sign_timeout.sh": {
+      "status": "pass",
+      "last_run": "2026-04-27T04:51:05Z",
+      "duration_s": 11,
+      "log_path": "/Users/pablofernandez/Work/TENEX-ff3ssq/artifacts/e2e/125_nip46_sign_timeout.sh/20260427T045054Z/log.txt",
+      "detail": "timeout logged and daemon continued without crash",
+      "runs": [
+        {
+          "ts": "2026-04-27T03:11:27Z",
+          "status": "fail",
+          "duration_s": 18
+        },
+        {
+          "ts": "2026-04-27T03:31:14Z",
+          "status": "fail",
+          "duration_s": 18
+        },
+        {
+          "ts": "2026-04-27T03:31:25Z",
+          "status": "pass",
+          "duration_s": 11
+        },
+        {
+          "ts": "2026-04-27T03:31:37Z",
+          "status": "pass",
+          "duration_s": 11
+        },
+        {
+          "ts": "2026-04-27T03:32:19Z",
+          "status": "pass",
+          "duration_s": 15
+        },
+        {
+          "ts": "2026-04-27T03:32:35Z",
+          "status": "pass",
+          "duration_s": 15
+        },
+        {
+          "ts": "2026-04-27T03:32:46Z",
+          "status": "pass",
+          "duration_s": 11
+        },
+        {
+          "ts": "2026-04-27T03:49:02Z",
+          "status": "pass",
+          "duration_s": 11
+        },
+        {
+          "ts": "2026-04-27T04:28:52Z",
+          "status": "pass",
+          "duration_s": 12
+        },
+        {
+          "ts": "2026-04-27T04:51:05Z",
+          "status": "pass",
+          "duration_s": 11
+        }
+      ]
+    },
+    "127_nip46_sighup_reloads_owners.sh": {
+      "status": "pass",
+      "last_run": "2026-04-27T04:51:24Z",
+      "duration_s": 19,
+      "log_path": "/Users/pablofernandez/Work/TENEX-ff3ssq/artifacts/e2e/127_nip46_sighup_reloads_owners.sh/20260427T045105Z/log.txt",
+      "detail": "SIGHUP cleared registry; kind:14199 published via bunker B",
+      "runs": [
+        {
+          "ts": "2026-04-26T21:39:29Z",
+          "status": "pass",
+          "duration_s": 19
+        },
+        {
+          "ts": "2026-04-26T21:39:29Z",
+          "status": "pass",
+          "duration_s": 19
+        },
+        {
+          "ts": "2026-04-27T01:44:59Z",
+          "status": "fail",
+          "duration_s": 16
+        },
+        {
+          "ts": "2026-04-27T01:49:06Z",
+          "status": "pass",
+          "duration_s": 18
+        },
+        {
+          "ts": "2026-04-27T02:07:53Z",
+          "status": "pass",
+          "duration_s": 19
+        },
+        {
+          "ts": "2026-04-27T02:24:04Z",
+          "status": "pass",
+          "duration_s": 19
+        },
+        {
+          "ts": "2026-04-27T03:11:45Z",
+          "status": "pass",
+          "duration_s": 18
+        },
+        {
+          "ts": "2026-04-27T03:49:21Z",
+          "status": "pass",
+          "duration_s": 19
+        },
+        {
+          "ts": "2026-04-27T04:29:10Z",
+          "status": "pass",
+          "duration_s": 18
+        },
+        {
+          "ts": "2026-04-27T04:51:24Z",
+          "status": "pass",
+          "duration_s": 19
+        }
+      ]
+    },
+    "144_telegram_outbox_send.sh": {
+      "status": "pass",
+      "last_run": "2026-04-27T04:51:43Z",
+      "duration_s": 4,
+      "log_path": "/Users/pablofernandez/Work/TENEX-ff3ssq/artifacts/e2e/144_telegram_outbox_send.sh/20260427T045139Z/log.txt",
+      "detail": "outbox record delivered and sendMessage confirmed",
+      "runs": [
+        {
+          "ts": "2026-04-26T21:39:49Z",
+          "status": "pass",
+          "duration_s": 4
+        },
+        {
+          "ts": "2026-04-26T21:40:16Z",
+          "status": "pass",
+          "duration_s": 4
+        },
+        {
+          "ts": "2026-04-27T01:45:24Z",
+          "status": "pass",
+          "duration_s": 5
+        },
+        {
+          "ts": "2026-04-27T01:49:25Z",
+          "status": "pass",
+          "duration_s": 4
+        },
+        {
+          "ts": "2026-04-27T02:08:18Z",
+          "status": "pass",
+          "duration_s": 5
+        },
+        {
+          "ts": "2026-04-27T02:24:29Z",
+          "status": "pass",
+          "duration_s": 5
+        },
+        {
+          "ts": "2026-04-27T03:12:04Z",
+          "status": "pass",
+          "duration_s": 4
+        },
+        {
+          "ts": "2026-04-27T03:49:40Z",
+          "status": "pass",
+          "duration_s": 4
+        },
+        {
+          "ts": "2026-04-27T04:29:30Z",
+          "status": "pass",
+          "duration_s": 4
+        },
+        {
+          "ts": "2026-04-27T04:51:43Z",
+          "status": "pass",
+          "duration_s": 4
+        }
+      ]
+    },
+    "510_killed_delegation_propagates.sh": {
+      "status": "skip",
+      "last_run": "2026-04-27T04:59:30Z",
+      "duration_s": 0,
+      "log_path": "/Users/pablofernandez/Work/TENEX-ff3ssq/artifacts/e2e/510_killed_delegation_propagates.sh/20260427T045930Z/log.txt",
+      "detail": "DelegationKilled requires worker-protocol message from kill tool; delegation ID is unknown at fixture time; see cargo test proposal in script header",
+      "runs": [
+        {
+          "ts": "2026-04-26T21:46:19Z",
+          "status": "skip",
+          "duration_s": 0
+        },
+        {
+          "ts": "2026-04-26T21:46:41Z",
+          "status": "skip",
+          "duration_s": 0
+        },
+        {
+          "ts": "2026-04-27T01:48:05Z",
+          "status": "skip",
+          "duration_s": 0
+        },
+        {
+          "ts": "2026-04-27T01:53:14Z",
+          "status": "skip",
+          "duration_s": 0
+        },
+        {
+          "ts": "2026-04-27T02:17:43Z",
+          "status": "skip",
+          "duration_s": 0
+        },
+        {
+          "ts": "2026-04-27T02:38:17Z",
+          "status": "skip",
+          "duration_s": 0
+        },
+        {
+          "ts": "2026-04-27T03:21:33Z",
+          "status": "skip",
+          "duration_s": 0
+        },
+        {
+          "ts": "2026-04-27T03:58:32Z",
+          "status": "skip",
+          "duration_s": 0
+        },
+        {
+          "ts": "2026-04-27T04:36:30Z",
+          "status": "skip",
+          "duration_s": 0
+        },
+        {
+          "ts": "2026-04-27T04:59:30Z",
+          "status": "skip",
+          "duration_s": 0
+        }
+      ]
+    },
+    "54_idle_parent_wakeup.sh": {
+      "status": "pass",
+      "last_run": "2026-04-27T05:02:50Z",
+      "duration_s": 100,
+      "log_path": "/Users/pablofernandez/Work/TENEX-ff3ssq/artifacts/e2e/54_idle_parent_wakeup.sh/20260427T050110Z/log.txt",
+      "detail": "agent1 resumed from WaitingForDelegation via new dispatch after child completion",
+      "runs": [
+        {
+          "ts": "2026-04-26T21:46:49Z",
+          "status": "pass",
+          "duration_s": 8
+        },
+        {
+          "ts": "2026-04-26T21:47:35Z",
+          "status": "fail",
+          "duration_s": 33
+        },
+        {
+          "ts": "2026-04-27T01:48:38Z",
+          "status": "pass",
+          "duration_s": 13
+        },
+        {
+          "ts": "2026-04-27T01:56:35Z",
+          "status": "pass",
+          "duration_s": 100
+        },
+        {
+          "ts": "2026-04-27T02:19:52Z",
+          "status": "pass",
+          "duration_s": 100
+        },
+        {
+          "ts": "2026-04-27T02:41:38Z",
+          "status": "pass",
+          "duration_s": 100
+        },
+        {
+          "ts": "2026-04-27T03:24:54Z",
+          "status": "pass",
+          "duration_s": 100
+        },
+        {
+          "ts": "2026-04-27T04:01:19Z",
+          "status": "pass",
+          "duration_s": 102
+        },
+        {
+          "ts": "2026-04-27T04:39:51Z",
+          "status": "pass",
+          "duration_s": 100
+        },
+        {
+          "ts": "2026-04-27T05:02:50Z",
+          "status": "pass",
+          "duration_s": 100
+        }
+      ]
+    },
+    "56_partial_delegation_completion.sh": {
+      "status": "pass",
+      "last_run": "2026-04-27T05:04:32Z",
+      "duration_s": 102,
+      "log_path": "/Users/pablofernandez/Work/TENEX-ff3ssq/artifacts/e2e/56_partial_delegation_completion.sh/20260427T050250Z/log.txt",
+      "detail": "both B and C delegation completions recorded; agent1 resumed and published final answer",
+      "runs": [
+        {
+          "ts": "2026-04-27T01:57:41Z",
+          "status": "pass",
+          "duration_s": 66
+        },
+        {
+          "ts": "2026-04-27T02:20:12Z",
+          "status": "pass",
+          "duration_s": 20
+        },
+        {
+          "ts": "2026-04-27T02:43:18Z",
+          "status": "pass",
+          "duration_s": 100
+        },
+        {
+          "ts": "2026-04-27T03:26:34Z",
+          "status": "pass",
+          "duration_s": 100
+        },
+        {
+          "ts": "2026-04-27T04:03:00Z",
+          "status": "fail",
+          "duration_s": 101
+        },
+        {
+          "ts": "2026-04-27T04:08:41Z",
+          "status": "pass",
+          "duration_s": 100
+        },
+        {
+          "ts": "2026-04-27T04:10:22Z",
+          "status": "pass",
+          "duration_s": 100
+        },
+        {
+          "ts": "2026-04-27T04:11:32Z",
+          "status": "pass",
+          "duration_s": 70
+        },
+        {
+          "ts": "2026-04-27T04:40:57Z",
+          "status": "pass",
+          "duration_s": 66
+        },
+        {
+          "ts": "2026-04-27T05:04:32Z",
+          "status": "pass",
+          "duration_s": 102
+        }
+      ]
+    },
+    "63_message_during_streaming_queues.sh": {
+      "status": "pass",
+      "last_run": "2026-04-27T05:06:12Z",
+      "duration_s": 100,
+      "log_path": "/Users/pablofernandez/Work/TENEX-ff3ssq/artifacts/e2e/63_message_during_streaming_queues.sh/20260427T050432Z/log.txt",
+      "detail": "streaming not pre-empted; second dispatch queued; both messages processed sequentially",
+      "runs": [
+        {
+          "ts": "2026-04-26T21:47:22Z",
+          "status": "fail",
+          "duration_s": 24
+        },
+        {
+          "ts": "2026-04-26T21:49:48Z",
+          "status": "pass",
+          "duration_s": 100
+        },
+        {
+          "ts": "2026-04-27T01:50:34Z",
+          "status": "fail",
+          "duration_s": 62
+        },
+        {
+          "ts": "2026-04-27T01:59:21Z",
+          "status": "pass",
+          "duration_s": 100
+        },
+        {
+          "ts": "2026-04-27T02:20:36Z",
+          "status": "fail",
+          "duration_s": 24
+        },
+        {
+          "ts": "2026-04-27T02:44:58Z",
+          "status": "pass",
+          "duration_s": 100
+        },
+        {
+          "ts": "2026-04-27T03:28:14Z",
+          "status": "pass",
+          "duration_s": 100
+        },
+        {
+          "ts": "2026-04-27T04:04:40Z",
+          "status": "pass",
+          "duration_s": 100
+        },
+        {
+          "ts": "2026-04-27T04:42:37Z",
+          "status": "pass",
+          "duration_s": 100
+        },
+        {
+          "ts": "2026-04-27T05:06:12Z",
+          "status": "pass",
+          "duration_s": 100
+        }
+      ]
+    },
+    "64_concurrent_message_race.sh": {
+      "status": "pass",
+      "last_run": "2026-04-27T05:07:52Z",
+      "duration_s": 100,
+      "log_path": "/Users/pablofernandez/Work/TENEX-ff3ssq/artifacts/e2e/64_concurrent_message_race.sh/20260427T050612Z/log.txt",
+      "detail": "two 3ms-apart messages dispatched sequentially; only one LEASED at a time; both processed",
+      "runs": [
+        {
+          "ts": "2026-04-26T21:47:35Z",
+          "status": "pass",
+          "duration_s": 13
+        },
+        {
+          "ts": "2026-04-26T21:49:54Z",
+          "status": "pass",
+          "duration_s": 6
+        },
+        {
+          "ts": "2026-04-27T01:51:42Z",
+          "status": "pass",
+          "duration_s": 68
+        },
+        {
+          "ts": "2026-04-27T02:00:21Z",
+          "status": "pass",
+          "duration_s": 60
+        },
+        {
+          "ts": "2026-04-27T02:20:51Z",
+          "status": "pass",
+          "duration_s": 15
+        },
+        {
+          "ts": "2026-04-27T02:46:04Z",
+          "status": "pass",
+          "duration_s": 66
+        },
+        {
+          "ts": "2026-04-27T03:29:54Z",
+          "status": "pass",
+          "duration_s": 100
+        },
+        {
+          "ts": "2026-04-27T04:06:20Z",
+          "status": "pass",
+          "duration_s": 100
+        },
+        {
+          "ts": "2026-04-27T04:44:18Z",
+          "status": "pass",
+          "duration_s": 101
+        },
+        {
+          "ts": "2026-04-27T05:07:52Z",
+          "status": "pass",
+          "duration_s": 100
+        }
+      ]
+    },
+    "71_worker_boot_timeout.sh": {
+      "status": "pass",
+      "last_run": "2026-04-27T05:07:57Z",
+      "duration_s": 4,
+      "log_path": "/Users/pablofernandez/Work/TENEX-ff3ssq/artifacts/e2e/71_worker_boot_timeout.sh/20260427T050753Z/log.txt",
+      "detail": "daemon survives worker boot timeout; error logged; no panic",
+      "runs": [
+        {
+          "ts": "2026-04-26T21:47:40Z",
+          "status": "pass",
+          "duration_s": 4
+        },
+        {
+          "ts": "2026-04-26T21:50:04Z",
+          "status": "pass",
+          "duration_s": 10
+        },
+        {
+          "ts": "2026-04-27T01:51:47Z",
+          "status": "pass",
+          "duration_s": 5
+        },
+        {
+          "ts": "2026-04-27T02:00:25Z",
+          "status": "pass",
+          "duration_s": 4
+        },
+        {
+          "ts": "2026-04-27T02:21:23Z",
+          "status": "fail",
+          "duration_s": 32
+        },
+        {
+          "ts": "2026-04-27T02:46:09Z",
+          "status": "pass",
+          "duration_s": 5
+        },
+        {
+          "ts": "2026-04-27T03:29:58Z",
+          "status": "pass",
+          "duration_s": 4
+        },
+        {
+          "ts": "2026-04-27T04:06:24Z",
+          "status": "pass",
+          "duration_s": 4
+        },
+        {
+          "ts": "2026-04-27T04:44:23Z",
+          "status": "pass",
+          "duration_s": 5
+        },
+        {
+          "ts": "2026-04-27T05:07:57Z",
+          "status": "pass",
+          "duration_s": 4
+        }
+      ]
+    },
+    "72_worker_protocol_version_mismatch.sh": {
+      "status": "pass",
+      "last_run": "2026-04-27T05:08:01Z",
+      "duration_s": 4,
+      "log_path": "/Users/pablofernandez/Work/TENEX-ff3ssq/artifacts/e2e/72_worker_protocol_version_mismatch.sh/20260427T050757Z/log.txt",
+      "detail": "daemon survives protocol version mismatch; error logged; no panic",
+      "runs": [
+        {
+          "ts": "2026-04-26T21:47:44Z",
+          "status": "pass",
+          "duration_s": 4
+        },
+        {
+          "ts": "2026-04-26T21:50:08Z",
+          "status": "pass",
+          "duration_s": 4
+        },
+        {
+          "ts": "2026-04-27T01:51:51Z",
+          "status": "pass",
+          "duration_s": 4
+        },
+        {
+          "ts": "2026-04-27T02:00:30Z",
+          "status": "pass",
+          "duration_s": 4
+        },
+        {
+          "ts": "2026-04-27T02:21:28Z",
+          "status": "fail",
+          "duration_s": 5
+        },
+        {
+          "ts": "2026-04-27T02:46:13Z",
+          "status": "pass",
+          "duration_s": 4
+        },
+        {
+          "ts": "2026-04-27T03:30:08Z",
+          "status": "pass",
+          "duration_s": 10
+        },
+        {
+          "ts": "2026-04-27T04:06:28Z",
+          "status": "pass",
+          "duration_s": 4
+        },
+        {
+          "ts": "2026-04-27T04:44:27Z",
+          "status": "pass",
+          "duration_s": 4
+        },
+        {
+          "ts": "2026-04-27T05:08:01Z",
+          "status": "pass",
+          "duration_s": 4
+        }
+      ]
+    },
+    "74_worker_unexpected_exit.sh": {
+      "status": "pass",
+      "last_run": "2026-04-27T05:08:05Z",
+      "duration_s": 4,
+      "log_path": "/Users/pablofernandez/Work/TENEX-ff3ssq/artifacts/e2e/74_worker_unexpected_exit.sh/20260427T050801Z/log.txt",
+      "detail": "daemon survives worker SIGKILL; session error logged; no panic",
+      "runs": [
+        {
+          "ts": "2026-04-26T21:47:48Z",
+          "status": "pass",
+          "duration_s": 4
+        },
+        {
+          "ts": "2026-04-26T21:50:12Z",
+          "status": "pass",
+          "duration_s": 4
+        },
+        {
+          "ts": "2026-04-27T01:52:00Z",
+          "status": "pass",
+          "duration_s": 9
+        },
+        {
+          "ts": "2026-04-27T02:00:34Z",
+          "status": "pass",
+          "duration_s": 4
+        },
+        {
+          "ts": "2026-04-27T02:22:30Z",
+          "status": "fail",
+          "duration_s": 62
+        },
+        {
+          "ts": "2026-04-27T02:46:17Z",
+          "status": "pass",
+          "duration_s": 4
+        },
+        {
+          "ts": "2026-04-27T03:30:12Z",
+          "status": "pass",
+          "duration_s": 4
+        },
+        {
+          "ts": "2026-04-27T04:06:32Z",
+          "status": "pass",
+          "duration_s": 4
+        },
+        {
+          "ts": "2026-04-27T04:44:31Z",
+          "status": "pass",
+          "duration_s": 4
+        },
+        {
+          "ts": "2026-04-27T05:08:05Z",
+          "status": "pass",
+          "duration_s": 4
+        }
+      ]
+    },
+    "79_frame_size_cap.sh": {
+      "status": "pass",
+      "last_run": "2026-04-27T05:08:09Z",
+      "duration_s": 4,
+      "log_path": "/Users/pablofernandez/Work/TENEX-ff3ssq/artifacts/e2e/79_frame_size_cap.sh/20260427T050805Z/log.txt",
+      "detail": "daemon rejects oversized frame; session error logged; no panic",
+      "runs": [
+        {
+          "ts": "2026-04-26T21:47:52Z",
+          "status": "pass",
+          "duration_s": 4
+        },
+        {
+          "ts": "2026-04-26T21:50:16Z",
+          "status": "pass",
+          "duration_s": 4
+        },
+        {
+          "ts": "2026-04-27T01:52:05Z",
+          "status": "pass",
+          "duration_s": 5
+        },
+        {
+          "ts": "2026-04-27T02:00:38Z",
+          "status": "pass",
+          "duration_s": 4
+        },
+        {
+          "ts": "2026-04-27T02:22:34Z",
+          "status": "pass",
+          "duration_s": 4
+        },
+        {
+          "ts": "2026-04-27T02:46:21Z",
+          "status": "pass",
+          "duration_s": 4
+        },
+        {
+          "ts": "2026-04-27T03:30:16Z",
+          "status": "pass",
+          "duration_s": 4
+        },
+        {
+          "ts": "2026-04-27T04:06:41Z",
+          "status": "pass",
+          "duration_s": 9
+        },
+        {
+          "ts": "2026-04-27T04:44:35Z",
+          "status": "pass",
+          "duration_s": 4
+        },
+        {
+          "ts": "2026-04-27T05:08:09Z",
+          "status": "pass",
+          "duration_s": 4
+        }
+      ]
+    },
+    "05_parallel_delegation_q_tags.sh": {
+      "status": "pass",
+      "last_run": "2026-04-27T04:40:57Z",
+      "duration_s": 66,
+      "log_path": "/Users/pablofernandez/Work/TENEX-ff3ssq/artifacts/e2e/05_parallel_delegation_q_tags.sh/20260427T043951Z/log.txt",
+      "detail": "",
+      "runs": [
+        {
+          "ts": "2026-04-26T21:23:50Z",
+          "status": "pass",
+          "duration_s": 20
+        },
+        {
+          "ts": "2026-04-26T21:23:50Z",
+          "status": "fail",
+          "duration_s": 66
+        },
+        {
+          "ts": "2026-04-27T01:35:24Z",
+          "status": "pass",
+          "duration_s": 65
+        },
+        {
+          "ts": "2026-04-27T01:43:46Z",
+          "status": "pass",
+          "duration_s": 16
+        },
+        {
+          "ts": "2026-04-27T01:57:41Z",
+          "status": "pass",
+          "duration_s": 66
+        },
+        {
+          "ts": "2026-04-27T02:17:40Z",
+          "status": "pass",
+          "duration_s": 17
+        },
+        {
+          "ts": "2026-04-27T03:01:25Z",
+          "status": "pass",
+          "duration_s": 100
+        },
+        {
+          "ts": "2026-04-27T03:37:53Z",
+          "status": "pass",
+          "duration_s": 100
+        },
+        {
+          "ts": "2026-04-27T04:16:58Z",
+          "status": "pass",
+          "duration_s": 100
+        },
+        {
+          "ts": "2026-04-27T04:40:57Z",
+          "status": "pass",
+          "duration_s": 66
+        }
+      ]
+    },
+    "103_sigkill_no_duplicate_events.sh": {
+      "status": "fail",
+      "last_run": "2026-04-27T04:44:52Z",
+      "duration_s": 34,
+      "log_path": "/Users/pablofernandez/Work/TENEX-ff3ssq/artifacts/e2e/103_sigkill_no_duplicate_events.sh/20260427T044418Z/log.txt",
+      "detail": "",
+      "runs": [
+        {
+          "ts": "2026-04-26T21:35:09Z",
+          "status": "pass",
+          "duration_s": 20
+        },
+        {
+          "ts": "2026-04-26T21:35:09Z",
+          "status": "pass",
+          "duration_s": 20
+        },
+        {
+          "ts": "2026-04-27T01:40:45Z",
+          "status": "pass",
+          "duration_s": 19
+        },
+        {
+          "ts": "2026-04-27T01:44:51Z",
+          "status": "pass",
+          "duration_s": 20
+        },
+        {
+          "ts": "2026-04-27T02:01:04Z",
+          "status": "pass",
+          "duration_s": 19
+        },
+        {
+          "ts": "2026-04-27T02:20:12Z",
+          "status": "pass",
+          "duration_s": 20
+        },
+        {
+          "ts": "2026-04-27T03:06:40Z",
+          "status": "pass",
+          "duration_s": 19
+        },
+        {
+          "ts": "2026-04-27T03:42:34Z",
+          "status": "pass",
+          "duration_s": 19
+        },
+        {
+          "ts": "2026-04-27T04:22:19Z",
+          "status": "pass",
+          "duration_s": 25
+        },
+        {
+          "ts": "2026-04-27T04:44:52Z",
+          "status": "fail",
+          "duration_s": 34
+        }
+      ]
+    },
+    "104_correlation_id_chain.sh": {
+      "status": "pass",
+      "last_run": "2026-04-27T04:45:01Z",
+      "duration_s": 9,
+      "log_path": "/Users/pablofernandez/Work/TENEX-ff3ssq/artifacts/e2e/104_correlation_id_chain.sh/20260427T044452Z/log.txt",
+      "detail": "conv_id present in daemon.log (19) + ral journal (9) + publish outbox (12)",
+      "runs": [
+        {
+          "ts": "2026-04-26T21:35:18Z",
+          "status": "pass",
+          "duration_s": 9
+        },
+        {
+          "ts": "2026-04-26T21:35:18Z",
+          "status": "pass",
+          "duration_s": 9
+        },
+        {
+          "ts": "2026-04-27T01:40:55Z",
+          "status": "pass",
+          "duration_s": 10
+        },
+        {
+          "ts": "2026-04-27T01:45:00Z",
+          "status": "pass",
+          "duration_s": 9
+        },
+        {
+          "ts": "2026-04-27T02:01:19Z",
+          "status": "pass",
+          "duration_s": 15
+        },
+        {
+          "ts": "2026-04-27T02:20:22Z",
+          "status": "pass",
+          "duration_s": 9
+        },
+        {
+          "ts": "2026-04-27T03:06:49Z",
+          "status": "pass",
+          "duration_s": 9
+        },
+        {
+          "ts": "2026-04-27T03:42:44Z",
+          "status": "pass",
+          "duration_s": 9
+        },
+        {
+          "ts": "2026-04-27T04:22:28Z",
+          "status": "pass",
+          "duration_s": 9
+        },
+        {
+          "ts": "2026-04-27T04:45:01Z",
+          "status": "pass",
+          "duration_s": 9
+        }
+      ]
+    }
+  }
+}

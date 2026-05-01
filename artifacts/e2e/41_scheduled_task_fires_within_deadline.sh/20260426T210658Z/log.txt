@@ -1,0 +1,63 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-41-1777237618-53049
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-41-1777237618-53049
+[harness]   backend pubkey:  f6b5f2d103817f5dbd6402c6c5748bb794b1925071b68b23289435e0916577e4
+[harness]   user pubkey:     fe4a8b1178d09a8896352da018b4251d12535fa4e5376c8bb681cd5e88af695e
+[harness]   agent1 pubkey:   96d8572ff0f119e85a6129c90561b8b81d21bd4061eab1bc8cb018b6fd2cab1e
+[harness]   agent2 pubkey:   b741a1acc2026a6dac37f312d3b50f907302d1c11ee6b938a049b3352faea878
+[harness]   project a-tag:   31933:fe4a8b1178d09a8896352da018b4251d12535fa4e5376c8bb681cd5e88af695e:nak-interop-test-20260427000658-4098
+[harness] starting relay on 127.0.0.1:62873 (admins=1)
+[harness] relay ready at ws://127.0.0.1:62873
+[harness] daemon config relays -> [ws://127.0.0.1:62873]
+connecting to ws://127.0.0.1:62873... ok.
+publishing to ws://127.0.0.1:62873... success.
+connecting to ws://127.0.0.1:62873... ok.
+publishing to ws://127.0.0.1:62873... success.
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-41-1777237618-53049/backend, binary=/Users/pablofernandez/Work/TENEX-ff3ssq/target/release/daemon)
+[harness] daemon ready (pid 54091, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-41-1777237618-53049/backend/daemon/tenex.lock)
+[harness] kind:14199 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] kind:24030 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] daemon subscription confirmed live (all probed listener filters registered)
+[scenario] publishing kind:24000 boot event
+connecting to ws://127.0.0.1:62873... ok.
+publishing to ws://127.0.0.1:62873... success.
+/Users/pablofernandez/Work/TENEX-ff3ssq/scripts/e2e/scenarios/41_scheduled_task_fires_within_deadline.sh: line 78: 54091 Killed: 9               TENEX_BASE_DIR="$TENEX_BASE_DIR" "$daemon_bin" --tenex-base-dir "$TENEX_BASE_DIR" >> "$HARNESS_DAEMON_LOG" 2>&1
+[scenario] writing schedules.json with executeAt=2026-04-26T21:07:06Z (task_id=sched-task-e2e-41-53049)
+[scenario] waiting up to 7s for scheduled task dispatch to appear in queue
+[scenario] daemon log (last 60 lines):
+{"timestamp":"2026-04-26T21:07:01.662084Z","level":"INFO","fields":{"message":"nostr relay task started","relay_url":"ws://127.0.0.1:62873"},"target":"tenex_daemon::nostr_subscription_gateway"}
+{"timestamp":"2026-04-26T21:07:01.662103Z","level":"DEBUG","fields":{"message":"connecting subscription relay session","relay_url":"ws://127.0.0.1:62873"},"target":"tenex_daemon::nostr_subscription_gateway"}
+{"timestamp":"2026-04-26T21:07:01.662109Z","level":"DEBUG","fields":{"message":"connecting to relay","relay_url":"ws://127.0.0.1:62873","subscription_id":"tenex-main"},"target":"tenex_daemon::nostr_subscription_gateway"}
+{"timestamp":"2026-04-26T21:07:01.662790Z","level":"DEBUG","fields":{"message":"relay sent AUTH challenge, authenticating","relay_url":"ws://127.0.0.1:62873"},"target":"tenex_daemon::nostr_subscription_gateway"}
+{"timestamp":"2026-04-26T21:07:01.662851Z","level":"DEBUG","fields":{"message":"ignoring duplicate AUTH challenge","relay_url":"ws://127.0.0.1:62873"},"target":"tenex_daemon::nostr_subscription_gateway"}
+{"timestamp":"2026-04-26T21:07:01.663209Z","level":"INFO","fields":{"message":"relay authenticated, resubscribed","relay_url":"ws://127.0.0.1:62873"},"target":"tenex_daemon::nostr_subscription_gateway"}
+{"timestamp":"2026-04-26T21:07:01.683023Z","level":"DEBUG","fields":{"message":"nostr event received","relay_url":"ws://127.0.0.1:62873","event_id":"83432f7c2deacbbf14c69ea35c237388e2f7cd8c55e83d5bf434b239334283ac","event_kind":31933,"event_pubkey":"fe4a8b1178d09a8896352da018b4251d12535fa4e5376c8bb681cd5e88af695e","class":"Project"},"target":"tenex_daemon::nostr_subscription_gateway"}
+{"timestamp":"2026-04-26T21:07:01.683040Z","level":"INFO","fields":{"message":"inbound nostr event ignored","relay_url":"ws://127.0.0.1:62873","event_id":"83432f7c2deacbbf14c69ea35c237388e2f7cd8c55e83d5bf434b239334283ac","code":"project_updated","detail":"project nak-interop-test-20260427000658-4098 state written to disk","class":"Some(Project)","project_id":"Some(\"nak-interop-test-20260427000658-4098\")","pubkeys":"[]","dispatch_id":"None"},"target":"tenex_daemon::nostr_subscription_gateway"}
+{"timestamp":"2026-04-26T21:07:01.683300Z","level":"INFO","fields":{"message":"nostr subscription filters refreshed","relay_url":"ws://127.0.0.1:62873","subscription_id":"tenex-main","old_filter_count":5,"new_filter_count":7,"project_address_count":1,"agent_pubkey_count":3},"target":"tenex_daemon::nostr_subscription_gateway"}
+{"timestamp":"2026-04-26T21:07:01.683409Z","level":"DEBUG","fields":{"message":"nostr event received","relay_url":"ws://127.0.0.1:62873","event_id":"aae59dde7b00d17e18532228a9e363bddc73bab3052b7f61940c2d65d62afd20","event_kind":14199,"event_pubkey":"fe4a8b1178d09a8896352da018b4251d12535fa4e5376c8bb681cd5e88af695e","class":"NeverRoute"},"target":"tenex_daemon::nostr_subscription_gateway"}
+{"timestamp":"2026-04-26T21:07:01.683412Z","level":"INFO","fields":{"message":"inbound nostr event ignored","relay_url":"ws://127.0.0.1:62873","event_id":"aae59dde7b00d17e18532228a9e363bddc73bab3052b7f61940c2d65d62afd20","code":"never_route","detail":"nostr event class NeverRoute is not a worker conversation","class":"Some(NeverRoute)","project_id":"None","pubkeys":"[]","dispatch_id":"None"},"target":"tenex_daemon::nostr_subscription_gateway"}
+{"timestamp":"2026-04-26T21:07:01.687191Z","level":"DEBUG","fields":{"message":"worker runtime: no queued dispatches"},"target":"tenex_daemon::daemon_worker_runtime"}
+{"timestamp":"2026-04-26T21:07:01.687205Z","level":"DEBUG","fields":{"message":"worker-admission-driver: not admitted; waiting for signal","reason":"NoQueuedDispatches"},"target":"tenex_daemon::worker_admission_driver"}
+{"timestamp":"2026-04-26T21:07:01.780230Z","level":"DEBUG","fields":{"message":"nostr event received","relay_url":"ws://127.0.0.1:62873","event_id":"1cd0d68fc92cbdfe251ec3de03dfbe719139df1e96c7093a5d225fc2f42981e7","event_kind":14199,"event_pubkey":"fe4a8b1178d09a8896352da018b4251d12535fa4e5376c8bb681cd5e88af695e","class":"NeverRoute"},"target":"tenex_daemon::nostr_subscription_gateway"}
+{"timestamp":"2026-04-26T21:07:01.780243Z","level":"INFO","fields":{"message":"inbound nostr event ignored","relay_url":"ws://127.0.0.1:62873","event_id":"1cd0d68fc92cbdfe251ec3de03dfbe719139df1e96c7093a5d225fc2f42981e7","code":"never_route","detail":"nostr event class NeverRoute is not a worker conversation","class":"Some(NeverRoute)","project_id":"None","pubkeys":"[]","dispatch_id":"None"},"target":"tenex_daemon::nostr_subscription_gateway"}
+{"timestamp":"2026-04-26T21:07:01.974089Z","level":"DEBUG","fields":{"message":"nostr event received","relay_url":"ws://127.0.0.1:62873","event_id":"c92131781d5c23197db417e2b543082b6dd7631fdce69c404ea9ccab566eaaed","event_kind":24030,"event_pubkey":"fe4a8b1178d09a8896352da018b4251d12535fa4e5376c8bb681cd5e88af695e","class":"Other"},"target":"tenex_daemon::nostr_subscription_gateway"}
+{"timestamp":"2026-04-26T21:07:01.974103Z","level":"INFO","fields":{"message":"inbound nostr event ignored","relay_url":"ws://127.0.0.1:62873","event_id":"c92131781d5c23197db417e2b543082b6dd7631fdce69c404ea9ccab566eaaed","code":"unsupported_nostr_event_class","detail":"nostr event class Other is not a worker conversation","class":"Some(Other)","project_id":"None","pubkeys":"[]","dispatch_id":"None"},"target":"tenex_daemon::nostr_subscription_gateway"}
+{"timestamp":"2026-04-26T21:07:02.164021Z","level":"DEBUG","fields":{"message":"nostr event received","relay_url":"ws://127.0.0.1:62873","event_id":"8163d42548ae5fa4ff65393bf36cbeea13b108f8ed1f60e62b8dd0f6d034bead","event_kind":24000,"event_pubkey":"fe4a8b1178d09a8896352da018b4251d12535fa4e5376c8bb681cd5e88af695e","class":"Boot"},"target":"tenex_daemon::nostr_subscription_gateway"}
+{"timestamp":"2026-04-26T21:07:02.164035Z","level":"INFO","fields":{"message":"inbound nostr event ignored","relay_url":"ws://127.0.0.1:62873","event_id":"8163d42548ae5fa4ff65393bf36cbeea13b108f8ed1f60e62b8dd0f6d034bead","code":"project_booted","detail":"project nak-interop-test-20260427000658-4098 boot state recorded in session state","class":"Some(Boot)","project_id":"Some(\"nak-interop-test-20260427000658-4098\")","pubkeys":"[]","dispatch_id":"None"},"target":"tenex_daemon::nostr_subscription_gateway"}
+{"timestamp":"2026-04-26T21:07:02.175683Z","level":"INFO","fields":{"message":"publish outbox draining event","event_id":"7648220a36e9d207ecd8622b459e413b8ce1d869eb7eb06254077515f4a9268c","event_kind":24010,"request_id":"project-status:nak-interop-test-20260427000658-4098:1777237622","project_id":"nak-interop-test-20260427000658-4098","conversation_id":"nak-interop-test-20260427000658-4098","agent_pubkey":"f6b5f2d103817f5dbd6402c6c5748bb794b1925071b68b23289435e0916577e4"},"target":"tenex_daemon::publish_outbox"}
+{"timestamp":"2026-04-26T21:07:02.175716Z","level":"INFO","fields":{"message":"publishing nostr event to relay","relay_url":"ws://127.0.0.1:62873","event_id":"7648220a36e9d207ecd8622b459e413b8ce1d869eb7eb06254077515f4a9268c","event_kind":24010},"target":"tenex_daemon::relay_publisher","span":{"event_id":"7648220a36e9d207ecd8622b459e413b8ce1d869eb7eb06254077515f4a9268c","event_kind":24010,"relay_url":"ws://127.0.0.1:62873","name":"nostr.publish"},"spans":[{"event_id":"7648220a36e9d207ecd8622b459e413b8ce1d869eb7eb06254077515f4a9268c","event_kind":24010,"relay_url":"ws://127.0.0.1:62873","name":"nostr.publish"}]}
+{"timestamp":"2026-04-26T21:07:02.176372Z","level":"INFO","fields":{"message":"nostr event published","relay_url":"ws://127.0.0.1:62873","event_id":"7648220a36e9d207ecd8622b459e413b8ce1d869eb7eb06254077515f4a9268c"},"target":"tenex_daemon::relay_publisher"}
+{"timestamp":"2026-04-26T21:07:02.176456Z","level":"DEBUG","fields":{"message":"nostr event received","relay_url":"ws://127.0.0.1:62873","event_id":"7648220a36e9d207ecd8622b459e413b8ce1d869eb7eb06254077515f4a9268c","event_kind":24010,"event_pubkey":"f6b5f2d103817f5dbd6402c6c5748bb794b1925071b68b23289435e0916577e4","class":"NeverRoute"},"target":"tenex_daemon::nostr_subscription_gateway"}
+{"timestamp":"2026-04-26T21:07:02.176462Z","level":"INFO","fields":{"message":"inbound nostr event ignored","relay_url":"ws://127.0.0.1:62873","event_id":"7648220a36e9d207ecd8622b459e413b8ce1d869eb7eb06254077515f4a9268c","code":"never_route","detail":"nostr event class NeverRoute is not a worker conversation","class":"Some(NeverRoute)","project_id":"None","pubkeys":"[]","dispatch_id":"None"},"target":"tenex_daemon::nostr_subscription_gateway"}
+{"timestamp":"2026-04-26T21:07:02.177382Z","level":"INFO","fields":{"message":"publish outbox event published","event_id":"7648220a36e9d207ecd8622b459e413b8ce1d869eb7eb06254077515f4a9268c","request_id":"project-status:nak-interop-test-20260427000658-4098:1777237622","relay_results":"Some([PublishRelayResult { relay_url: \"ws://127.0.0.1:62873\", accepted: true, message: Some(\"broadcasted to 1 listeners\") }])"},"target":"tenex_daemon::publish_outbox"}
+{"timestamp":"2026-04-26T21:07:02.197626Z","level":"INFO","fields":{"message":"project repository ready","project_d_tag":"nak-interop-test-20260427000658-4098","project_base_path":"/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-41-1777237618-53049/projects/nak-interop-test-20260427000658-4098","repo_url":"None","action":"GitInit"},"target":"tenex_daemon::project_repository_init"}
+{"timestamp":"2026-04-26T21:07:02.197641Z","level":"INFO","fields":{"message":"project repository initialised on boot","project_d_tag":"nak-interop-test-20260427000658-4098","action":"GitInit"},"target":"tenex_daemon::nostr_ingress"}
+[harness] FATAL: ASSERT: no scheduled-task dispatch enqueued within deadline (task_id=sched-task-e2e-41-53049)
+[harness] cleanup (script exit code=1)
+[harness] stopping daemon pid 54091 (SIGTERM)
+[harness] stopping relay pid 54052

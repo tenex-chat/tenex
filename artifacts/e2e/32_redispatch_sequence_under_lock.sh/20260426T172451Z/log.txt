@@ -1,0 +1,10 @@
+[scenario] test_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-32-1777224291-89091
+[scenario] spawning 4 inbound + 4 completion writers, 25 each
+[scenario] expected total records: 200
+[scenario] all writers complete — verifying invariants
+[scenario]   record count: 200 (expected 200)
+[scenario]   contiguous 1..200, unique, strictly increasing in file order
+[scenario]   completion writers: 100 total, 100 with stale-sequence-rewritten-under-lock
+
+[scenario] PASS — scenario 3.2: re-dispatch sequence computed under lock
+[harness] RESULT status=pass scenario=32_redispatch_sequence_under_lock.sh detail=ral journal resequenced correctly under concurrent inbound+completion writers

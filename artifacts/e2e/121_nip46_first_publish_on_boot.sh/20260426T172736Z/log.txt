@@ -1,0 +1,14 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-121-1777224456-5780
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-121-1777224456-5780
+[harness]   backend pubkey:  ada6f59d7d7d85a0fc48ccb07affff3d4c810e2aa8e4e15d13fbe2caa550506e
+[harness]   user pubkey:     f86d09982c1804f028e0417becc901360ae2f99b1fd14946b023bc15e215048c
+[harness]   agent1 pubkey:   683f811bb8960469803ad914be840a35324e3b361f0c3918113ec18fd108e816
+[harness]   agent2 pubkey:   0acbe6b77bb3bef80ac0cecaf9a78a148d4bc3a5ed5fd0a46f3a0be26aceab99
+[harness]   project a-tag:   31933:f86d09982c1804f028e0417becc901360ae2f99b1fd14946b023bc15e215048c:nak-interop-test-20260426202736-9950
+[harness] starting relay on 127.0.0.1:62674 (admins=1)

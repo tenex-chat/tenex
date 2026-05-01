@@ -1,0 +1,66 @@
+[scenario] fixture_root=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-1777228678-77231
+==> Locating source agents
+==> Creating fixture directories
+==> Generating keys with nak
+==> Writing backend and CLI config
+==> Writing generated agent identities
+==> Skipping relay publishing because TENEX_INTEROP_SKIP_PUBLISH=1
+[harness] fixture loaded from /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-1777228678-77231
+[harness]   backend pubkey:  c822af0006cecbb9828c19663f4ec53e2ba402ee024ea1e9d4e643fa4aa94f17
+[harness]   user pubkey:     213ea7015a7ed048f9a264a69c7841cb7052989cd29a39afd3c0b5bbb658d01e
+[harness]   agent1 pubkey:   4b7c26ab98a724a1321a759e8fac0c2be099d722a63fe78d0fff7b2211af153d
+[harness]   agent2 pubkey:   33a8ad1ee872267330b922ff68c51959eb6f56bd14b9c472602c3f93f08d9a0a
+[harness]   project a-tag:   31933:213ea7015a7ed048f9a264a69c7841cb7052989cd29a39afd3c0b5bbb658d01e:nak-interop-test-20260426213758-31426
+[scenario] rewriting llms.json to use mock fixture model 'mock/parallel-delegation-05'
+[scenario] mock LLM enabled: fixture=/Users/pablofernandez/Work/TENEX-ff3ssq/scripts/e2e/fixtures/mock-llm/05_parallel_delegation.json
+[scenario] pre-seeded project descriptor at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-1777228678-77231/backend/projects/nak-interop-test-20260426213758-31426/project.json
+[harness] starting relay on 127.0.0.1:55119 (admins=1)
+[harness] relay ready at ws://127.0.0.1:55119
+[harness] daemon config relays -> [ws://127.0.0.1:55119]
+[scenario] publishing 14199 (whitelist) as user
+connecting to ws://127.0.0.1:55119... ok.
+publishing to ws://127.0.0.1:55119... success.
+[scenario] publishing 31933 (project) as user
+connecting to ws://127.0.0.1:55119... ok.
+publishing to ws://127.0.0.1:55119... success.
+[harness] starting daemon (TENEX_BASE_DIR=/var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-1777228678-77231/backend)
+[harness] daemon ready (pid 77762, lock at /var/folders/bl/w2vvyf7n0sq2vrh10pg8bd4h0000gn/T//tenex-e2e-1777228678-77231/backend/daemon/tenex.lock)
+[harness] kind:14199 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] kind:24030 listener confirmed (probe #1 round-tripped after 200ms)
+[harness] daemon subscription confirmed live (all probed listener filters registered)
+[scenario] publishing 24000 (boot) as user
+connecting to ws://127.0.0.1:55119... ok.
+publishing to ws://127.0.0.1:55119... success.
+[scenario]   boot event id=522163cc41eadead058c48c8bfbc0de16c23e12f57ed7e36320c61afe69ee211
+[scenario] waiting for daemon to process boot and publish kind:24010...
+[scenario]   24010 status published for our project ✓
+[scenario] publishing kind:1 from user to agent1 (attempt 1)
+connecting to ws://127.0.0.1:55119... ok.
+publishing to ws://127.0.0.1:55119... success.
+[scenario]   user message id=653e2cbef071c78eb303bb7db14651d8c9cfc88e0c5727bc39db4ae84d77d24a
+[scenario]   dispatch enqueued ✓
+[scenario] === Phase A complete: daemon plumbing OK ===
+
+[scenario] === Phase B: asserting mock-driven parallel delegation ===
+[scenario]   observed: RAL journal has 64 completion/terminal records
+[scenario]   observed: agent1 published kind:1 events
+[scenario]   observed: agent2 published alpha response
+[scenario]   observed: 2 agent1 tool_use(delegate) kind:1 event(s) on relay
+[scenario]   observed: both tool_use(delegate) kind:1 events present
+[scenario]   q-tag assertion: both tool_use events carry distinct delegation event IDs ✓
+[scenario]   observed: agent1 published its final kind:1 with summary
+[scenario]   observed: agent2 published beta response
+
+[scenario] === Phase B observations ===
+[scenario]   agent1 published kind:1                     : yes
+[scenario]   agent2 published alpha response              : yes
+[scenario]   agent2 published beta response               : yes
+[scenario]   agent1 >=1 tool_use(delegate) event          : yes
+[scenario]   agent1 >=2 tool_use(delegate) events         : yes
+[scenario]   agent1 final kind:1 (post-delegation)        : yes
+[scenario]   RAL journal >=2 completion records           : yes
+
+[scenario] PASS — scenario 05 parallel delegation q-tags (elapsed=23s)
+[harness] cleanup (script exit code=0)
+[harness] stopping daemon pid 77762 (SIGTERM)
+[harness] stopping relay pid 77729
