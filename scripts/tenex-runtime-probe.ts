@@ -207,15 +207,22 @@ const nip46Config =
         : undefined;
 
 writeJson(path.join(projectDir, "event.json"), projectEvent);
+const includeBackendInWhitelist = scenarioName !== "backend-kind1-routing";
+const whitelistedPubkeys = isCrossProjectScenario
+    ? [
+          user.pubkey,
+          owner.pubkey,
+          ...(includeBackendInWhitelist ? [backend.pubkey] : []),
+          pm.pubkey,
+      ]
+    : [user.pubkey, owner.pubkey, ...(includeBackendInWhitelist ? [backend.pubkey] : [])];
 writeJson(path.join(baseDir, "config.json"), {
     // For cross-project delegation, project B receives kind:1 events authored
     // by project A's agents. Project B's runtime would otherwise classify
     // those as external authors and refuse to dispatch (routeUnauthorizedAuthors
     // defaults to false). Whitelisting the source project's PM mirrors a real
     // deployment where the operator opts every cross-project author in.
-    whitelistedPubkeys: isCrossProjectScenario
-        ? [user.pubkey, owner.pubkey, backend.pubkey, pm.pubkey]
-        : [user.pubkey, owner.pubkey, backend.pubkey],
+    whitelistedPubkeys,
     tenexPrivateKey: bytesToHex(backend.secret),
     projectsBase: projectsBaseDir,
     relays: [relayUrl],
@@ -441,9 +448,11 @@ try {
         conversationDbPath: convDbPath,
         pmPubkey: pm.pubkey,
         workerPubkey: isCrossProjectScenario && projectBWorker ? projectBWorker.pubkey : worker.pubkey,
+        backendPubkey: backend.pubkey,
         ownerPubkey: owner.pubkey,
         ownerSecret: owner.secret,
         userSecret: user.secret,
+        backendSecret: backend.secret,
         requestRecordPath,
         sign,
         now,
@@ -512,6 +521,7 @@ const verdicts = evaluate(scenarioName, mergedEvents, requestRecords, {
     mcpProbeRecords,
     workspaceDir,
     ownerPubkey: owner.pubkey,
+    backendPubkey: backend.pubkey,
     agentHomeDir: path.join(baseDir, "agents", pm.pubkey, "home"),
 });
 if (scenarioError) {

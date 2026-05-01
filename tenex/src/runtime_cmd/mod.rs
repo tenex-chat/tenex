@@ -64,11 +64,15 @@ struct RuntimeShared {
     /// Human-readable project title (falls back to d-tag) — handed to
     /// the firewall LLM as part of its judgement context.
     project_title: String,
+    /// Human users from config. Kept separate from trusted system authors
+    /// because these pubkeys are also used for user-visible status tags and
+    /// shell-intervention policy.
     whitelisted_pubkeys: Vec<String>,
-    /// When true, kind:1 events from authors outside `whitelisted_pubkeys`
-    /// are eligible for firewall + dispatch. When false, they are still
-    /// persisted to the conversation store for context but never trigger
-    /// an agent run.
+    trusted_author_pubkeys: HashSet<String>,
+    /// When true, kind:1 events from authors outside trusted runtime authors
+    /// and project agents are eligible for firewall + dispatch. When false,
+    /// they are still persisted to the conversation store for context but
+    /// never trigger an agent run.
     route_unauthorized_authors: bool,
     project_id: String,
     project_dir: PathBuf,
@@ -154,7 +158,7 @@ struct DispatchJob {
     allow_driver_preempt: bool,
     completion_recipient_pubkey: Option<String>,
     /// True when the triggering event was authored by a pubkey outside
-    /// `whitelistedPubkeys` and only routed because
+    /// trusted runtime authors and project agents, and only routed because
     /// `routeUnauthorizedAuthors` is enabled and the firewall passed.
     /// Surfaces to the agent process as `TENEX_TRIGGER_IS_EXTERNAL=1`,
     /// which the agent uses to inject a disclosure into the user message.
@@ -348,18 +352,20 @@ pub async fn run(args: RuntimeArgs) -> Result<()> {
     std::fs::create_dir_all(&lock_dir)?;
     let _lock = RuntimeLockfile::acquire(&lock_dir)?;
 
-    let authors: Vec<PublicKey> = cfg
+    let user_authors: Vec<PublicKey> = cfg
         .whitelisted_pubkeys
         .iter()
         .filter_map(|pk| PublicKey::from_hex(pk).ok())
         .collect();
 
-    if authors.is_empty() {
+    if user_authors.is_empty() {
         anyhow::bail!("no valid whitelisted pubkeys in config");
     }
 
     let backend_keys =
         backend_signer::ensure_backend_keys(&base_dir).context("loading runtime relay signer")?;
+    let trusted_authors = trusted_runtime_authors(&user_authors, backend_keys.public_key());
+    let trusted_author_pubkeys = pubkey_hex_set(&trusted_authors);
     let client = Client::new(backend_keys.clone());
     for relay in &cfg.relays {
         if let Err(e) = client.add_relay(relay.as_str()).await {
@@ -383,7 +389,8 @@ pub async fn run(args: RuntimeArgs) -> Result<()> {
         &client,
         &subscription_ids,
         build_runtime_filters(
-            &authors,
+            &user_authors,
+            &trusted_authors,
             &project_addr,
             owner_key,
             &meta.d_tag,
@@ -481,6 +488,7 @@ pub async fn run(args: RuntimeArgs) -> Result<()> {
         project_addr: project_addr.clone(),
         project_title,
         whitelisted_pubkeys: cfg.whitelisted_pubkeys.clone(),
+        trusted_author_pubkeys,
         route_unauthorized_authors: cfg.route_unauthorized_authors,
         project_id: meta.d_tag.clone(),
         project_dir: project_dir.clone(),
@@ -522,7 +530,8 @@ pub async fn run(args: RuntimeArgs) -> Result<()> {
     let mut notifications = client.notifications();
     let reload_context = RuntimeReloadContext {
         subscription_ids: &subscription_ids,
-        authors: &authors,
+        user_authors: &user_authors,
+        trusted_authors: &trusted_authors,
         project_addr: &project_addr,
         owner: owner_key,
         project_dtag: &meta.d_tag,
@@ -594,7 +603,7 @@ pub async fn run(args: RuntimeArgs) -> Result<()> {
                         let short = &event.id.to_hex()[..8];
                         info!(event_id = short, "received event");
 
-                        // Author classification. Whitelisted authors and
+                        // Author classification. Trusted system authors and
                         // project agents take the existing dispatch path.
                         // Anything else is "external": the project filter
                         // dropped its `authors` gate so these reach us via
@@ -603,10 +612,10 @@ pub async fn run(args: RuntimeArgs) -> Result<()> {
                         // whitelisted-user replies, then either drop them
                         // (config off) or run them through the firewall.
                         let author_hex = event.pubkey.to_hex();
-                        let author_whitelisted =
-                            shared.whitelisted_pubkeys.contains(&author_hex);
+                        let author_trusted =
+                            shared.trusted_author_pubkeys.contains(&author_hex);
                         let author_is_agent = agent_pubkeys.contains(&author_hex);
-                        let is_external = !author_whitelisted && !author_is_agent;
+                        let is_external = !author_trusted && !author_is_agent;
 
                         if is_external {
                             if !tenex_protocol::event_filter::is_conversation_event(&event) {
@@ -728,7 +737,8 @@ fn resolve_project_working_dir(base_dir: &Path, project_dtag: &str) -> Result<Pa
 }
 
 fn build_runtime_filters(
-    authors: &[PublicKey],
+    user_authors: &[PublicKey],
+    trusted_authors: &[PublicKey],
     project_addr: &str,
     owner: PublicKey,
     project_dtag: &str,
@@ -740,14 +750,14 @@ fn build_runtime_filters(
         .iter()
         .filter_map(|a| PublicKey::from_hex(&a.pubkey).ok())
         .collect();
-    let mut p_authors = authors.to_vec();
+    let mut p_authors = trusted_authors.to_vec();
     p_authors.extend(agent_keys.iter().copied());
 
     RuntimeFilters {
         // External-author intake: `#a=project_addr` is the affiliation
         // assertion. Anyone — whitelisted or not — claiming this project
-        // address lands here. The whitelist gate moves to dispatch:
-        // non-whitelisted authors are persisted, and only routed if
+        // address lands here. The trust gate moves to dispatch:
+        // untrusted authors are persisted, and only routed if
         // `routeUnauthorizedAuthors` is enabled and the firewall passes.
         project: Filter::new()
             .kind(Kind::TextNote)
@@ -764,16 +774,31 @@ fn build_runtime_filters(
             .since(since),
         stop: Filter::new()
             .kind(Kind::Custom(tenex_protocol::nostr::kinds::STOP_COMMAND))
-            .authors(authors.to_vec())
+            .authors(user_authors.to_vec())
             .pubkeys(agent_keys.clone())
             .since(since),
         config_update: Filter::new()
             .kind(Kind::Custom(
                 tenex_protocol::nostr::kinds::AGENT_CONFIG_UPDATE,
             ))
-            .authors(authors.to_vec())
+            .authors(user_authors.to_vec())
             .since(since),
     }
+}
+
+fn trusted_runtime_authors(
+    user_authors: &[PublicKey],
+    backend_pubkey: PublicKey,
+) -> Vec<PublicKey> {
+    let mut authors = user_authors.to_vec();
+    if !authors.contains(&backend_pubkey) {
+        authors.push(backend_pubkey);
+    }
+    authors
+}
+
+fn pubkey_hex_set(pubkeys: &[PublicKey]) -> HashSet<String> {
+    pubkeys.iter().map(PublicKey::to_hex).collect()
 }
 
 async fn subscribe_runtime_filters(
@@ -822,7 +847,8 @@ fn agent_config_event_is_relevant(event: &NotifyEvent) -> bool {
 
 struct RuntimeReloadContext<'a> {
     subscription_ids: &'a RuntimeSubscriptionIds,
-    authors: &'a [PublicKey],
+    user_authors: &'a [PublicKey],
+    trusted_authors: &'a [PublicKey],
     project_addr: &'a str,
     owner: PublicKey,
     project_dtag: &'a str,
@@ -846,7 +872,8 @@ async fn reload_agent_snapshot(
         &shared.client,
         ctx.subscription_ids,
         build_runtime_filters(
-            ctx.authors,
+            ctx.user_authors,
+            ctx.trusted_authors,
             ctx.project_addr,
             ctx.owner,
             ctx.project_dtag,
@@ -951,7 +978,8 @@ async fn reload_project_membership_snapshot(
         &shared.client,
         ctx.subscription_ids,
         build_runtime_filters(
-            ctx.authors,
+            ctx.user_authors,
+            ctx.trusted_authors,
             ctx.project_addr,
             ctx.owner,
             ctx.project_dtag,
@@ -2490,6 +2518,56 @@ mod tests {
             telegram_config_json: None,
             mcp_servers_json: None,
         }
+    }
+
+    #[test]
+    fn runtime_filters_trust_backend_for_kind1_routing() {
+        let user_keys = Keys::generate();
+        let backend_keys = Keys::generate();
+        let agent_keys = Keys::generate();
+        let owner_keys = Keys::generate();
+        let agent_pubkey = agent_keys.public_key().to_hex();
+        let user_authors = vec![user_keys.public_key()];
+        let trusted_authors = trusted_runtime_authors(&user_authors, backend_keys.public_key());
+        let snapshot = RuntimeAgentSnapshot {
+            agents: vec![agent(&agent_pubkey)],
+            project_agents: vec![ProjectAgent {
+                agent_pubkey: agent_pubkey.clone(),
+                is_pm: true,
+            }],
+            agent_pubkeys: HashSet::from([agent_pubkey]),
+        };
+
+        let filters = build_runtime_filters(
+            &user_authors,
+            &trusted_authors,
+            "31933:owner:project",
+            owner_keys.public_key(),
+            "project",
+            Timestamp::now(),
+            &snapshot,
+        );
+
+        let directed_authors = filters.directed.authors.as_ref().unwrap();
+        assert!(directed_authors.contains(&user_keys.public_key()));
+        assert!(directed_authors.contains(&backend_keys.public_key()));
+        assert!(directed_authors.contains(&agent_keys.public_key()));
+
+        let stop_authors = filters.stop.authors.as_ref().unwrap();
+        assert!(stop_authors.contains(&user_keys.public_key()));
+        assert!(!stop_authors.contains(&backend_keys.public_key()));
+    }
+
+    #[test]
+    fn trusted_author_pubkeys_include_backend_pubkey() {
+        let user_keys = Keys::generate();
+        let backend_keys = Keys::generate();
+        let trusted_authors =
+            trusted_runtime_authors(&[user_keys.public_key()], backend_keys.public_key());
+        let trusted_hex = pubkey_hex_set(&trusted_authors);
+
+        assert!(trusted_hex.contains(&user_keys.public_key().to_hex()));
+        assert!(trusted_hex.contains(&backend_keys.public_key().to_hex()));
     }
 
     fn dispatch_job(agent_pubkey: &str, conv_id: &str, content: &str) -> DispatchJob {

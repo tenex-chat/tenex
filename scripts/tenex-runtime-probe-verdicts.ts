@@ -12,6 +12,8 @@ import {
     acpProbeModelName,
     agentConfigUpdateModelName,
     agentConfigUpdateSkills,
+    backendKind1RoutingCompletionText,
+    backendKind1RoutingRequest,
     convReminderCompletionText,
     convReminderProbeMessage,
     crossProjectDelegationUserRequest,
@@ -57,6 +59,7 @@ type Verdict = {
 type EvaluateContext = {
     pmPubkey: string;
     workerPubkey: string;
+    backendPubkey?: string;
     modelName: string;
     llmProvider: ProbeLlmProvider;
     conversationDbPath: string;
@@ -158,7 +161,55 @@ export function evaluate(
     if (name === "sign-as-user-nip46") {
         return [...commonVerdicts, ...evaluateSignAsUser(events, requestRecords, context)];
     }
+    if (name === "backend-kind1-routing") {
+        return [...commonVerdicts, ...evaluateBackendKind1Routing(events, requestRecords, context)];
+    }
     return [...commonVerdicts, ...evaluateFsReadAdjustment(events, requestRecords, context)];
+}
+
+function evaluateBackendKind1Routing(
+    events: Event[],
+    requestRecords: MockRequestRecord[],
+    context: EvaluateContext
+): Verdict[] {
+    const backendPubkey = context.backendPubkey ?? "";
+    const backendEvent = events.find(
+        (event) =>
+            event.kind === 1 &&
+            event.pubkey === backendPubkey &&
+            event.content === backendKind1RoutingRequest &&
+            hasTag(event, "p", context.pmPubkey)
+    );
+    const llmRequest = requestRecords.find(
+        (record) =>
+            record.agent === "pm" &&
+            record.requestDebug.includes(backendKind1RoutingRequest)
+    );
+    const completion = events.find(
+        (event) =>
+            event.kind === 1 &&
+            event.pubkey === context.pmPubkey &&
+            event.content.includes(backendKind1RoutingCompletionText) &&
+            hasTag(event, "status", "completed")
+    );
+
+    return [
+        {
+            name: "Backend published routed kind:1",
+            ok: Boolean(backendEvent),
+            detail: "Expected a backend-signed kind:1 p-tagged to the PM agent.",
+        },
+        {
+            name: "Runtime dispatched backend kind:1 to PM",
+            ok: Boolean(llmRequest),
+            detail: "Expected the PM mock LLM request to include the backend-authored message.",
+        },
+        {
+            name: "PM completed backend kind:1 turn",
+            ok: Boolean(completion),
+            detail: "Expected PM to publish the scripted completion for the backend-authored turn.",
+        },
+    ];
 }
 
 function evaluateSignAsUser(

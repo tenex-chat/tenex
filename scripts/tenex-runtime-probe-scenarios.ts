@@ -65,6 +65,7 @@ export const availableScenarios = [
     "rag-documents",
     "ask-owner",
     "sign-as-user-nip46",
+    "backend-kind1-routing",
 ] as const;
 
 export type ScenarioName = (typeof availableScenarios)[number];
@@ -118,6 +119,8 @@ export const signAsUserSignedContent = "SIGN_AS_USER_NIP46_PROBE_SIGNED_EVENT";
 export const signAsUserExplanation =
     "TENEX runtime probe verifying sign_as_user NIP-46 signing with throwaway keys.";
 export const signAsUserCompletionText = "sign_as_user probe complete";
+export const backendKind1RoutingRequest = "BACKEND_KIND1_ROUTING_PROBE";
+export const backendKind1RoutingCompletionText = "backend kind1 routed";
 
 const colorWords = [
     "red", "blue", "green", "yellow", "purple", "orange", "pink", "black",
@@ -153,9 +156,11 @@ export type ScenarioContext = {
     conversationDbPath: string;
     pmPubkey: string;
     workerPubkey: string;
+    backendPubkey: string;
     ownerPubkey: string;
     ownerSecret: Uint8Array;
     userSecret: Uint8Array;
+    backendSecret: Uint8Array;
     requestRecordPath: string;
     sign: (template: EventTemplate, secret: Uint8Array) => Event;
     now: () => number;
@@ -241,6 +246,9 @@ export function scenarioProjectDtag(name: ScenarioName): string {
     if (name === "sign-as-user-nip46") {
         return "probe-sign-as-user-nip46";
     }
+    if (name === "backend-kind1-routing") {
+        return "probe-backend-kind1-routing";
+    }
     return "probe-fs-read-adjustment";
 }
 
@@ -304,6 +312,9 @@ export function pmInstructions(name: ScenarioName): string {
     }
     if (name === "sign-as-user-nip46") {
         return "This scenario verifies sign_as_user over NIP-46. Do not call todo_write. On the first turn, call sign_as_user exactly once with the requested unsigned event. After the tool returns, do not call tools again; reply exactly: sign_as_user probe complete.";
+    }
+    if (name === "backend-kind1-routing") {
+        return "This scenario verifies backend-signed relay routing. Do not call tools. Reply exactly: backend kind1 routed.";
     }
     return "Use fs_read one file at a time. If the user corrects the requested total, follow the latest total before finishing.";
 }
@@ -656,6 +667,20 @@ export function mockScenario(name: ScenarioName): unknown {
         };
     }
 
+    if (name === "backend-kind1-routing") {
+        return {
+            responses: [
+                {
+                    agent: "pm",
+                    turn: 1,
+                    contains: backendKind1RoutingRequest,
+                    content: backendKind1RoutingCompletionText,
+                },
+            ],
+            defaultContent: "Backend kind:1 routing probe did not match expected runtime state.",
+        };
+    }
+
     const mockDelayMs = Number(process.env.TENEX_PROBE_MOCK_DELAY_MS ?? 750);
     return {
         defaultDelayMs: mockDelayMs,
@@ -725,9 +750,50 @@ export async function runScenario(name: ScenarioName, context: ScenarioContext):
         await runAskProbe(context);
     } else if (name === "sign-as-user-nip46") {
         await runSignAsUserProbe(context);
+    } else if (name === "backend-kind1-routing") {
+        await runBackendKind1RoutingProbe(context);
     } else {
         await runFsReadAdjustmentProbe(context);
     }
+}
+
+async function runBackendKind1RoutingProbe(context: ScenarioContext): Promise<void> {
+    const backendEvent = context.sign(
+        {
+            kind: 1,
+            created_at: context.now(),
+            content: backendKind1RoutingRequest,
+            tags: [
+                ["a", context.projectRef],
+                ["p", context.pmPubkey],
+                ["backend-kind1-routing", "1"],
+            ],
+        },
+        context.backendSecret
+    );
+    await Promise.all(context.pool.publish([context.relayUrl], backendEvent));
+    const timeoutMs = Number(process.env.TENEX_PROBE_WAIT_MS ?? 15_000);
+    await context.waitForRequestRecord(
+        context.requestRecordPath,
+        (records) =>
+            records.some(
+                (record) =>
+                    record.agent === "pm" &&
+                    record.requestDebug.includes(backendKind1RoutingRequest)
+            ),
+        timeoutMs,
+        "PM mock LLM request for backend-authored kind:1"
+    );
+    await context.waitForObservedEvent(
+        context.events,
+        (event) =>
+            event.kind === 1 &&
+            event.pubkey === context.pmPubkey &&
+            event.content.includes(backendKind1RoutingCompletionText) &&
+            event.tags.some((tag) => tag[0] === "status" && tag[1] === "completed"),
+        timeoutMs,
+        "PM completion for backend-authored kind:1"
+    );
 }
 
 async function runSignAsUserProbe(context: ScenarioContext): Promise<void> {

@@ -3,11 +3,12 @@
 //! Two filters:
 //!   - Discovery: kind 31933 from whitelisted authors (no `since` — relay
 //!     returns latest replaceable per d-tag).
-//!   - Boot triggers: kind 1 + 24000 from whitelisted authors that #a-tag
-//!     a known project. Resubscribed every time a new project is discovered.
+//!   - Boot triggers: kind 1 + 24000 from whitelisted authors or this
+//!     backend's own pubkey that #a-tag a known project. Resubscribed every
+//!     time a new project is discovered.
 //!
-//! Whitelist enforcement is relay-side via `authors`. Author-untrusted boot
-//! events never reach this process.
+//! Trust enforcement is relay-side via `authors`. Author-untrusted boot events
+//! never reach this process.
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -41,7 +42,7 @@ struct RuntimeCtx<'a> {
     known: Arc<Mutex<HashSet<String>>>,
     boot_sub: Arc<Mutex<Option<SubscriptionId>>>,
     pending_boots: &'a Mutex<PendingBoots>,
-    authors: &'a [PublicKey],
+    boot_authors: &'a [PublicKey],
     startup_ts: Timestamp,
     debounce_handle: Arc<Mutex<Option<JoinHandle<()>>>>,
 }
@@ -52,7 +53,7 @@ pub async fn run(
     supervisor: Supervisor,
     pending_boot_prefixes: Vec<String>,
 ) -> Result<JoinHandle<()>> {
-    let authors: Vec<PublicKey> = cfg
+    let discovery_authors: Vec<PublicKey> = cfg
         .whitelisted_pubkeys
         .iter()
         .filter_map(|pk| match PublicKey::from_hex(pk) {
@@ -64,9 +65,12 @@ pub async fn run(
         })
         .collect();
 
-    if authors.is_empty() {
+    if discovery_authors.is_empty() {
         return Err(anyhow!("no valid whitelisted pubkeys"));
     }
+
+    let mut boot_authors = discovery_authors.clone();
+    push_unique_pubkey(&mut boot_authors, backend_keys.public_key());
 
     let client = Client::new(backend_keys);
     for relay in &cfg.relays {
@@ -79,7 +83,7 @@ pub async fn run(
 
     let discovery_filter = Filter::new()
         .kind(Kind::Custom(PROJECT_KIND))
-        .authors(authors.clone());
+        .authors(discovery_authors.clone());
     let discovery_id = SubscriptionId::generate();
     client
         .subscribe_with_id(discovery_id, discovery_filter, None)
@@ -119,7 +123,7 @@ pub async fn run(
                     known: Arc::clone(&known),
                     boot_sub: Arc::clone(&boot_sub),
                     pending_boots: &pending_boots,
-                    authors: &authors,
+                    boot_authors: &boot_authors,
                     startup_ts,
                     debounce_handle: Arc::clone(&debounce_handle),
                 };
@@ -175,7 +179,7 @@ async fn handle_project(ctx: &RuntimeCtx<'_>, event: &Event) {
         let client = ctx.client.clone();
         let boot_sub = Arc::clone(&ctx.boot_sub);
         let known = Arc::clone(&ctx.known);
-        let authors: Vec<PublicKey> = ctx.authors.to_vec();
+        let boot_authors: Vec<PublicKey> = ctx.boot_authors.to_vec();
         let startup_ts = ctx.startup_ts;
         *dh = Some(tokio::spawn(async move {
             tokio::time::sleep(Duration::from_millis(200)).await;
@@ -184,7 +188,8 @@ async fn handle_project(ctx: &RuntimeCtx<'_>, event: &Event) {
                 k.iter().cloned().collect()
             };
             if let Err(e) =
-                update_boot_subscription(&client, &boot_sub, &authors, startup_ts, &addresses).await
+                update_boot_subscription(&client, &boot_sub, &boot_authors, startup_ts, &addresses)
+                    .await
             {
                 warn!(error = %e, "failed to update boot trigger subscription");
             }
@@ -315,4 +320,26 @@ fn a_tag_values(event: &Event) -> Vec<String> {
         }
     }
     out
+}
+
+fn push_unique_pubkey(pubkeys: &mut Vec<PublicKey>, pubkey: PublicKey) {
+    if !pubkeys.contains(&pubkey) {
+        pubkeys.push(pubkey);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn push_unique_pubkey_dedupes_backend_author() {
+        let keys = Keys::generate();
+        let pubkey = keys.public_key();
+        let mut authors = vec![pubkey];
+
+        push_unique_pubkey(&mut authors, pubkey);
+
+        assert_eq!(authors, vec![pubkey]);
+    }
 }
