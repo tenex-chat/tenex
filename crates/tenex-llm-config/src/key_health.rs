@@ -9,8 +9,9 @@
 //! empty vec and the caller receives an `all_keys_exhausted` error.
 
 use std::collections::HashMap;
-use std::sync::Mutex;
 use std::time::{Duration, Instant};
+
+use parking_lot::Mutex;
 
 const COOLDOWN: Duration = Duration::from_secs(5 * 60);
 
@@ -30,7 +31,7 @@ impl KeyHealthTracker {
     /// Mark key at position `key_index` for `provider` as failed.
     /// It will be excluded for [`COOLDOWN`].
     pub fn mark_failed(&self, provider: &str, key_index: usize) {
-        let mut map = self.failures.lock().unwrap();
+        let mut map = self.failures.lock();
         map.insert((provider.to_string(), key_index), Instant::now());
     }
 
@@ -38,7 +39,7 @@ impl KeyHealthTracker {
     /// currently in cooldown.  `count` is the total number of keys for the
     /// provider.
     pub fn healthy_indices(&self, provider: &str, count: usize) -> Vec<usize> {
-        let map = self.failures.lock().unwrap();
+        let map = self.failures.lock();
         let now = Instant::now();
         (0..count)
             .filter(|i| match map.get(&(provider.to_string(), *i)) {

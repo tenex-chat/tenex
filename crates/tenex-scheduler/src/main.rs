@@ -160,11 +160,11 @@ fn list_tasks(project: Option<String>) -> Result<()> {
     println!("{}", "─".repeat(80));
     for (d_tag, task) in tasks {
         let title = task.title.as_deref().unwrap_or("—");
+        // Storage validation guarantees `execute_at` is Some for one-off tasks.
         let schedule = if task.is_oneoff() {
             task.execute_at
-                .as_deref()
-                .unwrap_or(&task.schedule)
-                .to_string()
+                .clone()
+                .expect("storage guarantees executeAt for one-off tasks")
         } else {
             task.schedule.clone()
         };

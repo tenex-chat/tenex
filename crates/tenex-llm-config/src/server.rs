@@ -21,7 +21,7 @@ use tokio::sync::RwLock;
 use tracing::{debug, error, info, warn};
 
 use crate::key_health::KeyHealthTracker;
-use crate::protocol::{AckResponse, Request};
+use crate::protocol::Request;
 use crate::resolver::{load_llms, load_providers, resolve_config, LlmDocs, ProviderDocs};
 
 const SOCKET_NAME: &str = "llm-config.sock";
@@ -165,8 +165,7 @@ impl Server {
                 key_index,
             } => {
                 self.key_health.mark_failed(&provider, key_index);
-                serde_json::to_value(AckResponse { ok: true })
-                    .expect("serialization of AckResponse")
+                serde_json::json!({ "ok": true })
             }
         }
     }

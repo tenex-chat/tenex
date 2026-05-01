@@ -1,9 +1,33 @@
 use std::fs;
 
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
+use chrono::DateTime;
 
 use crate::model::ScheduledTask;
 use crate::paths;
+
+/// Enforce schema invariants that aren't expressible at the type level.
+///
+/// A one-off task must carry an `executeAt` field that parses as RFC3339.
+/// Cron tasks have no such constraint here (the cron expression is parsed
+/// when the timer arms).
+fn validate_task(task: &ScheduledTask) -> Result<()> {
+    if task.is_oneoff() {
+        let execute_at = task.execute_at.as_deref().ok_or_else(|| {
+            anyhow!(
+                "one-off task '{}' is missing required 'executeAt' field",
+                task.id
+            )
+        })?;
+        DateTime::parse_from_rfc3339(execute_at).with_context(|| {
+            format!(
+                "one-off task '{}' has invalid RFC3339 'executeAt': {execute_at}",
+                task.id
+            )
+        })?;
+    }
+    Ok(())
+}
 
 /// Discover all project dTags that have a schedules.json.
 pub fn list_project_dtags() -> Result<Vec<String>> {
@@ -30,17 +54,32 @@ pub fn list_project_dtags() -> Result<Vec<String>> {
 }
 
 /// Load tasks from a project's schedules.json. Returns empty vec if absent.
+///
+/// Every task is validated against schema invariants (see [`validate_task`]).
+/// A malformed entry fails the entire load so callers never observe a
+/// partially valid set.
 pub fn load_tasks(d_tag: &str) -> Result<Vec<ScheduledTask>> {
     let path = paths::project_schedules_file(d_tag);
     if !path.exists() {
         return Ok(Vec::new());
     }
     let bytes = fs::read(&path).with_context(|| format!("read {}", path.display()))?;
-    serde_json::from_slice(&bytes).with_context(|| format!("parse {}", path.display()))
+    let tasks: Vec<ScheduledTask> =
+        serde_json::from_slice(&bytes).with_context(|| format!("parse {}", path.display()))?;
+    for task in &tasks {
+        validate_task(task).with_context(|| format!("validate {}", path.display()))?;
+    }
+    Ok(tasks)
 }
 
 /// Save tasks to a project's schedules.json atomically (write-temp-then-rename).
+///
+/// Every task is validated against schema invariants (see [`validate_task`])
+/// before any bytes touch disk.
 pub fn save_tasks(d_tag: &str, tasks: &[ScheduledTask]) -> Result<()> {
+    for task in tasks {
+        validate_task(task)?;
+    }
     let path = paths::project_schedules_file(d_tag);
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
@@ -116,4 +155,87 @@ pub fn tasks_for_agent(agent_pubkey: &str) -> Result<Vec<ScheduledTask>> {
         }
     }
     Ok(result)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::TaskType;
+
+    fn oneoff_task(execute_at: Option<&str>) -> ScheduledTask {
+        ScheduledTask {
+            id: "task-1".to_string(),
+            title: None,
+            schedule: "2026-04-29T09:00:00Z".to_string(),
+            prompt: "p".to_string(),
+            last_run: None,
+            next_run: None,
+            created_at: None,
+            from_pubkey: None,
+            target_agent_slug: "agent".to_string(),
+            project_id: "project".to_string(),
+            project_ref: None,
+            task_type: Some(TaskType::Oneoff),
+            execute_at: execute_at.map(str::to_string),
+            target_channel: None,
+        }
+    }
+
+    #[test]
+    fn validate_rejects_oneoff_without_execute_at() {
+        let err = validate_task(&oneoff_task(None)).unwrap_err();
+        assert!(
+            err.to_string().contains("missing required 'executeAt'"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn validate_rejects_oneoff_with_unparseable_execute_at() {
+        let err = validate_task(&oneoff_task(Some("not a timestamp"))).unwrap_err();
+        assert!(
+            err.to_string().contains("invalid RFC3339 'executeAt'"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn validate_accepts_oneoff_with_valid_execute_at() {
+        validate_task(&oneoff_task(Some("2026-04-29T09:00:00Z"))).unwrap();
+    }
+
+    #[test]
+    fn validate_accepts_cron_without_execute_at() {
+        let mut task = oneoff_task(None);
+        task.task_type = Some(TaskType::Cron);
+        task.schedule = "0 9 * * *".to_string();
+        validate_task(&task).unwrap();
+    }
+
+    #[test]
+    fn load_tasks_rejects_oneoff_fixture_missing_execute_at() {
+        // Mirrors the body of `load_tasks` against an in-memory fixture.
+        // We avoid going through the disk path because tests can't safely
+        // write to the user's `~/.tenex` directory.
+        let fixture = r#"[
+            {
+                "id": "task-1",
+                "schedule": "2026-04-29T09:00:00Z",
+                "prompt": "p",
+                "targetAgentSlug": "agent",
+                "projectId": "project",
+                "type": "oneoff"
+            }
+        ]"#;
+
+        let tasks: Vec<ScheduledTask> = serde_json::from_str(fixture).unwrap();
+        let err = tasks
+            .iter()
+            .try_for_each(validate_task)
+            .expect_err("validation must reject oneoff without executeAt");
+        assert!(
+            err.to_string().contains("missing required 'executeAt'"),
+            "unexpected error: {err}"
+        );
+    }
 }

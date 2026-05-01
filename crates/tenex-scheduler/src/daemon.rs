@@ -11,7 +11,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use notify::{
     Config as NotifyConfig, Event as NotifyEvent, RecommendedWatcher, RecursiveMode, Watcher,
 };
@@ -280,7 +280,12 @@ async fn run_cron_loop(
     };
 
     loop {
-        let next = match cron.find_next_occurrence(&Utc::now(), false) {
+        // Sample the clock once per iteration and reuse it for both the next
+        // occurrence lookup and the delay computation. Two `Utc::now()` reads
+        // can straddle the boundary, making the delay computation see a
+        // negative duration and skip a genuinely-due firing.
+        let now = Utc::now();
+        let next = match cron.find_next_occurrence(&now, false) {
             Ok(t) => t,
             Err(e) => {
                 error!(task_id = %task.id, error = %e, "cron next occurrence failed");
@@ -288,7 +293,21 @@ async fn run_cron_loop(
             }
         };
 
-        let delay = (next - Utc::now()).to_std().unwrap_or(Duration::ZERO);
+        let delay = match cron_delay_until(next, now) {
+            Ok(d) => d,
+            Err(elapsed) => {
+                // The runtime stalled between picking `next` and computing the
+                // delay (e.g. system suspend, GC pause). Skip this occurrence
+                // and let the next loop iteration find the following one.
+                warn!(
+                    task_id = %task.id,
+                    target = %next.to_rfc3339(),
+                    elapsed_secs = elapsed.as_secs(),
+                    "cron next occurrence already in the past; advancing to next",
+                );
+                continue;
+            }
+        };
 
         tokio::select! {
             _ = tokio::time::sleep(delay) => {}
@@ -344,10 +363,19 @@ async fn run_oneoff_loop(
         if execute_at <= now {
             break;
         }
-        let delay = (execute_at - now)
-            .to_std()
-            .unwrap_or(Duration::ZERO)
-            .min(Duration::from_secs(ONEOFF_RECHECK_SECS));
+        // The guard above ensures `execute_at > now`, so the difference is
+        // strictly positive and `to_std` cannot fail.
+        let remaining = match (execute_at - now).to_std() {
+            Ok(d) => d,
+            Err(_) => {
+                error!(
+                    task_id = %task.id,
+                    "one-off remaining duration went negative after positive guard",
+                );
+                return;
+            }
+        };
+        let delay = remaining.min(Duration::from_secs(ONEOFF_RECHECK_SECS));
 
         tokio::select! {
             _ = tokio::time::sleep(delay) => {}
@@ -401,6 +429,15 @@ fn oneoff_catchup_deadline(task: &ScheduledTask) -> Option<chrono::DateTime<Utc>
     Some(t)
 }
 
+/// Compute how long to sleep until `next`. Returns `Err(elapsed)` if `next`
+/// is already in the past (clock skew, runtime stall, suspend), letting the
+/// caller skip the occurrence and recompute against the next one.
+fn cron_delay_until(next: DateTime<Utc>, now: DateTime<Utc>) -> Result<Duration, Duration> {
+    let diff = next - now;
+    diff.to_std()
+        .map_err(|_| (now - next).to_std().unwrap_or(Duration::ZERO))
+}
+
 fn project_dtags_from_schedule_paths(projects_dir: &Path, paths: &[PathBuf]) -> BTreeSet<String> {
     paths
         .iter()
@@ -425,10 +462,46 @@ fn project_dtag_from_schedule_path_with_projects_dir(
 #[cfg(test)]
 mod tests {
     use std::path::{Path, PathBuf};
+    use std::time::Duration;
+
+    use chrono::{TimeZone, Utc};
 
     use super::{
-        project_dtag_from_schedule_path_with_projects_dir, project_dtags_from_schedule_paths,
+        cron_delay_until, project_dtag_from_schedule_path_with_projects_dir,
+        project_dtags_from_schedule_paths,
     };
+
+    #[test]
+    fn cron_delay_until_future_returns_positive_duration() {
+        let now = Utc.with_ymd_and_hms(2026, 4, 29, 9, 0, 0).unwrap();
+        let next = Utc.with_ymd_and_hms(2026, 4, 29, 9, 0, 30).unwrap();
+
+        assert_eq!(cron_delay_until(next, now), Ok(Duration::from_secs(30)));
+    }
+
+    #[test]
+    fn cron_delay_until_exact_boundary_returns_zero_duration() {
+        // When the daemon samples the clock once and passes that exact
+        // instant as both `now` and the input to `find_next_occurrence`, a
+        // schedule whose next firing is the current instant must yield a
+        // zero (non-negative) delay so the firing actually runs. If the
+        // delay computation drifted into the negative branch here, the
+        // daemon would skip a due firing.
+        let instant = Utc.with_ymd_and_hms(2026, 4, 29, 9, 0, 0).unwrap();
+
+        assert_eq!(cron_delay_until(instant, instant), Ok(Duration::ZERO));
+    }
+
+    #[test]
+    fn cron_delay_until_past_returns_elapsed_so_caller_can_advance() {
+        let now = Utc.with_ymd_and_hms(2026, 4, 29, 9, 0, 30).unwrap();
+        let next = Utc.with_ymd_and_hms(2026, 4, 29, 9, 0, 0).unwrap();
+
+        // Negative-duration case must surface as Err, not silently coerce to
+        // ZERO. The caller's contract is to skip this occurrence and find the
+        // next one rather than fire immediately.
+        assert_eq!(cron_delay_until(next, now), Err(Duration::from_secs(30)));
+    }
 
     #[test]
     fn schedule_path_maps_to_project_dtag() {
