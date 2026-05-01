@@ -1389,10 +1389,7 @@ fn select_dispatch_target(
         anyhow::bail!("event project a-tag does not match this runtime");
     }
 
-    if has_p_tags(event)
-        && !targets_project_agent(event, &snapshot.agent_pubkeys)
-        && !targets_project_address(event, &shared.project_addr)
-    {
+    if has_p_tags(event) && !targets_project_agent(event, &snapshot.agent_pubkeys) {
         anyhow::bail!("directed event does not target a current project agent");
     }
 
@@ -1985,16 +1982,6 @@ fn has_p_tags(event: &Event) -> bool {
     event.tags.iter().any(|tag| tag.kind() == p_kind)
 }
 
-fn targets_project_address(event: &Event, project_addr: &str) -> bool {
-    let a_kind = TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::A));
-    event
-        .tags
-        .iter()
-        .filter(|tag| tag.kind() == a_kind)
-        .filter_map(|tag| tag.content())
-        .any(|addr| addr == project_addr)
-}
-
 fn event_matches_project_scope(event: &Event, project_addr: &str) -> bool {
     let project_addresses = project_address_tags(event);
     project_addresses.is_empty() || project_addresses.contains(&project_addr)
@@ -2029,7 +2016,11 @@ fn select_agent<'a>(
         return Ok(agent);
     }
 
-    // No #p match: fall back to the PM agent (handles project-wide events).
+    if !p_tags.is_empty() {
+        anyhow::bail!("directed event does not target a current project agent");
+    }
+
+    // No #p tags: fall back to the PM agent (handles project-wide events).
     let pm_pubkey = project_agents
         .iter()
         .find(|pa| pa.is_pm)
@@ -2803,6 +2794,38 @@ mod tests {
 
         assert!(event_matches_project_scope(&unscoped, project));
         assert!(event_matches_project_scope(&article_ref, project));
+    }
+
+    #[test]
+    fn select_agent_falls_back_to_pm_only_when_event_has_no_p_tags() {
+        let owner = Keys::generate().public_key().to_hex();
+        let pm_pubkey = Keys::generate().public_key().to_hex();
+        let worker_pubkey = Keys::generate().public_key().to_hex();
+        let unknown_pubkey = Keys::generate().public_key().to_hex();
+        let project = format!("31933:{owner}:local-project");
+        let agents = vec![agent(&pm_pubkey), agent(&worker_pubkey)];
+        let project_agents = vec![
+            ProjectAgent {
+                agent_pubkey: pm_pubkey.clone(),
+                is_pm: true,
+            },
+            ProjectAgent {
+                agent_pubkey: worker_pubkey.clone(),
+                is_pm: false,
+            },
+        ];
+
+        let project_wide =
+            signed_event(Kind::TextNote, "project-wide", vec![tag(&["a", &project])]);
+        let selected = select_agent(&project_wide, &agents, &project_agents).unwrap();
+        assert_eq!(selected.pubkey, pm_pubkey);
+
+        let unknown_direct = signed_event(
+            Kind::TextNote,
+            "unknown direct",
+            vec![tag(&["a", &project]), tag(&["p", &unknown_pubkey])],
+        );
+        assert!(select_agent(&unknown_direct, &agents, &project_agents).is_err());
     }
 
     #[test]

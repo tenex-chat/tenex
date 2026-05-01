@@ -1598,6 +1598,30 @@ async function runProjectMembershipReloadProbe(context: ScenarioContext): Promis
     if (repliesAfter !== repliesBefore) {
         throw new Error("removed agent2 direct p-tagged event was still dispatched");
     }
+
+    const removedWorkerScopedEvent = context.sign(
+        {
+            kind: 1,
+            created_at: context.now() + 5,
+            content: "membership scoped removed worker after removal",
+            tags: [
+                ["a", context.projectRef],
+                ["p", context.workerPubkey],
+            ],
+        },
+        context.userSecret
+    );
+    const scopedRepliesBefore = context.events.filter(
+        (event) => event.kind === 1 && repliesTo(event, removedWorkerScopedEvent.id)
+    ).length;
+    await Promise.all(context.pool.publish([context.relayUrl], removedWorkerScopedEvent));
+    await context.delay(Number(process.env.TENEX_PROBE_REMOVAL_WAIT_MS ?? 1_500));
+    const scopedRepliesAfter = context.events.filter(
+        (event) => event.kind === 1 && repliesTo(event, removedWorkerScopedEvent.id)
+    ).length;
+    if (scopedRepliesAfter !== scopedRepliesBefore) {
+        throw new Error("removed agent2 project-scoped p-tagged event was still dispatched");
+    }
 }
 
 function statusAgentSlugs(event: Event): string[] {

@@ -584,6 +584,15 @@ function evaluateProjectMembershipReload(
     const removedWorkerReplies = removedWorkerRequest
         ? events.filter((event) => event.kind === 1 && repliesTo(event, removedWorkerRequest.id))
         : [];
+    const removedWorkerScopedRequest = events.find(
+        (event) =>
+            event.kind === 1 && event.content === "membership scoped removed worker after removal"
+    );
+    const removedWorkerScopedReplies = removedWorkerScopedRequest
+        ? events.filter((event) =>
+              event.kind === 1 && repliesTo(event, removedWorkerScopedRequest.id)
+          )
+        : [];
 
     return [
         {
@@ -615,6 +624,11 @@ function evaluateProjectMembershipReload(
             name: "Removed agent2 direct request was not dispatched",
             ok: Boolean(removedWorkerRequest) && removedWorkerReplies.length === 0,
             detail: `Expected no agent replies to removed agent2 request; saw ${removedWorkerReplies.length}.`,
+        },
+        {
+            name: "Removed agent2 project-scoped direct request was not dispatched",
+            ok: Boolean(removedWorkerScopedRequest) && removedWorkerScopedReplies.length === 0,
+            detail: `Expected no agent replies to project-scoped removed agent2 request; saw ${removedWorkerScopedReplies.length}.`,
         },
     ];
 }
