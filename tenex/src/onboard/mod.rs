@@ -17,9 +17,9 @@
 //! 7. Agents           — installation
 //!
 //! Each step's port is a concrete module; partial-screen stubs are not
-//! shipped (per CLAUDE.md absolute rules). Steps that haven't been ported
-//! yet cause `run` to return early with a status message — never with a
-//! pretend-done state.
+//! shipped (per CLAUDE.md absolute rules). The main interactive path runs
+//! through Step 6 today and ends with an explicit Step 7 incomplete status
+//! rather than a pretend-done state.
 
 pub mod acp_config_wizard;
 pub mod auto_detect;
@@ -159,12 +159,12 @@ async fn run_inner(args: OnboardArgs) -> Result<()> {
 
     if !args.pubkey.is_empty() {
         // `--pubkey` mode skips the entire identity flow per spec 01 §"Screen 1".
-        // The remaining 6 steps need their own ports before this branch can land
-        // the user back at a fully-configured state — surface that explicitly so
-        // the operator sees a clear message rather than a half-flow.
+        // The interactive Rust path is wired around the identity result object,
+        // so this bypass still needs a resume path that seeds that object and
+        // continues through the rest of the flow.
         eprintln!(
-            "onboard: --pubkey mode requires steps 2-7 (relays, providers, models, \
-             roles, project, agents). Those screens have not been ported yet."
+            "onboard: --pubkey mode is not wired in the Rust flow yet; run \
+             interactive onboarding or configure identity explicitly."
         );
         return Ok(());
     }
@@ -233,10 +233,8 @@ async fn run_inner(args: OnboardArgs) -> Result<()> {
         display::success("Provider credentials saved");
     }
 
-    // Step 4 (sub-step A): seed default LLM configurations.
-    // The interactive LLM editor (`LLMConfigEditor.showMainMenu`) is the
-    // remaining piece of Screen 4 and is deferred until the editor's bespoke
-    // prompt is ported in its own iteration.
+    // Step 4 (sub-step A): seed default LLM configurations before opening
+    // the interactive LLM editor.
     let configured_provider_ids = providers_doc.provider_ids();
     let mut llms_doc = LlmsDoc::load(&base_dir)
         .with_context(|| format!("loading llms.json from {}", base_dir.display()))?;
@@ -261,10 +259,6 @@ async fn run_inner(args: OnboardArgs) -> Result<()> {
             display::blank();
         }
         // Step 4 (sub-step B): interactive LLM config editor.
-        // The `addConfiguration` and per-config detail-edit sub-flows are
-        // their own subsystems (each requires a separate provider-list API:
-        // OpenRouter, Ollama, Codex, models.dev). Until those are ported the
-        // editor lets the user view, delete, or accept the seeded configs.
         match llm_editor::run(&base_dir)? {
             llm_editor::LlmEditorResult::Done => {
                 llm_editor_done = true;

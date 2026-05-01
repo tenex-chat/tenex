@@ -6,18 +6,14 @@
 //!
 //! - **Done** — exit cleanly.
 //! - **`delete:<name>`** — drop the config from `llms.json`, save, recurse.
-//! - **`add` / `addMultiModal` / `config:<name>`** — these branches require
-//!   the standard-config builder (`addConfiguration`,
-//!   `addMultiModalConfiguration`) and the per-config detail editor (the
-//!   inner select that asks for provider/model/effort/personality/etc.).
-//!   Those sub-flows are large enough to deserve their own iterations and
-//!   are wired here as explicit `display::hint` notices that recurse the
-//!   menu — no stubs that pretend to succeed (per CLAUDE.md absolute rules).
+//! - **`add` / `addMultiModal` / `addAcp`** — run the corresponding Rust
+//!   configuration wizard, then recurse.
+//! - **`config:<name>`** — mirrors the TS fallthrough and simply re-renders
+//!   the menu; per-config detail editing is not a distinct Rust route.
 //!
-//! The `onTest` callback is currently surfaced as a "test runner not yet
-//! configured" hint; the actual test-runner integration (per spec doc 06)
-//! is its own subsystem (provider-aware streaming + 30s timeout +
-//! four-string error-hint mapping).
+//! The `onTest` callback runs [`crate::onboard::llm_runner::run_test`],
+//! which performs provider-aware connectivity checks and maps failures to
+//! the TS-compatible hint strings.
 
 use anyhow::{anyhow, Context, Result};
 
@@ -488,10 +484,10 @@ mod tests {
     }
 
     #[test]
-    fn route_add_action_continues_without_persisting_anything() {
+    fn route_add_action_continues_when_no_providers_are_configured() {
         let base = fresh_temp();
-        // `add` is documented as pending — we expect the route to return
-        // continue=true and not write llms.json.
+        // The add wizard returns to the menu after showing its
+        // "configure providers first" hint.
         assert!(route(&base, "add").unwrap());
         assert!(!base.join("llms.json").exists());
         std::fs::remove_dir_all(&base).ok();

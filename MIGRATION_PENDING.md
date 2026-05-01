@@ -9,8 +9,8 @@ Organized by functional area. Items marked ✅ are already at parity; items mark
 
 ## 1. Agent Tools
 
-### 1.1 Fully Missing Tools (TypeScript-only)
-- ✅ `send_message` — proactive Telegram delivery to bound channels (note: agent won't know channel IDs until Fragment 08 injects Telegram bindings into the system prompt)
+### 1.1 Resolved or Intentionally Excluded Tools
+- ✅ `send_message` — proactive Telegram delivery to bound channels
 - ✅ `mcp_list_resources` — discover available MCP resources and resource templates from configured servers
 - ✅ `mcp_resource_read` — fetch content from an MCP resource, with URI template expansion
 - ✅ `mcp_subscribe` — create persistent subscriptions to MCP resource update notifications
@@ -39,28 +39,30 @@ Organized by functional area. Items marked ✅ are already at parity; items mark
 - ✅ Hierarchical delegation chain tree output (depth-indented with `└─` connectors)
 - ✅ Delegation chain nesting (child conversations nested under parent by `rustRuntime.delegation.parent_conversation_id`)
 
+#### `conversation_search`
+- [ ] `project_id` filtering — the tool accepts the parameter but searches the global embeddings database today; filtering requires chunk/project metadata in `meta_json`
+
 ---
 
 ## 2. System Prompt Fragments
 
-### 2.1 Missing Fragments
-- [ ] **Fragment 00 — Global System Prompt**: user-configured global guidance from `config.json`
+### 2.1 Fragment Status
+- [ ] **Fragment 00 — Global System Prompt**: `tenex config system-prompt` can persist the global prompt, but the Rust agent does not yet inject it into `build_system_prompt`
 - [ ] **Fragment 05 — Delegation Chain**: multi-agent workflow hierarchy visualization for active turn
 - [ ] **Fragment 18 — No-Response Guidance**: Telegram silent-completion mode instructions
 - 🚫 **Fragment 20 — Voice Mode**: TTS-specific formatting guidance — won't port (voice mode is not implemented in the Rust stack)
 - ✅ **Fragment 22 — Scheduled Tasks**: display agent's own scheduled tasks with human-readable cron expressions
-- [ ] **Fragment 28 — Agent-Directed Monitoring**: guidance on monitoring delegated work and using `delegate_followup` for mid-flight corrections (spec references but is not implemented in Rust code)
+- ✅ **Fragment 28 — Agent-Directed Monitoring**: guidance on async delegation, stop-after-delegating behavior, and `delegate_followup` for mid-flight corrections
 - ✅ **Fragment 33 — Telegram Chat Context**: chat title, topic title, admin list, member count, recently seen participants (requires `TelegramChatContextService`)
 - ✅ **Fragment 34 — Telegram Delivery Rules**: `[[telegram_voice:…]]` marker syntax documentation
 
 ### 2.2 Missing Dynamic Context Injection
 - ✅ **Proactive RAG Context** — RAG search at score ≥ 0.65, up to 5 snippets injected into the system prompt each turn; LLM query planner (for messages > 20 words) and LLM reranker (when > 3 results pass threshold) implemented in `tenex-agent/src/context_discovery.rs`
-- [ ] **Conversation Reminders** — active/recent conversation context overlay (streaming conversations, delegation parent refs, human-readable durations)
+- ✅ **Conversation Reminders** — active/recent conversation context overlay (streaming conversations, delegation parent refs, human-readable durations) is built from the conversation store and appended as a system reminder to the user message
 - [ ] **Effective Instructions (Lesson Synthesis)** — `PromptCompilerService` merges base instructions with lessons; Rust intentionally uses a different approach (`+INDEX.md` file), but LLM-synthesized multi-lesson synthesis is absent
 
 ### 2.3 Incomplete Fragments
 - ✅ **Fragment 08 — Project Context**: Now renders project ID, owner pubkey, conversation ID, `$PROJECT_BASE`-relative workspace paths, and Telegram channel bindings (`<channels>` block) from `BindingStore`. Remaining gaps that cannot be implemented with current data:
-  - ❌ **Worktree metadata** — no Rust git-worktree utility exists; `tenex-project` carries no worktree data
   - ❌ **Team-related channel bindings** — teams (`Team` struct) have no channel fields in the current data model
   - ❌ **Other project cross-references** — `ProjectMetadata` has no such field; not populated by the ingestion pipeline
 
@@ -95,7 +97,7 @@ Pre-tool and post-completion contexts are missing fields that the two unimplemen
 - [ ] `SupervisorLLMService` — LLM-based verification of heuristic detections with structured response (`verdict: "ok" | "violation"`, `explanation`, `correctionMessage`); TypeScript heuristics can each supply a custom verification prompt
 
 ### 4.4 Correction Action Gaps
-- [ ] `inject-message` correction action — inject a message without blocking execution (Rust only has binary `Accept`/`ReEngage`)
+- [ ] `inject-message` durable/nonblocking correction semantics — Rust has `PostCompletionOutcome::InjectMessage`, but the agent currently logs the nudge and publishes the final completion instead of queueing a later injected reminder
 - [ ] `block-tool` correction action — block a specific tool call and require re-engagement
 - [ ] `suppress-publish` correction action — suppress turn publication
 
@@ -112,11 +114,11 @@ Pre-tool and post-completion contexts are missing fields that the two unimplemen
 
 ## 5. MCP Integration (`tenex-mcp`)
 
-### 5.1 Missing MCP Resource Capabilities
-- [ ] MCP resource discovery (`listResources()`, `listResourceTemplates()`)
-- [ ] MCP resource fetch with URI template parameter expansion
-- [ ] MCP resource subscription (persistent update notifications within a conversation)
-- [ ] Notification handler management for resource updates
+### 5.1 MCP Resource Capabilities
+- ✅ MCP resource discovery (`listResources()`, `listResourceTemplates()`) via `mcp_list_resources`
+- ✅ MCP resource fetch with URI template parameter expansion via `mcp_resource_read`
+- ✅ MCP resource subscription and cancellation via `mcp_subscribe` / `mcp_subscription_stop`
+- ✅ Runtime notification delivery for subscribed resource updates
 - [ ] Metadata caching with TTL for resources and templates (TypeScript uses 30s staleness)
 
 ### 5.2 MCP Server Lifecycle Differences
@@ -150,7 +152,7 @@ Pre-tool and post-completion contexts are missing fields that the two unimplemen
 
 ### 7.1 Missing Features
 - ✅ **`TelegramChatContextService`** — enriches agent context with chat title, topic title, admin list, member count, and recently-seen participant list via Telegram Bot API; cached with ~5-minute TTL. Without this, agents have no visibility into group/topic metadata
-- ✅ **System prompt fragments for Telegram** — Fragment 33 (chat context) and Fragment 34 (delivery rules) are not injected into the Rust agent system prompt (see §2.1)
+- ✅ **System prompt fragments for Telegram** — Fragment 33 (chat context) and Fragment 34 (delivery rules) are injected into the Rust agent system prompt (see §2.1)
 - ✅ **`send_message` tool** — proactive messaging to bound channels (see §1.1)
 - [ ] **Identity binding validation for DMs** — TypeScript checks `AuthorizedIdentityService` before accepting DMs; Rust accepts all DMs that pass the `allows_dms()` config flag
 - ✅ **Persistent pending project selection** — `PendingSelectionStore` in `pending_selection_store.rs` persists pending channel-to-project selection state to `{base_dir}/data/pending-channel-selections.json` with 24-hour TTL; atomic writes via `.tmp` + rename; expired entries pruned on load and access
@@ -173,7 +175,8 @@ The Rust `tenex` runtime (`tenex/src/runtime_cmd/`) already implements core orch
 - ✅ Delegation completion routing — `delegation_route_for_completion` routes child completions back to parent conversation/agent
 - 🚫 Delegation completion debouncing (`DELEGATION_COMPLETION_DEBOUNCE_MS = 2500`) — won't port (process-per-project isolation in Rust makes in-process debouncing unnecessary)
 - [ ] Deferred completions for nested delegation trees
-- [ ] Delegation prefix resolution and canonicalization
+- ✅ `delegate_followup` prefix resolution and canonicalization — accepts original delegation IDs, unique 10-character prefixes, and previous followup event IDs
+- [ ] Cross-project delegation completion return routing — the target runtime can execute the delegated task, but return routing to the source project is still pending because route registration is local-project-agent scoped
 - [ ] Implicit kill-wake path (synthetic envelopes for delegation kills)
 
 ### 8.3 Agent Config Update (kind:24020)
@@ -187,7 +190,7 @@ The Rust `tenex` runtime (`tenex/src/runtime_cmd/`) already implements core orch
 ## 9. LLM Layer
 
 ### 9.1 Provider SDK Implementations
-Rust (`tenex-llm-config`) is a credential resolver only; all provider protocol work is TypeScript:
+Rust uses `rig` for the live provider protocol path; `tenex-llm-config` remains the credential resolver. Remaining provider-specific gaps:
 - [ ] Anthropic provider with OAuth token support (`sk-ant-oat*` tokens)
 - [ ] OpenRouter provider with usage tracking and metadata extraction — rig's streaming `FinalResponse` collapses all provider responses into `rig::completion::Usage` (input/output/total/cached/cache-creation tokens only); OpenRouter-specific fields (generation ID, cost, model name) are not accessible through the streaming path. The non-streaming `CompletionResponse` does carry `model` and `usage.cost`, but the agent uses streaming exclusively. Cost and model metadata require either a rig upstream change or a non-streaming fallback
 - [ ] Ollama provider with vision model pattern detection

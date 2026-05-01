@@ -68,7 +68,7 @@ Fresh delegations (no prior delegation event to follow up on):
 ```
 `["delegation", parent_root_id]` is emitted via `delegation_parent_tag(root_event_id)` in `encoder.rs` only on fresh delegations that have a `conversation_root` (i.e. the delegating agent is already in a known conversation). It allows `tenex runtime` to route child completions back to the parent without any in-process state.
 
-Followup delegations carry `["e", original_delegation_event_id, "", "reply"]` instead of the delegation tag, and no `e` root tag.
+Followup delegations carry `["e", original_delegation_event_id, "", "root"]` instead of the delegation tag. The followup stays in the delegated conversation and is not tagged as a reply to the parent conversation.
 
 ## Agent Configuration (agent.json)
 
@@ -246,7 +246,7 @@ If RAG is configured and the vector search returns results with score ≥ 0.65, 
 
 ## Tools
 
-Implemented in Rust; semantics match the TypeScript originals.
+Implemented in Rust; semantics match the TypeScript originals unless a note calls out an intentional divergence or remaining gap.
 
 ### `shell`
 Execute a shell command in the working directory. Shell sessions auto-load the agent `.env` file and have access to computed env vars (`$AGENT_HOME`, `$PUBKEY`, `$NPUB`, `$PROJECT_BASE`, `$PROJECT_ID`, `$TENEX_BASE_DIR`, `$USER_HOME`).
@@ -347,9 +347,11 @@ Send a followup message to an agent already delegated to, referencing the origin
 
 | Param | Type | Description |
 |-------|------|-------------|
-| `recipient` | string | Agent slug — same as in the original `delegate` call |
-| `delegation_event_id` | string | Hex event ID returned by the original `delegate` call |
+| `recipient` | string? | Agent slug, team name, or pubkey. Optional when the original delegation route is present in local conversation state |
+| `delegation_conversation_id` | string | Original delegation event ID, a unique 10-character prefix, or a previous followup event ID that can be canonicalized to the original delegation. `delegation_event_id` is accepted as a compatibility alias |
 | `message` | string | Additional instructions, corrections, or context |
+
+The tool resolves stored delegation routes from the project conversation DB and rejects a supplied recipient that does not match the original delegatee. Followup events thread with the original delegation event as the `e` root tag.
 
 ### `delegate_crossproject`
 Delegate a task to an agent in a different project. Use `project_list` first to discover available project IDs and agent slugs. **Only available to categories that allow delegation.**
@@ -462,19 +464,23 @@ Retrieve the message transcript for a conversation by ID. Reads from the project
 |-------|------|-------------|
 | `conversation_id` | string | Conversation ID (64-char hex event ID) |
 | `limit` | integer? | Maximum messages to return (default: all) |
+| `until_id` | string? | Return transcript entries before this message ID |
+| `prompt` | string? | Ask the configured LLM to analyze the retrieved transcript |
 
-Returns a plain-text transcript with `[role] author8: content` lines. Note: the TS version additionally supports `untilId`, `prompt` (LLM analysis), and `includeToolCalls` — these are not yet implemented in Rust.
+Returns a plain-text transcript with `[role] author8: content` lines, or an LLM analysis when `prompt` is supplied. Remaining TypeScript parity gaps: `includeToolCalls`, XML transcript output, and relative timestamp formatting.
 
 ### `conversation_list`
-List conversations in the current project, sorted by most recent activity.
+List conversations sorted by most recent activity. By default it lists the current project; pass `project_id` for another project or `"ALL"` to scan all projects under `~/.tenex/projects/`.
 
 | Param | Type | Description |
 |-------|------|-------------|
 | `limit` | integer? | Maximum conversations to return (default: 20) |
 | `from_time` | integer? | Filter: activity after this Unix timestamp (ms) |
 | `to_time` | integer? | Filter: activity before this Unix timestamp (ms) |
+| `with` | string? | Filter by participant pubkey |
+| `project_id` | string? | Project dTag, or `"ALL"` for all local projects |
 
-Returns a plain-text list with short ID, title, last activity, and preview of the last user message. Note: the TS version additionally supports `projectId` (cross-project), `with` (participant filter), and returns a hierarchical tree of delegation chains — the Rust version is single-project, flat list.
+Returns a plain-text tree with delegation children nested under their parent conversation when runtime metadata links them.
 
 ### `skill_list`
 List all available skills grouped by scope. Returns a JSON object with `total` count, per-scope `counts`, and `scopes` map (keys: `builtIn`, `agent`, `agentProject`, `project`, `shared`). Each skill entry includes `identifier`, optional `name`, optional `description` (truncated at 150 chars), `hasTools`, and `scope`.
@@ -522,6 +528,18 @@ Create or update a backend-local agent identity stored at `~/.tenex/agents/<pubk
 
 Behavior: opens `tenex-agent-registry`, finds an existing record whose `slug` matches, and saves the normalized `AgentDoc` through the shared mutation API. If found, `nsec`, the `<pubkey>.json` filename, and unknown fields (e.g. `category`, `eventId`, `mcpServers`, `telegram`) are preserved across read-modify-write. If not found, the registry crate generates a fresh nsec, derives the pubkey, and writes `<pubkey_hex>.json` with `status = "active"`. Writes are atomic via temp-file + rename and update the installed-agent index. Returns `{ success, agent: { slug, name, pubkey } }`. Newly created agents are not assigned to the current project — that requires a 31933 event p-tagging the new pubkey.
 
+### MCP resource tools
+When the runtime control socket is available, agents with the corresponding granted tools can inspect and consume MCP resources without using the stdout MCP proxy channel.
+
+| Tool | Params | Description |
+|------|--------|-------------|
+| `mcp_list_resources` | none | List resources and resource templates from MCP servers the agent can access |
+| `mcp_resource_read` | `serverName`, `resourceUri`, `templateParams?`, `description` | Read a concrete resource URI or expand a URI template before reading |
+| `mcp_subscribe` | `serverName`, `resourceUri`, `description` | Subscribe this conversation to resource update notifications |
+| `mcp_subscription_stop` | `subscriptionId` | Cancel a subscription created by this agent |
+
+Resource calls go through `RuntimeControlRequest::Mcp` over the runtime socket. Subscriptions persist in the runtime and deliver update notifications back into the conversation. Resource/template metadata is not TTL-cached in the agent.
+
 ### MCP proxy tools
 When `TENEX_MCP_MANIFEST` and `TENEX_MCP_SOCKET` are set by `tenex-runtime`, `tenex-agent` loads a dynamic set of `McpProxyTool` instances at startup — one per entry in the manifest. Each proxy tool:
 
@@ -542,7 +560,7 @@ stdout remains reserved for signed Nostr NDJSON; MCP calls use the side-channel 
 - `PendingTodosHeuristic` — detects completions with unresolved pending todos.
 - `ConsecutiveToolsWithoutTodoHeuristic` — detects agents making many tool calls without a todo list.
 
-When a pre-tool heuristic fires, `ToolCallHookAction::skip(reason)` is returned and the tool call is cancelled with the reason injected as a system reminder. When a post-completion heuristic fires, `Supervisor::check_post_completion` returns `PostCompletionOutcome::ReEngage { message }` — the outer `'agent_loop` in `main.rs` injects the message as a new user turn and re-runs the agent with extended history. The loop is guarded by `MAX_RETRIES = 3` in `tenex-supervision`; after that threshold it returns `Accept` unconditionally.
+When a pre-tool heuristic fires, `ToolCallHookAction::skip(reason)` is returned and the tool call is cancelled with the reason injected as a system reminder. When a post-completion heuristic fires, `Supervisor::check_post_completion` can return `PostCompletionOutcome::ReEngage { message }` — the outer `'agent_loop` in `main.rs` injects the message as a new user turn and re-runs the agent with extended history. `PostCompletionOutcome::InjectMessage { message }` also exists, but the current agent path only logs that nudge and then publishes the final completion; it does not persist a later injected reminder. The re-engagement loop is guarded by `MAX_RETRIES = 3` in `tenex-supervision`; after that threshold it returns `Accept` unconditionally.
 
 ## Iterative Loop
 
@@ -608,4 +626,9 @@ API keys are resolved from `~/.tenex/providers.json`. Ollama uses `OLLAMA_API_BA
 
 ## Future Work (not yet implemented)
 
-- **TS-only tools**: `send_message`, MCP resource/subscription tools (`mcp_list_resources`, `mcp_resource_read`, `mcp_subscribe`, `mcp_subscription_stop`), RAG subscription tools (`rag_subscription_create/delete/get/list`), RAG collection management tools (`rag_collection_create/delete/list`).
+- **Conversation tools**: `conversation_get.includeToolCalls`, XML transcript output, relative timestamps, and `conversation_search.project_id` filtering.
+- **Delegation routing**: cross-project delegation return routing back into the source project, deferred completions for nested delegation trees, and implicit kill-wake envelopes.
+- **Supervision**: durable/nonblocking `inject-message`, `block-tool`, `suppress-publish`, richer post-completion context, and OpenTelemetry spans/events.
+- **RAG**: scope-aware search and a mock embedding provider for tests. RAG subscription and collection-management tools remain intentionally unported.
+- **Provider-specific LLM behavior**: Anthropic OAuth token support, OpenRouter generation/cost metadata on the streaming path, Ollama vision detection, request sanitization, and LLM-synthesized prompt compilation.
+- **Authorization/onboarding**: transport identity binding validation, NIP-46 signer backend, and onboarding Step 7 project/agent setup.

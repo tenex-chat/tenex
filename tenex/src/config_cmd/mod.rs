@@ -28,7 +28,7 @@
 //! | LLMs          | Wired — runs [`crate::onboard::llm_editor::run`]               |
 //! | Roles         | Wired — runs [`crate::onboard::role_assignment::run`]          |
 //! | Embeddings    | Wired — runs [`crate::onboard::embeddings::run`] using the configured provider IDs |
-//! | All others    | Surfaced via `display::hint` "submenu pending port" — honest about what's not done yet (per CLAUDE.md absolute rule "no half-finished implementations") |
+//! | All others    | Wired through dedicated submodules; `embed --project` is the only explicit unsupported config scope in this dispatcher |
 
 pub mod context_management;
 pub mod escalation;
@@ -272,11 +272,11 @@ async fn dispatch_inner(base_dir: &std::path::Path, value: &str) -> Result<()> {
         "system-prompt" => system_prompt::run(base_dir),
         "context-management" => context_management::run(base_dir),
         "telegram" => telegram::run(base_dir),
-        // All 16 config submenus are now wired. Anything else here is a
-        // typo or future addition — surface a hint and recurse.
+        // All 16 config submenus are wired. Anything else here is an
+        // unknown menu token; surface a hint and recurse.
         _ => {
             display::hint(&format!(
-                "Submenu '{value}' is pending port — see spec docs in tenex/docs/tui-port/.",
+                "Unknown config submenu '{value}'.",
             ));
             Ok(())
         }
