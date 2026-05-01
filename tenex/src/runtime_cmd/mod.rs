@@ -7,6 +7,7 @@ mod control_tests;
 mod mcp_resource_control;
 mod mcp_subscription_delivery;
 mod mcp_subscriptions;
+mod sign_as_user;
 mod transport;
 
 use std::collections::{HashMap, HashSet, VecDeque};

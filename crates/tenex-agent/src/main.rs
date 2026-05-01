@@ -965,6 +965,7 @@ async fn run() -> Result<()> {
         conv_db_path: conv_db_path.clone(),
         conversation_id: conversation_id.clone(),
         agent_pubkey: pubkey_hex.clone(),
+        agent_nsec: agent_config.nsec.clone(),
         agent_home: agent_home.clone(),
         resolved_model: Arc::new(resolved.clone()),
         project_d_tag: project_meta.d_tag.clone(),

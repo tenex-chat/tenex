@@ -90,14 +90,10 @@ impl Tool for DelegateCrossProjectTool {
                 ))
             })?;
         let owner_hex = metadata.owner_pubkey.ok_or_else(|| {
-            DelegateCrossProjectError(format!(
-                "project '{}' has no owner pubkey",
-                args.project_id
-            ))
+            DelegateCrossProjectError(format!("project '{}' has no owner pubkey", args.project_id))
         })?;
-        let owner_pubkey = nostr::PublicKey::from_hex(&owner_hex).map_err(|e| {
-            DelegateCrossProjectError(format!("invalid project owner pubkey: {e}"))
-        })?;
+        let owner_pubkey = nostr::PublicKey::from_hex(&owner_hex)
+            .map_err(|e| DelegateCrossProjectError(format!("invalid project owner pubkey: {e}")))?;
         let target_project = ProjectRef {
             author: owner_pubkey,
             d_tag: metadata.d_tag,
@@ -134,9 +130,7 @@ impl Tool for DelegateCrossProjectTool {
 
         let ral = self.state.meta.lock().unwrap().ral;
         let source_ctx = self.state.build_ctx(ral);
-        let target_ctx = self
-            .state
-            .build_ctx_with_project(ral, target_project);
+        let target_ctx = self.state.build_ctx_with_project(ral, target_project);
 
         let intent = DelegationIntent {
             items: vec![DelegationRequest {
@@ -156,9 +150,10 @@ impl Tool for DelegateCrossProjectTool {
             .map_err(|e| DelegateCrossProjectError(format!("failed to emit delegation: {e}")))?;
         self.state.mark_pending_external_work();
 
-        let delegation_ref = refs.into_iter().next().ok_or_else(|| {
-            DelegateCrossProjectError("delegation produced no event".into())
-        })?;
+        let delegation_ref = refs
+            .into_iter()
+            .next()
+            .ok_or_else(|| DelegateCrossProjectError("delegation produced no event".into()))?;
         let delegation_event_id = match &delegation_ref {
             MessageRef::Nostr { event_id } => event_id.to_hex(),
         };

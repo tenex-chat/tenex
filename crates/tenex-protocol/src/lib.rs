@@ -49,5 +49,5 @@ pub use runtime_control::{
     McpReadResourceRequest, McpReadResourceResponse, McpSubscribeRequest, McpSubscribeResponse,
     McpSubscriptionStopRequest, McpSubscriptionStopResponse, RunShellRequest,
     RuntimeControlRequest, RuntimeControlResponse, ShellBackgroundResponse, ShellCompletedResponse,
-    ShellTaskMode, ShellTaskSummary, ShellTasksResponse,
+    ShellTaskMode, ShellTaskSummary, ShellTasksResponse, SignAsUserRequest, SignAsUserResponse,
 };

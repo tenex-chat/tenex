@@ -1,6 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
 
-export type ProbeLlmMode = "mock" | "ollama" | "cassette" | "anthropic";
 export type ProbeLlmMode = "mock" | "ollama" | "cassette" | "anthropic" | "openrouter";
 
 export type ProbeLlmOptions = {

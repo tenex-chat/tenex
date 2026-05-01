@@ -14,6 +14,7 @@ pub enum RuntimeControlRequest {
     ListShellTasks(ListShellTasksRequest),
     Kill(KillRequest),
     Mcp(McpControlRequest),
+    SignAsUser(SignAsUserRequest),
     DispatchTransport(DispatchTransportRequest),
 }
 
@@ -54,6 +55,18 @@ pub struct McpSubscribeRequest {
 pub struct McpSubscriptionStopRequest {
     pub agent_pubkey: String,
     pub subscription_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SignAsUserRequest {
+    pub owner_pubkey: String,
+    pub agent_nsec: String,
+    pub description: String,
+    pub explanation: String,
+    pub kind: u16,
+    pub created_at: Option<u64>,
+    pub content: String,
+    pub tags: Vec<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -131,6 +144,7 @@ pub enum RuntimeControlResponse {
     ShellTasks(ShellTasksResponse),
     Kill(KillResponse),
     Mcp(McpControlResponse),
+    SignAsUser(SignAsUserResponse),
     Error(ErrorResponse),
 }
 
@@ -161,6 +175,17 @@ pub struct McpSubscribeResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct McpSubscriptionStopResponse {
     pub content: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SignAsUserResponse {
+    pub success: bool,
+    pub event_id: String,
+    pub pubkey: String,
+    pub kind: u16,
+    pub description: String,
+    pub explanation: String,
+    pub signed_event: serde_json::Value,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

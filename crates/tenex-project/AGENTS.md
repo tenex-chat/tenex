@@ -21,7 +21,7 @@ project-local state. Conversation rows are stored in SQLite; agents are not.
 ## Critical invariants
 
 - **Project-id flexibility.** Every API entry point that accepts a project ID must go through `normalize_project_id`. Do not assume a bare dTag.
-- **`Signer` trait is the only speculative abstraction.** The read-side agent projection exposes `signer_ref` as `nsec:<bech32>` from the global JSON record today. The `Signer` trait (`src/signer.rs`) exists so that the future `bunker:<uri>` scheme is a new impl with no callsite changes. Do not add other speculative traits.
+- **`Signer` trait is the signing boundary.** The read-side agent projection exposes `signer_ref` as `nsec:<bech32>` from the global JSON record, and the signer module also accepts `bunker://...` NIP-46 references. Do not add other speculative traits.
 - **Project membership comes from relay-event ingestion.** `Project` derives members from `p` tags in `projects/<dTag>/event.json`; it must not invent membership from local agent files.
 - **Agent definitions are global JSON by pubkey.** `Project` reads `<base_dir>/agents/<pubkey>.json` for each member. Cross-project joins are not needed and must not be added.
 - **Unavailable member display names are best-effort.** Missing member-agent JSON is skipped, but logs may ask the host-wide `tenex-identity` socket for a kind:0 display name through the private `src/identity.rs` adapter. Keep this lookup read-only and optional.
@@ -42,7 +42,7 @@ Team helpers:
 - `teams_for_agent(teams, slug)` filters team membership for one agent.
 - `render_teams_context(member_teams, active_team)` renders the prompt fragment.
 
-Key types: `Agent`, `ProjectAgent`, `ProjectMetadata`, `Signer`, `NsecSigner`, `SignerScheme`.
+Key types: `Agent`, `ProjectAgent`, `ProjectMetadata`, `Signer`, `NsecSigner`, `BunkerSigner`, `SignerScheme`.
 
 ## How to approach changes
 

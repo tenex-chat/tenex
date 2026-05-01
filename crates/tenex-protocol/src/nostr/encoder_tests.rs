@@ -247,8 +247,7 @@ fn self_completion_keeps_p_tag_when_triggering_principal_equals_signer() {
         usage: None,
         metadata: None,
     };
-    let builders =
-        NostrEncoder::encode(&Intent::Completion(intent), &ctx).expect("encode");
+    let builders = NostrEncoder::encode(&Intent::Completion(intent), &ctx).expect("encode");
     let tags = signed_with(&signer_keys, builders.into_iter().next().unwrap());
     let p_tags: Vec<&Vec<String>> = tags.iter().filter(|t| t[0] == "p").collect();
     assert_eq!(
@@ -285,7 +284,8 @@ fn self_tool_use_keeps_p_tag_when_triggering_principal_equals_signer() {
     // routing tag here keeps the tag.
     let tags = signed_with(&signer_keys, builders.into_iter().next().unwrap());
     assert!(
-        tags.iter().any(|t| t[0] == "tool" && t[1] == "self_delegate"),
+        tags.iter()
+            .any(|t| t[0] == "tool" && t[1] == "self_delegate"),
         "expected tool=self_delegate tag; got tags={tags:?}"
     );
 }

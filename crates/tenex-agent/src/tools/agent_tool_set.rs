@@ -40,6 +40,7 @@ use super::schedule_task::ScheduleTaskTool;
 use super::self_delegate::SelfDelegateTool;
 use super::send_message::SendMessageTool;
 use super::shell::ShellTool;
+use super::sign_as_user::SignAsUserTool;
 use super::skill_list::SkillListTool;
 use super::skills_set::SkillsSetTool;
 use super::todo::{TodoItem, TodoWriteTool};
@@ -55,6 +56,7 @@ pub(crate) struct ToolSet {
     pub(crate) conv_db_path: PathBuf,
     pub(crate) conversation_id: String,
     pub(crate) agent_pubkey: String,
+    pub(crate) agent_nsec: String,
     pub(crate) agent_home: PathBuf,
     pub(crate) resolved_model: Arc<ResolvedModel>,
     pub(crate) project_d_tag: String,
@@ -382,6 +384,17 @@ impl ToolSet {
                 &mut tools,
                 &recorder,
                 Box::new(AgentsWriteTool::new(self.base_dir.clone())),
+            );
+        }
+
+        if self.granted_tools.contains("sign_as_user") {
+            self.push_tool(
+                &mut tools,
+                &recorder,
+                Box::new(SignAsUserTool::new(
+                    self.owner_pubkey.clone(),
+                    self.agent_nsec.clone(),
+                )),
             );
         }
 

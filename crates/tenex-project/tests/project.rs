@@ -1,7 +1,7 @@
 use std::fs;
 
 use tempfile::TempDir;
-use tenex_project::{Agent, Project, ProjectAgent, ProjectMetadata};
+use tenex_project::{Agent, Project, ProjectAgent, ProjectMetadata, SignerScheme};
 
 const OWNER_PK: &str = "c506be742732723deaaf8260d2b43d75d33420c601c05a9e1fa3b7986cc1b957";
 const AGENT_PK: &str = "0eb926fe0fb742ed7970f6bcd3c009287d72ddb4b2cf2e0ec8480b5780325eb9";
@@ -248,42 +248,37 @@ fn agent_json_fields_round_trip() {
     assert!(a.mcp_servers_json.as_deref().unwrap().contains("repomix"));
 }
 
-#[test]
-fn signer_for_agent_with_nsec_works() {
+#[tokio::test]
+async fn signer_for_agent_with_nsec_works() {
     let tmp = TempDir::new().unwrap();
     write_event_json(tmp.path(), "my-project", &[]);
     write_agent_json(tmp.path(), AGENT_PK);
 
     let p = Project::open("my-project", tmp.path()).unwrap();
     let signer = p.signer_for_agent(AGENT_PK).unwrap().unwrap();
-    assert_eq!(signer.pubkey().len(), 64);
+    assert_eq!(signer.pubkey().await.unwrap().len(), 64);
 }
 
 #[test]
-fn signer_for_agent_with_bunker_returns_unsupported() {
-    let tmp = TempDir::new().unwrap();
-    write_event_json(tmp.path(), "my-project", &[]);
+fn signer_scheme_parses_bunker_uri_reference() {
+    let reference = "bunker://c506be742732723deaaf8260d2b43d75d33420c601c05a9e1fa3b7986cc1b957?relay=wss://relay.example";
+    let (scheme, payload) = SignerScheme::parse(reference).unwrap();
+    assert_eq!(scheme, SignerScheme::Bunker);
+    assert_eq!(payload, reference);
+}
 
-    let agents_dir = tmp.path().join("agents");
-    fs::create_dir_all(&agents_dir).unwrap();
-    let agent = serde_json::json!({"slug": "a", "name": "A"});
-    fs::write(
-        agents_dir.join(format!("{AGENT_PK}.json")),
-        serde_json::to_vec(&agent).unwrap(),
-    )
-    .unwrap();
-
-    // Manually construct an agent with a bunker signer_ref to test the signer path.
-    // Since the file format doesn't have a "bunker" field, inject via agent_by_pubkey
-    // then call signer_for_agent on a fabricated pubkey that has no nsec.
-    // Instead, test via the public API with a direct Agent that has a bunker ref.
-    let p = Project::open("my-project", tmp.path()).unwrap();
-    let result = p.signer_for_agent(AGENT_PK).unwrap();
-    // No nsec → signer_ref is None → SignerScheme::None → Ok(NsecSigner) would fail
-    // Actually signer_for returns an Err for missing/unknown schemes.
-    // With no nsec in the file, signer_ref = None, which maps to SignerScheme::None.
-    // Let's just verify it doesn't panic.
-    let _ = result;
+#[cfg(feature = "nip46")]
+#[test]
+fn signer_for_agent_with_bunker_reference_resolves() {
+    let agent = Agent {
+        signer_ref: Some(
+            "bunker://c506be742732723deaaf8260d2b43d75d33420c601c05a9e1fa3b7986cc1b957?relay=wss://relay.example"
+                .to_string(),
+        ),
+        ..expected_agent()
+    };
+    let signer = tenex_project::signer::signer_for(&agent).unwrap();
+    drop(signer);
 }
 
 #[test]

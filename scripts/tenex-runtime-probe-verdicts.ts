@@ -1,7 +1,8 @@
-import type { Event } from "nostr-tools";
+import { verifyEvent, type Event } from "nostr-tools";
 import { evaluateAcpWorker } from "./tenex-runtime-probe-acp-verdicts";
 import {
     messageText,
+    readAllConversationTranscripts,
     readAgentContextStates,
     readConversationTranscript,
     type ConversationTranscript,
@@ -28,6 +29,9 @@ import {
     rootAgentsMdInstruction,
     selfDelegationCompletionToken,
     selfDelegationUserRequest,
+    signAsUserCompletionText,
+    signAsUserExplanation,
+    signAsUserSignedContent,
     type MockRequestRecord,
     type ScenarioName,
     worktreeAgentsMdInstruction,
@@ -54,8 +58,6 @@ type EvaluateContext = {
     pmPubkey: string;
     workerPubkey: string;
     modelName: string;
-    llmProvider: "mock" | "ollama" | "anthropic" | "cassette";
-export type ProbeLlmProvider = "mock" | "ollama" | "anthropic" | "cassette" | "openrouter";
     llmProvider: ProbeLlmProvider;
     conversationDbPath: string;
     mcpProbeRecords?: Array<Record<string, unknown>>;
@@ -63,6 +65,8 @@ export type ProbeLlmProvider = "mock" | "ollama" | "anthropic" | "cassette" | "o
     ownerPubkey?: string;
     agentHomeDir?: string;
 };
+
+type ProbeLlmProvider = "mock" | "ollama" | "anthropic" | "cassette" | "openrouter";
 
 function isRealLlm(provider: EvaluateContext["llmProvider"]): boolean {
     return provider === "ollama" || provider === "anthropic" || provider === "openrouter";
@@ -151,7 +155,84 @@ export function evaluate(
     if (name === "ask-owner") {
         return [...commonVerdicts, ...evaluateAsk(events, requestRecords, context)];
     }
+    if (name === "sign-as-user-nip46") {
+        return [...commonVerdicts, ...evaluateSignAsUser(events, requestRecords, context)];
+    }
     return [...commonVerdicts, ...evaluateFsReadAdjustment(events, requestRecords, context)];
+}
+
+function evaluateSignAsUser(
+    events: Event[],
+    requestRecords: MockRequestRecord[],
+    context: EvaluateContext
+): Verdict[] {
+    const ownerPubkey = context.ownerPubkey ?? "";
+    const llmToolCall = requestRecords.find(
+        (record) => record.agent === "pm" && record.toolCalls?.includes("sign_as_user")
+    );
+    const toolEvent = events.find(
+        (event) =>
+            event.kind === 1 &&
+            event.pubkey === context.pmPubkey &&
+            hasTag(event, "tool", "sign_as_user") &&
+            (tagValue(event, "tool-args") ?? "").includes(signAsUserExplanation)
+    );
+    const nip46Request = events.find(
+        (event) =>
+            event.kind === 24133 &&
+            event.pubkey === context.pmPubkey &&
+            hasTag(event, "p", ownerPubkey) &&
+            event.content.length > 0
+    );
+    const nip46Response = events.find(
+        (event) =>
+            event.kind === 24133 &&
+            event.pubkey === ownerPubkey &&
+            hasTag(event, "p", context.pmPubkey) &&
+            event.content.length > 0
+    );
+    const relaySignedEvent = events.find(isOwnerSignedProbeEvent(ownerPubkey));
+    const storedSignedEvent = findStoredSignedProbeEvent(context.conversationDbPath, ownerPubkey);
+    const completion = events.find(
+        (event) =>
+            event.kind === 1 &&
+            event.pubkey === context.pmPubkey &&
+            event.content.includes(signAsUserCompletionText) &&
+            hasTag(event, "status", "completed")
+    );
+
+    return [
+        {
+            name: "Mock LLM requested sign_as_user",
+            ok: Boolean(llmToolCall),
+            detail: "Expected PM mock request record to include a sign_as_user tool call.",
+        },
+        {
+            name: "PM emitted sign_as_user tool event",
+            ok: Boolean(toolEvent),
+            detail: "Expected kind:1 tool=sign_as_user event with the probe signing explanation in tool-args.",
+        },
+        {
+            name: "NIP-46 request targeted throwaway owner",
+            ok: Boolean(nip46Request),
+            detail: "Expected encrypted kind:24133 from PM p-tagged to the throwaway owner pubkey.",
+        },
+        {
+            name: "NIP-46 owner signer replied",
+            ok: Boolean(nip46Response),
+            detail: "Expected encrypted kind:24133 response from the throwaway owner p-tagged to PM.",
+        },
+        {
+            name: "Final signed event is owner-signed and valid",
+            ok: Boolean(relaySignedEvent ?? storedSignedEvent),
+            detail: "Expected either a published owner-signed probe event or a valid signed event in the stored tool result.",
+        },
+        {
+            name: "PM completed after sign_as_user result",
+            ok: Boolean(completion),
+            detail: "Expected PM to publish the scripted completion after receiving the signed event result.",
+        },
+    ];
 }
 
 function evaluateAcpDelegationMcp(events: Event[], context: EvaluateContext): Verdict[] {
@@ -237,7 +318,7 @@ function evaluateRootAgentsMd(
             event.pubkey === context.pmPubkey &&
             (isRealLlm(context.llmProvider)
                 ? (fuzzyIncludes(event.content, rootAgentsMdInstruction.toLowerCase()) && !hasTag(event, "tool"))
-                : event.content.includes(`${rootAgentsMdInstruction} observed"))
+                : event.content.includes(`${rootAgentsMdInstruction} observed`))
     );
 
     return [
@@ -1337,6 +1418,103 @@ function toolArgPath(event: Event): string | undefined {
 
 function requestContainsAgentsMdReminder(requestDebug: string): boolean {
     return requestDebug.includes("system-reminder") && requestDebug.includes("agents-md");
+}
+
+function isOwnerSignedProbeEvent(ownerPubkey: string): (event: Event) => boolean {
+    return (event) =>
+        event.kind === 1 &&
+        event.pubkey === ownerPubkey &&
+        event.content === signAsUserSignedContent &&
+        verifyEvent(event);
+}
+
+function findStoredSignedProbeEvent(dbPath: string, ownerPubkey: string): Event | null {
+    const transcripts = readAllConversationTranscripts(dbPath);
+    for (const transcript of transcripts) {
+        for (const message of transcript.messages) {
+            const event = findSignedProbeEventInValue(message.content, ownerPubkey);
+            if (event) {
+                return event;
+            }
+        }
+    }
+    for (const output of readToolResultOutputs(dbPath)) {
+        const event = findSignedProbeEventInValue(output, ownerPubkey);
+        if (event) {
+            return event;
+        }
+    }
+    return null;
+}
+
+function readToolResultOutputs(dbPath: string): string[] {
+    try {
+        const { Database } = require("bun:sqlite");
+        const db = new Database(dbPath, { readonly: true });
+        try {
+            return (db
+                .query("SELECT result_output AS resultOutput FROM tool_messages")
+                .all() as Array<{ resultOutput: string | Uint8Array | null }>)
+                .map((row) =>
+                    row.resultOutput instanceof Uint8Array
+                        ? new TextDecoder().decode(row.resultOutput)
+                        : row.resultOutput
+                )
+                .filter((value): value is string => typeof value === "string");
+        } finally {
+            db.close();
+        }
+    } catch {
+        return [];
+    }
+}
+
+function findSignedProbeEventInValue(value: unknown, ownerPubkey: string): Event | null {
+    if (typeof value === "string") {
+        if (!value.includes(signAsUserSignedContent)) {
+            return null;
+        }
+        try {
+            return findSignedProbeEventInValue(JSON.parse(value), ownerPubkey);
+        } catch {
+            return null;
+        }
+    }
+    if (!value || typeof value !== "object") {
+        return null;
+    }
+    if (looksLikeSignedProbeEvent(value, ownerPubkey)) {
+        return value as Event;
+    }
+    if (Array.isArray(value)) {
+        for (const item of value) {
+            const found = findSignedProbeEventInValue(item, ownerPubkey);
+            if (found) {
+                return found;
+            }
+        }
+        return null;
+    }
+    for (const item of Object.values(value)) {
+        const found = findSignedProbeEventInValue(item, ownerPubkey);
+        if (found) {
+            return found;
+        }
+    }
+    return null;
+}
+
+function looksLikeSignedProbeEvent(value: object, ownerPubkey: string): boolean {
+    const event = value as Event;
+    return (
+        event.kind === 1 &&
+        event.pubkey === ownerPubkey &&
+        event.content === signAsUserSignedContent &&
+        Array.isArray(event.tags) &&
+        typeof event.id === "string" &&
+        typeof event.sig === "string" &&
+        verifyEvent(event)
+    );
 }
 
 function countOccurrences(value: string, needle: string): number {

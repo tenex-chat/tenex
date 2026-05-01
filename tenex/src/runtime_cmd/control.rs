@@ -5,6 +5,7 @@ use std::sync::{Arc, Mutex};
 use super::control_process::terminate_process_group;
 use super::control_shell::{self, ShellTaskRecord};
 use super::mcp_subscriptions::McpControlCommand;
+use super::sign_as_user;
 use super::transport::TransportTee;
 use anyhow::{Context, Result};
 use tenex_protocol::{
@@ -181,6 +182,14 @@ impl RuntimeControlState {
                     Ok(response) => response,
                     Err(_) => RuntimeControlResponse::Error(ErrorResponse {
                         message: "runtime MCP control response channel closed".to_string(),
+                    }),
+                }
+            }
+            RuntimeControlRequest::SignAsUser(req) => {
+                match sign_as_user::sign_as_user(&self.base_dir, req).await {
+                    Ok(response) => RuntimeControlResponse::SignAsUser(response),
+                    Err(error) => RuntimeControlResponse::Error(ErrorResponse {
+                        message: error.to_string(),
                     }),
                 }
             }

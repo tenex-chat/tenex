@@ -8,7 +8,12 @@ description = "File-backed view of per-project TENEX state: agents, membership, 
 name = "tenex_project"
 path = "src/lib.rs"
 
+[features]
+default = []
+nip46 = ["dep:nostr-connect"]
+
 [dependencies]
+async-trait = "0.1"
 thiserror = "2"
 tracing = "0.1"
 tenex-agent-registry = { path = "../tenex-agent-registry" }
@@ -17,7 +22,9 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 dirs-next = "2"
 nostr = "0.44"
+nostr-connect = { version = "0.44", optional = true }
 
 [dev-dependencies]
 tempfile = "3"
+tokio = { version = "1", features = ["macros", "rt"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

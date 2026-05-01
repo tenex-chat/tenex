@@ -523,6 +523,26 @@ impl SkillSummary {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn built_in_signer_skill_grants_sign_as_user_tool() {
+        let tmp = tempfile::tempdir().unwrap();
+        let ctx = SkillLookupCtx {
+            agent_pubkey: "0123456789abcdef".to_string(),
+            project_path: tmp.path().display().to_string(),
+            base_dir: tmp.path().join("missing-base"),
+            agent_config_path: tmp.path().join("agent.json").display().to_string(),
+        };
+
+        let skill = find_skill("signer", &ctx).expect("built-in signer skill");
+        let tools = skill.frontmatter.expect("frontmatter").tools;
+        assert_eq!(tools, vec!["sign_as_user".to_string()]);
+    }
+}
+
 /// Group skills by scope into a map keyed by scope string.
 pub fn group_by_scope(skills: &[SkillData]) -> HashMap<&'static str, Vec<SkillSummary>> {
     let mut map: HashMap<&'static str, Vec<SkillSummary>> = HashMap::new();

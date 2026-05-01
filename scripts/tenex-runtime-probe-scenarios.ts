@@ -2,6 +2,11 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import type { Event, EventTemplate, SimplePool } from "nostr-tools";
 import {
+    decrypt as nip44Decrypt,
+    encrypt as nip44Encrypt,
+    getConversationKey,
+} from "nostr-tools/nip44";
+import {
     messageText,
     waitForStoredMessage,
     type ConversationMonitor,
@@ -59,6 +64,7 @@ export const availableScenarios = [
     "learn-tool",
     "rag-documents",
     "ask-owner",
+    "sign-as-user-nip46",
 ] as const;
 
 export type ScenarioName = (typeof availableScenarios)[number];
@@ -106,6 +112,12 @@ export const nestedAgentsMdCompletionText = "Nested AGENTS reminders observed.";
 export const convProbeFirstMessage = "CONVO_PROBE_FIRST";
 export const convReminderProbeMessage = "CONVO_REMINDER_PROBE";
 export const convReminderCompletionText = "conversation reminders observed.";
+export const signAsUserRequest =
+    "Use sign_as_user to sign the TENEX runtime probe event as the project owner.";
+export const signAsUserSignedContent = "SIGN_AS_USER_NIP46_PROBE_SIGNED_EVENT";
+export const signAsUserExplanation =
+    "TENEX runtime probe verifying sign_as_user NIP-46 signing with throwaway keys.";
+export const signAsUserCompletionText = "sign_as_user probe complete";
 
 const colorWords = [
     "red", "blue", "green", "yellow", "purple", "orange", "pink", "black",
@@ -141,6 +153,8 @@ export type ScenarioContext = {
     conversationDbPath: string;
     pmPubkey: string;
     workerPubkey: string;
+    ownerPubkey: string;
+    ownerSecret: Uint8Array;
     userSecret: Uint8Array;
     requestRecordPath: string;
     sign: (template: EventTemplate, secret: Uint8Array) => Event;
@@ -224,6 +238,9 @@ export function scenarioProjectDtag(name: ScenarioName): string {
     if (name === "ask-owner") {
         return "probe-ask-owner";
     }
+    if (name === "sign-as-user-nip46") {
+        return "probe-sign-as-user-nip46";
+    }
     return "probe-fs-read-adjustment";
 }
 
@@ -284,6 +301,9 @@ export function pmInstructions(name: ScenarioName): string {
     }
     if (name === "ask-owner") {
         return askPmInstructions;
+    }
+    if (name === "sign-as-user-nip46") {
+        return "This scenario verifies sign_as_user over NIP-46. Do not call todo_write. On the first turn, call sign_as_user exactly once with the requested unsigned event. After the tool returns, do not call tools again; reply exactly: sign_as_user probe complete.";
     }
     return "Use fs_read one file at a time. If the user corrects the requested total, follow the latest total before finishing.";
 }
@@ -600,6 +620,41 @@ export function mockScenario(name: ScenarioName): unknown {
     if (name === "ask-owner") {
         return askMockScenario();
     }
+    if (name === "sign-as-user-nip46") {
+        return {
+            responses: [
+                {
+                    agent: "pm",
+                    turn: 1,
+                    contains: signAsUserRequest,
+                    toolCalls: [
+                        {
+                            name: "sign_as_user",
+                            args: {
+                                description: "Sign TENEX runtime probe event",
+                                explanation: signAsUserExplanation,
+                                event: {
+                                    kind: 1,
+                                    content: signAsUserSignedContent,
+                                    tags: [
+                                        ["client", "tenex-runtime-probe"],
+                                        ["probe", "sign-as-user"],
+                                    ],
+                                },
+                            },
+                        },
+                    ],
+                },
+                {
+                    agent: "pm",
+                    turn: 2,
+                    contains: signAsUserSignedContent,
+                    content: signAsUserCompletionText,
+                },
+            ],
+            defaultContent: "sign_as_user NIP-46 probe did not match expected runtime state.",
+        };
+    }
 
     const mockDelayMs = Number(process.env.TENEX_PROBE_MOCK_DELAY_MS ?? 750);
     return {
@@ -668,9 +723,194 @@ export async function runScenario(name: ScenarioName, context: ScenarioContext):
         await runRagDocumentsProbe(context);
     } else if (name === "ask-owner") {
         await runAskProbe(context);
+    } else if (name === "sign-as-user-nip46") {
+        await runSignAsUserProbe(context);
     } else {
         await runFsReadAdjustmentProbe(context);
     }
+}
+
+async function runSignAsUserProbe(context: ScenarioContext): Promise<void> {
+    const signer = startNip46OwnerSigner(context);
+    const timeoutMs = Number(process.env.TENEX_PROBE_WAIT_MS ?? 15_000);
+    try {
+        const userEvent = context.sign(
+            {
+                kind: 1,
+                created_at: context.now(),
+                content: signAsUserRequest,
+                tags: [["a", context.projectRef]],
+            },
+            context.userSecret
+        );
+        await Promise.all(context.pool.publish([context.relayUrl], userEvent));
+        await context.waitForRequestRecord(
+            context.requestRecordPath,
+            (records) =>
+                records.some(
+                    (record) =>
+                        record.agent === "pm" &&
+                        record.toolCalls?.includes("sign_as_user")
+                ),
+            timeoutMs,
+            "PM mock LLM sign_as_user tool call"
+        );
+        await context.waitForObservedEvent(
+            context.events,
+            (event) =>
+                event.kind === 24133 &&
+                event.pubkey === context.pmPubkey &&
+                hasEventTag(event, "p", context.ownerPubkey),
+            timeoutMs,
+            "NIP-46 request from PM to owner signer"
+        );
+        await context.waitForObservedEvent(
+            context.events,
+            (event) =>
+                event.kind === 24133 &&
+                event.pubkey === context.ownerPubkey &&
+                hasEventTag(event, "p", context.pmPubkey),
+            timeoutMs,
+            "NIP-46 response from owner signer to PM"
+        );
+        await waitForStoredMessage(
+            context.conversationDbPath,
+            userEvent.id,
+            (message) =>
+                message.authorPubkey === context.pmPubkey &&
+                messageText(message).includes(signAsUserCompletionText),
+            timeoutMs,
+            "PM completion after sign_as_user result",
+            context.delay
+        );
+    } finally {
+        signer.close();
+    }
+}
+
+function startNip46OwnerSigner(context: ScenarioContext): { close: () => void } {
+    const sub = context.pool.subscribeMany(
+        [context.relayUrl],
+        { kinds: [24133], "#p": [context.ownerPubkey] },
+        {
+            onevent: (event) => {
+                if (event.pubkey === context.ownerPubkey) {
+                    return;
+                }
+                void respondToNip46Request(context, event);
+            },
+        }
+    );
+    return { close: () => sub.close() };
+}
+
+async function respondToNip46Request(context: ScenarioContext, requestEvent: Event): Promise<void> {
+    let response: { id: string; result: string | null; error: string | null };
+    try {
+        const request = decryptNip46Message(context.ownerSecret, requestEvent.pubkey, requestEvent.content);
+        response = {
+            id: request.id,
+            result: await handleNip46Request(context, request),
+            error: null,
+        };
+    } catch (error) {
+        response = {
+            id: "invalid",
+            result: null,
+            error: error instanceof Error ? error.message : String(error),
+        };
+    }
+    const conversationKey = getConversationKey(context.ownerSecret, requestEvent.pubkey);
+    const encrypted = nip44Encrypt(JSON.stringify(response), conversationKey);
+    const responseEvent = context.sign(
+        {
+            kind: 24133,
+            created_at: context.now(),
+            content: encrypted,
+            tags: [["p", requestEvent.pubkey]],
+        },
+        context.ownerSecret
+    );
+    await Promise.all(context.pool.publish([context.relayUrl], responseEvent));
+}
+
+function decryptNip46Message(
+    ownerSecret: Uint8Array,
+    requesterPubkey: string,
+    ciphertext: string
+): { id: string; method: string; params?: string[] } {
+    const conversationKey = getConversationKey(ownerSecret, requesterPubkey);
+    const plaintext = nip44Decrypt(ciphertext, conversationKey);
+    const parsed = JSON.parse(plaintext) as { id?: unknown; method?: unknown; params?: unknown };
+    if (typeof parsed.id !== "string" || typeof parsed.method !== "string") {
+        throw new Error("invalid NIP-46 request envelope");
+    }
+    return {
+        id: parsed.id,
+        method: parsed.method,
+        params: Array.isArray(parsed.params)
+            ? parsed.params.filter((param): param is string => typeof param === "string")
+            : [],
+    };
+}
+
+async function handleNip46Request(
+    context: ScenarioContext,
+    request: { method: string; params?: string[] }
+): Promise<string> {
+    if (request.method === "connect") {
+        return "ack";
+    }
+    if (request.method === "get_public_key") {
+        return context.ownerPubkey;
+    }
+    if (request.method === "ping") {
+        return "pong";
+    }
+    if (request.method === "sign_event") {
+        const unsigned = parseUnsignedEvent(request.params?.[0]);
+        const signed = context.sign(
+            {
+                kind: unsigned.kind,
+                created_at: unsigned.created_at ?? context.now(),
+                content: unsigned.content,
+                tags: unsigned.tags ?? [],
+            },
+            context.ownerSecret
+        );
+        return JSON.stringify(signed);
+    }
+    throw new Error(`unsupported NIP-46 method: ${request.method}`);
+}
+
+function parseUnsignedEvent(raw: string | undefined): {
+    kind: number;
+    created_at?: number;
+    content: string;
+    tags?: string[][];
+} {
+    if (!raw) {
+        throw new Error("missing sign_event payload");
+    }
+    const parsed = JSON.parse(raw) as {
+        kind?: unknown;
+        created_at?: unknown;
+        content?: unknown;
+        tags?: unknown;
+    };
+    if (typeof parsed.kind !== "number" || typeof parsed.content !== "string") {
+        throw new Error("invalid sign_event payload");
+    }
+    return {
+        kind: parsed.kind,
+        created_at: typeof parsed.created_at === "number" ? parsed.created_at : undefined,
+        content: parsed.content,
+        tags: Array.isArray(parsed.tags)
+            ? parsed.tags.filter((tag): tag is string[] =>
+                  Array.isArray(tag) && tag.every((part) => typeof part === "string")
+              )
+            : [],
+    };
 }
 
 async function runConversationRemindersProbe(context: ScenarioContext): Promise<void> {

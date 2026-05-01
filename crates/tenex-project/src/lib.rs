@@ -24,5 +24,7 @@ pub use git::{
 pub use id::{normalize_project_id, ProjectDTag};
 pub use models::{Agent, ProjectAgent, ProjectMetadata};
 pub use project::Project;
+#[cfg(feature = "nip46")]
+pub use signer::BunkerSigner;
 pub use signer::{NsecSigner, Signer, SignerError, SignerScheme};
 pub use teams::{load_teams, render_teams_context, teams_for_agent, Team};

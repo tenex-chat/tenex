@@ -100,7 +100,14 @@ const requestRecordPath = path.join(runDir, "mock-requests.jsonl");
 const cassetteRecordPath = llm.recordCassettePath
     ? path.resolve(llm.recordCassettePath)
     : path.join(runDir, "llm-cassette.jsonl");
-const llmModelName = llm.mode === "ollama" ? "probe-real" : llm.mode === "anthropic" ? "probe-anthropic" : "mock";
+const llmModelName =
+    llm.mode === "ollama"
+        ? "probe-real"
+        : llm.mode === "anthropic"
+        ? "probe-anthropic"
+        : llm.mode === "openrouter"
+        ? "probe-openrouter"
+        : "mock";
 const usesAcp =
     scenarioName === "acp-worker-basic" ||
     scenarioName === "acp-delegation-mcp" ||
@@ -185,6 +192,19 @@ const projectEvent = buildProjectEvent(initialProjectAgentPubkeys);
 const projectRef = `31933:${owner.pubkey}:${projectDtag}`;
 const pmWorkingDirectory =
     scenarioName === "root-agents-md" ? rootAgentsMdWorktreeDir : workspaceDir;
+const nip46Config =
+    scenarioName === "sign-as-user-nip46"
+        ? {
+              enabled: true,
+              signingTimeoutMs: 15_000,
+              maxRetries: 0,
+              owners: {
+                  [owner.pubkey]: {
+                      bunkerUri: `bunker://${owner.pubkey}?relay=${encodeURIComponent(relayUrl)}`,
+                  },
+              },
+          }
+        : undefined;
 
 writeJson(path.join(projectDir, "event.json"), projectEvent);
 writeJson(path.join(baseDir, "config.json"), {
@@ -200,6 +220,7 @@ writeJson(path.join(baseDir, "config.json"), {
     projectsBase: projectsBaseDir,
     relays: [relayUrl],
     telemetry: { enabled: false },
+    ...(nip46Config ? { nip46: nip46Config } : {}),
 });
 const llmConfigurations: Record<string, unknown> =
    llm.mode === "ollama"
@@ -279,6 +300,8 @@ writeJson(path.join(agentsDir, `${pm.pubkey}.json`), {
             : scenarioName === "fs-read-adjustment"
               || scenarioName === "nested-agents-md"
             ? { model: llmModelName, skills: ["read-access"] }
+            : scenarioName === "sign-as-user-nip46"
+            ? { model: llmModelName, skills: ["signer"] }
             : { model: llmModelName },
 });
 writeJson(path.join(agentsDir, `${worker.pubkey}.json`), {
@@ -418,6 +441,8 @@ try {
         conversationDbPath: convDbPath,
         pmPubkey: pm.pubkey,
         workerPubkey: isCrossProjectScenario && projectBWorker ? projectBWorker.pubkey : worker.pubkey,
+        ownerPubkey: owner.pubkey,
+        ownerSecret: owner.secret,
         userSecret: user.secret,
         requestRecordPath,
         sign,
@@ -519,8 +544,8 @@ if (verbose) {
         const statusTag = event.tags.find((tag) => tag[0] === "status");
         const kind = event.kind;
         const author = event.pubkey === pm.pubkey ? "pm" : event.pubkey === worker.pubkey ? "worker" : event.pubkey.slice(0, 8);
-        const toolLabel = toolTag ?  : "";
-        const statusLabel = statusTag ?  : "";
+        const toolLabel = toolTag ? ` tool=${toolTag[1] ?? ""}` : "";
+        const statusLabel = statusTag ? ` status=${statusTag[1] ?? ""}` : "";
         const contentPreview = event.content.slice(0, 120).replace(/\n/g, " \\n");
         console.log(`  kind=${kind} ${author}${toolLabel}${statusLabel}: ${contentPreview}`);
     }
@@ -763,9 +788,3 @@ function cleanup(): void {
         }
     }
 }
-const llmModelName =
-    llm.mode === "ollama" ? "probe-real"
-    : llm.mode === "anthropic" ? "probe-anthropic"
-    : llm.mode === "openrouter" ? "probe-openrouter"
-    : "mock";
-if (llm.mode === "ollama" || llm.mode === "anthropic" || llm.mode === "openrouter" || llm.recordCassettePath) {

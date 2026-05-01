@@ -129,9 +129,8 @@ fn encode_delegation(
         .iter()
         .map(|d| {
             let prefixed = prepend_recipient_label(&d.request, &d.recipient_label);
-            let mut builder =
-                allow_self_addressed(EventBuilder::new(Kind::TextNote, prefixed))
-                    .custom_created_at(now_plus_one);
+            let mut builder = allow_self_addressed(EventBuilder::new(Kind::TextNote, prefixed))
+                .custom_created_at(now_plus_one);
 
             // Followup delegations stay in the original delegated conversation.
             // Fresh delegations start a new conversation without any e-tag.
