@@ -1,5 +1,6 @@
 use anyhow::{anyhow, bail, Context, Result};
 use serde_json::Value;
+use tenex_agent_registry::{AgentCategory, VALID_CATEGORIES};
 use tenex_llm_config::key_health::KeyHealthTracker;
 use tenex_llm_config::resolver::{load_llms, load_providers, resolve_config};
 
@@ -12,6 +13,17 @@ pub struct PromptModel {
     pub system_prompt: Option<String>,
 }
 
+#[derive(Debug, Clone)]
+pub struct AgentGenerationResult {
+    pub name: String,
+    pub slug: String,
+    pub role: String,
+    pub description: String,
+    pub use_criteria: String,
+    pub category: Option<AgentCategory>,
+    pub instructions: String,
+}
+
 pub fn resolve_role_model(base_dir: &std::path::Path, role_key: &str) -> Result<PromptModel> {
     let llms = load_llms(base_dir)?;
     let config_name = llms
@@ -21,6 +33,113 @@ pub fn resolve_role_model(base_dir: &std::path::Path, role_key: &str) -> Result<
     let providers = load_providers(base_dir)?;
     let value = resolve_config(config_name, &llms, &providers, &KeyHealthTracker::new());
     prompt_model_from_resolved_value(&value)
+}
+
+pub fn resolve_supervision_model(base_dir: &std::path::Path) -> Result<PromptModel> {
+    resolve_role_model(base_dir, "supervision")
+}
+
+pub fn build_generation_prompt(description: &str) -> String {
+    let categories = VALID_CATEGORIES
+        .iter()
+        .map(|c| c.as_str())
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!(
+        "Generate a TENEX agent definition from this description.\n\
+         Return ONLY a JSON object — no markdown fences, no extra text.\n\n\
+         Description: {description}\n\n\
+         Return JSON with exactly these fields:\n\
+         - name: display name (title case, concise)\n\
+         - slug: lowercase kebab-case identifier derived from the name\n\
+         - role: one short phrase describing expertise (no punctuation)\n\
+         - description: one sentence describing what the agent does\n\
+         - useCriteria: one sentence describing when to use this agent\n\
+         - category: one of: {categories}\n\
+         - instructions: complete system prompt for the agent\n\n\
+         Example output:\n\
+         {{\"name\":\"Code Reviewer\",\"slug\":\"code-reviewer\",\"role\":\"code quality specialist\",\
+         \"description\":\"Reviews code for correctness, style, and security.\",\
+         \"useCriteria\":\"Use when reviewing a pull request or patch.\",\
+         \"category\":\"reviewer\",\
+         \"instructions\":\"You are Code Reviewer, a code quality specialist.\\n\\nYour job: ...\"}}"
+    )
+}
+
+pub async fn generate_agent_from_description(
+    model: &PromptModel,
+    description: &str,
+) -> Result<AgentGenerationResult> {
+    let prompt = build_generation_prompt(description);
+    let raw = refine_system_prompt(model, &prompt).await?;
+    parse_generation_result(&raw)
+}
+
+fn parse_generation_result(raw: &str) -> Result<AgentGenerationResult> {
+    let clean = raw.trim();
+    let clean = clean
+        .strip_prefix("```json")
+        .or_else(|| clean.strip_prefix("```"))
+        .map(|s| s.trim_end_matches("```").trim())
+        .unwrap_or(clean);
+
+    let json: Value =
+        serde_json::from_str(clean).with_context(|| format!("LLM returned non-JSON:\n{raw}"))?;
+
+    let name = json
+        .get("name")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| anyhow!("LLM response missing 'name'"))?
+        .to_owned();
+
+    let slug = json
+        .get("slug")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+        .unwrap_or(&name)
+        .to_owned();
+
+    let role = json
+        .get("role")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| anyhow!("LLM response missing 'role'"))?
+        .to_owned();
+
+    let description = json
+        .get("description")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_owned();
+
+    let use_criteria = json
+        .get("useCriteria")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_owned();
+
+    let category = json
+        .get("category")
+        .and_then(Value::as_str)
+        .and_then(AgentCategory::from_str_strict);
+
+    let instructions = json
+        .get("instructions")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| anyhow!("LLM response missing 'instructions'"))?
+        .to_owned();
+
+    Ok(AgentGenerationResult {
+        name,
+        slug,
+        role,
+        description,
+        use_criteria,
+        category,
+        instructions,
+    })
 }
 
 pub async fn refine_system_prompt(model: &PromptModel, prompt: &str) -> Result<String> {
@@ -41,26 +160,6 @@ pub async fn refine_system_prompt(model: &PromptModel, prompt: &str) -> Result<S
         "ollama" => call_ollama(model, prompt).await,
         other => bail!("LLM prompt refinement is not wired for provider '{other}'"),
     }
-}
-
-pub fn build_refinement_prompt(
-    name: &str,
-    slug: &str,
-    role: &str,
-    description: &str,
-    use_criteria: &str,
-    draft: &str,
-) -> String {
-    format!(
-        "Create a TENEX agent system prompt from this operator brief.\n\
-         Return only the final system prompt. Do not wrap it in markdown fences.\n\n\
-         Agent name: {name}\n\
-         Agent slug: {slug}\n\
-         Role: {role}\n\
-         Description: {description}\n\
-         Use criteria: {use_criteria}\n\n\
-         Operator draft:\n{draft}"
-    )
 }
 
 fn prompt_model_from_resolved_value(value: &Value) -> Result<PromptModel> {
@@ -290,24 +389,58 @@ mod tests {
     }
 
     #[test]
-    fn refinement_prompt_contains_all_agent_fields() {
-        let prompt = build_refinement_prompt(
-            "Planner",
-            "planner",
-            "planning specialist",
-            "Plans work",
-            "Use for plans",
-            "Be careful",
-        );
+    fn build_generation_prompt_contains_required_field_names() {
+        let prompt = build_generation_prompt("An agent that reviews code");
         for needle in [
-            "Planner",
-            "planner",
-            "planning specialist",
-            "Plans work",
-            "Use for plans",
-            "Be careful",
+            "name",
+            "slug",
+            "role",
+            "description",
+            "useCriteria",
+            "category",
+            "instructions",
+            "An agent that reviews code",
         ] {
-            assert!(prompt.contains(needle), "missing {needle}");
+            assert!(prompt.contains(needle), "missing '{needle}' in generation prompt");
         }
+    }
+
+    #[test]
+    fn parse_generation_result_extracts_all_fields() {
+        let raw = r#"{"name":"Code Reviewer","slug":"code-reviewer","role":"code quality specialist","description":"Reviews code.","useCriteria":"Use for PRs.","category":"reviewer","instructions":"You are Code Reviewer."}"#;
+        let result = parse_generation_result(raw).unwrap();
+        assert_eq!(result.name, "Code Reviewer");
+        assert_eq!(result.slug, "code-reviewer");
+        assert_eq!(result.role, "code quality specialist");
+        assert_eq!(result.description, "Reviews code.");
+        assert_eq!(result.use_criteria, "Use for PRs.");
+        assert_eq!(result.category, Some(AgentCategory::Reviewer));
+        assert_eq!(result.instructions, "You are Code Reviewer.");
+    }
+
+    #[test]
+    fn parse_generation_result_strips_markdown_fences() {
+        let raw = "```json\n{\"name\":\"Planner\",\"slug\":\"planner\",\"role\":\"planner\",\"instructions\":\"You plan.\"}\n```";
+        let result = parse_generation_result(raw).unwrap();
+        assert_eq!(result.name, "Planner");
+    }
+
+    #[test]
+    fn parse_generation_result_unknown_category_returns_none() {
+        let raw = r#"{"name":"X","slug":"x","role":"specialist","instructions":"Do stuff.","category":"unknown-type"}"#;
+        let result = parse_generation_result(raw).unwrap();
+        assert_eq!(result.category, None);
+    }
+
+    #[test]
+    fn parse_generation_result_missing_name_returns_error() {
+        let raw = r#"{"slug":"x","role":"specialist","instructions":"Do stuff."}"#;
+        assert!(parse_generation_result(raw).is_err());
+    }
+
+    #[test]
+    fn parse_generation_result_missing_instructions_returns_error() {
+        let raw = r#"{"name":"X","slug":"x","role":"specialist"}"#;
+        assert!(parse_generation_result(raw).is_err());
     }
 }

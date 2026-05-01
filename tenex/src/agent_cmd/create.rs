@@ -3,9 +3,9 @@ use indexmap::IndexMap;
 use serde_json::Value;
 use tenex_agent_registry::{AgentCategory, AgentDoc, AgentStorage};
 
+use crate::agent_cmd::create_llm;
 use crate::agent_cmd::create_prompts::{
-    default_instructions, existing_slugs, maybe_refine_with_llm, prompt_category, prompt_editor,
-    prompt_model_config, prompt_optional, prompt_projects, prompt_required, prompt_slug,
+    existing_slugs, prompt_editor, prompt_model_config, prompt_projects, prompt_required,
     slug_from_name,
 };
 use crate::nostr_pub::owner_signer::resolve_owner_signer;
@@ -15,55 +15,64 @@ use crate::tui::{display, prompts};
 pub async fn run(base_dir: &std::path::Path) -> Result<()> {
     display::blank();
     display::step(0, 0, "Create Agent");
-    display::context("Create a local installed agent, then optionally assign it to projects.");
+    display::context("Describe the agent and the LLM will fill in the details.");
 
-    let existing_slugs = existing_slugs(base_dir)?;
-    let Some(name) = prompt_required("Agent display name:")? else {
+    let model = match create_llm::resolve_supervision_model(base_dir) {
+        Ok(m) => m,
+        Err(e) => {
+            display::hint(&format!("Supervision LLM role is not configured: {e}"));
+            return Ok(());
+        }
+    };
+
+    let Some(description) = prompt_required("Describe the agent you want to create:")? else {
         return Ok(());
     };
-    let default_slug = slug_from_name(&name);
-    let Some(slug) = prompt_slug(&existing_slugs, &default_slug)? else {
+
+    display::hint("Generating agent definition…");
+    let generated = match create_llm::generate_agent_from_description(&model, &description).await {
+        Ok(g) => g,
+        Err(e) => {
+            display::hint(&format!("LLM generation failed: {e}"));
+            return Ok(());
+        }
+    };
+
+    let existing = existing_slugs(base_dir)?;
+    let base_slug = slug_from_name(&generated.slug);
+    let slug = ensure_unique_slug(&base_slug, &existing);
+
+    display::blank();
+    display::summary_line("Name", &generated.name);
+    display::summary_line("Slug", &slug);
+    display::summary_line("Role", &generated.role);
+    if !generated.description.is_empty() {
+        display::summary_line("Description", &generated.description);
+    }
+    if !generated.use_criteria.is_empty() {
+        display::summary_line("Use when", &generated.use_criteria);
+    }
+    display::summary_line(
+        "Category",
+        generated.category.map(|c| c.as_str()).unwrap_or("none"),
+    );
+
+    let Some(instructions) = prompt_editor("Review system prompt", &generated.instructions)? else {
         return Ok(());
     };
-    let Some(role) = prompt_required("Role / expertise:")? else {
-        return Ok(());
-    };
-    let Some(description) = prompt_optional("One-sentence description:")? else {
-        return Ok(());
-    };
-    let Some(use_criteria) = prompt_optional("Use this agent when:")? else {
-        return Ok(());
-    };
-    let Some(category) = prompt_category()? else {
-        return Ok(());
-    };
+
     let Some(model_config) = prompt_model_config(base_dir)? else {
         return Ok(());
     };
-
-    let initial = default_instructions(&name, &role, &description, &use_criteria);
-    let Some(mut instructions) = prompt_editor("Initial system prompt", &initial)? else {
-        return Ok(());
-    };
-    instructions = maybe_refine_with_llm(
-        base_dir,
-        &name,
-        &slug,
-        &role,
-        &description,
-        &use_criteria,
-        &instructions,
-    )
-    .await?;
 
     let Some(projects) = prompt_projects(base_dir)? else {
         return Ok(());
     };
 
     display::blank();
-    display::summary_line("Name", &name);
+    display::summary_line("Name", &generated.name);
     display::summary_line("Slug", &slug);
-    display::summary_line("Role", &role);
+    display::summary_line("Role", &generated.role);
     display::summary_line("Model", model_config.as_deref().unwrap_or("TENEX default"));
     let projects_summary = if projects.is_empty() {
         "none".to_owned()
@@ -87,19 +96,33 @@ pub async fn run(base_dir: &std::path::Path) -> Result<()> {
 
     let draft = AgentCreateDraft {
         slug,
-        name,
-        role,
-        description,
-        use_criteria,
+        name: generated.name,
+        role: generated.role,
+        description: generated.description,
+        use_criteria: generated.use_criteria,
         instructions,
         model_config,
-        category,
+        category: generated.category,
     };
     let pubkey = save_created_agent(base_dir, &draft, &projects).await?;
     display::blank();
     display::success(&format!("Created \"{}\" ({})", draft.name, draft.slug));
     display::context(&format!("Pubkey: {pubkey}"));
     Ok(())
+}
+
+fn ensure_unique_slug(base: &str, existing: &[String]) -> String {
+    if !existing.iter().any(|s| s == base) {
+        return base.to_owned();
+    }
+    let mut n = 2u32;
+    loop {
+        let candidate = format!("{base}-{n}");
+        if !existing.iter().any(|s| s == &candidate) {
+            return candidate;
+        }
+        n += 1;
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -212,5 +235,22 @@ mod tests {
             Some("smart"),
         );
         assert!(doc.nsec().unwrap_or_default().starts_with("nsec1"));
+    }
+
+    #[test]
+    fn ensure_unique_slug_returns_base_when_no_conflict() {
+        assert_eq!(ensure_unique_slug("foo", &[]), "foo");
+        assert_eq!(
+            ensure_unique_slug("foo", &["bar".to_owned()]),
+            "foo"
+        );
+    }
+
+    #[test]
+    fn ensure_unique_slug_appends_suffix_on_conflict() {
+        let existing = vec!["foo".to_owned()];
+        assert_eq!(ensure_unique_slug("foo", &existing), "foo-2");
+        let existing = vec!["foo".to_owned(), "foo-2".to_owned()];
+        assert_eq!(ensure_unique_slug("foo", &existing), "foo-3");
     }
 }
