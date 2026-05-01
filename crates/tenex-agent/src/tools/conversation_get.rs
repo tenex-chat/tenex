@@ -1,8 +1,9 @@
 use crate::config::ResolvedModel;
 use rig::providers::{anthropic, ollama, openai, openrouter};
 use rig::{client::CompletionClient, completion::Prompt, completion::ToolDefinition, tool::Tool};
+use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::json;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -27,14 +28,6 @@ pub struct ConversationGetTool {
 impl ConversationGetTool {
     pub fn new(db_path: PathBuf, resolved: Arc<ResolvedModel>) -> Self {
         Self { db_path, resolved }
-    }
-
-    fn get_conversations_dir(&self) -> PathBuf {
-        self.db_path
-            .parent()
-            .map(|p| p.to_path_buf())
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join("conversations")
     }
 
     async fn call_llm(&self, system: &str, user: String) -> anyhow::Result<String> {
@@ -145,39 +138,57 @@ impl Tool for ConversationGetTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<String, Self::Error> {
-        let conversations_dir = self.get_conversations_dir();
-        let json_path = conversations_dir.join(format!("{}.json", &args.conversation_id));
+        let messages: Vec<(String, String, String, String)> = {
+            let conn = Connection::open(&self.db_path)
+                .map_err(|e| ConversationGetError(format!("failed to open database: {e}")))?;
 
-        let content = std::fs::read_to_string(&json_path)
-            .map_err(|e| ConversationGetError(format!("failed to read conversation file: {e}")))?;
+            let mut stmt = conn
+                .prepare(
+                    "SELECT id, author_pubkey, message_type, content \
+                     FROM messages \
+                     WHERE conversation_id = ? \
+                     ORDER BY sequence ASC"
+                )
+                .map_err(|e| ConversationGetError(format!("failed to prepare statement: {e}")))?;
 
-        let json: Value = serde_json::from_str(&content)
-            .map_err(|e| ConversationGetError(format!("failed to parse conversation JSON: {e}")))?;
+            let rows = stmt
+                .query_map([&args.conversation_id], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                    ))
+                })
+                .map_err(|e| ConversationGetError(format!("failed to query messages: {e}")))?;
 
-        let messages_array = json
-            .get("messages")
-            .and_then(|m| m.as_array())
-            .ok_or_else(|| ConversationGetError("no messages array in conversation file".to_string()))?;
+            let mut result = Vec::new();
+            for row in rows {
+                result.push(row.map_err(|e| ConversationGetError(format!("failed to get row: {e}")))?);
+            }
+            result
+        };
+
+        if messages.is_empty() {
+            return Ok(format!(
+                "No messages found for conversation {}",
+                &args.conversation_id[..8.min(args.conversation_id.len())]
+            ));
+        }
 
         let limit = args.limit.unwrap_or(i64::MAX) as usize;
-        let mut messages: Vec<_> = messages_array
-            .iter()
-            .take(limit)
-            .collect();
+        let mut filtered_messages: Vec<_> = messages.iter().take(limit).collect();
 
         if let Some(uid) = args.until_id.as_deref() {
-            if let Some(idx) = messages
+            if let Some(idx) = filtered_messages
                 .iter()
-                .position(|m| {
-                    m.get("eventId").and_then(|v| v.as_str()) == Some(uid)
-                        || m.get("id").and_then(|v| v.as_str()) == Some(uid)
-                })
+                .position(|(id, _, _, _)| id == uid)
             {
-                messages.truncate(idx);
+                filtered_messages.truncate(idx);
             }
         }
 
-        if messages.is_empty() {
+        if filtered_messages.is_empty() {
             return Ok(format!(
                 "No messages found for conversation {}",
                 &args.conversation_id[..8.min(args.conversation_id.len())]
@@ -187,25 +198,12 @@ impl Tool for ConversationGetTool {
         let mut lines = vec![format!(
             "Conversation {} ({} messages):",
             &args.conversation_id[..8.min(args.conversation_id.len())],
-            messages.len()
+            filtered_messages.len()
         )];
 
-        for msg in messages {
-            let author = msg
-                .get("pubkey")
-                .and_then(|p| p.as_str())
-                .map(|p| &p[..8.min(p.len())])
-                .unwrap_or("unknown");
-            let msg_type = msg
-                .get("messageType")
-                .and_then(|t| t.as_str())
-                .unwrap_or("text");
-            let content = msg
-                .get("content")
-                .and_then(|c| c.as_str())
-                .unwrap_or("");
-
-            lines.push(format!("[{msg_type}] {author}: {content}"));
+        for (_, author, msg_type, content) in filtered_messages {
+            let author_short = &author[..8.min(author.len())];
+            lines.push(format!("[{msg_type}] {author_short}: {content}"));
         }
 
         let transcript = lines.join("\n");
@@ -228,7 +226,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_get_conversations_dir() {
+    fn test_conversation_get_tool_creation() {
         let db_path = PathBuf::from("/home/user/.tenex/projects/myproject/conversation.db");
         let resolved = Arc::new(ResolvedModel {
             provider: "anthropic".to_string(),
@@ -236,11 +234,7 @@ mod tests {
             api_key: None,
             base_url: None,
         });
-        let tool = ConversationGetTool::new(db_path, resolved);
-        let conv_dir = tool.get_conversations_dir();
-        assert_eq!(
-            conv_dir,
-            PathBuf::from("/home/user/.tenex/projects/myproject/conversations")
-        );
+        let tool = ConversationGetTool::new(db_path.clone(), resolved);
+        assert_eq!(tool.db_path, db_path);
     }
 }
