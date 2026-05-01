@@ -19,12 +19,12 @@
 //! source — including the singular/plural toggles
 //! (`agent`/`agents`, `project`/`projects`).
 //!
-//! These functions take a resolved owner [`Keys`] from the caller; they
-//! do not run [`crate::nostr_pub::owner_signer::resolve_owner_signer`]
-//! themselves. The TS source resolves the signer per-call inside
-//! `getOwnerSigner`; the Rust port lifts that to the caller so the
-//! manager can resolve once at the start of an interactive session and
-//! reuse it across many actions.
+//! Delete functions take `Option<&Keys>` — Nostr membership sync is skipped
+//! when no keys are available. This lets users delete agents locally without
+//! providing their nsec (the kind:31933 project event is left on the relay
+//! unchanged, which is correct when moving an agent to another machine).
+//! Assign and merge still require keys because those operations always
+//! produce Nostr state that needs to be authoritative.
 
 use anyhow::{anyhow, Result};
 use nostr_sdk::Keys;
@@ -54,12 +54,13 @@ use tenex_agent_registry::AgentStorage;
 /// 4. Collect affected project dTags = unique union of every selected
 ///    agent's `projects` field.
 /// 5. Delete each (publishing inventory after each — TS default behavior).
-/// 6. Re-publish every affected project's kind:31933 with the post-delete
-///    local membership.
+/// 6. If `keys` is `Some`, re-publish every affected project's kind:31933.
+///    When `None`, local deletion still proceeds; the relay copy is left
+///    unchanged (correct when migrating an agent to another machine).
 /// 7. Success line: `"Deleted N agent(s)"`.
 pub async fn bulk_delete_agents(
     base_dir: &std::path::Path,
-    keys: &Keys,
+    keys: Option<&Keys>,
     agents: &[ManagedAgent],
     selected_pubkeys: &[String],
 ) -> Result<()> {
@@ -105,7 +106,9 @@ pub async fn bulk_delete_agents(
         }
     }
 
-    sync_many_project_memberships(base_dir, keys, &affected).await?;
+    if let Some(keys) = keys {
+        sync_many_project_memberships(base_dir, keys, &affected).await?;
+    }
 
     display::blank();
     let plural = if deleted_count == 1 { "" } else { "s" };
@@ -351,13 +354,13 @@ pub async fn assign_agent_to_projects(
 /// 2. Confirm prompt:
 ///    `"Permanently delete <slug> from storage?"` (default false).
 ///    User-cancel returns silently.
-/// 3. Capture affected projects from the entry, delete locally, sync the
-///    affected projects.
+/// 3. Delete locally. If `keys` is `Some`, sync the affected projects'
+///    kind:31933. When `None`, the relay copy is left unchanged.
 /// 4. Success line: `"Deleted \"<name>\" (<slug>)"` — note the quoted
 ///    name + parenthesised slug shape (TS `:608`).
 pub async fn confirm_and_delete(
     base_dir: &std::path::Path,
-    keys: &Keys,
+    keys: Option<&Keys>,
     entry: Option<&ManagedAgent>,
 ) -> Result<()> {
     let Some(entry) = entry else {
@@ -382,7 +385,9 @@ pub async fn confirm_and_delete(
 
     let affected = entry.projects.clone();
     delete_stored_agent(base_dir, &entry.pubkey, DeleteOptions::new()).await?;
-    sync_many_project_memberships(base_dir, keys, &affected).await?;
+    if let Some(keys) = keys {
+        sync_many_project_memberships(base_dir, keys, &affected).await?;
+    }
 
     display::blank();
     display::success(&format!("Deleted \"{}\" ({})", entry.name, entry.slug));
@@ -564,9 +569,8 @@ pub async fn show_agent_detail(
                 continue;
             }
             CHOICE_DELETE => {
-                let keys = ensure_owner_signer(owner_keys, base_dir)?;
                 let snapshot = entry.clone();
-                confirm_and_delete(base_dir, &keys, Some(&snapshot)).await?;
+                confirm_and_delete(base_dir, owner_keys.as_ref(), Some(&snapshot)).await?;
                 return Ok(());
             }
             other => {
@@ -663,8 +667,8 @@ pub async fn show_main_menu(base_dir: &std::path::Path) -> Result<()> {
         match result.action.as_str() {
             "done" => return Ok(()),
             "delete-selected" => {
-                let keys = ensure_owner_signer(&mut owner_keys, base_dir)?;
-                bulk_delete_agents(base_dir, &keys, &agents, &result.selected_pubkeys).await?;
+                bulk_delete_agents(base_dir, owner_keys.as_ref(), &agents, &result.selected_pubkeys)
+                    .await?;
                 continue;
             }
             "merge-selected" => {
@@ -679,9 +683,8 @@ pub async fn show_main_menu(base_dir: &std::path::Path) -> Result<()> {
             }
             other if other.starts_with("delete:") => {
                 let pubkey = &other["delete:".len()..];
-                let keys = ensure_owner_signer(&mut owner_keys, base_dir)?;
                 let entry_clone = agents.iter().find(|a| a.pubkey == pubkey).cloned();
-                confirm_and_delete(base_dir, &keys, entry_clone.as_ref()).await?;
+                confirm_and_delete(base_dir, owner_keys.as_ref(), entry_clone.as_ref()).await?;
                 continue;
             }
             other => {
@@ -780,7 +783,7 @@ mod tests {
         let base = unique_temp();
         let keys = Keys::generate();
         // No agents, no selection — guard fires, no prompt invoked.
-        let result = bulk_delete_agents(&base, &keys, &[], &[]).await;
+        let result = bulk_delete_agents(&base, Some(&keys), &[], &[]).await;
         assert!(result.is_ok());
         std::fs::remove_dir_all(&base).ok();
     }
@@ -790,7 +793,7 @@ mod tests {
         let base = unique_temp();
         let keys = Keys::generate();
         let a = agent("alpha", vec!["P1"]);
-        let result = bulk_delete_agents(&base, &keys, &[a], &[]).await;
+        let result = bulk_delete_agents(&base, Some(&keys), &[a], &[]).await;
         assert!(result.is_ok());
         std::fs::remove_dir_all(&base).ok();
     }
@@ -805,7 +808,8 @@ mod tests {
         let base = unique_temp();
         let keys = Keys::generate();
         let a = agent("alpha", vec!["P1"]);
-        let result = bulk_delete_agents(&base, &keys, &[a], &["does-not-match".to_owned()]).await;
+        let result =
+            bulk_delete_agents(&base, Some(&keys), &[a], &["does-not-match".to_owned()]).await;
         assert!(result.is_ok());
         std::fs::remove_dir_all(&base).ok();
     }
@@ -863,8 +867,7 @@ mod tests {
     #[tokio::test]
     async fn confirm_and_delete_no_entry_emits_no_longer_exists_hint() {
         let base = unique_temp();
-        let keys = Keys::generate();
-        let result = confirm_and_delete(&base, &keys, None).await;
+        let result = confirm_and_delete(&base, None, None).await;
         assert!(result.is_ok());
         std::fs::remove_dir_all(&base).ok();
     }
