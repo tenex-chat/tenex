@@ -214,7 +214,6 @@ This project runs multiple agents concurrently. Follow these rules to avoid inte
 
 - **Full architecture guide:** `docs/ARCHITECTURE.md`
 - **Module inventory:** `MODULE_INVENTORY.md`
-- **Testing status:** `docs/TESTING_STATUS.md`
 
 ---
 
