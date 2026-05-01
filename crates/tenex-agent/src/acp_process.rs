@@ -10,11 +10,13 @@ use crate::acp_config::{AcpPermissionPolicy, AcpRuntimeConfig};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum AcpUpdate {
     AgentMessageChunk { text: String },
+    ToolCallStarted { segment_to_flush: String },
 }
 
 #[derive(Default)]
 pub(crate) struct AcpUpdates {
     pub(crate) visible_text: String,
+    pub(crate) current_segment: String,
 }
 
 impl AcpUpdates {
@@ -23,17 +25,24 @@ impl AcpUpdates {
             .get("params")
             .and_then(|params| params.get("update"))?;
         let kind = update.get("sessionUpdate").and_then(Value::as_str)?;
-        if kind != "agent_message_chunk" {
-            return None;
+        match kind {
+            "agent_message_chunk" => {
+                let text = update
+                    .get("content")
+                    .and_then(|content| content.get("text"))
+                    .and_then(Value::as_str)?;
+                self.visible_text.push_str(text);
+                self.current_segment.push_str(text);
+                Some(AcpUpdate::AgentMessageChunk {
+                    text: text.to_string(),
+                })
+            }
+            "tool_call" => {
+                let segment_to_flush = std::mem::take(&mut self.current_segment);
+                Some(AcpUpdate::ToolCallStarted { segment_to_flush })
+            }
+            _ => None,
         }
-        let text = update
-            .get("content")
-            .and_then(|content| content.get("text"))
-            .and_then(Value::as_str)?;
-        self.visible_text.push_str(text);
-        Some(AcpUpdate::AgentMessageChunk {
-            text: text.to_string(),
-        })
     }
 }
 
@@ -247,17 +256,98 @@ mod tests {
             })
         );
         assert_eq!(updates.visible_text, "hello world");
+        assert_eq!(updates.current_segment, "hello world");
     }
 
     #[test]
-    fn apply_ignores_non_visible_updates() {
+    fn apply_tool_call_flushes_current_segment_and_resets() {
+        let mut updates = AcpUpdates::default();
+        let chunk = json!({
+            "jsonrpc": "2.0",
+            "method": "session/update",
+            "params": {
+                "update": {
+                    "sessionUpdate": "agent_message_chunk",
+                    "content": {"type": "text", "text": "thinking..."}
+                }
+            }
+        });
+        let tool = json!({
+            "jsonrpc": "2.0",
+            "method": "session/update",
+            "params": {
+                "update": {
+                    "sessionUpdate": "tool_call",
+                    "toolCallId": "abc",
+                    "title": "do thing",
+                    "kind": "read",
+                    "status": "in_progress"
+                }
+            }
+        });
+
+        updates.apply(&chunk);
+        assert_eq!(
+            updates.apply(&tool),
+            Some(AcpUpdate::ToolCallStarted {
+                segment_to_flush: "thinking...".to_string()
+            })
+        );
+        assert_eq!(updates.visible_text, "thinking...");
+        assert!(updates.current_segment.is_empty());
+
+        let trailing = json!({
+            "jsonrpc": "2.0",
+            "method": "session/update",
+            "params": {
+                "update": {
+                    "sessionUpdate": "agent_message_chunk",
+                    "content": {"type": "text", "text": "done."}
+                }
+            }
+        });
+        updates.apply(&trailing);
+        assert_eq!(updates.visible_text, "thinking...done.");
+        assert_eq!(updates.current_segment, "done.");
+    }
+
+    #[test]
+    fn apply_back_to_back_tool_calls_emit_empty_flushes() {
+        let mut updates = AcpUpdates::default();
+        let tool = json!({
+            "jsonrpc": "2.0",
+            "method": "session/update",
+            "params": {
+                "update": {
+                    "sessionUpdate": "tool_call",
+                    "toolCallId": "abc"
+                }
+            }
+        });
+
+        assert_eq!(
+            updates.apply(&tool),
+            Some(AcpUpdate::ToolCallStarted {
+                segment_to_flush: String::new()
+            })
+        );
+        assert_eq!(
+            updates.apply(&tool),
+            Some(AcpUpdate::ToolCallStarted {
+                segment_to_flush: String::new()
+            })
+        );
+    }
+
+    #[test]
+    fn apply_ignores_unknown_session_updates() {
         let mut updates = AcpUpdates::default();
         let ignored = json!({
             "jsonrpc": "2.0",
             "method": "session/update",
             "params": {
                 "update": {
-                    "sessionUpdate": "tool_call",
+                    "sessionUpdate": "agent_thought_chunk",
                     "content": {"type": "text", "text": "hidden"}
                 }
             }
@@ -265,5 +355,6 @@ mod tests {
 
         assert_eq!(updates.apply(&ignored), None);
         assert!(updates.visible_text.is_empty());
+        assert!(updates.current_segment.is_empty());
     }
 }

@@ -335,6 +335,7 @@ async fn run() -> Result<()> {
         team: envelope.metadata.team.clone(),
     };
     let mut stream_sequence = 0_u64;
+    let stream_session_id = session_id.clone();
     let prompt_result = acp
         .request_with_update_handler(
             "session/prompt",
@@ -348,6 +349,7 @@ async fn run() -> Result<()> {
                 let sequence = stream_sequence;
                 let channel = channel.clone();
                 let ctx = stream_ctx.clone();
+                let thread_id = stream_session_id.clone();
                 async move {
                     match update {
                         AcpUpdate::AgentMessageChunk { text } => {
@@ -360,6 +362,27 @@ async fn run() -> Result<()> {
                             {
                                 eprintln!(
                                     "[tenex-agent-acp] warn: stream delta emit failed: {err}"
+                                );
+                            }
+                        }
+                        AcpUpdate::ToolCallStarted { segment_to_flush } => {
+                            if segment_to_flush.is_empty() {
+                                return;
+                            }
+                            let intent = ConversationIntent {
+                                content: segment_to_flush,
+                                is_reasoning: false,
+                                usage: None,
+                                metadata: Some(LlmMetadata {
+                                    thread_id: Some(thread_id),
+                                    ..Default::default()
+                                }),
+                            };
+                            if let Err(err) =
+                                channel.send(Intent::Conversation(intent), &ctx).await
+                            {
+                                eprintln!(
+                                    "[tenex-agent-acp] warn: tool-boundary flush failed: {err}"
                                 );
                             }
                         }
@@ -420,14 +443,14 @@ async fn run() -> Result<()> {
     });
     let final_intent = if pending_external_work.load(Ordering::Acquire) {
         Intent::Conversation(ConversationIntent {
-            content: updates.visible_text,
+            content: updates.current_segment,
             is_reasoning: false,
             usage: None,
             metadata,
         })
     } else {
         Intent::Completion(CompletionIntent {
-            content: updates.visible_text,
+            content: updates.current_segment,
             usage: None,
             metadata,
         })
