@@ -586,7 +586,8 @@ async fn run() -> Result<()> {
     // Load Telegram channel bindings for this agent so they appear in the system prompt.
     let telegram_channel_bindings: Vec<tenex_system_prompt::TelegramChannelBinding> = {
         let bindings_path = base_dir.join("data").join("transport-bindings.json");
-        let store = tenex_telegram::binding::BindingStore::open(bindings_path);
+        let store = tenex_telegram::binding::BindingStore::open(bindings_path)
+            .context("open transport bindings store")?;
         store
             .list_telegram_for_agent_project(&pubkey_hex, &project_meta.d_tag)
             .into_iter()
