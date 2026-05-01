@@ -84,8 +84,7 @@ fn process_alive(pid: i32) -> bool {
         return true;
     }
     // EPERM means the process exists but we lack permission to signal it.
-    let errno = unsafe { *libc::__errno_location() };
-    errno == libc::EPERM
+    std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
 }
 
 fn hostname() -> String {
