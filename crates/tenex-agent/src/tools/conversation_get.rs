@@ -2,10 +2,9 @@ use crate::config::ResolvedModel;
 use rig::providers::{anthropic, ollama, openai, openrouter};
 use rig::{client::CompletionClient, completion::Prompt, completion::ToolDefinition, tool::Tool};
 use serde::{Deserialize, Serialize};
-use serde_json::json;
+use serde_json::{json, Value};
 use std::path::PathBuf;
 use std::sync::Arc;
-use tenex_conversations::{store::MessageQuery, ConversationStore};
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct ConversationGetArgs {
@@ -28,6 +27,14 @@ pub struct ConversationGetTool {
 impl ConversationGetTool {
     pub fn new(db_path: PathBuf, resolved: Arc<ResolvedModel>) -> Self {
         Self { db_path, resolved }
+    }
+
+    fn get_conversations_dir(&self) -> PathBuf {
+        self.db_path
+            .parent()
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join("conversations")
     }
 
     async fn call_llm(&self, system: &str, user: String) -> anyhow::Result<String> {
@@ -138,23 +145,33 @@ impl Tool for ConversationGetTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<String, Self::Error> {
-        let store = ConversationStore::open(&self.db_path)
-            .map_err(|e| ConversationGetError(format!("failed to open conversation store: {e}")))?;
+        let conversations_dir = self.get_conversations_dir();
+        let json_path = conversations_dir.join(format!("{}.json", &args.conversation_id));
 
-        let mut messages = store
-            .list_messages(
-                &args.conversation_id,
-                MessageQuery {
-                    limit: args.limit,
-                    ..Default::default()
-                },
-            )
-            .map_err(|e| ConversationGetError(format!("failed to list messages: {e}")))?;
+        let content = std::fs::read_to_string(&json_path)
+            .map_err(|e| ConversationGetError(format!("failed to read conversation file: {e}")))?;
+
+        let json: Value = serde_json::from_str(&content)
+            .map_err(|e| ConversationGetError(format!("failed to parse conversation JSON: {e}")))?;
+
+        let messages_array = json
+            .get("messages")
+            .and_then(|m| m.as_array())
+            .ok_or_else(|| ConversationGetError("no messages array in conversation file".to_string()))?;
+
+        let limit = args.limit.unwrap_or(i64::MAX) as usize;
+        let mut messages: Vec<_> = messages_array
+            .iter()
+            .take(limit)
+            .collect();
 
         if let Some(uid) = args.until_id.as_deref() {
             if let Some(idx) = messages
                 .iter()
-                .position(|m| m.nostr_event_id.as_deref() == Some(uid) || m.record_id == uid)
+                .position(|m| {
+                    m.get("eventId").and_then(|v| v.as_str()) == Some(uid)
+                        || m.get("id").and_then(|v| v.as_str()) == Some(uid)
+                })
             {
                 messages.truncate(idx);
             }
@@ -173,11 +190,22 @@ impl Tool for ConversationGetTool {
             messages.len()
         )];
 
-        for msg in &messages {
-            let role = msg.role.as_deref().unwrap_or("unknown");
-            let author = &msg.author_pubkey[..8.min(msg.author_pubkey.len())];
-            let readable = msg.human_readable.as_deref().unwrap_or(&msg.content);
-            lines.push(format!("[{role}] {author}: {readable}"));
+        for msg in messages {
+            let author = msg
+                .get("pubkey")
+                .and_then(|p| p.as_str())
+                .map(|p| &p[..8.min(p.len())])
+                .unwrap_or("unknown");
+            let msg_type = msg
+                .get("messageType")
+                .and_then(|t| t.as_str())
+                .unwrap_or("text");
+            let content = msg
+                .get("content")
+                .and_then(|c| c.as_str())
+                .unwrap_or("");
+
+            lines.push(format!("[{msg_type}] {author}: {content}"));
         }
 
         let transcript = lines.join("\n");
@@ -192,5 +220,27 @@ impl Tool for ConversationGetTool {
         }
 
         Ok(transcript)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_get_conversations_dir() {
+        let db_path = PathBuf::from("/home/user/.tenex/projects/myproject/conversation.db");
+        let resolved = Arc::new(ResolvedModel {
+            provider: "anthropic".to_string(),
+            model: "claude-3-sonnet".to_string(),
+            api_key: None,
+            base_url: None,
+        });
+        let tool = ConversationGetTool::new(db_path, resolved);
+        let conv_dir = tool.get_conversations_dir();
+        assert_eq!(
+            conv_dir,
+            PathBuf::from("/home/user/.tenex/projects/myproject/conversations")
+        );
     }
 }
