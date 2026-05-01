@@ -191,7 +191,7 @@ impl Tool for ReportPublishTool {
             });
         }
 
-        let ral = self.state.meta.lock().unwrap().ral;
+        let ral = self.state.meta.lock().ral;
         let ctx = self.state.build_ctx(ral);
         let mut published: Vec<String> = Vec::new();
 

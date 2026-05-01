@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use parking_lot::Mutex;
 
 const AGENTS_MD_FILENAME: &str = "AGENTS.md";
 
@@ -43,7 +43,7 @@ impl AgentsMdReminderState {
             }
         }
 
-        let mut visible = self.visible_paths.lock().unwrap();
+        let mut visible = self.visible_paths.lock();
         let new_files: Vec<AgentsMdFile> = files
             .into_iter()
             .filter(|file| !visible.contains(&file.path))

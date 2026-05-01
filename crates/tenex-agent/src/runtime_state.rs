@@ -11,6 +11,14 @@ use tenex_conversations::ConversationStore;
 use tokio::time::sleep;
 
 const DRIVER_STALE_AFTER_MS: i64 = 10 * 60 * 1000;
+/// Maximum number of consecutive database errors tolerated while trying
+/// to acquire the driver lease before giving up. With the exponential
+/// backoff below this caps the worst-case wait at ≈31s
+/// (1 + 2 + 4 + 8 + 16 = 31s of sleep before the 6th attempt errors out).
+const MAX_DRIVER_DB_ATTEMPTS: u32 = 6;
+/// Base delay (in ms) for the exponential backoff between database-error
+/// retries. Doubled on each successive failure.
+const DRIVER_DB_BACKOFF_BASE_MS: u64 = 1_000;
 
 #[derive(Clone)]
 pub struct RuntimeStateHandle {
@@ -35,18 +43,46 @@ impl RuntimeStateHandle {
         }
     }
 
-    pub async fn acquire_driver(&self) {
+    /// Block until this execution holds the runtime driver lease.
+    ///
+    /// `Ok(false)` from `try_acquire_driver_once` is the cooperative-wait
+    /// path (another execution holds it) and is polled indefinitely with a
+    /// short interval — that is the design.
+    ///
+    /// Database-level errors are bounded: each failure backs off with
+    /// exponential delay and after `MAX_DRIVER_DB_ATTEMPTS` consecutive
+    /// failures the function returns the last error so the caller can
+    /// decide how to proceed.
+    pub async fn acquire_driver(&self) -> anyhow::Result<()> {
         if std::env::var_os("TENEX_RUNTIME_DRIVER_PREEMPT").is_some() {
-            return;
+            return Ok(());
         }
 
+        let mut db_failures: u32 = 0;
         loop {
             match self.try_acquire_driver_once() {
-                Ok(true) => return,
-                Ok(false) => sleep(Duration::from_millis(100)).await,
+                Ok(true) => return Ok(()),
+                Ok(false) => {
+                    db_failures = 0;
+                    sleep(Duration::from_millis(100)).await;
+                }
                 Err(e) => {
-                    eprintln!("[tenex-agent] Failed to acquire runtime driver: {e}");
-                    sleep(Duration::from_millis(250)).await;
+                    db_failures += 1;
+                    if db_failures >= MAX_DRIVER_DB_ATTEMPTS {
+                        return Err(e.context(format!(
+                            "acquire_driver: gave up after {MAX_DRIVER_DB_ATTEMPTS} database errors"
+                        )));
+                    }
+                    let backoff_ms =
+                        DRIVER_DB_BACKOFF_BASE_MS * 2u64.saturating_pow(db_failures - 1);
+                    tracing::warn!(
+                        attempt = db_failures,
+                        max_attempts = MAX_DRIVER_DB_ATTEMPTS,
+                        backoff_ms,
+                        error = %e,
+                        "acquire_driver: database error, backing off"
+                    );
+                    sleep(Duration::from_millis(backoff_ms)).await;
                 }
             }
         }

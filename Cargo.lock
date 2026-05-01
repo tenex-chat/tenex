@@ -3155,6 +3155,7 @@ dependencies = [
  "http",
  "indexmap",
  "nostr",
+ "parking_lot",
  "regex",
  "reqwest 0.13.3",
  "reqwest-middleware",

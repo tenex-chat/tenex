@@ -1,7 +1,9 @@
 use std::collections::HashMap;
 use std::io::Write;
 use std::path::Path;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+
+use parking_lot::Mutex;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
@@ -194,7 +196,7 @@ impl MockModel {
     fn next_response(&self, request: &CompletionRequest) -> MockSelection {
         let agent = self.inner.agent_slug.clone();
         let turn = {
-            let mut turns = self.inner.turns.lock().unwrap();
+            let mut turns = self.inner.turns.lock();
             let entry = turns.entry(agent.clone()).or_insert(0);
             *entry += 1;
             *entry

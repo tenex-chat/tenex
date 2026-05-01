@@ -107,7 +107,7 @@ impl Tool for AskTool {
     }
 
     async fn call(&self, args: AskArgs) -> Result<String, AskError> {
-        let ral = self.state.meta.lock().unwrap().ral;
+        let ral = self.state.meta.lock().ral;
         let ctx = self.state.build_ctx(ral);
 
         if let Some(ref esc_pubkey_hex) = self.escalation_pubkey {

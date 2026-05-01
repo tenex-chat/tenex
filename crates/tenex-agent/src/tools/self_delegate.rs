@@ -59,7 +59,7 @@ impl Tool for SelfDelegateTool {
     async fn call(&self, args: SelfDelegateArgs) -> Result<String, SelfDelegateError> {
         let PrincipalRef::Nostr { pubkey, .. } = self.state.channel.identity().clone();
 
-        let ral = self.state.meta.lock().unwrap().ral;
+        let ral = self.state.meta.lock().ral;
         let ctx = self.state.build_ctx(ral);
 
         let recipient = PrincipalRef::Nostr {
