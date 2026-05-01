@@ -225,11 +225,11 @@ impl ConversationStore {
             [conversation_id],
             |row| row.get(0),
         )?;
-        let mut metadata = serde_json::from_str(&raw).unwrap_or_else(|_| serde_json::json!({}));
-        if !metadata.is_object() {
-            metadata = serde_json::json!({});
-        }
-        let metadata_obj = metadata.as_object_mut().expect("object just created");
+        let mut metadata_obj: serde_json::Map<String, serde_json::Value> =
+            match serde_json::from_str(&raw) {
+                Ok(serde_json::Value::Object(map)) => map,
+                _ => serde_json::Map::new(),
+            };
 
         if let Some(value) = title {
             metadata_obj.insert(
@@ -256,6 +256,7 @@ impl ConversationStore {
             );
         }
 
+        let metadata = serde_json::Value::Object(metadata_obj);
         let now = now_ms();
         self.conn.execute(
             "UPDATE conversations

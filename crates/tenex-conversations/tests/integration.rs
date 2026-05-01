@@ -144,6 +144,101 @@ fn append_message_maintains_conversation_header_and_metadata() {
 }
 
 #[test]
+fn update_metadata_initialises_object_when_row_absent() {
+    let store = ConversationStore::open_in_memory().unwrap();
+
+    // No prior `ensure_conversation` / `upsert_conversation` — the call must
+    // create the row and populate metadata cleanly.
+    store
+        .update_metadata(
+            "conv-fresh",
+            Some("Title"),
+            None,
+            Some("Awaiting"),
+            None,
+        )
+        .unwrap();
+
+    let conv = store.get_conversation("conv-fresh").unwrap().unwrap();
+    assert_eq!(conv.title.as_deref(), Some("Title"));
+    assert_eq!(conv.status_label.as_deref(), Some("Awaiting"));
+    assert_eq!(
+        conv.metadata.get("title").and_then(|v| v.as_str()),
+        Some("Title")
+    );
+    assert_eq!(
+        conv.metadata.get("statusLabel").and_then(|v| v.as_str()),
+        Some("Awaiting")
+    );
+    assert!(conv.metadata.get("summary").is_none());
+}
+
+#[test]
+fn update_metadata_recovers_from_non_object_metadata_blob() {
+    let store = ConversationStore::open_in_memory().unwrap();
+    store.ensure_conversation("conv-bad").unwrap();
+
+    // Force the metadata column to a non-object JSON value, which historically
+    // tripped the `as_object_mut().expect(...)` panic path.
+    store
+        .connection()
+        .execute(
+            "UPDATE conversations SET metadata_json = ?1 WHERE id = ?2",
+            rusqlite::params!["[\"not-an-object\"]", "conv-bad"],
+        )
+        .unwrap();
+
+    store
+        .update_metadata("conv-bad", Some("Recovered"), None, None, None)
+        .unwrap();
+
+    let conv = store.get_conversation("conv-bad").unwrap().unwrap();
+    assert_eq!(conv.title.as_deref(), Some("Recovered"));
+    assert!(conv.metadata.is_object());
+    assert_eq!(
+        conv.metadata.get("title").and_then(|v| v.as_str()),
+        Some("Recovered")
+    );
+}
+
+#[test]
+fn update_metadata_preserves_existing_keys_when_only_some_fields_set() {
+    let store = ConversationStore::open_in_memory().unwrap();
+    store.ensure_conversation("conv-merge").unwrap();
+    store
+        .update_metadata(
+            "conv-merge",
+            Some("Initial"),
+            Some("Initial summary"),
+            None,
+            None,
+        )
+        .unwrap();
+
+    // Now update only status — title and summary in metadata_json must persist.
+    store
+        .update_metadata("conv-merge", None, None, Some("Running"), None)
+        .unwrap();
+
+    let conv = store.get_conversation("conv-merge").unwrap().unwrap();
+    assert_eq!(conv.title.as_deref(), Some("Initial"));
+    assert_eq!(conv.summary.as_deref(), Some("Initial summary"));
+    assert_eq!(conv.status_label.as_deref(), Some("Running"));
+    assert_eq!(
+        conv.metadata.get("title").and_then(|v| v.as_str()),
+        Some("Initial")
+    );
+    assert_eq!(
+        conv.metadata.get("summary").and_then(|v| v.as_str()),
+        Some("Initial summary")
+    );
+    assert_eq!(
+        conv.metadata.get("statusLabel").and_then(|v| v.as_str()),
+        Some("Running")
+    );
+}
+
+#[test]
 fn round_trip_messages_tool_messages_prompt_history_completion() {
     let store = ConversationStore::open_in_memory().unwrap();
     store.ensure_conversation("conv-1").unwrap();
