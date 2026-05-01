@@ -3184,7 +3184,6 @@ dependencies = [
  "reqwest 0.13.3",
  "reqwest-middleware",
  "rig-core",
- "rusqlite",
  "serde",
  "serde_json",
  "tempfile",
