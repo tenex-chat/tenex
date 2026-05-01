@@ -6,9 +6,9 @@
 //! the no-op case and a rate-limit timestamp.
 
 use std::path::Path;
-use std::sync::Mutex;
 
 use anyhow::{Context, Result};
+use parking_lot::Mutex;
 use rusqlite::{params, Connection, OptionalExtension};
 
 pub struct StateStore {
@@ -52,7 +52,7 @@ impl StateStore {
     }
 
     pub fn get(&self, conversation_id: &str) -> Result<ConversationState> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         let row = conn
             .query_row(
                 "SELECT last_event_secs, event_count, visited_at_ms
@@ -72,7 +72,7 @@ impl StateStore {
     }
 
     pub fn put(&self, conversation_id: &str, state: &ConversationState) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         conn.execute(
             "INSERT INTO conversation_embed_state(conversation_id, last_event_secs, event_count, visited_at_ms)
              VALUES (?1, ?2, ?3, ?4)
@@ -92,7 +92,7 @@ impl StateStore {
     }
 
     pub fn delete(&self, conversation_id: &str) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         conn.execute(
             "DELETE FROM conversation_embed_state WHERE conversation_id = ?1",
             params![conversation_id],
@@ -102,7 +102,7 @@ impl StateStore {
     }
 
     pub fn delete_all(&self) -> Result<usize> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         let n = conn
             .execute("DELETE FROM conversation_embed_state", [])
             .context("delete all state")?;

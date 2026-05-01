@@ -26,7 +26,7 @@ use crate::identity::CacheResolver;
 use crate::pacing::Pacer;
 use crate::paths;
 use crate::processor::Processor;
-use crate::relay::Relay;
+use crate::relay::{FetchPageError, Relay, RelayFetcher};
 use crate::scope;
 use crate::state::StateStore;
 use crate::target::EmbedTarget;
@@ -120,6 +120,43 @@ pub async fn run(opts: BackfillOptions) -> Result<()> {
     let relay_client = Relay::connect(relays.clone()).await?;
     let floor = opts.since_secs.unwrap_or(0).max(0);
 
+    let result = walk_and_embed(
+        &relay_client,
+        &relays,
+        &a_tags,
+        &scope_hash_value,
+        floor,
+        page_size,
+        opts.dry_run,
+        &cursor,
+        &mut processor,
+        &resolver,
+        &rag,
+    )
+    .await;
+
+    // Always tear down the connection pool, regardless of how the walk
+    // terminated. shutdown() is infallible (returns ()), so there's
+    // nothing to surface.
+    relay_client.shutdown().await;
+
+    result
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn walk_and_embed(
+    fetcher: &dyn RelayFetcher,
+    relays: &[String],
+    a_tags: &[String],
+    scope_hash_value: &str,
+    floor: i64,
+    page_size: usize,
+    dry_run: bool,
+    cursor: &CursorStore,
+    processor: &mut Processor,
+    resolver: &CacheResolver,
+    rag: &RagStore,
+) -> Result<()> {
     // ---- Phase 1: walk back, accumulate ----
     let walk_bar = ProgressBar::new_spinner();
     walk_bar.set_style(
@@ -129,61 +166,20 @@ pub async fn run(opts: BackfillOptions) -> Result<()> {
     walk_bar.enable_steady_tick(std::time::Duration::from_millis(120));
 
     let mut acc = Accumulator::new();
-    for relay_url in &relays {
-        // Cursor stored is the oldest second we've reached on this relay.
-        // Resume from there if present; else start at "now".
-        let starting_until = cursor
-            .get(relay_url, &scope_hash_value)?
-            .unwrap_or_else(now_secs);
-        let mut until = starting_until;
-
-        loop {
-            walk_bar.set_message(format!("{relay_url}  until={until}"));
-            if until <= floor {
-                break;
-            }
-            let pre_count = acc.dedupe_count();
-            let page = match relay_client.fetch_page(&a_tags, until, page_size).await {
-                Ok(p) => p,
-                Err(e) => {
-                    warn!(relay = %relay_url, error = %e, "fetch_page failed; stopping this relay");
-                    break;
-                }
-            };
-            if page.events.is_empty() {
-                break;
-            }
-            for ev in page.events {
-                acc.ingest(ev);
-                walk_bar.inc(1);
-            }
-
-            // Did this page bring us any new unique events?
-            let new_unique = acc.dedupe_count() - pre_count;
-            if new_unique == 0 {
-                // Page was 100% duplicates — relay can't make progress
-                // past this boundary (probably a `created_at` cluster
-                // larger than the page limit). Bail.
-                break;
-            }
-
-            // Advance `until` to the oldest second seen, INCLUSIVE.
-            // We rely on accumulator dedupe to handle the boundary
-            // event re-appearing on the next page. Using
-            // `oldest - 1` skips events that share the oldest second.
-            let oldest = page.oldest_secs.unwrap_or(until);
-            let next_until = oldest;
-            if next_until >= until {
-                // No timestamp progress at all — same boundary or
-                // higher. Avoid infinite loop.
-                break;
-            }
-            until = next_until;
-
-            if !opts.dry_run {
-                cursor.put(relay_url, &scope_hash_value, until)?;
-            }
-        }
+    for relay_url in relays {
+        walk_relay(
+            fetcher,
+            relay_url,
+            a_tags,
+            scope_hash_value,
+            floor,
+            page_size,
+            dry_run,
+            cursor,
+            &mut acc,
+            &walk_bar,
+        )
+        .await?;
     }
     walk_bar.finish_and_clear();
 
@@ -258,7 +254,7 @@ pub async fn run(opts: BackfillOptions) -> Result<()> {
         }
     }
 
-    if opts.dry_run {
+    if dry_run {
         info!("dry-run; not embedding");
         return Ok(());
     }
@@ -274,12 +270,12 @@ pub async fn run(opts: BackfillOptions) -> Result<()> {
     );
     embed_bar.set_prefix("embedding");
 
-    let target = EmbedTarget::new(&rag);
+    let target = EmbedTarget::new(rag);
     let mut total_chunks = 0usize;
     for conv_id in &conv_ids {
         let events = acc.events_for(conv_id);
         match processor
-            .process_conversation(conv_id, events, &resolver, &target)
+            .process_conversation(conv_id, events, resolver, &target)
             .await
         {
             Ok(res) => total_chunks += res.chunks_embedded,
@@ -301,6 +297,138 @@ pub async fn run(opts: BackfillOptions) -> Result<()> {
         "backfill complete"
     );
     Ok(())
+}
+
+/// Drive one relay backward from its persisted cursor (or `now` if
+/// fresh) down to `floor`. Persists cursor progress on every successful
+/// page and on every "stop walking this relay" signal so a restart
+/// resumes from the oldest reached point rather than re-walking from
+/// `now`.
+///
+/// Per-relay error policy:
+/// - [`FetchPageError::Transient`] — log warning, persist cursor (only
+///   if real progress was made), stop this relay. The next backfill
+///   tick picks up where we left off.
+/// - [`FetchPageError::Permanent`] — bubble up to the caller. Cursor is
+///   left at the last successful advance (no half-advance is ever
+///   committed).
+///
+/// Cursor persistence rule: we only ever write a cursor that is
+/// strictly older than the value we started this walk with. Persisting
+/// the starting value would be a no-op when a cursor was already on
+/// disk, but on a fresh relay/scope the starting value is `now()`, so
+/// rewriting it would shift the daemon's next scheduled scan past
+/// events created during this walk. The walk explicitly does not record
+/// "we attempted to walk at time T" — only "we successfully reached
+/// older time T".
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn walk_relay(
+    fetcher: &dyn RelayFetcher,
+    relay_url: &str,
+    a_tags: &[String],
+    scope_hash_value: &str,
+    floor: i64,
+    page_size: usize,
+    dry_run: bool,
+    cursor: &CursorStore,
+    acc: &mut Accumulator,
+    progress: &ProgressBar,
+) -> Result<()> {
+    // Cursor stored is the oldest second we've reached on this relay.
+    // Resume from there if present; else start at "now".
+    let starting_until = cursor
+        .get(relay_url, scope_hash_value)?
+        .unwrap_or_else(now_secs);
+    let mut until = starting_until;
+
+    let persist = |until: i64| -> Result<()> {
+        if dry_run {
+            return Ok(());
+        }
+        cursor.put(relay_url, scope_hash_value, until)
+    };
+
+    // Only persist when we have advanced strictly past where we
+    // started; otherwise this walk produced no information and the
+    // cursor must be left untouched.
+    let persist_if_advanced = |until: i64| -> Result<()> {
+        if until < starting_until {
+            persist(until)
+        } else {
+            Ok(())
+        }
+    };
+
+    loop {
+        progress.set_message(format!("{relay_url}  until={until}"));
+        if until <= floor {
+            // Reached the configured floor; record and stop. The end
+            // boundary is `floor`, not `until`, because `until` may
+            // have already crossed the floor by the time we get here.
+            // This branch is reachable only if we advanced or the
+            // starting cursor was already at/under the floor — both
+            // are real outcomes worth persisting.
+            persist(floor.max(until))?;
+            return Ok(());
+        }
+        let pre_count = acc.dedupe_count();
+        let page = match fetcher.fetch_page(a_tags, until, page_size).await {
+            Ok(p) => p,
+            Err(FetchPageError::Transient(e)) => {
+                warn!(
+                    relay = %relay_url,
+                    error = %e,
+                    "transient relay error; persisting cursor and stopping this relay"
+                );
+                persist_if_advanced(until)?;
+                return Ok(());
+            }
+            Err(FetchPageError::Permanent(e)) => {
+                // Persist what we've already advanced — a permanent
+                // error doesn't invalidate prior progress — and bubble
+                // up. The current `until` is the next un-fetched
+                // boundary; on a restart we want to resume there once
+                // the underlying issue is fixed.
+                persist_if_advanced(until)?;
+                return Err(e.context(format!("permanent relay error on {relay_url}")));
+            }
+        };
+        if page.events.is_empty() {
+            // End of stream on this relay. Only commit a cursor if
+            // we genuinely walked back during this invocation.
+            persist_if_advanced(until)?;
+            return Ok(());
+        }
+        for ev in page.events {
+            acc.ingest(ev);
+            progress.inc(1);
+        }
+
+        // Did this page bring us any new unique events?
+        let new_unique = acc.dedupe_count() - pre_count;
+        if new_unique == 0 {
+            // Page was 100% duplicates — relay can't make progress
+            // past this boundary (probably a `created_at` cluster
+            // larger than the page limit). Stop and persist.
+            persist_if_advanced(until)?;
+            return Ok(());
+        }
+
+        // Advance `until` to the oldest second seen, INCLUSIVE.
+        // We rely on accumulator dedupe to handle the boundary
+        // event re-appearing on the next page. Using
+        // `oldest - 1` skips events that share the oldest second.
+        let oldest = page.oldest_secs.unwrap_or(until);
+        let next_until = oldest;
+        if next_until >= until {
+            // No timestamp progress at all — same boundary or
+            // higher. Stop and persist current position.
+            persist_if_advanced(until)?;
+            return Ok(());
+        }
+        until = next_until;
+        persist(until)?;
+    }
 }
 
 fn relays_from_config(base: &std::path::Path) -> Vec<String> {
@@ -362,4 +490,229 @@ fn ymd_string(secs: i64) -> String {
     let m = if mp < 10 { mp + 3 } else { mp - 9 };
     let year = if m <= 2 { y + 1 } else { y };
     format!("{:04}-{:02}-{:02}", year, m, d)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::accumulator::Accumulator;
+    use crate::cursor::CursorStore;
+    use crate::relay::{FetchPageError, Page, RelayFetcher};
+    use async_trait::async_trait;
+    use indicatif::ProgressBar;
+    use nostr::event::{EventBuilder, Kind};
+    use nostr::key::Keys;
+    use nostr::types::Timestamp;
+    use std::sync::Mutex as StdMutex;
+    use tempfile::TempDir;
+
+    /// Fetcher that walks through a script of canned responses, one per
+    /// `fetch_page` call. The script lets a test simulate "first call
+    /// succeeds, second call fails transiently mid-stream", which is
+    /// the partial-failure shape we need to verify cursor persistence
+    /// against.
+    struct ScriptedFetcher {
+        script: StdMutex<Vec<Result<Page, FetchPageError>>>,
+    }
+
+    impl ScriptedFetcher {
+        fn new(script: Vec<Result<Page, FetchPageError>>) -> Self {
+            Self {
+                script: StdMutex::new(script),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl RelayFetcher for ScriptedFetcher {
+        async fn fetch_page(
+            &self,
+            _scope_a_tags: &[String],
+            _until_secs: i64,
+            _page_limit: usize,
+        ) -> Result<Page, FetchPageError> {
+            let next = self
+                .script
+                .lock()
+                .unwrap()
+                .drain(..1)
+                .next()
+                .expect("scripted fetcher exhausted");
+            next
+        }
+    }
+
+    fn make_event(created_at_secs: u64) -> nostr::event::Event {
+        let keys = Keys::generate();
+        EventBuilder::new(Kind::TextNote, format!("evt-{created_at_secs}"))
+            .custom_created_at(Timestamp::from(created_at_secs))
+            .sign_with_keys(&keys)
+            .expect("sign event")
+    }
+
+    fn page_with_oldest(secs: u64) -> Page {
+        let ev = make_event(secs);
+        Page {
+            events: vec![ev],
+            event_count: 1,
+            root_count: 1,
+            oldest_secs: Some(secs as i64),
+        }
+    }
+
+    fn open_cursor() -> (CursorStore, TempDir) {
+        let dir = TempDir::new().unwrap();
+        let store = CursorStore::open(&dir.path().join("c.db")).unwrap();
+        (store, dir)
+    }
+
+    #[tokio::test]
+    async fn cursor_persists_progress_when_transient_error_occurs_mid_stream() {
+        // Script: first fetch returns one event at secs=900; second
+        // fetch fails transiently. The walk must persist cursor=900
+        // before stopping.
+        let fetcher = ScriptedFetcher::new(vec![
+            Ok(page_with_oldest(900)),
+            Err(FetchPageError::Transient(anyhow::anyhow!("simulated network blip"))),
+        ]);
+        let (cursor, _dir) = open_cursor();
+        let mut acc = Accumulator::new();
+        let bar = ProgressBar::hidden();
+        let scope_h = "scope";
+        let relay = "wss://test";
+        // Seed the cursor at 1000 so we walk from 1000 → 900 → fail.
+        cursor.put(relay, scope_h, 1000).unwrap();
+
+        walk_relay(
+            &fetcher,
+            relay,
+            &[],
+            scope_h,
+            0,
+            500,
+            false, // not a dry run — must persist
+            &cursor,
+            &mut acc,
+            &bar,
+        )
+        .await
+        .expect("transient error should not bubble out");
+
+        let saved = cursor.get(relay, scope_h).unwrap();
+        assert_eq!(
+            saved,
+            Some(900),
+            "cursor must record oldest second reached before transient failure"
+        );
+    }
+
+    #[tokio::test]
+    async fn cursor_not_persisted_when_first_page_is_empty_on_fresh_scope() {
+        // The bug: a fresh relay/scope with no cursor starts walking
+        // from `now`. If the very first page comes back empty (relay
+        // has no matching events yet), persisting `until` would write
+        // `now` to disk, and the daemon's next scheduled scan would
+        // start at `until=<old now>` and miss every event published
+        // after. The cursor must remain absent in this case.
+        let fetcher = ScriptedFetcher::new(vec![Ok(Page {
+            events: vec![],
+            event_count: 0,
+            root_count: 0,
+            oldest_secs: None,
+        })]);
+        let (cursor, _dir) = open_cursor();
+        let mut acc = Accumulator::new();
+        let bar = ProgressBar::hidden();
+        let scope_h = "scope";
+        let relay = "wss://test";
+        // No cursor seeded — fresh scope.
+        assert_eq!(cursor.get(relay, scope_h).unwrap(), None);
+
+        walk_relay(
+            &fetcher, relay, &[], scope_h, 0, 500, false, &cursor, &mut acc, &bar,
+        )
+        .await
+        .unwrap();
+
+        // Cursor must still be absent: the walk made no progress, so
+        // there is no value to commit.
+        assert_eq!(cursor.get(relay, scope_h).unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn cursor_unchanged_when_first_page_is_empty_with_seeded_cursor() {
+        // Seeded cursor + empty first page: we made no progress this
+        // walk, so the existing cursor must remain exactly as it was.
+        let fetcher = ScriptedFetcher::new(vec![Ok(Page {
+            events: vec![],
+            event_count: 0,
+            root_count: 0,
+            oldest_secs: None,
+        })]);
+        let (cursor, _dir) = open_cursor();
+        let mut acc = Accumulator::new();
+        let bar = ProgressBar::hidden();
+        let scope_h = "scope";
+        let relay = "wss://test";
+        cursor.put(relay, scope_h, 500).unwrap();
+
+        walk_relay(
+            &fetcher, relay, &[], scope_h, 0, 500, false, &cursor, &mut acc, &bar,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(cursor.get(relay, scope_h).unwrap(), Some(500));
+    }
+
+    #[tokio::test]
+    async fn cursor_not_persisted_when_first_fetch_errors_transiently_on_fresh_scope() {
+        // Mirror of the empty-page case for the transient error path:
+        // a fresh scope must not commit a `now`-valued cursor just
+        // because the very first relay request happened to fail.
+        let fetcher = ScriptedFetcher::new(vec![Err(FetchPageError::Transient(
+            anyhow::anyhow!("simulated network blip"),
+        ))]);
+        let (cursor, _dir) = open_cursor();
+        let mut acc = Accumulator::new();
+        let bar = ProgressBar::hidden();
+        let scope_h = "scope";
+        let relay = "wss://test";
+
+        walk_relay(
+            &fetcher, relay, &[], scope_h, 0, 500, false, &cursor, &mut acc, &bar,
+        )
+        .await
+        .expect("transient error should not bubble out");
+
+        assert_eq!(cursor.get(relay, scope_h).unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn permanent_error_bubbles_up_with_cursor_intact() {
+        let fetcher = ScriptedFetcher::new(vec![
+            Ok(page_with_oldest(900)),
+            Err(FetchPageError::Permanent(anyhow::anyhow!("malformed filter"))),
+        ]);
+        let (cursor, _dir) = open_cursor();
+        let mut acc = Accumulator::new();
+        let bar = ProgressBar::hidden();
+        let scope_h = "scope";
+        let relay = "wss://test";
+        cursor.put(relay, scope_h, 1000).unwrap();
+
+        let err = walk_relay(
+            &fetcher, relay, &[], scope_h, 0, 500, false, &cursor, &mut acc, &bar,
+        )
+        .await
+        .expect_err("permanent error must bubble up");
+        assert!(
+            err.to_string().contains("permanent relay error"),
+            "error should reference permanent classification, got: {err}"
+        );
+
+        // Even though we erred, the cursor must reflect what was
+        // already fetched successfully (oldest=900).
+        assert_eq!(cursor.get(relay, scope_h).unwrap(), Some(900));
+    }
 }

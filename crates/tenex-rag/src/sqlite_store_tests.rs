@@ -291,6 +291,87 @@ async fn delete_by_source_removes_only_matching() {
     assert_eq!(remaining[0].id, "b_0");
 }
 
+#[test]
+fn bytes_to_floats_rejects_non_multiple_of_four() {
+    let bad = vec![0u8; 5];
+    let err = bytes_to_floats(&bad).unwrap_err();
+    assert!(
+        err.to_string().contains("not a multiple of 4"),
+        "expected length error, got: {err}"
+    );
+
+    let ok = vec![0u8; 8];
+    let v = bytes_to_floats(&ok).unwrap();
+    assert_eq!(v, vec![0.0_f32, 0.0_f32]);
+}
+
+#[tokio::test]
+async fn upsert_rejects_dimension_mismatch_on_insert() {
+    let (store, _f) = temp_store();
+    let v4 = unit_vec(4, 0);
+    store
+        .upsert("a", "col", "x", None, &v4, &empty_meta())
+        .await
+        .unwrap();
+
+    let v8 = unit_vec(8, 0);
+    let err = store
+        .upsert("b", "col", "y", None, &v8, &empty_meta())
+        .await
+        .unwrap_err();
+    assert!(
+        err.to_string().contains("dimension mismatch"),
+        "expected dimension mismatch error, got: {err}"
+    );
+}
+
+#[tokio::test]
+async fn search_rejects_dimension_mismatch_on_query() {
+    let (store, _f) = temp_store();
+    let v4 = unit_vec(4, 0);
+    store
+        .upsert("a", "col", "x", None, &v4, &empty_meta())
+        .await
+        .unwrap();
+
+    let q = unit_vec(8, 0);
+    let err = store.search(&q, &["col"], 5).await.unwrap_err();
+    assert!(
+        err.to_string().contains("dimension mismatch"),
+        "expected dimension mismatch error, got: {err}"
+    );
+}
+
+#[tokio::test]
+async fn search_skips_corrupt_blob_with_warning() {
+    use rusqlite::params;
+
+    let (store, _f) = temp_store();
+    let v4 = unit_vec(4, 0);
+    store
+        .upsert("good", "col", "x", None, &v4, &empty_meta())
+        .await
+        .unwrap();
+
+    // Corrupt one row's blob in place: 5 bytes (not a multiple of 4).
+    {
+        let conn = store.conn.lock();
+        conn.execute(
+            "INSERT INTO doc_meta (
+                 id, collection, content, title, vector_blob, created_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params!["corrupt", "col", "y", Option::<String>::None, vec![0u8; 5], 0i64],
+        )
+        .unwrap();
+    }
+
+    // Query with a dim-4 vector — the corrupt row must be skipped, the
+    // good row must still be returned.
+    let results = store.search(&v4, &["col"], 10).await.unwrap();
+    let ids: Vec<&str> = results.iter().map(|m| m.id.as_str()).collect();
+    assert_eq!(ids, vec!["good"]);
+}
+
 #[tokio::test]
 async fn list_chunks_for_source_orders_by_chunk_index() {
     let (store, _f) = temp_store();

@@ -16,8 +16,11 @@ use std::collections::HashSet;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
+use async_trait::async_trait;
 use nostr::event::Event;
+use nostr_sdk::client::Error as ClientError;
 use nostr_sdk::prelude::*;
+use thiserror::Error;
 use tracing::{debug, warn};
 
 use tenex_protocol::event_filter::{
@@ -25,6 +28,58 @@ use tenex_protocol::event_filter::{
 };
 
 const FETCH_TIMEOUT_SECS: u64 = 30;
+
+/// Errors a page fetch can produce, classified for the backfill loop.
+///
+/// - [`FetchPageError::Transient`] — networking, timeout, relay-side
+///   issues. Retry on the next backfill tick. The per-relay loop should
+///   stop *and persist its cursor* so progress isn't lost.
+/// - [`FetchPageError::Permanent`] — programmer/configuration errors:
+///   malformed JSON requests, signer/event-builder issues. Surface to
+///   the caller; do not silently swallow.
+#[derive(Debug, Error)]
+pub enum FetchPageError {
+    #[error("transient relay error: {0}")]
+    Transient(anyhow::Error),
+    #[error("permanent relay error: {0}")]
+    Permanent(anyhow::Error),
+}
+
+impl FetchPageError {
+    fn from_client_error(err: ClientError, context: &'static str) -> Self {
+        match &err {
+            // Programmer-side: our request was malformed, or the
+            // signer/event-builder is misconfigured. Retrying won't
+            // help.
+            ClientError::Json(_)
+            | ClientError::EventBuilder(_)
+            | ClientError::Signer(_)
+            | ClientError::GossipFiltersEmpty
+            | ClientError::PrivateMsgRelaysNotFound => {
+                Self::Permanent(anyhow::Error::new(err).context(context))
+            }
+            // Network, pool, relay, gossip, database, shared state:
+            // worth retrying.
+            _ => Self::Transient(anyhow::Error::new(err).context(context)),
+        }
+    }
+}
+
+/// Fetch one page of events, with thread fill, ending at `until_secs`
+/// and walking backward.
+///
+/// Implementations must dedupe by `event.id` themselves before returning
+/// the page so the caller's accumulator only ever sees unique events.
+/// The returned events are sorted by `created_at ASC`.
+#[async_trait]
+pub trait RelayFetcher: Send + Sync {
+    async fn fetch_page(
+        &self,
+        scope_a_tags: &[String],
+        until_secs: i64,
+        page_limit: usize,
+    ) -> Result<Page, FetchPageError>;
+}
 
 pub struct Relay {
     client: Client,
@@ -49,17 +104,22 @@ impl Relay {
         &self.relays
     }
 
-    /// Fetch one page of events ending at `until_secs` and walking
-    /// backward, plus the thread fill for any new roots discovered.
-    /// Returns events sorted by `created_at ASC`. The caller pages by
-    /// advancing `until` to one second before the oldest event in the
-    /// returned set.
-    pub async fn fetch_page(
+    /// Disconnect every underlying relay and tear down the pool. Must
+    /// be called explicitly when the caller is done — `Drop` would have
+    /// to block on async work, which is the wrong shape.
+    pub async fn shutdown(self) {
+        self.client.shutdown().await;
+    }
+}
+
+#[async_trait]
+impl RelayFetcher for Relay {
+    async fn fetch_page(
         &self,
         scope_a_tags: &[String],
         until_secs: i64,
         page_limit: usize,
-    ) -> Result<Page> {
+    ) -> Result<Page, FetchPageError> {
         let kinds: Vec<Kind> = CONVERSATION_KINDS_RAW
             .iter()
             .copied()
@@ -85,7 +145,7 @@ impl Relay {
             .client
             .fetch_events(filter, Duration::from_secs(FETCH_TIMEOUT_SECS))
             .await
-            .context("relay pass A fetch")?;
+            .map_err(|e| FetchPageError::from_client_error(e, "relay pass A fetch"))?;
         debug!(
             pass_a_count = pass_a.len(),
             "relay fetch_page: pass A complete"
@@ -133,6 +193,10 @@ impl Relay {
                     }
                 }
                 Err(e) => {
+                    // Pass B is best-effort fill. A failure here is not
+                    // fatal — pass A's events are still good — but we
+                    // log it. Permanent errors here would also surface
+                    // on the next pass A call.
                     warn!(error = %e, "relay pass B fetch failed; continuing with pass A only");
                 }
             }
