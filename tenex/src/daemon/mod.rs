@@ -45,6 +45,10 @@ pub struct DaemonArgs {
     /// Do not start the scheduled-task companion daemon.
     #[arg(long)]
     pub disable_scheduled_jobs: bool,
+
+    /// Do not start the intervention companion daemon.
+    #[arg(long)]
+    pub disable_intervention: bool,
 }
 
 pub async fn run(args: DaemonArgs) -> Result<()> {
@@ -123,9 +127,12 @@ pub async fn run(args: DaemonArgs) -> Result<()> {
     if args.disable_scheduled_jobs {
         info!("scheduled-task companion disabled by --disable-scheduled-jobs");
     }
+    if args.disable_intervention {
+        info!("intervention companion disabled by --disable-intervention");
+    }
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
-            for name in companion_daemon_names(args.disable_scheduled_jobs) {
+            for name in companion_daemon_names(args.disable_scheduled_jobs, args.disable_intervention) {
                 let path = dir.join(name);
                 if path.exists() {
                     supervisor.boot_binary(name.to_string(), path).await;
@@ -189,10 +196,14 @@ pub async fn run(args: DaemonArgs) -> Result<()> {
     Ok(())
 }
 
-fn companion_daemon_names(disable_scheduled_jobs: bool) -> Vec<&'static str> {
+fn companion_daemon_names(
+    disable_scheduled_jobs: bool,
+    disable_intervention: bool,
+) -> Vec<&'static str> {
     COMPANION_DAEMONS
         .into_iter()
-        .filter(|name| !disable_scheduled_jobs || *name != "tenex-scheduler")
+        .filter(|name| !(disable_scheduled_jobs && *name == "tenex-scheduler"))
+        .filter(|name| !(disable_intervention && *name == "tenex-intervention"))
         .collect()
 }
 
@@ -269,21 +280,35 @@ mod tests {
     use super::{companion_daemon_names, DaemonArgs};
 
     #[test]
-    fn scheduled_jobs_are_enabled_by_default() {
+    fn companion_daemons_are_enabled_by_default() {
         let args = DaemonArgs::parse_from(["tenex", "--boot", "project"]);
 
         assert!(!args.disable_scheduled_jobs);
-        assert!(companion_daemon_names(args.disable_scheduled_jobs).contains(&"tenex-scheduler"));
+        assert!(!args.disable_intervention);
+        let names = companion_daemon_names(args.disable_scheduled_jobs, args.disable_intervention);
+        assert!(names.contains(&"tenex-scheduler"));
+        assert!(names.contains(&"tenex-intervention"));
     }
 
     #[test]
     fn disable_scheduled_jobs_omits_scheduler_companion() {
         let args = DaemonArgs::parse_from(["tenex", "--disable-scheduled-jobs"]);
-        let names = companion_daemon_names(args.disable_scheduled_jobs);
+        let names = companion_daemon_names(args.disable_scheduled_jobs, args.disable_intervention);
 
         assert!(!names.contains(&"tenex-scheduler"));
         assert!(names.contains(&"tenex-summarizer"));
         assert!(names.contains(&"tenex-intervention"));
+        assert!(names.contains(&"tenex-telegram"));
+    }
+
+    #[test]
+    fn disable_intervention_omits_intervention_companion() {
+        let args = DaemonArgs::parse_from(["tenex", "--disable-intervention"]);
+        let names = companion_daemon_names(args.disable_scheduled_jobs, args.disable_intervention);
+
+        assert!(!names.contains(&"tenex-intervention"));
+        assert!(names.contains(&"tenex-scheduler"));
+        assert!(names.contains(&"tenex-summarizer"));
         assert!(names.contains(&"tenex-telegram"));
     }
 }

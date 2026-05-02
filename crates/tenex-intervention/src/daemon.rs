@@ -12,7 +12,7 @@ use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 use tracing::{debug, error, info, warn};
 
-use tenex_conversations::Project;
+use tenex_conversations::{ConversationStore, Project};
 
 use crate::config::Config;
 use crate::detector;
@@ -211,6 +211,41 @@ async fn handle_event(
                     return;
                 }
             };
+
+            // Verify the p-tagged user actually opened the conversation. The
+            // local conversation DB is the source of truth: if the project
+            // isn't hosted here, or the user isn't the root author (e.g. a
+            // mid-chain delegation that p-tags the user), we are not the
+            // daemon responsible for this intervention.
+            match local_root_author(&project_id, &conv_id) {
+                Ok(Some(root)) if root == user_pubkey => {}
+                Ok(Some(root)) => {
+                    debug!(
+                        conversation_id = %conv_id,
+                        root_author = %root,
+                        p_tagged = %user_pubkey,
+                        "p-tagged user is not the conversation root author, skipping"
+                    );
+                    return;
+                }
+                Ok(None) => {
+                    debug!(
+                        conversation_id = %conv_id,
+                        project_id = %project_id,
+                        "conversation not present in local store (project not hosted here), skipping"
+                    );
+                    return;
+                }
+                Err(e) => {
+                    warn!(
+                        conversation_id = %conv_id,
+                        project_id = %project_id,
+                        error = %e,
+                        "failed to look up conversation root author, skipping"
+                    );
+                    return;
+                }
+            }
 
             // Skip if the completing agent IS the intervention agent.
             let intervention_agent_pk = match resolver::resolve_slug(agent_slug) {
@@ -445,11 +480,6 @@ async fn load_all_project_states(
             }
         };
 
-        if from_legacy {
-            // Re-save in canonical location.
-            state::save_state(&d_tag, &loaded_state).ok();
-        }
-
         let mut guard = ds.lock().await;
 
         if let Some(notified_list) = &loaded_state.notified {
@@ -460,11 +490,28 @@ async fn load_all_project_states(
             }
         }
 
+        let mut dropped_expired = 0usize;
         for pending in loaded_state.pending {
             let conv_id = pending.conversation_id.clone();
             let elapsed_ms = now_ms.saturating_sub(pending.completed_at);
-            let remaining_ms = timeout_ms.saturating_sub(elapsed_ms);
 
+            // The intervention window is "user silent for `timeout_ms` after
+            // an agent completion". If the daemon was down past that window,
+            // the moment to nudge has passed; firing now would just dump a
+            // stampede of stale review-requests at startup.
+            if elapsed_ms >= timeout_ms {
+                dropped_expired += 1;
+                debug!(
+                    d_tag,
+                    conversation_id = %conv_id,
+                    elapsed_ms,
+                    timeout_ms,
+                    "dropping expired pending intervention on load"
+                );
+                continue;
+            }
+
+            let remaining_ms = timeout_ms - elapsed_ms;
             guard.pending.insert(conv_id.clone(), pending.clone());
 
             let tx = trigger_tx.clone();
@@ -482,14 +529,56 @@ async fn load_all_project_states(
                 "catch-up timer set"
             );
         }
+
+        if dropped_expired > 0 || from_legacy {
+            // Re-save canonical state when we either dropped expired entries
+            // or migrated from a legacy path.
+            save_state_for_d_tag(&guard, &d_tag);
+            info!(
+                d_tag,
+                dropped_expired,
+                from_legacy,
+                "intervention state rewritten on load"
+            );
+        }
     }
 }
 
+fn local_root_author(project_id: &str, conversation_id: &str) -> Result<Option<String>> {
+    let project = Project::new_with_default_base(project_id)
+        .with_context(|| format!("resolve project '{project_id}'"))?;
+    let db_path = project.conversation_db_path();
+    if !db_path.exists() {
+        return Ok(None);
+    }
+    let store = ConversationStore::open(&db_path).context("open conversation store")?;
+    Ok(store.root_author_pubkey(conversation_id)?)
+}
+
 fn save_state_for_project(guard: &DaemonState, project_id: &str) {
+    save_state_filtered(guard, project_id, |p| {
+        p.project_id.as_deref() == Some(project_id)
+    });
+}
+
+fn save_state_for_d_tag(guard: &DaemonState, d_tag: &str) {
+    save_state_filtered(guard, d_tag, |p| {
+        p.project_id
+            .as_deref()
+            .map(|pid| state::d_tag_from_project_id(pid) == d_tag)
+            .unwrap_or(false)
+    });
+}
+
+fn save_state_filtered(
+    guard: &DaemonState,
+    save_key: &str,
+    keep_pending: impl Fn(&PendingIntervention) -> bool,
+) {
     let pending: Vec<PendingIntervention> = guard
         .pending
         .values()
-        .filter(|p| p.project_id.as_deref() == Some(project_id))
+        .filter(|p| keep_pending(p))
         .cloned()
         .collect();
 
@@ -511,7 +600,7 @@ fn save_state_for_project(guard: &DaemonState, project_id: &str) {
         },
     };
 
-    if let Err(e) = state::save_state(project_id, &save_state) {
+    if let Err(e) = state::save_state(save_key, &save_state) {
         warn!(error = %e, "failed to save intervention state");
     }
 }

@@ -100,6 +100,23 @@ impl ConversationStore {
             .map_err(ConversationsError::from)
     }
 
+    /// Author of the lowest-sequence message in the conversation — i.e. the
+    /// pubkey that opened the conversation. Returns `Ok(None)` when the
+    /// conversation is unknown locally or has no messages yet.
+    pub fn root_author_pubkey(&self, conversation_id: &str) -> Result<Option<String>> {
+        self.conn
+            .query_row(
+                "SELECT author_pubkey FROM messages
+                  WHERE conversation_id = ?1
+                  ORDER BY sequence ASC
+                  LIMIT 1",
+                [conversation_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(ConversationsError::from)
+    }
+
     /// Conversations whose `messages.author_pubkey` (or `targeted_pubkeys`)
     /// includes `pubkey`. Joins through `messages`.
     pub fn list_by_participant(
