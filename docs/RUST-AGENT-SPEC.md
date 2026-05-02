@@ -590,12 +590,14 @@ Uses `rig-core`'s `Agent::stream_chat()` with projected history and an `EmitHook
 
 ## Model Resolution
 
-Resolution order (applied after reading any `meta_model_variant` override from `AgentContextState`):
+`tenex-llm-config` owns filesystem loading and interpretation for `llms.json` and `providers.json`; the agent passes it the raw model reference after reading any `meta_model_variant` override from `AgentContextState`.
+
+Resolution order:
 
 1. If raw model is absent, `"default"`, or `""` — use the `default` key from `~/.tenex/llms.json`, falling back to `anthropic/claude-sonnet-4-6`.
 2. Look up raw model in the named `configurations` map in `~/.tenex/llms.json`.
 3. Parse `provider/model` inline format (slash). Recognized providers: `anthropic`, `openai`, `openrouter`, `ollama`, `groq`, `mistral`. **Checked before colon format** to correctly handle Ollama IDs like `ollama/mistral:latest`.
-4. Parse `provider:model` inline format (colon, legacy TENEX style).
+4. Parse `provider:model` inline format (colon).
 5. Fall back: treat the whole string as a model name with `anthropic` as provider.
 
 API keys are resolved from `~/.tenex/providers.json`. Ollama uses `OLLAMA_API_BASE_URL` or the `baseUrl`/`apiKey` field in `providers.json` as the base URL (no API key).
@@ -623,7 +625,7 @@ API keys are resolved from `~/.tenex/providers.json`. Ollama uses `OLLAMA_API_BA
 | `tenex-system-prompt` | System prompt assembly (`build_system_prompt`); `InjectedFile`, `HomeDirectoryInfo` types |
 | `tenex-rag` | RAG: SQLite vector store + embedding client |
 | `tenex-supervision` | Heuristic pre-tool and post-completion checks; `AgentCategory` enum |
-| `tenex-llm-config` | Provider credential resolution |
+| `tenex-llm-config` | Model/provider resolution and provider credential loading |
 
 ## Future Work (not yet implemented)
 

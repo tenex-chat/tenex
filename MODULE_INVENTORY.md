@@ -16,7 +16,7 @@ before adding code, moving behavior, or introducing a new dependency.
 | `crates/tenex-embedder/` | `tenex-embedder` | Host daemon + backfill subcommand that embeds conversation transcripts and summaries into per-project RAG stores. Polls `conversation.db`, message-aligned chunking with delegation-marker synthesis, writes to `embeddings.db`. |
 | `crates/tenex-identity/` | `tenex-identity` | Host identity cache and daemon for resolving Nostr kind:0 profile data over the configured relays. |
 | `crates/tenex-intervention/` | `tenex-intervention` | Intervention daemon and detector logic for identifying conversations that need owner review or follow-up. |
-| `crates/tenex-llm-config/` | `tenex-llm-config` | LLM/provider configuration resolver and Unix-socket server. Owns standard and meta model resolution plus API-key health tracking. |
+| `crates/tenex-llm-config/` | `tenex-llm-config` | Filesystem-backed LLM/provider configuration resolver. Owns standard and meta model resolution, inline model references, provider credentials, and API-key health tracking. |
 | `crates/tenex-mcp/` | `tenex-mcp` | Project-scoped MCP runtime library. Reads `.mcp.json`, starts configured MCP servers, exposes manifests, and bridges tool calls over Unix sockets. |
 | `crates/tenex-project/` | `tenex-project` | Read-side project view over project event JSON and global agent JSON files. Owns project-id normalization, membership projection, teams, and signer selection. |
 | `crates/tenex-protocol/` | `tenex-protocol` | Transport-agnostic TENEX intent vocabulary and Nostr channel encoding. Owns event kind/tag construction and message reference types. |
@@ -27,7 +27,7 @@ before adding code, moving behavior, or introducing a new dependency.
 | `crates/tenex-system-prompt/` | `tenex-system-prompt` | Deterministic system-prompt assembly from agent identity, project context, and available skill references. |
 | `crates/tenex-telegram/` | `tenex-telegram` | Telegram integration: bot client, bindings, polling, rendering, pending selections, event synthesis, and runtime forwarding. |
 | `crates/tenex-telemetry/` | `tenex-telemetry` | OpenTelemetry/tracing initialization and context propagation helpers shared by runtime binaries. |
-| `crates/tenex-whitelist/` | `tenex-whitelist` | Local allowlist daemon and CLI for trusted backend/project pubkeys. Owns cache loading, file watching, socket protocol, and daemon lifecycle. |
+| `crates/tenex-whitelist/` | `tenex-whitelist` | Local trust-set reader crate for whitelisted users and project p-tags. No daemon, CLI, socket, watcher, or exported backend-pubkey path. |
 
 ## Top-Level CLI Modules (`tenex/src`)
 
@@ -36,7 +36,7 @@ before adding code, moving behavior, or introducing a new dependency.
 | `agent_cmd/` | Agent lifecycle and configuration commands, OpenClaw import/preview flows, provisioning, categorization, and Telegram config mutation. |
 | `config_cmd/` | Interactive and command-line configuration for context management, escalation, identity, intervention, logging, relays, summarization, system prompt, Telegram, and telemetry. |
 | `cron_cmd/` | Host commands for scheduled TENEX activity. |
-| `daemon/` | Host supervisor daemon configuration, lockfile, control socket, Nostr subscription, runtime supervision, and whitelist export. |
+| `daemon/` | Host supervisor daemon configuration, lockfile, control socket, Nostr subscription, and runtime supervision. |
 | `doctor/` | Diagnostics and migration/repair workflows. |
 | `mcp_cmd/` | MCP command surface for host/project configuration inspection and management. |
 | `nostr_pub/` | Host-side Nostr publication helpers for backend signing, installed agents, operations status, project mutation, and project status. |
@@ -161,7 +161,7 @@ before adding code, moving behavior, or introducing a new dependency.
 |---|---|
 | `tenex-identity` | `cache`, `client`, `daemonize`, `fetch`, `model`, `paths`, `protocol`, `resolve`, `schema`, `server`. |
 | `tenex-intervention` | `config`, `daemon`, `detector`, `lockfile`, `model`, `paths`, `publish`, `resolver`, `state`. |
-| `tenex-llm-config` | `key_health`, `protocol`, `resolver`, `server`. |
+| `tenex-llm-config` | `key_health`, `resolver`, `types`. |
 | `tenex-mcp` | `bridge`, `config`, `manifest`, `runtime`, `stdio`. |
 | `tenex-protocol` | `channel`, `context`, `intent`, `refs`, `runtime_control`, `sink`. |
 | `tenex-rag` | `config`, `embed`, `rag`, `schema`, `sqlite_store`, `store`. |
@@ -171,7 +171,7 @@ before adding code, moving behavior, or introducing a new dependency.
 | `tenex-system-prompt` | `guidance`, `home`, `reminders`, `schedule`, `telegram`. |
 | `tenex-telegram` | `binding`, `chat_context`, `client`, `config`, `daemon_client`, `discovery`, `event_synth`, `forward`, `pending_selection_store`, `poller`, `render`, `runtime_client`, `selection`, `session`, `tool_publications`, `types`. |
 | `tenex-telemetry` | `propagation` plus tracing/OpenTelemetry setup in `lib.rs`. |
-| `tenex-whitelist` | `cache`, `client`, `daemonize`, `paths`, `protocol`, `server`, `watch`. |
+| `tenex-whitelist` | `cache`, `paths`. |
 
 ## Ownership Rules
 

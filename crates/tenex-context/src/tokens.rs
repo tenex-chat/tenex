@@ -1,6 +1,5 @@
-//! Conservative token estimator. Chars/4 is the de-facto rough heuristic
-//! used across the bun runtime; matching it here keeps cross-runner
-//! behaviour comparable without coupling to a tokenizer.
+//! Conservative token estimator. Chars/4 is the rough heuristic used by
+//! TENEX runtime components when an exact tokenizer is not available.
 
 use crate::types::Message;
 

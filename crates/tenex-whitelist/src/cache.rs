@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use serde::Deserialize;
 use std::collections::HashSet;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::RwLock;
 
 use crate::paths;
@@ -23,53 +23,45 @@ struct RawEvent {
 struct State {
     /// Pubkeys from `~/.tenex/config.json` `whitelistedPubkeys`.
     whitelist: HashSet<String>,
-    /// Backend pubkeys, one hex per line, from `~/.tenex/whitelist/pubkeys.txt`.
-    /// Written by the Rust supervisor, not by this daemon.
-    backend: HashSet<String>,
     /// Union of `p` tags across all `~/.tenex/projects/*/event.json` files.
     p_tags: HashSet<String>,
 }
 
-pub struct TrustCache {
+pub struct TrustSet {
+    base_dir: PathBuf,
     inner: RwLock<State>,
 }
 
 pub struct Counts {
     pub whitelist: usize,
-    pub backend: usize,
     pub p_tags: usize,
 }
 
-impl TrustCache {
-    pub fn new() -> Self {
-        Self {
+impl TrustSet {
+    pub fn load(base_dir: impl Into<PathBuf>) -> Result<Self> {
+        let trust = Self {
+            base_dir: base_dir.into(),
             inner: RwLock::new(State::default()),
-        }
+        };
+        trust.reload_all()?;
+        Ok(trust)
     }
 
     pub fn reload_all(&self) -> Result<()> {
         self.reload_whitelist()?;
-        self.reload_backend()?;
         self.reload_p_tags()?;
         Ok(())
     }
 
     pub fn reload_whitelist(&self) -> Result<()> {
-        let set = read_whitelist(&paths::config_path())?;
+        let set = read_whitelist(&paths::config_path(&self.base_dir))?;
         let mut state = self.inner.write().expect("trust cache poisoned");
         state.whitelist = set;
         Ok(())
     }
 
-    pub fn reload_backend(&self) -> Result<()> {
-        let set = read_pubkeys_txt(&paths::backend_pubkeys_path())?;
-        let mut state = self.inner.write().expect("trust cache poisoned");
-        state.backend = set;
-        Ok(())
-    }
-
     pub fn reload_p_tags(&self) -> Result<()> {
-        let set = read_all_project_p_tags(&paths::projects_dir())?;
+        let set = read_all_project_p_tags(&paths::projects_dir(&self.base_dir))?;
         let mut state = self.inner.write().expect("trust cache poisoned");
         state.p_tags = set;
         Ok(())
@@ -77,16 +69,13 @@ impl TrustCache {
 
     pub fn is_allowed(&self, pubkey: &str) -> bool {
         let state = self.inner.read().expect("trust cache poisoned");
-        state.whitelist.contains(pubkey)
-            || state.backend.contains(pubkey)
-            || state.p_tags.contains(pubkey)
+        state.whitelist.contains(pubkey) || state.p_tags.contains(pubkey)
     }
 
     pub fn counts(&self) -> Counts {
         let state = self.inner.read().expect("trust cache poisoned");
         Counts {
             whitelist: state.whitelist.len(),
-            backend: state.backend.len(),
             p_tags: state.p_tags.len(),
         }
     }
@@ -103,19 +92,6 @@ fn read_whitelist(path: &Path) -> Result<HashSet<String>> {
     Ok(cfg
         .whitelisted_pubkeys
         .into_iter()
-        .filter_map(normalize_pubkey)
-        .collect())
-}
-
-fn read_pubkeys_txt(path: &Path) -> Result<HashSet<String>> {
-    let text = match fs::read_to_string(path) {
-        Ok(s) => s,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(HashSet::new()),
-        Err(e) => return Err(e).with_context(|| format!("read {}", path.display())),
-    };
-    Ok(text
-        .lines()
-        .map(|l| l.trim().to_string())
         .filter_map(normalize_pubkey)
         .collect())
 }

@@ -1,11 +1,10 @@
 //! Singleton lockfile for the supervisor.
 //!
-//! Format matches `src/utils/lockfile.ts` so a stale lock written by either
-//! side is interpretable by the other:
+//! The lockfile body is JSON so stale locks can be diagnosed by operators:
 //!     { "pid": 1234, "hostname": "host", "startedAt": 1700000000000 }
 //!
-//! Detection of a live owner uses `kill(pid, 0)` — same as the TS
-//! implementation. Stale locks (owner gone) are removed and reacquired.
+//! Detection of a live owner uses `kill(pid, 0)`. Stale locks (owner gone)
+//! are removed and reacquired.
 
 use std::fs;
 use std::path::PathBuf;

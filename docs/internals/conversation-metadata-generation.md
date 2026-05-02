@@ -43,7 +43,7 @@ For each eligible conversation, the scheduler waits until the catalog last activ
 
 `crates/tenex-summarizer/src/main.rs` is the binary entrypoint. `run` acquires the singleton lock, loads config, opens the summarizer state DB, and enters the scheduler. `status` probes the same lockfile and prints whether another process holds it.
 
-`crates/tenex-summarizer/src/config.rs` reads `$TENEX_BASE_DIR/config.json`, `llms.json`, and `providers.json`. The relay list comes from config, defaulting to `wss://relay.tenex.chat` when absent. The backend signing key is `tenexPrivateKey`. The LLM preset is `llms.summarization` if present, otherwise `llms.default`. Supported providers in the reviewed source are Anthropic, OpenRouter, OpenAI, and Ollama.
+`crates/tenex-summarizer/src/config.rs` reads `$TENEX_BASE_DIR/config.json` directly and delegates LLM/provider resolution to `tenex-llm-config`. The relay list comes from config, defaulting to `wss://relay.tenex.chat` when absent. The backend signing key is `tenexPrivateKey`. The LLM preset is `llms.summarization` if present, otherwise `llms.default`. Supported providers in the reviewed source are Anthropic, OpenRouter, OpenAI, and Ollama.
 
 `crates/tenex-summarizer/src/scheduler.rs` owns process policy: scan cadence, quiet window, maximum age, per-conversation rate limit, error handling, category recording, and success/failure logs.
 

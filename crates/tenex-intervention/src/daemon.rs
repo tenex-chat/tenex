@@ -536,9 +536,7 @@ async fn load_all_project_states(
             save_state_for_d_tag(&guard, &d_tag);
             info!(
                 d_tag,
-                dropped_expired,
-                from_legacy,
-                "intervention state rewritten on load"
+                dropped_expired, from_legacy, "intervention state rewritten on load"
             );
         }
     }

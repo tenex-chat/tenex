@@ -5,8 +5,8 @@
 //!   - last_activity has advanced since our last summarize
 //!   - at least MIN_INTERVAL_MS has passed since our last summarize (rate limit)
 //!
-//! Equivalent to the bun runtime's `MetadataDebounceManager` policy without
-//! an in-process scheduler.
+//! Implements the host-level debounce policy without relying on an
+//! in-process scheduler inside each project runtime.
 
 use std::time::Duration;
 

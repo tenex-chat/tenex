@@ -19,6 +19,7 @@ thiserror = "2"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tenex-telemetry = { path = "../tenex-telemetry" }
+tenex-llm-config = { path = "../tenex-llm-config" }
 tenex-conversations = { path = "../tenex-conversations" }
 rusqlite = { version = "0.31", features = ["bundled"] }
 nostr = "0.44"

@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::sync::{atomic::AtomicBool, Arc, Mutex};
 
 use rig::tool::ToolDyn;
-use tenex_rag::{EmbedConfig, RagStore};
+use tenex_rag::RagStore;
 
 use crate::config::ResolvedModel;
 use crate::emit::EmitState;
@@ -65,7 +65,6 @@ pub(crate) struct ToolSet {
     pub(crate) execution_id: String,
     pub(crate) suppress_response: Arc<AtomicBool>,
     pub(crate) rag_store: Option<Arc<RagStore>>,
-    pub(crate) embed_config: Option<EmbedConfig>,
     pub(crate) working_dir: String,
     pub(crate) agents_md: Arc<AgentsMdReminderState>,
     pub(crate) shell_env: Vec<(String, String)>,

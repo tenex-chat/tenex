@@ -240,10 +240,7 @@ mod tests {
     #[test]
     fn ensure_unique_slug_returns_base_when_no_conflict() {
         assert_eq!(ensure_unique_slug("foo", &[]), "foo");
-        assert_eq!(
-            ensure_unique_slug("foo", &["bar".to_owned()]),
-            "foo"
-        );
+        assert_eq!(ensure_unique_slug("foo", &["bar".to_owned()]), "foo");
     }
 
     #[test]

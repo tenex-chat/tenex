@@ -1,7 +1,6 @@
 //! Category tally at `~/.tenex/data/conversation-categories.json`.
-//! Format: `{ "<name>": <count> }`. This matches the bun runtime's
-//! `CategoryManager`, which is global (not per-project) despite the file
-//! living under `data/`.
+//! Format: `{ "<name>": <count> }`. The tally is global rather than
+//! per-project despite the file living under `data/`.
 
 use std::collections::HashMap;
 use std::fs;

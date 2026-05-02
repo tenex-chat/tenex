@@ -1,6 +1,9 @@
 use anyhow::{Context, Result};
 use serde::Deserialize;
 use std::{collections::HashMap, path::Path};
+use tenex_llm_config::key_health::KeyHealthTracker;
+use tenex_llm_config::resolver::ConfigStore;
+use tenex_llm_config::ResolvedConfig;
 use tenex_supervision::types::AgentCategory;
 
 #[derive(Debug, Deserialize)]
@@ -59,68 +62,24 @@ pub(crate) enum AcpPermissionPolicy {
 }
 
 pub(crate) fn load_acp_config(base_dir: &Path, config_name: &str) -> Result<AcpRuntimeConfig> {
-    let llms = tenex_llm_config::resolver::load_llms(base_dir).context("loading llms.json")?;
-    let config = llms
-        .configurations
-        .get(config_name)
-        .with_context(|| format!("LLM config '{config_name}' not found in llms.json"))?;
-    let obj = config
-        .as_object()
-        .with_context(|| format!("LLM config '{config_name}' is not a JSON object"))?;
+    let store = ConfigStore::load(base_dir)?;
+    let resolved = store.resolve_config(config_name, &KeyHealthTracker::new())?;
+    let ResolvedConfig::Acp(config) = resolved else {
+        anyhow::bail!("LLM config '{config_name}' is not an ACP config");
+    };
 
-    let provider = obj
-        .get("provider")
-        .and_then(|v| v.as_str())
-        .with_context(|| format!("LLM config '{config_name}' missing 'provider'"))?;
-    anyhow::ensure!(
-        provider == "acp",
-        "LLM config '{config_name}' has provider '{provider}', expected 'acp'"
-    );
-
-    let backend = obj
-        .get("backend")
-        .and_then(|v| v.as_str())
-        .unwrap_or("custom")
-        .to_string();
-    let command = obj
-        .get("command")
-        .and_then(|v| v.as_str())
-        .with_context(|| format!("ACP config '{config_name}' missing 'command'"))?
-        .to_string();
-    let args: Vec<String> = obj
-        .get("args")
-        .and_then(|v| v.as_array())
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|v| v.as_str().map(str::to_string))
-                .collect()
-        })
-        .unwrap_or_default();
-    let env: HashMap<String, String> = obj
-        .get("env")
-        .and_then(|v| v.as_object())
-        .map(|m| {
-            m.iter()
-                .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
-                .collect()
-        })
-        .unwrap_or_default();
-    let model = obj
-        .get("model")
-        .and_then(|v| v.as_str())
-        .map(str::to_string);
-    let permission_policy: AcpPermissionPolicy = obj
-        .get("permissionPolicy")
-        .and_then(|v| v.as_str())
+    let permission_policy: AcpPermissionPolicy = config
+        .permission_policy
+        .as_deref()
         .and_then(|s| serde_json::from_value(serde_json::Value::String(s.to_string())).ok())
         .unwrap_or_default();
 
     Ok(AcpRuntimeConfig {
-        backend,
-        command,
-        args,
-        env,
-        model,
+        backend: config.backend,
+        command: config.command,
+        args: config.args,
+        env: config.env,
+        model: config.model,
         permission_policy,
     })
 }

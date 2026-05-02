@@ -1,5 +1,4 @@
 //! flock(2)-based singleton lock at `~/.tenex/summarizer.pid`.
-//! Mirrors the pattern used by the whitelist daemon.
 
 use std::fs::{self, OpenOptions};
 use std::io::{Read, Write};

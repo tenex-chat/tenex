@@ -6,6 +6,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tenex_llm_config::{
     key_health::KeyHealthTracker,
     resolver::{load_llms, load_providers, resolve_config},
+    ResolvedConfig, StandardConfig,
 };
 
 struct FixtureDir {
@@ -39,6 +40,15 @@ impl FixtureDir {
     "claude-code/sonnet": {
       "provider": "claude-code",
       "model": "sonnet"
+    },
+    "codex-acp": {
+      "provider": "acp",
+      "backend": "codex",
+      "command": "codex",
+      "args": ["--json"],
+      "env": {"TENEX_ACP": "1"},
+      "model": "gpt-5.4",
+      "permissionPolicy": "allow"
     }
   },
   "default": "opus",
@@ -78,6 +88,13 @@ fn base_dir() -> FixtureDir {
     FixtureDir::new()
 }
 
+fn standard(config: ResolvedConfig) -> StandardConfig {
+    match config {
+        ResolvedConfig::Standard(config) => config,
+        other => panic!("expected standard config, got {other:?}"),
+    }
+}
+
 #[test]
 fn loads_llms_and_providers() {
     let dir = base_dir();
@@ -100,23 +117,19 @@ fn resolves_standard_config() {
     let providers = load_providers(&dir.path).unwrap();
     let kh = KeyHealthTracker::new();
 
-    let resp = resolve_config("opus", &llms, &providers, &kh);
+    let resp = standard(resolve_config("opus", &llms, &providers, &kh).unwrap());
 
-    assert_eq!(resp["ok"], true, "resolve should succeed");
-    assert_eq!(resp["kind"], "standard");
-    assert_eq!(resp["provider"], "anthropic");
-    assert_eq!(resp["model"], "claude-opus-4-6");
+    assert_eq!(resp.provider, "anthropic");
+    assert_eq!(resp.model, "claude-opus-4-6");
 
-    let keys = resp["apiKeys"]
-        .as_array()
-        .expect("apiKeys should be an array");
-    assert!(!keys.is_empty(), "anthropic apiKeys should be non-empty");
+    assert!(
+        !resp.api_keys.is_empty(),
+        "anthropic apiKeys should be non-empty"
+    );
 
     // The trailing alias must be split off; key must not contain a space.
-    let first = &keys[0];
-    let key_str = first["key"]
-        .as_str()
-        .expect("apiKeys[0].key should be a string");
+    let first = &resp.api_keys[0];
+    let key_str = &first.key;
     assert!(
         !key_str.contains(' '),
         "key must not contain the alias: {key_str:?}"
@@ -126,10 +139,7 @@ fn resolves_standard_config() {
         "key should start with sk-: {key_str:?}"
     );
 
-    let alias = first["alias"]
-        .as_str()
-        .expect("apiKeys[0].alias should be present");
-    assert_eq!(alias, "pfer@example.com");
+    assert_eq!(first.alias.as_deref(), Some("pfer@example.com"));
 }
 
 #[test]
@@ -139,10 +149,12 @@ fn resolves_extras_passthrough() {
     let providers = load_providers(&dir.path).unwrap();
     let kh = KeyHealthTracker::new();
 
-    let resp = resolve_config("codex/gpt-5.4", &llms, &providers, &kh);
+    let resp = standard(resolve_config("codex/gpt-5.4", &llms, &providers, &kh).unwrap());
 
-    assert_eq!(resp["ok"], true);
-    assert_eq!(resp["effort"], "xhigh", "effort extra must be preserved");
+    assert_eq!(
+        resp.extras["effort"], "xhigh",
+        "effort extra must be preserved"
+    );
 }
 
 #[test]
@@ -155,8 +167,7 @@ fn resolves_role_default() {
     let role_target = llms.roles.get("default").cloned();
 
     let name = role_target.expect("default role should be configured");
-    let resp = resolve_config(&name, &llms, &providers, &kh);
-    assert_eq!(resp["ok"], true, "default role config must resolve");
+    resolve_config(&name, &llms, &providers, &kh).expect("default role config must resolve");
 }
 
 #[test]
@@ -170,8 +181,7 @@ fn resolves_role_summarization() {
         .roles
         .get("summarization")
         .expect("summarization role should be configured");
-    let resp = resolve_config(name, &llms, &providers, &kh);
-    assert_eq!(resp["ok"], true);
+    resolve_config(name, &llms, &providers, &kh).expect("summarization role should resolve");
 }
 
 #[test]
@@ -181,9 +191,8 @@ fn unknown_config_returns_error() {
     let providers = load_providers(&dir.path).unwrap();
     let kh = KeyHealthTracker::new();
 
-    let resp = resolve_config("__no_such_config__", &llms, &providers, &kh);
-    assert_eq!(resp["ok"], false);
-    assert!(resp["error"].as_str().unwrap().contains("unknown config"));
+    let err = resolve_config("__no_such_config__", &llms, &providers, &kh).unwrap_err();
+    assert!(err.to_string().contains("unknown config"));
 }
 
 #[test]
@@ -196,13 +205,11 @@ fn key_health_cooldown_excludes_key() {
     kh.mark_failed("anthropic", 0);
     kh.mark_failed("anthropic", 1);
 
-    let resp = resolve_config("opus", &llms, &providers, &kh);
+    let err = resolve_config("opus", &llms, &providers, &kh).unwrap_err();
 
-    assert_eq!(resp["ok"], false);
     assert!(
-        resp["error"].as_str().unwrap().contains("cooldown"),
-        "expected cooldown error, got: {}",
-        resp["error"]
+        err.to_string().contains("cooldown"),
+        "expected cooldown error, got: {err}"
     );
 }
 
@@ -213,10 +220,29 @@ fn agent_provider_no_keys_is_ok() {
     let providers = load_providers(&dir.path).unwrap();
     let kh = KeyHealthTracker::new();
 
-    let resp = resolve_config("claude-code/sonnet", &llms, &providers, &kh);
+    let resp = standard(resolve_config("claude-code/sonnet", &llms, &providers, &kh).unwrap());
 
-    assert_eq!(resp["ok"], true);
-    assert_eq!(resp["kind"], "standard");
     // apiKeys may be empty or contain "none" depending on what's in providers.json.
     // Either way the resolve itself must succeed.
+    assert_eq!(resp.provider, "claude-code");
+}
+
+#[test]
+fn resolves_acp_config() {
+    let dir = base_dir();
+    let llms = load_llms(&dir.path).unwrap();
+    let providers = load_providers(&dir.path).unwrap();
+    let kh = KeyHealthTracker::new();
+
+    let resp = resolve_config("codex-acp", &llms, &providers, &kh).unwrap();
+    let ResolvedConfig::Acp(config) = resp else {
+        panic!("expected ACP config");
+    };
+
+    assert_eq!(config.backend, "codex");
+    assert_eq!(config.command, "codex");
+    assert_eq!(config.args, vec!["--json"]);
+    assert_eq!(config.env.get("TENEX_ACP").map(String::as_str), Some("1"));
+    assert_eq!(config.model.as_deref(), Some("gpt-5.4"));
+    assert_eq!(config.permission_policy.as_deref(), Some("allow"));
 }

@@ -26,8 +26,7 @@ pub struct Config {
 }
 
 /// Load `<base_dir>/config.json` and apply daemon-startup invariants.
-/// Errors when `whitelistedPubkeys` is missing/empty (matches TS daemon
-/// behaviour at `src/daemon/Daemon.ts:301-314`, modulo the per-case message).
+/// Errors when `whitelistedPubkeys` is missing or empty.
 pub fn load(base_dir: &Path) -> Result<Config> {
     let doc = TenexConfigDoc::load(base_dir)?;
 

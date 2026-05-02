@@ -13,14 +13,6 @@ pub fn config_file() -> PathBuf {
     base_dir().join("config.json")
 }
 
-pub fn llms_file() -> PathBuf {
-    base_dir().join("llms.json")
-}
-
-pub fn providers_file() -> PathBuf {
-    base_dir().join("providers.json")
-}
-
 pub fn pid_file() -> PathBuf {
     base_dir().join("summarizer.pid")
 }

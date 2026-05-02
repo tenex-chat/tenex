@@ -23,7 +23,8 @@ use rig::providers::{anthropic, ollama, openai, openrouter};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use tenex_llm_config::key_health::KeyHealthTracker;
-use tenex_llm_config::resolver::{load_llms, load_providers, resolve_standard};
+use tenex_llm_config::resolver::ConfigStore;
+use tenex_llm_config::{ResolvedConfig, StandardConfig};
 
 /// Project-side context handed to the firewall so it can judge whether a
 /// message is on-topic versus spam. Only fields that are stable across
@@ -70,23 +71,20 @@ struct FirewallVerdict {
 }
 
 async fn run(base_dir: &Path, project: ProjectContext<'_>, content: &str) -> Result<Verdict> {
-    let llms = load_llms(base_dir).context("loading llms.json")?;
-    let providers = load_providers(base_dir).context("loading providers.json")?;
-
-    let config_name = llms
-        .roles
-        .get("firewall")
-        .ok_or_else(|| anyhow!("no `firewall` role configured in llms.json"))?
-        .clone();
-    let config = llms
-        .configurations
-        .get(&config_name)
-        .ok_or_else(|| anyhow!("firewall role points to unknown config '{config_name}'"))?
-        .clone();
+    let store = ConfigStore::load(base_dir).context("loading LLM config")?;
 
     let key_health = KeyHealthTracker::default();
-    let resolved =
-        resolve_standard(&config_name, &config, &providers, &key_health).map_err(|e| anyhow!(e))?;
+    let resolved = match store.resolve_role("firewall", &key_health)? {
+        ResolvedConfig::Standard(config) => config,
+        ResolvedConfig::Meta(meta) => {
+            let variant = meta
+                .variants
+                .get(&meta.default)
+                .ok_or_else(|| anyhow!("firewall meta config missing default variant"))?;
+            variant.resolved.clone()
+        }
+        ResolvedConfig::Acp(_) => return Err(anyhow!("firewall role resolved to an ACP config")),
+    };
 
     let preamble = preamble(project);
     let user = format!("External user message (raw):\n```\n{}\n```", content.trim());
@@ -137,7 +135,7 @@ Keep `reason` to one short sentence (<= 120 chars)."#,
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 
 async fn extract_anthropic(
-    resolved: &tenex_llm_config::protocol::StandardConfigResponse,
+    resolved: &StandardConfig,
     preamble: &str,
     user: &str,
 ) -> Result<FirewallVerdict> {
@@ -154,7 +152,7 @@ async fn extract_anthropic(
 }
 
 async fn extract_openrouter(
-    resolved: &tenex_llm_config::protocol::StandardConfigResponse,
+    resolved: &StandardConfig,
     preamble: &str,
     user: &str,
 ) -> Result<FirewallVerdict> {
@@ -171,7 +169,7 @@ async fn extract_openrouter(
 }
 
 async fn extract_openai(
-    resolved: &tenex_llm_config::protocol::StandardConfigResponse,
+    resolved: &StandardConfig,
     preamble: &str,
     user: &str,
 ) -> Result<FirewallVerdict> {
@@ -188,7 +186,7 @@ async fn extract_openai(
 }
 
 async fn extract_ollama(
-    resolved: &tenex_llm_config::protocol::StandardConfigResponse,
+    resolved: &StandardConfig,
     preamble: &str,
     user: &str,
 ) -> Result<FirewallVerdict> {
@@ -207,7 +205,7 @@ async fn extract_ollama(
         .map_err(|e| anyhow!("ollama extraction failed: {e}"))
 }
 
-fn first_api_key(resolved: &tenex_llm_config::protocol::StandardConfigResponse) -> Result<String> {
+fn first_api_key(resolved: &StandardConfig) -> Result<String> {
     resolved
         .api_keys
         .first()

@@ -1,7 +1,7 @@
 # `crates/` — Modularization Philosophy
 
-This directory holds the Rust crates that decompose the TENEX bun monolith
-into a Unix-style fleet. The shape and the rules are deliberate. Read this
+This directory holds the Rust crates that decompose TENEX into focused
+libraries and daemons. The shape and the rules are deliberate. Read this
 before adding, splitting, or merging crates.
 
 ## Unix philosophy, applied here
@@ -12,8 +12,8 @@ before adding, splitting, or merging crates.
   shared globals. Two contracts dominate this tree:
   1. **Storage contract by substrate**: SQLite crates expose a typed API over
      a versioned schema; JSON-backed crates expose typed APIs over the shared
-     file layout. Multiple processes (bun TS, Rust binaries) open the same
-     durable state. No service in front, no IPC layer.
+     file layout. Rust binaries and daemons open the same durable state. No
+     service in front, no IPC layer.
   2. **NDJSON over Unix sockets** (and over stdio for one-shots): the
      canonical local IPC. Same frame format whether the peer is a subprocess
      or a long-lived daemon. `tenex-agent` already uses this for stdio.
@@ -29,7 +29,7 @@ When designing anything that touches relays + LLM + tools, do not collapse:
 - **Subscribe** — owns the relay connection (today: per-project; eventually:
   the host-wide relay-multiplexer).
 - **Orchestrate** — owns dispatch, RAL state, delegation tree
-  (`tenex-runtime`, forward plan; today: bun runtime).
+  (`tenex runtime <d-tag>`).
 - **Execute** — owns the LLM loop and tools (`tenex-agent`).
 
 The runner does **not** open relays. The orchestrator does **not** call
@@ -47,7 +47,7 @@ independent restart, hot-swap. Otherwise it is a library, not a daemon.
 | Typed conversation state shared across processes | Library + SQLite (`tenex-conversations`) |
 | Global installed-agent JSON shared across processes | Library + JSON files (`tenex-agent-registry`) |
 | Read-side project metadata and membership | Library + JSON files (`tenex-project`) |
-| LLM-bound or stateful work that should survive bun-runtime crashes | Daemon (`tenex-summarizer`, future `tenex-cron`, `tenex-intervention`) |
+| LLM-bound or stateful work that should survive runtime restarts | Daemon (`tenex-summarizer`, `tenex-scheduler`, `tenex-intervention`) |
 | Pure compute reachable over a frame protocol | One-shot or long-lived binary (`tenex-agent`) |
 
 If a daemon is justified, its public surface is a Unix socket speaking

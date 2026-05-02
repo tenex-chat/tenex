@@ -14,7 +14,7 @@ mod types;
 mod utils;
 
 use anyhow::Result;
-use clap::{Args, Parser, Subcommand};
+use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
 #[derive(Parser)]
@@ -56,20 +56,9 @@ enum Command {
     /// Inspect and serve the LLM accounting store.
     Accounting(accounting_cmd::AccountingArgs),
 
-    /// Internal foreground whitelist process supervised by `tenex daemon`.
-    #[command(name = "whitelist-run", hide = true)]
-    WhitelistRun(WhitelistRunArgs),
-
     /// Internal foreground identity daemon process supervised by `tenex daemon`.
     #[command(name = "identity-run", hide = true)]
     IdentityRun,
-}
-
-#[derive(Args)]
-struct WhitelistRunArgs {
-    /// TENEX base directory (default: $TENEX_BASE_DIR or ~/.tenex).
-    #[arg(long, value_name = "PATH")]
-    base_dir: Option<PathBuf>,
 }
 
 #[tokio::main]
@@ -96,12 +85,6 @@ async fn main() -> Result<()> {
         Command::Daemon(args) => daemon::run(args).await,
         Command::Runtime(args) => runtime_cmd::run(args).await,
         Command::Accounting(args) => accounting_cmd::run(args).await,
-        Command::WhitelistRun(args) => {
-            if let Some(base_dir) = args.base_dir {
-                std::env::set_var("TENEX_BASE_DIR", base_dir);
-            }
-            tenex_whitelist::run_foreground()
-        }
         Command::IdentityRun => tenex_identity::run_daemon_sync(),
     };
     telemetry.shutdown();
@@ -135,7 +118,6 @@ fn command_base_dir(command: &Command) -> Option<&std::path::Path> {
     match command {
         Command::Daemon(args) => args.base_dir.as_deref(),
         Command::Runtime(args) => args.base_dir.as_deref(),
-        Command::WhitelistRun(args) => args.base_dir.as_deref(),
         Command::IdentityRun => None,
         _ => None,
     }
@@ -146,21 +128,9 @@ mod tests {
     use super::*;
     use clap::CommandFactory;
 
-    /// Pin the top-level CLI's `about` string and the four TS-mirrored
-    /// subcommand descriptions visible via `tenex --help`. They must
-    /// match the TS source byte-for-byte:
-    ///
-    /// - top-level                — `src/index.ts:119`
-    /// - `tenex config`           — `src/commands/config/index.ts:126`
-    /// - `tenex onboard`          — `src/commands/onboard.ts:1200`
-    /// - `tenex doctor`           — `src/commands/doctor.ts:69`
-    /// - `tenex agent`            — `src/commands/agent/index.ts:52`
-    ///
-    /// The other entries (`mcp`, `cron`, `daemon`, `runtime`) are
-    /// Rust-only surfaces — no TS counterpart, so their wording isn't
-    /// pinned here.
+    /// Pin top-level CLI descriptions visible via `tenex --help`.
     #[test]
-    fn top_level_command_descriptions_match_ts_verbatim() {
+    fn top_level_command_descriptions_are_stable() {
         let cmd = Cli::command();
         assert_eq!(
             cmd.get_about().map(|s| s.to_string()).as_deref(),

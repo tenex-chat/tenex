@@ -9,8 +9,8 @@
 //!                       ERR <message>\n (d_tag unknown or other failure)
 //! ```
 //!
-//! Mirrors the line-protocol shape of `whitelist/src/lib.rs` but uses Tokio
-//! since the daemon is already async and owns the [`Supervisor`].
+//! The socket is intentionally small: it only accepts commands that the
+//! supervisor itself can execute.
 
 use std::path::{Path, PathBuf};
 

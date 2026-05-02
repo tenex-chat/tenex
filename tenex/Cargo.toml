@@ -22,7 +22,6 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tenex-accounting = { path = "../crates/tenex-accounting" }
 tenex-telemetry = { path = "../crates/tenex-telemetry" }
 libc = "0.2"
-shell-words = "1"
 console = "0.15"
 inquire = { version = "0.7", features = ["editor"] }
 indexmap = { version = "2", features = ["serde"] }
@@ -34,7 +33,6 @@ reqwest = { version = "0.12", features = ["blocking", "json"] }
 dirs-next = "2"
 sha2 = "0.10"
 regex = "1"
-tenex-whitelist = { path = "../crates/tenex-whitelist" }
 tenex-llm-config = { path = "../crates/tenex-llm-config" }
 tenex-mcp = { path = "../crates/tenex-mcp" }
 tenex-identity = { path = "../crates/tenex-identity" }

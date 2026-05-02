@@ -1,8 +1,9 @@
-use std::collections::HashMap;
 use std::fs;
 
 use anyhow::{anyhow, Context, Result};
 use serde::Deserialize;
+use tenex_llm_config::key_health::KeyHealthTracker;
+use tenex_llm_config::resolver::{resolved_config_default_standard, ConfigStore};
 
 use crate::paths;
 
@@ -33,14 +34,12 @@ impl Config {
 
         let backend_secret_key = global.tenex_private_key.ok_or_else(|| {
             anyhow!(
-                "no tenexPrivateKey in {} (run the bun setup once to provision a backend key)",
+                "no tenexPrivateKey in {} (run `tenex onboard` to provision a backend key)",
                 paths::config_file().display()
             )
         })?;
 
-        let llms = LlmsConfig::load();
-        let providers = ProvidersConfig::load();
-        let llm = LlmSelection::resolve(llms.as_ref(), providers.as_ref())?;
+        let llm = LlmSelection::resolve()?;
 
         Ok(Self {
             relays,
@@ -73,127 +72,25 @@ pub struct LlmSelection {
     pub base_url: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
-struct LlmsConfig {
-    configurations: HashMap<String, LlmEntry>,
-    default: Option<String>,
-    summarization: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct LlmEntry {
-    provider: String,
-    model: String,
-}
-
-impl LlmsConfig {
-    fn load() -> Option<Self> {
-        let bytes = fs::read(paths::llms_file()).ok()?;
-        serde_json::from_slice(&bytes).ok()
-    }
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(untagged)]
-enum ApiKeyValue {
-    Single(String),
-    List(Vec<String>),
-}
-
-impl ApiKeyValue {
-    fn first(&self) -> &str {
-        match self {
-            ApiKeyValue::Single(s) => s.split_whitespace().next().unwrap_or(s),
-            ApiKeyValue::List(v) => v
-                .first()
-                .map(|s| s.split_whitespace().next().unwrap_or(s))
-                .unwrap_or(""),
-        }
-    }
-}
-
-#[derive(Debug, Deserialize)]
-struct ProviderEntry {
-    #[serde(rename = "apiKey")]
-    api_key: Option<ApiKeyValue>,
-    #[serde(rename = "baseUrl")]
-    base_url: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct ProvidersConfig {
-    providers: HashMap<String, ProviderEntry>,
-}
-
-impl ProvidersConfig {
-    fn load() -> Option<Self> {
-        let bytes = fs::read(paths::providers_file()).ok()?;
-        serde_json::from_slice(&bytes).ok()
-    }
-
-    fn api_key(&self, provider: &str) -> Option<String> {
-        let entry = self.providers.get(provider)?;
-        let key = entry.api_key.as_ref()?.first();
-        if key.is_empty() || key == "none" || key == "local" {
-            None
-        } else {
-            Some(key.to_string())
-        }
-    }
-
-    fn ollama_base_url(&self) -> Option<String> {
-        let entry = self.providers.get("ollama")?;
-        if let Some(url) = &entry.base_url {
-            return Some(url.clone());
-        }
-        let key = entry.api_key.as_ref()?.first();
-        if key.is_empty() || key == "none" || key == "local" {
-            None
-        } else {
-            Some(key.to_string())
-        }
-    }
-}
-
 impl LlmSelection {
-    fn resolve(llms: Option<&LlmsConfig>, providers: Option<&ProvidersConfig>) -> Result<Self> {
-        let llms = llms
-            .ok_or_else(|| anyhow!("{} is missing or unreadable", paths::llms_file().display()))?;
-
-        let preset_name = llms
-            .summarization
-            .as_deref()
-            .or(llms.default.as_deref())
-            .ok_or_else(|| anyhow!("llms.json has neither `summarization` nor `default`"))?;
-
-        let entry = llms
-            .configurations
-            .get(preset_name)
-            .ok_or_else(|| anyhow!("llms.json: configuration `{preset_name}` not found"))?;
-
-        let provider = entry.provider.clone();
-        let model = entry.model.clone();
-        let (api_key, base_url) = resolve_credentials(&provider, providers);
+    fn resolve() -> Result<Self> {
+        let store = ConfigStore::load(&paths::base_dir())?;
+        let role = if store.llms.roles.contains_key("summarization") {
+            "summarization"
+        } else if store.llms.roles.contains_key("default") {
+            "default"
+        } else {
+            return Err(anyhow!(
+                "llms.json has neither `summarization` nor `default`"
+            ));
+        };
+        let standard =
+            resolved_config_default_standard(store.resolve_role(role, &KeyHealthTracker::new())?)?;
         Ok(Self {
-            provider,
-            model,
-            api_key,
-            base_url,
+            provider: standard.provider,
+            model: standard.model,
+            api_key: standard.api_keys.first().map(|key| key.key.clone()),
+            base_url: standard.base_url,
         })
     }
-}
-
-fn resolve_credentials(
-    provider: &str,
-    providers: Option<&ProvidersConfig>,
-) -> (Option<String>, Option<String>) {
-    if provider == "ollama" {
-        let base = std::env::var("OLLAMA_API_BASE_URL")
-            .ok()
-            .filter(|s| !s.is_empty())
-            .or_else(|| providers.and_then(|p| p.ollama_base_url()));
-        return (None, base);
-    }
-    let key = providers.and_then(|p| p.api_key(provider));
-    (key, None)
 }

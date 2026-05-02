@@ -4,7 +4,7 @@ Library crate. Defines the TENEX agent communication protocol: the transport-agn
 
 This crate is the canonical home for wire-format knowledge. Kind numbers, tag shapes, threading rules, project a-tag layout — they live here. Other crates produce intents; only this crate knows how an intent becomes a kind:1 with `["e", root, "", "root"]` plus a `["status", "completed"]` tag.
 
-Mirrors the TypeScript canonical encoder at `src/nostr/AgentEventEncoder.ts`.
+The Rust encoder and snapshot tests are the canonical wire-format source.
 
 ## Public API
 
@@ -21,7 +21,7 @@ Mirrors the TypeScript canonical encoder at `src/nostr/AgentEventEncoder.ts`.
 - **Signing is the channel's job, not the encoder's.** Secret material does not enter the encoder module.
 - **Two sinks behind one trait, not two channel types.** Encode + sign plumbing is identical across modes; only the final delivery varies. `StdoutNdjsonSink` and `RelaySink` are interchangeable behind `EventSink`.
 - **`relay` feature is opt-in.** `tenex-agent` consumes with `default-features = false` so `nostr-sdk` is excluded from its dependency graph — the no-relay-connections invariant becomes a type-system property, not a convention.
-- **Tag-shape parity with TypeScript.** `src/nostr/AgentEventEncoder.ts` is the canonical spec. Any divergence is a bug. Snapshot tests under `tests/` lock the tag set per intent variant.
+- **Tag-shape stability.** Snapshot tests under `tests/` lock the tag set per intent variant. Any wire-format change must be intentional and reviewed as a protocol change.
 - **Reference enums are forward-compatible.** When `PrincipalRef::Telegram` lands, the compiler's exhaustive-match check tells every encoder which arms need updating. Do not bypass that check by adding catch-all `_` arms.
 
 ## How to approach changes
@@ -30,7 +30,7 @@ Mirrors the TypeScript canonical encoder at `src/nostr/AgentEventEncoder.ts`.
 2. New intent variant: add to `Intent` enum + payload struct in `intent.rs` + arm in `nostr/encoder.rs::encode` + snapshot test in `tests/`.
 3. New transport: add a sibling module under `src/`, define the encoder, implement `Channel`. Intent types stay shared.
 4. New tag: thread it through `EncodingContext` (if computed by the caller) or hardcode in the encoder (if intent-specific). Update the snapshot fixture.
-5. Wire-format changes must match `src/nostr/AgentEventEncoder.ts` byte-for-byte.
+5. Wire-format changes must update the snapshot fixture and any consumer docs that describe the event shape.
 
 ## Intentionally absent
 

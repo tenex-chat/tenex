@@ -2,7 +2,8 @@ use anyhow::{anyhow, bail, Context, Result};
 use serde_json::Value;
 use tenex_agent_registry::{AgentCategory, VALID_CATEGORIES};
 use tenex_llm_config::key_health::KeyHealthTracker;
-use tenex_llm_config::resolver::{load_llms, load_providers, resolve_config};
+use tenex_llm_config::resolver::ConfigStore;
+use tenex_llm_config::{ResolvedConfig, StandardConfig};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PromptModel {
@@ -25,14 +26,9 @@ pub struct AgentGenerationResult {
 }
 
 pub fn resolve_role_model(base_dir: &std::path::Path, role_key: &str) -> Result<PromptModel> {
-    let llms = load_llms(base_dir)?;
-    let config_name = llms
-        .roles
-        .get(role_key)
-        .ok_or_else(|| anyhow!("no config assigned to role '{role_key}'"))?;
-    let providers = load_providers(base_dir)?;
-    let value = resolve_config(config_name, &llms, &providers, &KeyHealthTracker::new());
-    prompt_model_from_resolved_value(&value)
+    let store = ConfigStore::load(base_dir)?;
+    let resolved = store.resolve_role(role_key, &KeyHealthTracker::new())?;
+    prompt_model_from_resolved_config(&resolved)
 }
 
 pub fn resolve_supervision_model(base_dir: &std::path::Path) -> Result<PromptModel> {
@@ -162,66 +158,27 @@ pub async fn refine_system_prompt(model: &PromptModel, prompt: &str) -> Result<S
     }
 }
 
-fn prompt_model_from_resolved_value(value: &Value) -> Result<PromptModel> {
-    if value.get("ok").and_then(Value::as_bool) != Some(true) {
-        let msg = value
-            .get("error")
-            .and_then(Value::as_str)
-            .unwrap_or("unknown LLM config resolution error");
-        bail!("{msg}");
-    }
-
-    match value.get("kind").and_then(Value::as_str) {
-        Some("standard") => parse_standard(value, None),
-        Some("meta") => {
-            let default = value
-                .get("default")
-                .and_then(Value::as_str)
-                .ok_or_else(|| anyhow!("meta config missing default variant"))?;
-            let variant = value
-                .get("variants")
-                .and_then(|v| v.get(default))
-                .ok_or_else(|| anyhow!("meta config missing default variant '{default}'"))?;
-            let system_prompt = variant
-                .get("systemPrompt")
-                .and_then(Value::as_str)
-                .map(str::to_owned);
-            let resolved = variant
-                .get("resolved")
-                .ok_or_else(|| anyhow!("meta variant '{default}' missing resolved config"))?;
-            parse_standard(resolved, system_prompt)
+fn prompt_model_from_resolved_config(config: &ResolvedConfig) -> Result<PromptModel> {
+    match config {
+        ResolvedConfig::Standard(standard) => parse_standard(standard, None),
+        ResolvedConfig::Meta(meta) => {
+            let variant = meta
+                .variants
+                .get(&meta.default)
+                .ok_or_else(|| anyhow!("meta config missing default variant '{}'", meta.default))?;
+            parse_standard(&variant.resolved, variant.system_prompt.clone())
         }
-        other => bail!("unsupported resolved LLM config kind: {other:?}"),
+        ResolvedConfig::Acp(_) => bail!("agent generation role resolved to an ACP config"),
     }
 }
 
-fn parse_standard(value: &Value, system_prompt: Option<String>) -> Result<PromptModel> {
-    let provider = value
-        .get("provider")
-        .and_then(Value::as_str)
-        .ok_or_else(|| anyhow!("resolved config missing provider"))?
-        .to_owned();
-    let model = value
-        .get("model")
-        .and_then(Value::as_str)
-        .ok_or_else(|| anyhow!("resolved config missing model"))?
-        .to_owned();
-    let api_key = value
-        .get("apiKeys")
-        .and_then(Value::as_array)
-        .and_then(|keys| keys.first())
-        .and_then(|key| key.get("key"))
-        .and_then(Value::as_str)
-        .map(str::to_owned);
-    let base_url = value
-        .get("baseUrl")
-        .and_then(Value::as_str)
-        .map(str::to_owned);
+fn parse_standard(config: &StandardConfig, system_prompt: Option<String>) -> Result<PromptModel> {
+    let api_key = config.api_keys.first().map(|key| key.key.clone());
     Ok(PromptModel {
-        provider,
-        model,
+        provider: config.provider.clone(),
+        model: config.model.clone(),
         api_key,
-        base_url,
+        base_url: config.base_url.clone(),
         system_prompt,
     })
 }
@@ -350,15 +307,18 @@ mod tests {
 
     #[test]
     fn parse_standard_resolved_config() {
-        let value = serde_json::json!({
-            "ok": true,
-            "kind": "standard",
-            "provider": "openrouter",
-            "model": "anthropic/claude-haiku-4-5",
-            "apiKeys": [{"key": "sk-or"}],
-            "baseUrl": "https://example.test"
+        let config = ResolvedConfig::Standard(StandardConfig {
+            provider: "openrouter".to_string(),
+            model: "anthropic/claude-haiku-4-5".to_string(),
+            api_keys: vec![tenex_llm_config::ApiKey {
+                key: "sk-or".to_string(),
+                alias: None,
+            }],
+            base_url: Some("https://example.test".to_string()),
+            timeout: None,
+            extras: serde_json::Map::new(),
         });
-        let model = prompt_model_from_resolved_value(&value).unwrap();
+        let model = prompt_model_from_resolved_config(&config).unwrap();
         assert_eq!(model.provider, "openrouter");
         assert_eq!(model.api_key.as_deref(), Some("sk-or"));
         assert_eq!(model.base_url.as_deref(), Some("https://example.test"));
@@ -366,24 +326,32 @@ mod tests {
 
     #[test]
     fn parse_meta_uses_default_variant_resolved_config() {
-        let value = serde_json::json!({
-            "ok": true,
-            "kind": "meta",
-            "default": "deep",
-            "variants": {
-                "deep": {
-                    "systemPrompt": "variant system",
-                    "resolved": {
-                        "ok": true,
-                        "kind": "standard",
-                        "provider": "anthropic",
-                        "model": "claude",
-                        "apiKeys": [{"key": "sk-ant"}]
-                    }
-                }
-            }
+        let mut variants = indexmap::IndexMap::new();
+        variants.insert(
+            "deep".to_string(),
+            tenex_llm_config::ResolvedVariant {
+                model_config: "claude".to_string(),
+                keywords: Vec::new(),
+                description: None,
+                system_prompt: Some("variant system".to_string()),
+                resolved: StandardConfig {
+                    provider: "anthropic".to_string(),
+                    model: "claude".to_string(),
+                    api_keys: vec![tenex_llm_config::ApiKey {
+                        key: "sk-ant".to_string(),
+                        alias: None,
+                    }],
+                    base_url: None,
+                    timeout: None,
+                    extras: serde_json::Map::new(),
+                },
+            },
+        );
+        let config = ResolvedConfig::Meta(tenex_llm_config::MetaConfig {
+            default: "deep".to_string(),
+            variants,
         });
-        let model = prompt_model_from_resolved_value(&value).unwrap();
+        let model = prompt_model_from_resolved_config(&config).unwrap();
         assert_eq!(model.provider, "anthropic");
         assert_eq!(model.system_prompt.as_deref(), Some("variant system"));
     }
@@ -401,7 +369,10 @@ mod tests {
             "instructions",
             "An agent that reviews code",
         ] {
-            assert!(prompt.contains(needle), "missing '{needle}' in generation prompt");
+            assert!(
+                prompt.contains(needle),
+                "missing '{needle}' in generation prompt"
+            );
         }
     }
 

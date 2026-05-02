@@ -31,7 +31,7 @@ use agent_loop_hook::AgentLoopHook;
 use anyhow::{Context, Result};
 use cassette::CassetteRecorder;
 use cassette_client::{RecordingClient, RecordingModel};
-use config::{LlmsConfig, ResolvedModel};
+use config::ResolvedModel;
 use context_rig::ctx_msg_to_rig;
 use emit::{EmitState, EmitStateArgs};
 use hook::EmitHook;
@@ -424,10 +424,7 @@ async fn run() -> Result<()> {
         pubkey_hex.clone(),
         execution_id.clone(),
     ));
-
-    // Load TENEX configuration files for model/key resolution
-    let llms = LlmsConfig::load();
-    let providers = config::load_providers_config();
+    let base_dir = tenex_project::paths::default_base_dir();
 
     // Check for a per-conversation model override stored by a prior change_model call.
     let model_override: Option<String> = conv_store
@@ -441,12 +438,11 @@ async fn run() -> Result<()> {
 
     // Resolve provider + model + API key (override takes precedence over static config).
     let resolved = ResolvedModel::resolve(
+        &base_dir,
         model_override
             .as_deref()
             .or_else(|| agent_config.raw_model()),
-        llms.as_ref(),
-        providers.as_ref(),
-    );
+    )?;
     let cassette_recorder = CassetteRecorder::from_env(
         agent_config.identity_name(),
         &resolved.provider,
@@ -484,7 +480,6 @@ async fn run() -> Result<()> {
     )));
 
     // Load teams (global + project-specific) and compute the prompt fragment.
-    let base_dir = tenex_project::paths::default_base_dir();
     let teams = Arc::new(tenex_project::load_teams(&base_dir, Some(&project_id)));
     let member_teams =
         tenex_project::teams_for_agent(&teams, agent_config.slug.as_deref().unwrap_or(""));
@@ -974,7 +969,6 @@ async fn run() -> Result<()> {
         execution_id: execution_id.clone(),
         suppress_response: suppress_response.clone(),
         rag_store: rag_store.clone(),
-        embed_config: embed_config.clone(),
         working_dir: working_dir.clone(),
         agents_md,
         shell_env: shell_env.clone(),
@@ -1092,7 +1086,7 @@ async fn run() -> Result<()> {
                     let key = resolved
                         .api_key
                         .clone()
-                        .context("No OpenRouter API key found in ~/.tenex/providers.json")?;
+                        .context("No OpenRouter API key available from LLM config")?;
                     let client = RecordingClient::new(
                         openrouter::Client::new(&key)?,
                         cassette_recorder.clone(),
@@ -1111,7 +1105,7 @@ async fn run() -> Result<()> {
                     let key = resolved
                         .api_key
                         .clone()
-                        .context("No OpenAI API key found in ~/.tenex/providers.json")?;
+                        .context("No OpenAI API key available from LLM config")?;
                     let client = RecordingClient::new(
                         openai::CompletionsClient::builder().api_key(&key).build()?,
                         cassette_recorder.clone(),
@@ -1160,7 +1154,7 @@ async fn run() -> Result<()> {
                 _ => {
                     let key = resolved.api_key.clone().with_context(|| {
                         format!(
-                            "No API key found for provider '{}' in ~/.tenex/providers.json",
+                            "No API key available from LLM config for provider '{}'",
                             resolved.provider
                         )
                     })?;

@@ -1,10 +1,8 @@
 //! `tenex doctor` — diagnose and repair TENEX state.
 //!
-//! Source: `src/commands/doctor.ts:68-72`. Top-level command is a parent
-//! that **only dispatches to subcommands**; invoking `tenex doctor` with
-//! no subcommand prints commander's auto-generated help. Per spec doc 11
-//! §1.1 there is **no global "run-all" flow** — the Rust port must not
-//! invent one.
+//! Top-level command is a parent that **only dispatches to subcommands**;
+//! invoking `tenex doctor` with no subcommand prints help. Per spec doc 11
+//! §1.1 there is **no global "run-all" flow**.
 //!
 //! Subcommand dependency status:
 //!
@@ -12,14 +10,13 @@
 //! |---|---|---|
 //! | `agents orphans [--purge]` | AgentStorage + project-membership reader | wired — see `find_orphaned_agents` |
 //! | `agents categorize [--dry-run]` | AgentStorage + LLM service | pending — honest hint |
-//! | `migrate` | TS-side state migration registry | reports current vs latest version; honest hint when behind (substrates pending) |
+//! | `migrate` | state migration registry | reports current vs latest version; honest hint when behind (substrates pending) |
 //! | `conversations status` | conversation-index DB | pending — honest hint |
 //! | `conversations reindex [--confirm]` | conversation-index DB | pending — honest hint |
 //!
 //! Note: spec 11 §1 listed an `agents refetch` subcommand. That was removed
-//! in TS commit `2855d63d` (kind:4199 / Nostr-event-driven agent install
-//! cutover) — there's no longer anything to "refetch" from Nostr. The Rust
-//! port matches the live TS source at `src/commands/doctor.ts:43-46`.
+//! during the kind:4199 / Nostr-event-driven agent install cutover; there's
+//! no longer anything to "refetch" from Nostr.
 //!
 //! Per CLAUDE.md "no half-finished implementations" — every pending
 //! subcommand surfaces a clear hint identifying which subsystem is

@@ -231,19 +231,17 @@ async fn dispatch(base_dir: &std::path::Path, value: &str) -> Result<()> {
         Ok(()) => Ok(()),
         Err(e) => {
             let msg = format!("{e}");
-            // TS catch blocks at every config subcommand swallow
-            // SIGINT/force-closed errors silently — mirror that.
+            // Interactive prompts surface cancellation as SIGINT or
+            // force-closed errors; keep the config menu open.
             if msg.contains("SIGINT") || msg.contains("force closed") {
                 return Ok(());
             }
-            // For subcommands that have a TS-side red catch wrapper, emit
-            // the same `❌ Failed to <verb> <noun>: <error>` line. The
-            // remaining two (`paths`, `context-management`) have NO TS
-            // wrapper — let the error propagate untouched.
+            // Some subcommands own a user-facing red failure prefix. The
+            // remaining two (`paths`, `context-management`) let the error
+            // propagate untouched.
             //
-            // Use `theme::chalk_red(...)` (raw SGR 31 + SGR 39) for
-            // byte-perfect TS chalk match — `console::Style.apply_to(...)`
-            // would close with SGR 0 instead.
+            // Use `theme::chalk_red(...)` (raw SGR 31 + SGR 39) to match
+            // the rest of the TUI's color reset behavior.
             if let Some(prefix) = failure_message_prefix(value) {
                 println!(
                     "{}",
@@ -275,9 +273,7 @@ async fn dispatch_inner(base_dir: &std::path::Path, value: &str) -> Result<()> {
         // All 16 config submenus are wired. Anything else here is an
         // unknown menu token; surface a hint and recurse.
         _ => {
-            display::hint(&format!(
-                "Unknown config submenu '{value}'.",
-            ));
+            display::hint(&format!("Unknown config submenu '{value}'.",));
             Ok(())
         }
     }

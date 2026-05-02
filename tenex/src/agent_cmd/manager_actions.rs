@@ -667,8 +667,13 @@ pub async fn show_main_menu(base_dir: &std::path::Path) -> Result<()> {
         match result.action.as_str() {
             "done" => return Ok(()),
             "delete-selected" => {
-                bulk_delete_agents(base_dir, owner_keys.as_ref(), &agents, &result.selected_pubkeys)
-                    .await?;
+                bulk_delete_agents(
+                    base_dir,
+                    owner_keys.as_ref(),
+                    &agents,
+                    &result.selected_pubkeys,
+                )
+                .await?;
                 continue;
             }
             "merge-selected" => {

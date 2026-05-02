@@ -7,9 +7,8 @@ pub mod control_socket;
 pub mod lockfile;
 pub mod nostr;
 pub mod supervisor;
-pub mod whitelist_export;
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
@@ -28,11 +27,6 @@ pub struct DaemonArgs {
     /// TENEX base directory (default: $TENEX_BASE_DIR or ~/.tenex).
     #[arg(long, value_name = "PATH")]
     pub base_dir: Option<PathBuf>,
-
-    /// Use this TypeScript command as the per-project runtime instead of the
-    /// default Rust orchestrator; the d-tag is appended as a positional argument.
-    #[arg(long, value_name = "CMD")]
-    pub ts: Option<String>,
 
     /// Boot the project whose d-tag starts with this prefix as soon as it is
     /// discovered on Nostr, without waiting for a kind:1/24000 trigger.
@@ -54,9 +48,9 @@ pub struct DaemonArgs {
 pub async fn run(args: DaemonArgs) -> Result<()> {
     let base_dir = crate::store::resolve_base_dir(args.base_dir.clone());
 
-    // The whitelist daemon resolves its socket path from $TENEX_BASE_DIR / $HOME/.tenex.
-    // If the operator passed --base-dir, propagate it to the env so the whitelist
-    // daemon agrees with us on which socket to bind / which trust set to read.
+    // Companion daemons resolve their data paths from TENEX_BASE_DIR. Keep the
+    // environment aligned with the supervisor when the operator passes
+    // --base-dir.
     if args.base_dir.is_some() {
         std::env::set_var("TENEX_BASE_DIR", &base_dir);
     }
@@ -74,32 +68,10 @@ pub async fn run(args: DaemonArgs) -> Result<()> {
     let backend_keys = crate::nostr_pub::backend_signer::ensure_backend_keys(&base_dir)
         .context("loading daemon signer")?;
 
-    whitelist_export::write_backend_pubkey(&base_dir, &backend_keys)
-        .context("publish backend pubkey for whitelist daemon")?;
-
-    let boot_argv = if let Some(cmd) = args.ts {
-        info!(boot_command = %cmd, "boot command resolved (--ts)");
-        let argv = shell_words::split(&cmd).with_context(|| format!("parsing --ts: {cmd}"))?;
-        if argv.is_empty() {
-            return Err(anyhow::anyhow!("--ts is empty"));
-        }
-        argv
-    } else {
-        let argv = default_boot_argv();
-        info!(boot_command = %argv.join(" "), "boot command resolved (default Rust runtime)");
-        argv
-    };
+    let boot_argv = default_boot_argv();
+    info!(boot_command = %boot_argv.join(" "), "boot command resolved");
 
     let supervisor = supervisor::Supervisor::new(boot_argv, base_dir.clone());
-
-    // Bootstrap the whitelist trust daemon as a supervised foreground child.
-    // Every runtime gates inbound events through it and fails closed on socket
-    // errors, so the daemon must be ready before any project runtime starts.
-    if let Err(e) = start_whitelist_service(&supervisor, &base_dir).await {
-        supervisor.shutdown().await;
-        return Err(e);
-    }
-    info!("whitelist daemon ready");
 
     // Bootstrap the identity daemon. Runtime code relies on this service for
     // pubkey display names; fail startup if the socket cannot be reached.
@@ -108,19 +80,6 @@ pub async fn run(args: DaemonArgs) -> Result<()> {
         return Err(e);
     }
     info!("identity daemon ready");
-
-    // Start the LLM config IPC server. TypeScript runtimes resolve config
-    // names and report key failures through this socket rather than reading
-    // providers.json / llms.json directly.
-    {
-        let llm_base = base_dir.clone();
-        tokio::spawn(async move {
-            if let Err(e) = tenex_llm_config::Server::start(llm_base).await {
-                error!(error = %e, "llm-config IPC server failed");
-            }
-        });
-    }
-    info!("llm-config IPC server started");
 
     // Spawn host-level companion daemons. Binaries are expected alongside the
     // tenex binary (same target/ dir for cargo builds, same bin/ for installs).
@@ -132,7 +91,9 @@ pub async fn run(args: DaemonArgs) -> Result<()> {
     }
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
-            for name in companion_daemon_names(args.disable_scheduled_jobs, args.disable_intervention) {
+            for name in
+                companion_daemon_names(args.disable_scheduled_jobs, args.disable_intervention)
+            {
                 let path = dir.join(name);
                 if path.exists() {
                     supervisor.boot_binary(name.to_string(), path).await;
@@ -205,27 +166,6 @@ fn companion_daemon_names(
         .filter(|name| !(disable_scheduled_jobs && *name == "tenex-scheduler"))
         .filter(|name| !(disable_intervention && *name == "tenex-intervention"))
         .collect()
-}
-
-async fn start_whitelist_service(
-    supervisor: &supervisor::Supervisor,
-    base_dir: &Path,
-) -> Result<()> {
-    let exe = std::env::current_exe().context("resolve current tenex executable")?;
-    supervisor
-        .boot_command(
-            "tenex-whitelist".to_string(),
-            vec![
-                exe.to_string_lossy().into_owned(),
-                "whitelist-run".to_string(),
-                "--base-dir".to_string(),
-                base_dir.to_string_lossy().into_owned(),
-            ],
-        )
-        .await;
-
-    tenex_whitelist::wait_until_ready(Duration::from_secs(5))
-        .context("waiting for whitelist daemon readiness")
 }
 
 async fn start_identity_service(supervisor: &supervisor::Supervisor) -> Result<()> {

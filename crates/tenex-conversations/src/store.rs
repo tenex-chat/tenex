@@ -1,7 +1,7 @@
 //! `ConversationStore` is the single open handle on a project's
 //! `conversation.db`. Read methods serve all consumers (catalog, agent
-//! runner, intervention watcher, future Rust orchestrator); write methods
-//! are used by the orchestrator and agent runner.
+//! runner, summarizer, intervention watcher, and project runtime); write
+//! methods are used by the runtime and agent runner.
 //!
 //! Writes are idempotent on `nostr_event_id` where the schema enforces a
 //! partial unique index, and idempotent on `(conversation_id, record_id)`

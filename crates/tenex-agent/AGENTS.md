@@ -2,7 +2,7 @@
 
 One-shot Rust binary. Receives one Nostr event on stdin, runs a multi-tool LLM loop via `rig-core`, emits NDJSON on stdout, then exits. No relay connections. No persistent state.
 
-Spawned by the bun project runtime (via `AgentExecutor`) or by the future Rust orchestrator over a Unix socket. In both cases the wire protocol is the same NDJSON frame format.
+Spawned by the Rust project runtime. The runtime passes exactly one event on stdin and consumes signed Nostr NDJSON from stdout.
 
 Canonical spec: `docs/RUST-AGENT-SPEC.md`. Fleet context: `docs/plans/2026-04-28-architecture-map.md`.
 
@@ -23,10 +23,11 @@ Canonical spec: `docs/RUST-AGENT-SPEC.md`. Fleet context: `docs/plans/2026-04-28
 
 ## Critical invariants
 
-- **NDJSON-over-stdio generalizes to NDJSON-over-Unix-socket.** The same frame format must remain valid when the runtime orchestrator wraps this process over a socket. Protect this property in any spec edits.
+- **stdout is the signed event stream.** Keep stdout reserved for signed Nostr NDJSON; side channels such as MCP and runtime control use their own explicit sockets.
 - **Completion only when work is actually done.** The final stdout line is a signed completion unless the turn started pending external work; pending-work text is emitted as a non-notifying conversation frame.
 - **Root event ID derivation** (`src/nostr.rs`): first `["e", id, _, "root"]` tag → else first `["e", id, ...]` tag → else the triggering event's own ID.
-- **Project context via `tenex-project`.** Agent definitions, model resolution, and project metadata come from `tenex-project::Project`. Do not parse agent JSON files directly.
+- **Project context via `tenex-project`.** Agent definitions and project metadata come from `tenex-project::Project`. Do not parse agent JSON files directly.
+- **Model resolution via `tenex-llm-config`.** The agent passes raw model references to `tenex-llm-config`; it must not parse `llms.json` or `providers.json` itself.
 - **Tools in `src/tools/`.** Static tools live as separate files in this directory and are registered in `main.rs` via the `run_agent!` macro. Core tools include shell, filesystem and home-filesystem tools, todo, delegation and follow-up delegation, ask/no-response, conversation lookup, RAG, skills, learning, reports, scheduling, project listing, model changes, agent config writes, and MCP proxy tools. Project filesystem reads/globs use `src/tools/agents_md.rs` to append newly encountered nested `AGENTS.md` files as system reminders.
 - **No relay connections.** This binary never opens a relay. Signing and publishing happen only to stdout.
 
@@ -35,8 +36,8 @@ Canonical spec: `docs/RUST-AGENT-SPEC.md`. Fleet context: `docs/plans/2026-04-28
 1. `cargo build -p tenex-agent && cargo test -p tenex-agent`.
 2. System prompt fragments live in `crates/tenex-system-prompt`. Runner-owned prompt inputs such as root `AGENTS.md` loading live in `src/project_instructions.rs`; stdio-only home environment setup lives in `src/stdio_home.rs`.
 3. Nostr event construction and signing: `src/nostr.rs`. Keep the hook (`NostrHook`) and signer (`AgentSigner`) in sync.
-4. Model/provider resolution: `src/config.rs`. Reads `~/.tenex/llms.json` and `~/.tenex/providers.json`.
-5. Any change to the stdout frame format must be coordinated with the bun `AgentExecutor` and the runtime orchestrator spec.
+4. Model/provider resolution: `src/config.rs` delegates to `tenex-llm-config`.
+5. Any change to the stdout frame format must be coordinated with the Rust runtime orchestrator.
 
 ## Intentionally absent
 

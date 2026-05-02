@@ -3,14 +3,7 @@ name = "tenex-whitelist"
 version = "0.1.0"
 edition = "2021"
 
-[[bin]]
-name = "whitelist"
-path = "src/main.rs"
-
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-notify = "6"
-nix = { version = "0.27", features = ["process", "fs"] }
 anyhow = "1"
-libc = "0.2"

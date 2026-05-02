@@ -4,8 +4,7 @@ mod acp_process;
 #[path = "categorize.rs"]
 mod categorize;
 // `config.rs` is shared with the main `tenex-agent` binary; ACP only
-// uses the LLM-resolution helpers (`LlmsConfig`, `ResolvedModel`,
-// `load_providers_config`), so the agent-side structs read as dead from
+// uses the LLM-resolution helpers, so the agent-side structs read as dead from
 // this binary's perspective.
 #[allow(dead_code)]
 #[path = "config.rs"]
@@ -186,9 +185,7 @@ async fn run() -> Result<()> {
     let resolved_category_string: Option<String> = match agent_config.category.clone() {
         Some(c) => Some(c),
         None => {
-            let llms = config::LlmsConfig::load();
-            let providers = config::load_providers_config();
-            let resolved = config::ResolvedModel::resolve(None, llms.as_ref(), providers.as_ref());
+            let resolved = config::ResolvedModel::resolve(&base_dir, None)?;
             let metadata = tenex_agent_registry::AgentMetadata {
                 name: agent_config.name.clone(),
                 role: String::new(),
