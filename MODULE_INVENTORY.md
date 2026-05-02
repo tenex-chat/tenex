@@ -161,7 +161,7 @@ before adding code, moving behavior, or introducing a new dependency.
 |---|---|
 | `tenex-identity` | `cache`, `client`, `daemonize`, `fetch`, `model`, `paths`, `protocol`, `resolve`, `schema`, `server`. |
 | `tenex-intervention` | `config`, `daemon`, `detector`, `lockfile`, `model`, `paths`, `publish`, `resolver`, `state`. |
-| `tenex-llm-config` | `key_health`, `resolver`, `types`. |
+| `tenex-llm-config` | `configs`, `files`, `key_health`, `resolver`, `types`. |
 | `tenex-mcp` | `bridge`, `config`, `manifest`, `runtime`, `stdio`. |
 | `tenex-protocol` | `channel`, `context`, `intent`, `refs`, `runtime_control`, `sink`. |
 | `tenex-rag` | `config`, `embed`, `rag`, `schema`, `sqlite_store`, `store`. |

@@ -9,6 +9,8 @@
 //! 3. **Tracks key health**: callers can share a [`key_health::KeyHealthTracker`]
 //!    and exclude failed keys for the cooldown window.
 
+mod configs;
+mod files;
 pub mod key_health;
 pub mod resolver;
 pub mod types;
