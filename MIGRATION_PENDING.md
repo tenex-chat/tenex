@@ -58,7 +58,7 @@ Organized by functional area. Items marked ✅ are already at parity; items mark
 
 ### 2.2 Missing Dynamic Context Injection
 - ✅ **Proactive RAG Context** — RAG search at score ≥ 0.65, up to 5 snippets injected into the system prompt each turn; LLM query planner (for messages > 20 words) and LLM reranker (when > 3 results pass threshold) implemented in `tenex-agent/src/context_discovery.rs`
-- ✅ **Conversation Reminders** — active/recent conversation context overlay (streaming conversations, delegation parent refs, human-readable durations) is built from the conversation store and appended as a system reminder to the user message
+- ✅ **Conversation Reminders** — active/recent conversation context overlay (streaming conversations, delegation parent refs, human-readable durations) is built from the conversation store and appended to the user message as a `<conversation-reminders>` block
 - [ ] **Effective Instructions (Lesson Synthesis)** — `PromptCompilerService` merges base instructions with lessons; Rust intentionally uses a different approach (`+INDEX.md` file), but LLM-synthesized multi-lesson synthesis is absent
 
 ### 2.3 Incomplete Fragments
@@ -101,14 +101,10 @@ Pre-tool and post-completion contexts are missing fields that the two unimplemen
 - [ ] `block-tool` correction action — block a specific tool call and require re-engagement
 - [ ] `suppress-publish` correction action — suppress turn publication
 
-### 4.5 Behavioral Differences
-- ✅ `ConsecutiveToolsWithoutTodoHeuristic`: TypeScript sets `reEngage: false` (nudge only); Rust sets `re_engage: true` (actually re-engages the agent loop — different semantics)
-- ✅ `WorkerTodoBeforeFileOrShellHeuristic`: TypeScript protects 11 tools (includes `home_read`, `home_write`, `home_edit`, `home_glob`, `home_grep`); Rust protects 6 tools
-
-### 4.6 Missing Infrastructure
+### 4.5 Missing Infrastructure
 - 🚫 `HeuristicRegistry` singleton — won't port (Rust's static dispatch of known heuristics makes a runtime registry unnecessary)
 - [ ] OpenTelemetry spans and events for supervision checks
-- [ ] Per-execution state tracking (`SupervisionState` scoped to execution ID)
+- [ ] Per-execution state tracking (`SupervisionState` scoped to execution ID) — `Supervisor` carries `fired_once`/`retry_count` per instance, but state is not keyed by execution ID
 
 ---
 
@@ -122,7 +118,7 @@ Pre-tool and post-completion contexts are missing fields that the two unimplemen
 - [ ] Metadata caching with TTL for resources and templates (TypeScript uses 30s staleness)
 
 ### 5.2 MCP Server Lifecycle Differences
-- 🚫 TypeScript defers server startup until first tool call (`ensureServersForTools()`) — won't fix (eager startup at manifest load is the intentional Rust design)
+- ✅ Lazy server startup — `tenex-mcp/src/runtime.rs` `ensure_server` starts servers on first use (called by `prepare_manifest`, `call_tool`, `read_resource`, `subscribe_resource`); matches TypeScript's `ensureServersForTools()` behavior
 - 🚫 TypeScript supports dynamic tool cache refresh (`refreshToolCache()`) — won't fix (restart is acceptable; no live-reload requirement)
 - 🚫 TypeScript supports `allowedPaths` security checks on filesystem-touching MCP servers — won't fix
 
@@ -167,7 +163,7 @@ The Rust `tenex` runtime (`tenex/src/runtime_cmd/`) already implements core orch
 - ✅ Multi-RAL concurrency per conversation — `DispatchCoordinator` with `driver_busy`/`queued: VecDeque` and `persisted_driver_busy` via SQLite
 - ✅ `KillSwitchRegistry` — `kill_agent_conversation()` sends SIGTERM/SIGKILL to agent process groups
 - ✅ `DelegationRegistry` — delegation routes tracked in SQLite (`register_delegation_route_if_needed`, `delegation_route_for_completion`)
-- [ ] `MessageInjectionQueue` — bounded in-process message buffer (max 100 msgs) with role-aware queuing and event-ID-based deduplication; Rust uses VecDeque without the same bounds/deduplication
+- ✅ Message injection — `MessageInjectionTracker` (`crates/tenex-agent/src/injections.rs`) pulls new user messages from the SQLite conversation store with a `last_sequence` watermark plus `runtime_state.consumedMessages` event-ID dedup; injects as a `<system-reminder type="injected-user-messages">` block. Architecturally different from TypeScript's bounded in-memory queue (pull-from-storage vs. push-into-buffer); see Known Intentional Divergences
 - [ ] `ExecutionTimingTracker` — LLM stream duration per RAL, accumulated runtime, unreported runtime
 - [ ] `HeuristicViolationManager` — post-completion supervision violation tracking per RAL
 
@@ -191,7 +187,7 @@ The Rust `tenex` runtime (`tenex/src/runtime_cmd/`) already implements core orch
 
 ### 9.1 Provider SDK Implementations
 Rust uses `rig` for the live provider protocol path; `tenex-llm-config` remains the credential resolver. Remaining provider-specific gaps:
-- [ ] Anthropic provider with OAuth token support (`sk-ant-oat*` tokens)
+- ✅ Anthropic provider with OAuth token support (`sk-ant-oat*` tokens) — `crates/tenex-agent/src/oauth_client.rs` (`is_oauth_token`, `build_oauth_http_client`, `OAuthMiddleware`); wired via reqwest-middleware on rig 0.35
 - [ ] OpenRouter provider with usage tracking and metadata extraction — rig's streaming `FinalResponse` collapses all provider responses into `rig::completion::Usage` (input/output/total/cached/cache-creation tokens only); OpenRouter-specific fields (generation ID, cost, model name) are not accessible through the streaming path. The non-streaming `CompletionResponse` does carry `model` and `usage.cost`, but the agent uses streaming exclusively. Cost and model metadata require either a rig upstream change or a non-streaming fallback
 - [ ] Ollama provider with vision model pattern detection
 - 🚫 Codex agent provider with MCP server adapter (`CodexToolsAdapter`) — won't port (covered by ACP integration)
@@ -234,7 +230,7 @@ Rust uses `rig` for the live provider protocol path; `tenex-llm-config` remains 
 ## 12. Nostr / Protocol
 
 ### 12.1 NIP-46 Signer
-- [ ] NIP-46 bunker support — TypeScript has a basic `Nip46SigningService` used in migration scripts; Rust has the `Signer` trait abstraction in `tenex-project` ready for a NIP-46 backend, but no implementation yet
+- ✅ NIP-46 bunker support — `BunkerSigner` at `crates/tenex-project/src/signer.rs:138-195` (gated behind the `nip46` Cargo feature, backed by `nostr-connect`'s `NostrConnect`, parses `bunker://` URIs via `NostrConnectURI::parse`, implements the `Signer` trait). Wired through to the `sign_as_user` agent tool (`crates/tenex-agent/src/tools/sign_as_user.rs`) and a built-in skill (`crates/tenex-agent/skills/built-in/signer/SKILL.md`)
 
 ---
 
@@ -251,5 +247,6 @@ These are deliberate design differences, not missing features:
 - **`rag_add_documents` audience**: TypeScript accepts a free-form `collection` name; Rust enforces `"self"` or `"project"` and resolves the collection name internally.
 - **Summarizer output**: TypeScript produces free-form 8-section prose; Rust (`tenex-summarizer`) produces a structured JSON object (`title`, `summary`, `status_label`, `status_current_activity`, `categories`).
 - **Conversation store backend**: TypeScript uses JSON files for transcripts + SQLite for the catalog read model; Rust uses SQLite exclusively for both.
+- **Message injection mechanism**: TypeScript pushes targeted messages into an in-process bounded queue (max 100 msgs, in-memory dedup); Rust pulls from the SQLite conversation store on each turn with a sequence watermark + persisted `consumedMessages` set. Same effective behavior (role filtering, event-ID dedup), different storage model.
 - **Runtime architecture**: TypeScript runs all projects in one Bun process; Rust spawns isolated per-project runtime processes (better fault isolation, deliberate trade-off).
 - **Live agent reloading**: Rust runtime watches `agents/*.json` and reloads without restart; TypeScript daemon requires a full restart to pick up new agents (Rust advantage).
