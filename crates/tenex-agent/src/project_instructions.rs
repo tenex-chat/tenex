@@ -11,6 +11,9 @@ pub(crate) fn read_root_agents_md(project_root: &Path) -> Option<String> {
     }
 }
 
+// Used by the tenex-agent bin (main.rs); the tenex-agent-acp bin includes
+// this module but does not call this function.
+#[allow(dead_code)]
 pub(crate) fn infer_project_root(working_dir: &Path) -> PathBuf {
     let mut root = PathBuf::new();
     let mut saw_component = false;

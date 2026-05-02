@@ -1,10 +1,9 @@
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use rig::{completion::ToolDefinition, tool::Tool};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use tenex_rag::{EmbedConfig, RagStore};
+use tenex_rag::RagStore;
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct ConversationSearchArgs {
@@ -21,26 +20,13 @@ pub struct ConversationSearchError(String);
 
 #[derive(Clone)]
 pub struct ConversationSearchTool {
-    /// Current project's RAG store (None if embedding not configured).
+    /// Shared global RAG store (None if embedding not configured).
     store: Option<Arc<RagStore>>,
-    /// Needed to open other projects' stores when project_id == "ALL".
-    embed_config: Option<EmbedConfig>,
-    /// `~/.tenex` base directory.
-    base_dir: PathBuf,
 }
 
 impl ConversationSearchTool {
-    pub fn new(
-        store: Option<Arc<RagStore>>,
-        embed_config: Option<EmbedConfig>,
-        base_dir: PathBuf,
-        _current_project_id: String,
-    ) -> Self {
-        Self {
-            store,
-            embed_config,
-            base_dir,
-        }
+    pub fn new(store: Option<Arc<RagStore>>) -> Self {
+        Self { store }
     }
 }
 

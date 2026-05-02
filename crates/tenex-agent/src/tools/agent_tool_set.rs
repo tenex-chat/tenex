@@ -288,12 +288,7 @@ impl ToolSet {
         self.push_tool(
             &mut tools,
             &recorder,
-            Box::new(ConversationSearchTool::new(
-                self.rag_store.clone(),
-                self.embed_config.clone(),
-                self.base_dir.clone(),
-                self.project_id.clone(),
-            )),
+            Box::new(ConversationSearchTool::new(self.rag_store.clone())),
         );
 
         self.push_tool(
