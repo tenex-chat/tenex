@@ -9,20 +9,31 @@ use anyhow::{Context, Result};
 use rusqlite::{params, params_from_iter, Connection, OpenFlags};
 use serde::{Deserialize, Serialize};
 
+use crate::agent_labels::AgentLabels;
+
+mod agent_cost;
+
 #[derive(Clone)]
 pub struct QueryService {
     db_path: PathBuf,
+    agent_labels: AgentLabels,
 }
 
 impl QueryService {
     pub fn new(db_path: impl Into<PathBuf>) -> Self {
         Self {
             db_path: db_path.into(),
+            agent_labels: AgentLabels::default(),
         }
     }
 
     pub fn db_path(&self) -> &Path {
         &self.db_path
+    }
+
+    pub fn with_agent_slugs(mut self, slugs: impl IntoIterator<Item = (String, String)>) -> Self {
+        self.agent_labels = AgentLabels::from_slugs(slugs);
+        self
     }
 
     /// Open a read-only connection. Caller is one-shot per query.
@@ -305,38 +316,6 @@ impl QueryService {
         Ok(rows)
     }
 
-    pub fn cost_by_agent(&self, since_ms: Option<i64>) -> Result<Vec<AgentCostRow>> {
-        let conn = self.open()?;
-        let sql = r#"
-            SELECT
-                COALESCE(s.agent_slug, s.agent_pubkey, '<unknown>') AS agent,
-                s.agent_pubkey,
-                COUNT(*) AS calls,
-                COALESCE(SUM(l.input_tokens),0),
-                COALESCE(SUM(l.output_tokens),0),
-                COALESCE(SUM(COALESCE(l.total_cost_usd_provider, l.total_cost_usd_estimated)),0)
-            FROM llm_calls l
-            JOIN spans s USING(span_id)
-            WHERE s.started_at_ms >= ?1
-            GROUP BY agent
-            ORDER BY 6 DESC
-        "#;
-        let mut stmt = conn.prepare(sql)?;
-        let rows = stmt
-            .query_map(params![since_ms.unwrap_or(0)], |row| {
-                Ok(AgentCostRow {
-                    agent: row.get(0)?,
-                    agent_pubkey: row.get(1)?,
-                    calls: row.get(2)?,
-                    input_tokens: row.get(3)?,
-                    output_tokens: row.get(4)?,
-                    cost_usd: row.get(5)?,
-                })
-            })?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        Ok(rows)
-    }
-
     pub fn embedding_summary(&self, since_ms: Option<i64>) -> Result<Vec<EmbeddingSummaryRow>> {
         let conn = self.open()?;
         let sql = r#"
@@ -427,12 +406,14 @@ impl QueryService {
             r#"SELECT s.span_id, s.trace_id, s.started_at_ms, s.duration_ms, s.status,
                       l.provider, l.provider_model_id, l.input_tokens, l.output_tokens,
                       COALESCE(l.total_cost_usd_provider, l.total_cost_usd_estimated) AS cost,
-                      l.finish_reason, s.agent_slug
+                      l.finish_reason, s.agent_pubkey, s.agent_slug
                FROM llm_calls l JOIN spans s USING(span_id)
                ORDER BY s.started_at_ms DESC LIMIT ?1"#,
         )?;
         let rows = stmt
             .query_map(params![limit], |row| {
+                let agent_pubkey: Option<String> = row.get(11)?;
+                let recorded_slug: Option<String> = row.get(12)?;
                 Ok(RecentLlmCall {
                     span_id: row.get(0)?,
                     trace_id: row.get(1)?,
@@ -445,7 +426,9 @@ impl QueryService {
                     output_tokens: row.get(8)?,
                     cost_usd: row.get(9)?,
                     finish_reason: row.get(10)?,
-                    agent_slug: row.get(11)?,
+                    agent_slug: self
+                        .agent_labels
+                        .slug(agent_pubkey.as_deref(), recorded_slug.as_deref()),
                 })
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;

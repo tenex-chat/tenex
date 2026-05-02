@@ -29,9 +29,9 @@ Organized by functional area. Items marked ✅ are already at parity; items mark
 #### `conversation_get`
 - ✅ `untilId` parameter — slice conversation transcript to a specific message ID
 - ✅ `prompt` parameter — LLM-driven conversation analysis with structured output
-- [ ] `includeToolCalls` parameter — include tool-call/result pairs in transcript
-- [ ] XML-formatted transcript output (Rust returns plain text `[role] author8: content`)
-- [ ] Relative timestamp formatting in output
+- ✅ `includeToolCalls` parameter — include tool-call entries in transcript while omitting tool result payloads
+- ✅ XML-formatted transcript output
+- ✅ Relative timestamp formatting in output
 
 #### `conversation_list`
 - ✅ `projectId` parameter — cross-project listing (`"ALL"` queries all projects under `~/.tenex/projects/`)

@@ -1,3 +1,8 @@
+mod xml;
+
+#[cfg(test)]
+mod tests;
+
 use crate::config::ResolvedModel;
 use rig::providers::{anthropic, ollama, openai, openrouter};
 use rig::{client::CompletionClient, completion::Prompt, completion::ToolDefinition, tool::Tool};
@@ -5,14 +10,18 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::path::PathBuf;
 use std::sync::Arc;
-use tenex_conversations::{ConversationStore, MessageQuery};
+use tenex_conversations::{ConversationListFilter, ConversationStore, MessageQuery};
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct ConversationGetArgs {
+    #[serde(alias = "conversationId")]
     pub conversation_id: String,
     pub limit: Option<i64>,
+    #[serde(alias = "untilId")]
     pub until_id: Option<String>,
     pub prompt: Option<String>,
+    #[serde(default, alias = "includeToolCalls")]
+    pub include_tool_calls: bool,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -102,6 +111,58 @@ impl ConversationGetTool {
     }
 }
 
+fn is_full_hex_id(input: &str) -> bool {
+    input.len() == 64 && input.chars().all(|c| c.is_ascii_hexdigit())
+}
+
+fn is_conversation_prefix(input: &str) -> bool {
+    (8..64).contains(&input.len()) && input.chars().all(|c| c.is_ascii_hexdigit())
+}
+
+fn resolve_conversation_id(
+    store: &ConversationStore,
+    raw_id: &str,
+) -> Result<String, ConversationGetError> {
+    let trimmed = raw_id.trim();
+    let normalized = trimmed.to_ascii_lowercase();
+
+    if is_full_hex_id(&normalized) {
+        return Ok(normalized);
+    }
+
+    if !is_conversation_prefix(&normalized) {
+        return Ok(trimmed.to_string());
+    }
+
+    let mut matches: Vec<String> = store
+        .list_recent(ConversationListFilter {
+            limit: None,
+            ..Default::default()
+        })
+        .map_err(|e| ConversationGetError(format!("failed to list conversations: {e}")))?
+        .into_iter()
+        .filter_map(|conversation| {
+            if conversation
+                .id
+                .to_ascii_lowercase()
+                .starts_with(&normalized)
+            {
+                Some(conversation.id)
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    match matches.len() {
+        0 => Ok(normalized),
+        1 => Ok(matches.remove(0)),
+        count => Err(ConversationGetError(format!(
+            "conversation prefix {trimmed} is ambiguous ({count} matches); provide the full 64-character ID"
+        ))),
+    }
+}
+
 impl Tool for ConversationGetTool {
     const NAME: &'static str = "conversation_get";
     type Error = ConversationGetError;
@@ -111,25 +172,35 @@ impl Tool for ConversationGetTool {
     async fn definition(&self, _prompt: String) -> ToolDefinition {
         ToolDefinition {
             name: Self::NAME.to_string(),
-            description: "Retrieve the full message transcript for a conversation by its ID. Returns messages in chronological order with role and author prefix.".to_string(),
+            description: "Retrieve a conversation by stored ID. Returns an XML transcript. XML includes root t0, per-entry relative time=\"+seconds\", author/recipient attribution, short event IDs, and optional tool-call entries.".to_string(),
             parameters: json!({
                 "type": "object",
                 "properties": {
                     "conversation_id": {
                         "type": "string",
-                        "description": "The conversation ID (64-char hex event ID)"
+                        "description": "Stored conversation ID. Full 64-character hex IDs and unique 8+ character hex prefixes are accepted."
                     },
                     "limit": {
                         "type": "integer",
-                        "description": "Maximum number of messages to return (default: all)"
+                        "description": "Maximum number of text/delegation messages to return after slicing."
                     },
                     "until_id": {
                         "type": "string",
-                        "description": "Stop before the message with this event ID or record ID (exclusive). Useful for reading a conversation slice."
+                        "description": "Optional stored message/event/tool-call ID. Returns the transcript up to and including this entry; unique 8+ character prefixes are accepted."
                     },
                     "prompt": {
                         "type": "string",
-                        "description": "If provided, analyze the conversation transcript with this prompt using an LLM and return the analysis instead of the raw transcript."
+                        "description": "Optional prompt to analyze the retrieved conversation with an LLM."
+                    },
+                    "include_tool_calls": {
+                        "type": "boolean",
+                        "description": "Whether to include tool-call entries in the XML transcript. Tool result payloads are omitted. The camelCase alias includeToolCalls is also accepted.",
+                        "default": false
+                    },
+                    "includeToolCalls": {
+                        "type": "boolean",
+                        "description": "Alias for include_tool_calls.",
+                        "default": false
                     }
                 },
                 "required": ["conversation_id"]
@@ -140,270 +211,47 @@ impl Tool for ConversationGetTool {
     async fn call(&self, args: Self::Args) -> Result<String, Self::Error> {
         let store = ConversationStore::open(&self.db_path)
             .map_err(|e| ConversationGetError(format!("failed to open conversation store: {e}")))?;
+        let conversation_id = resolve_conversation_id(&store, &args.conversation_id)?;
+        let conversation = store
+            .get_conversation(&conversation_id)
+            .map_err(|e| ConversationGetError(format!("failed to read conversation: {e}")))?;
 
-        let messages = store
-            .list_messages(
-                &args.conversation_id,
-                MessageQuery {
-                    limit: args.limit,
-                    ..Default::default()
-                },
-            )
+        let mut messages = store
+            .list_messages(&conversation_id, MessageQuery::default())
             .map_err(|e| ConversationGetError(format!("failed to list messages: {e}")))?;
+        let mut tool_messages = store
+            .list_tool_messages(&conversation_id)
+            .map_err(|e| ConversationGetError(format!("failed to list tool messages: {e}")))?;
 
-        let id_short = &args.conversation_id[..8.min(args.conversation_id.len())];
-
-        if messages.is_empty() {
-            return Ok(format!("No messages found for conversation {id_short}"));
+        if conversation.is_none() && messages.is_empty() && tool_messages.is_empty() {
+            return Ok(xml::render_missing_conversation_xml(&conversation_id));
         }
 
-        let mut filtered = messages;
-        if let Some(uid) = args.until_id.as_deref() {
-            if let Some(idx) = filtered.iter().position(|m| {
-                m.record_id == uid || m.nostr_event_id.as_deref() == Some(uid)
-            }) {
-                filtered.truncate(idx);
-            }
+        if let Some(until_id) = args.until_id.as_deref() {
+            xml::truncate_until(&mut messages, &mut tool_messages, until_id);
+        }
+        if let Some(limit) = args.limit.and_then(|value| usize::try_from(value).ok()) {
+            xml::truncate_message_limit(&mut messages, &mut tool_messages, limit);
         }
 
-        if filtered.is_empty() {
-            return Ok(format!("No messages found for conversation {id_short}"));
-        }
+        let messages_xml = xml::render_conversation_xml(
+            &conversation_id,
+            &messages,
+            &tool_messages,
+            args.include_tool_calls,
+        );
 
-        let mut lines = vec![format!(
-            "Conversation {id_short} ({} messages):",
-            filtered.len()
-        )];
-        for m in &filtered {
-            let author_short = &m.author_pubkey[..8.min(m.author_pubkey.len())];
-            lines.push(format!("[{}] {author_short}: {}", m.message_type, m.content));
-        }
-        let transcript = lines.join("\n");
-
-        if let Some(p) = args.prompt {
-            let system = "You are analyzing a conversation transcript. Answer concisely based only on the transcript provided.";
-            let user = format!("<transcript>\n{transcript}\n</transcript>\n\n{p}");
+        if let Some(prompt) = args.prompt {
+            let system = "You analyze TENEX conversation transcripts. Base your answer only on the provided conversation data, preserve identifiers exactly, and include verbatim quotes when they support the answer.";
+            let user = format!(
+                "Please analyze the following conversation based on this prompt: \"{prompt}\"\n\nCONVERSATION XML:\n{messages_xml}"
+            );
             return self
                 .call_llm(system, user)
                 .await
                 .map_err(|e| ConversationGetError(format!("LLM call failed: {e}")));
         }
 
-        Ok(transcript)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use tempfile::TempDir;
-    use tenex_conversations::model::ConversationRow;
-    use tenex_conversations::NewMessage;
-
-    fn resolved() -> Arc<ResolvedModel> {
-        Arc::new(ResolvedModel {
-            provider: "anthropic".to_string(),
-            model: "claude-3-sonnet".to_string(),
-            api_key: None,
-            base_url: None,
-        })
-    }
-
-    fn seed_db(path: &std::path::Path, conversation_id: &str, messages: &[(&str, &str, &str)]) {
-        let store = ConversationStore::open(path).expect("open store");
-        store
-            .upsert_conversation(&ConversationRow {
-                id: conversation_id.to_string(),
-                title: None,
-                summary: None,
-                last_user_message: None,
-                status_label: None,
-                status_current_activity: None,
-                owner_pubkey: None,
-                created_at: Some(0),
-                last_activity: None,
-                metadata: serde_json::json!({}),
-                runtime_state: serde_json::json!({}),
-                updated_at: 0,
-            })
-            .expect("upsert conversation");
-        for (i, (record_id, author, content)) in messages.iter().enumerate() {
-            store
-                .append_message(
-                    conversation_id,
-                    &NewMessage {
-                        record_id: record_id.to_string(),
-                        nostr_event_id: None,
-                        author_pubkey: author.to_string(),
-                        sender_pubkey: None,
-                        ral: None,
-                        message_type: "user".to_string(),
-                        role: Some("user".to_string()),
-                        content: content.to_string(),
-                        timestamp: Some(i as i64),
-                        targeted_pubkeys: None,
-                        sender_principal: None,
-                        targeted_principals: None,
-                        tool_data: None,
-                        delegation_marker: None,
-                        human_readable: None,
-                        transcript_tool_attributes: None,
-                    },
-                )
-                .expect("append message");
-        }
-    }
-
-    #[test]
-    fn test_conversation_get_tool_creation() {
-        let db_path = PathBuf::from("/home/user/.tenex/projects/myproject/conversation.db");
-        let tool = ConversationGetTool::new(db_path.clone(), resolved());
-        assert_eq!(tool.db_path, db_path);
-    }
-
-    #[tokio::test]
-    async fn returns_transcript_for_existing_conversation() {
-        let dir = TempDir::new().unwrap();
-        let db = dir.path().join("conversation.db");
-        let cid = "a".repeat(64);
-        seed_db(
-            &db,
-            &cid,
-            &[
-                ("rec1", "alice0000aaaa", "hello"),
-                ("rec2", "bob0000bbbb", "world"),
-            ],
-        );
-
-        let tool = ConversationGetTool::new(db, resolved());
-        let out = tool
-            .call(ConversationGetArgs {
-                conversation_id: cid.clone(),
-                limit: None,
-                until_id: None,
-                prompt: None,
-            })
-            .await
-            .expect("tool call should succeed");
-
-        assert!(out.contains("aaaaaaaa (2 messages)"), "got: {out}");
-        assert!(out.contains("hello"));
-        assert!(out.contains("world"));
-        assert!(out.contains("alice000"));
-        assert!(out.contains("bob0000b"));
-    }
-
-    #[tokio::test]
-    async fn reports_missing_conversation() {
-        let dir = TempDir::new().unwrap();
-        let db = dir.path().join("conversation.db");
-        ConversationStore::open(&db).unwrap();
-
-        let tool = ConversationGetTool::new(db, resolved());
-        let out = tool
-            .call(ConversationGetArgs {
-                conversation_id: "f".repeat(64),
-                limit: None,
-                until_id: None,
-                prompt: None,
-            })
-            .await
-            .expect("tool call should succeed");
-
-        assert!(out.starts_with("No messages found"), "got: {out}");
-    }
-
-    #[tokio::test]
-    async fn until_id_truncates_by_record_id() {
-        let dir = TempDir::new().unwrap();
-        let db = dir.path().join("conversation.db");
-        let cid = "b".repeat(64);
-        seed_db(
-            &db,
-            &cid,
-            &[
-                ("rec1", "alice0000", "first"),
-                ("rec2", "alice0000", "second"),
-                ("rec3", "alice0000", "third"),
-            ],
-        );
-
-        let tool = ConversationGetTool::new(db, resolved());
-        let out = tool
-            .call(ConversationGetArgs {
-                conversation_id: cid,
-                limit: None,
-                until_id: Some("rec2".to_string()),
-                prompt: None,
-            })
-            .await
-            .expect("tool call should succeed");
-
-        assert!(out.contains("(1 messages)"), "got: {out}");
-        assert!(out.contains("first"));
-        assert!(!out.contains("second"));
-        assert!(!out.contains("third"));
-    }
-
-    /// E2E probe against a copy of the live project DB.
-    ///
-    /// Run with:
-    ///   TENEX_PROBE_DB=$HOME/.tenex/projects/TENEX-ff3ssq/conversation.db \
-    ///   TENEX_PROBE_CID=410a9661ec26252aac23a81a4100052a0a80e659e71d18d2aa4277692f7f63cb \
-    ///   cargo test -p tenex-agent --bins -- conversation_get::tests::probe_real_database --ignored --nocapture
-    #[tokio::test]
-    #[ignore]
-    async fn probe_real_database() {
-        let src = std::env::var("TENEX_PROBE_DB").expect("set TENEX_PROBE_DB to a conversation.db path");
-        let cid = std::env::var("TENEX_PROBE_CID").expect("set TENEX_PROBE_CID to a conversation id");
-        let dir = TempDir::new().unwrap();
-        let copy = dir.path().join("conversation.db");
-        std::fs::copy(&src, &copy).expect("copy db");
-
-        let tool = ConversationGetTool::new(copy, resolved());
-        let out = tool
-            .call(ConversationGetArgs {
-                conversation_id: cid.clone(),
-                limit: Some(5),
-                until_id: None,
-                prompt: None,
-            })
-            .await
-            .expect("tool call should succeed");
-
-        eprintln!("=== probe output ({} bytes) ===\n{}", out.len(), out);
-        assert!(!out.starts_with("No messages found"), "expected real conversation");
-    }
-
-    #[tokio::test]
-    async fn limit_caps_returned_messages() {
-        let dir = TempDir::new().unwrap();
-        let db = dir.path().join("conversation.db");
-        let cid = "c".repeat(64);
-        seed_db(
-            &db,
-            &cid,
-            &[
-                ("rec1", "alice0000", "one"),
-                ("rec2", "alice0000", "two"),
-                ("rec3", "alice0000", "three"),
-            ],
-        );
-
-        let tool = ConversationGetTool::new(db, resolved());
-        let out = tool
-            .call(ConversationGetArgs {
-                conversation_id: cid,
-                limit: Some(2),
-                until_id: None,
-                prompt: None,
-            })
-            .await
-            .expect("tool call should succeed");
-
-        assert!(out.contains("(2 messages)"), "got: {out}");
-        assert!(out.contains("one"));
-        assert!(out.contains("two"));
-        assert!(!out.contains("three"));
+        Ok(messages_xml)
     }
 }

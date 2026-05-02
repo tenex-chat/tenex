@@ -378,8 +378,7 @@ async fn run() -> Result<()> {
                                     ..Default::default()
                                 }),
                             };
-                            if let Err(err) =
-                                channel.send(Intent::Conversation(intent), &ctx).await
+                            if let Err(err) = channel.send(Intent::Conversation(intent), &ctx).await
                             {
                                 eprintln!(
                                     "[tenex-agent-acp] warn: tool-boundary flush failed: {err}"

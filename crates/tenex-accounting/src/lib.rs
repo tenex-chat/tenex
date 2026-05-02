@@ -32,6 +32,8 @@ pub mod recorder;
 pub mod schema;
 pub mod server;
 
+mod agent_labels;
+
 pub use query::{
     AgentCostRow, EmbeddingSummary, LlmCallSummary, ModelCostRow, Overview, ProviderCostRow,
     QueryService, RecentLlmCall, SpanDetail, SpanMessage, ToolCallSummary, TraceDetail,

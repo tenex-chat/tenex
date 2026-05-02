@@ -8,6 +8,7 @@ before adding code, moving behavior, or introducing a new dependency.
 | Path | Package | Role |
 |---|---|---|
 | `tenex/` | `tenex` | Host CLI and supervisor. Owns onboarding, configuration commands, project/runtime process management, doctor commands, TUI prompts, and Nostr publication for host-side operations. |
+| `crates/tenex-accounting/` | `tenex-accounting` | SQLite-backed LLM accounting and observability store. Owns append-only trace/span recording, cost and token query APIs, provider pricing snapshots, and the embedded local accounting HTTP UI. |
 | `crates/tenex-agent/` | `tenex-agent` | One-shot agent runner binary. Receives one Nostr event over stdin, runs the LLM/tool loop, and emits signed NDJSON frames over stdout. It does not open relays. |
 | `crates/tenex-agent-registry/` | `tenex-agent-registry` | JSON-backed global installed-agent registry under `<base_dir>/agents`. Owns agent document normalization, mutation, keys, and index maintenance. |
 | `crates/tenex-context/` | `tenex-context` | Conversation-history projection for LLM prompts. Owns message shaping, token estimates, cache-breakpoint hints, and context-management turn recording. |
@@ -47,6 +48,18 @@ before adding code, moving behavior, or introducing a new dependency.
 | `utils/` | Shared CLI utilities for errors, identifiers, dotenv parsing, path expansion, Telegram identifiers, and time formatting. |
 
 ## Crate Internal Modules
+
+### `tenex-accounting`
+
+| Module | Responsibility |
+|---|---|
+| `agent_labels.rs` | Pubkey-to-agent-slug label resolution for accounting read-side views. |
+| `ids.rs` | Sortable accounting identifier generation. |
+| `pricing/` | Provider/model pricing catalog, cost estimation, and shadow-cost reference lookup. |
+| `query.rs`, `query/` | Read-only SQLite query API for traces, spans, costs, embeddings, recent LLM calls, and agent-cost grouping. |
+| `recorder.rs` | Append-only writer handle and background SQLite writer for traces, spans, LLM calls, tool calls, embeddings, and rollups. |
+| `schema/` | Accounting hot DB schema, SQLite pragmas, and forward-only migrations. |
+| `server/` | Embedded Axum API and vanilla-JS accounting UI. |
 
 ### `tenex-agent`
 

@@ -462,12 +462,13 @@ Retrieve the message transcript for a conversation by ID. Reads from the project
 
 | Param | Type | Description |
 |-------|------|-------------|
-| `conversation_id` | string | Conversation ID (64-char hex event ID) |
+| `conversation_id` | string | Conversation ID. Full 64-character IDs and unique 8+ character hex prefixes are accepted |
 | `limit` | integer? | Maximum messages to return (default: all) |
-| `until_id` | string? | Return transcript entries before this message ID |
+| `until_id` | string? | Return transcript entries up to and including this message/event/tool-call ID |
 | `prompt` | string? | Ask the configured LLM to analyze the retrieved transcript |
+| `include_tool_calls` | boolean? | Include tool-call entries in the XML transcript; tool result payloads are omitted |
 
-Returns a plain-text transcript with `[role] author8: content` lines, or an LLM analysis when `prompt` is supplied. Remaining TypeScript parity gaps: `includeToolCalls`, XML transcript output, and relative timestamp formatting.
+Returns the XML transcript directly, rooted at `<conversation id="..." t0="...">`. Entries include relative `time="+seconds"` attributes, author/recipient attribution, short event IDs, and optional `<tool ... />` call entries when `include_tool_calls` is true. Tool result payloads are not included. If no conversation data exists, returns `<conversation ... found="false"></conversation>`. When `prompt` is supplied, the tool returns the LLM's text analysis instead of the raw transcript.
 
 ### `conversation_list`
 List conversations sorted by most recent activity. By default it lists the current project; pass `project_id` for another project or `"ALL"` to scan all projects under `~/.tenex/projects/`.
@@ -626,7 +627,7 @@ API keys are resolved from `~/.tenex/providers.json`. Ollama uses `OLLAMA_API_BA
 
 ## Future Work (not yet implemented)
 
-- **Conversation tools**: `conversation_get.includeToolCalls`, XML transcript output, relative timestamps, and `conversation_search.project_id` filtering.
+- **Conversation tools**: `conversation_search.project_id` filtering.
 - **Delegation routing**: cross-project delegation return routing back into the source project, deferred completions for nested delegation trees, and implicit kill-wake envelopes.
 - **Supervision**: durable/nonblocking `inject-message`, `block-tool`, `suppress-publish`, richer post-completion context, and OpenTelemetry spans/events.
 - **RAG**: scope-aware search and a mock embedding provider for tests. RAG subscription and collection-management tools remain intentionally unported.

@@ -1,11 +1,12 @@
 //! `tenex accounting` — query and serve the SQLite accounting store.
 
 use std::net::SocketAddr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use clap::{Args, Subcommand};
 use tenex_accounting::{default_db_path, query::QueryService};
+use tenex_agent_registry::AgentIndexDoc;
 
 #[derive(Args)]
 pub struct AccountingArgs {
@@ -82,6 +83,18 @@ fn db_or_default(p: Option<PathBuf>) -> PathBuf {
     p.unwrap_or_else(default_db_path)
 }
 
+fn query_service(path: &Path) -> Result<QueryService> {
+    let base_dir = crate::store::resolve_base_dir(None);
+    let index = AgentIndexDoc::load(&base_dir)
+        .with_context(|| format!("loading agent index from {}", base_dir.display()))?;
+    let slugs = index
+        .by_slug()
+        .iter()
+        .map(|(slug, entry)| (entry.pubkey.clone(), slug.clone()))
+        .collect::<Vec<_>>();
+    Ok(QueryService::new(path).with_agent_slugs(slugs))
+}
+
 async fn run_cost(a: CostArgs) -> Result<()> {
     let secs = parse_window(&a.since)?;
     let since_ms = Some(now_ms() - secs * 1000);
@@ -89,7 +102,7 @@ async fn run_cost(a: CostArgs) -> Result<()> {
     if !path.exists() {
         anyhow::bail!("accounting db not found at {}", path.display());
     }
-    let q = QueryService::new(&path);
+    let q = query_service(&path)?;
     let ov = q.overview(since_ms)?;
     println!(
         "Window: last {} ({} traces, {} llm_calls, {} embeddings, {} tool_calls)",
@@ -138,7 +151,7 @@ async fn run_tail(a: TailArgs) -> Result<()> {
     if !path.exists() {
         anyhow::bail!("accounting db not found at {}", path.display());
     }
-    let q = QueryService::new(&path);
+    let q = query_service(&path)?;
     for r in q.recent_llm_calls(a.limit)? {
         println!(
             "{}  {:14} {:35} in={:>5} out={:>5} cost={:>12}  {:>6}ms  {}",
@@ -174,7 +187,7 @@ async fn run_serve(a: ServeArgs) -> Result<()> {
         bind,
         path.display()
     );
-    let q = QueryService::new(&path);
+    let q = query_service(&path)?;
     tenex_accounting::server::serve(bind, q).await
 }
 
