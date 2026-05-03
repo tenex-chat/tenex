@@ -3,7 +3,7 @@
 //!
 //!   - last_activity is between DEBOUNCE_SECS (10s) and MAX_AGE_SECS (7d) old
 //!   - last_activity has advanced since our last summarize
-//!   - at least MIN_INTERVAL_MS has passed since our last summarize (rate limit)
+//!   - at least MIN_INTERVAL_MS (10 min) has passed since our last summarize (rate limit)
 //!
 //! Implements the host-level debounce policy without relying on an
 //! in-process scheduler inside each project runtime.
@@ -25,7 +25,7 @@ use crate::summarize::{self, Summary};
 
 const SCAN_INTERVAL: Duration = Duration::from_secs(5);
 const DEBOUNCE_SECS: i64 = 10;
-const MIN_INTERVAL_MS: i64 = 5 * 60 * 1000;
+const MIN_INTERVAL_MS: i64 = 10 * 60 * 1000;
 const MAX_AGE_SECS: i64 = 7 * 24 * 60 * 60;
 
 pub async fn run(cfg: Config, state: SummaryStateStore) -> Result<()> {
