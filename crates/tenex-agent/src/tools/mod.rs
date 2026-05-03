@@ -11,6 +11,7 @@ pub mod delegate_crossproject;
 pub mod delegate_followup;
 mod delegate_followup_resolution;
 pub mod fs;
+pub mod html_publish;
 pub mod kill;
 pub mod learn;
 pub mod mcp;

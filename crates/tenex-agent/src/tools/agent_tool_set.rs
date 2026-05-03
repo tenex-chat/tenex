@@ -2,6 +2,7 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::{atomic::AtomicBool, Arc, Mutex};
 
+use nostr::Keys;
 use rig::tool::ToolDyn;
 use tenex_rag::RagStore;
 
@@ -24,6 +25,7 @@ use super::fs::{
     FsEditTool, FsGlobTool, FsGrepTool, FsReadTool, FsWriteTool, HomeFsEditTool, HomeFsGlobTool,
     HomeFsGrepTool, HomeFsReadTool, HomeFsWriteTool,
 };
+use super::html_publish::HtmlPublishTool;
 use super::kill::KillTool;
 use super::learn::LearnTool;
 use super::mcp::McpProxyTool;
@@ -79,6 +81,8 @@ pub(crate) struct ToolSet {
     pub(crate) runtime_state: Option<RuntimeStateHandle>,
     pub(crate) message_injections: Arc<Mutex<MessageInjectionTracker>>,
     pub(crate) telegram_config: Option<tenex_telegram::config::TelegramAgentConfig>,
+    pub(crate) blossom_url: String,
+    pub(crate) agent_keys: Keys,
 }
 
 impl ToolSet {
@@ -356,6 +360,16 @@ impl ToolSet {
             Box::new(ReportPublishTool::new(
                 self.emit_state.clone(),
                 self.working_dir.clone(),
+            )),
+        );
+
+        self.push_tool(
+            &mut tools,
+            &recorder,
+            Box::new(HtmlPublishTool::new(
+                self.emit_state.clone(),
+                self.blossom_url.clone(),
+                self.agent_keys.clone(),
             )),
         );
 

@@ -210,6 +210,7 @@ impl<M: CompletionModel> PromptHook<M> for EmitHook {
                     args_json: Some(args_string),
                     referenced_messages: Vec::new(),
                     usage: None,
+                    extra_tags: Vec::new(),
                 };
                 if let Err(e) = channel.send(Intent::ToolUse(intent), &ctx).await {
                     eprintln!("[tenex-agent] warn: failed to emit tool-use event: {e}");

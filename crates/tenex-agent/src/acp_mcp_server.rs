@@ -175,6 +175,7 @@ async fn emit_tool_use(state: Arc<EmitState>, tool_name: String, args_json: Stri
         args_json: Some(args_json),
         referenced_messages: Vec::new(),
         usage: None,
+        extra_tags: Vec::new(),
     };
     if let Err(error) = state.channel.send(Intent::ToolUse(intent), &ctx).await {
         eprintln!("[tenex-agent-acp-mcp] warn: failed to emit tool-use event: {error}");

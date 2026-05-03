@@ -93,6 +93,7 @@ fn tool_use_emits_q_tags_and_tool_args() {
         args_json: Some("{\"x\":1}".into()),
         referenced_messages: vec![MessageRef::Nostr { event_id: id }],
         usage: None,
+        extra_tags: Vec::new(),
     };
     let builders = NostrEncoder::encode(&Intent::ToolUse(intent), &ctx).expect("encode");
     let tags = signed_tags(builders.into_iter().next().unwrap());
@@ -275,6 +276,7 @@ fn self_tool_use_keeps_p_tag_when_triggering_principal_equals_signer() {
             event_id: EventId::all_zeros(),
         }],
         usage: None,
+        extra_tags: Vec::new(),
     };
     let builders = NostrEncoder::encode(&Intent::ToolUse(intent), &ctx).expect("encode");
     // tool_use does not add a `p` tag for the principal directly, but the

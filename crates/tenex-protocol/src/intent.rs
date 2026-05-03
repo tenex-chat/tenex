@@ -116,6 +116,11 @@ pub struct LessonIntent {
 ///
 /// `args_json` is pre-serialized by the caller. The encoder enforces the 100 KB
 /// cap rule itself: oversized payloads emit an empty `["tool-args"]` tag.
+///
+/// `extra_tags` carries additional tag arrays the caller wants injected into
+/// the kind:1 event after the standard tool tags. Each inner `Vec<String>` is
+/// passed through `Tag::parse` verbatim — the first element is the tag name
+/// and the rest are values (e.g. `vec!["url".into(), "https://…".into()]`).
 #[derive(Debug, Clone)]
 pub struct ToolUseIntent {
     pub tool_name: String,
@@ -123,6 +128,7 @@ pub struct ToolUseIntent {
     pub args_json: Option<String>,
     pub referenced_messages: Vec<MessageRef>,
     pub usage: Option<LlmUsage>,
+    pub extra_tags: Vec<Vec<String>>,
 }
 
 /// Ephemeral live-update delta (kind:24135). Best-effort; not a snapshot.

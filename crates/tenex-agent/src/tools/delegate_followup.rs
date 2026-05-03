@@ -208,6 +208,7 @@ impl Tool for DelegateFollowupTool {
             args_json: Some(serde_json::to_string(&args).unwrap_or_default()),
             referenced_messages: vec![followup_ref.clone()],
             usage: None,
+            extra_tags: Vec::new(),
         };
         self.state
             .channel

@@ -249,6 +249,10 @@ fn encode_tool_use(
         builder = builder.tag(q_tag(refd)?);
     }
 
+    for parts in &intent.extra_tags {
+        builder = builder.tag(tag(parts.iter().map(String::as_str))?);
+    }
+
     builder = add_standard_tags(builder, ctx)?;
     builder = forward_branch_team(builder, ctx)?;
 

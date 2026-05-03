@@ -141,6 +141,19 @@ fn load_todos_from_store(
     serde_json::from_value(todos_val).unwrap_or_default()
 }
 
+/// Read `blossomServerUrl` from `<base_dir>/config.json`.
+///
+/// Returns `None` if the file is missing, unreadable, or the field is absent.
+fn read_blossom_server_url(base_dir: &std::path::Path) -> Option<String> {
+    let path = base_dir.join("config.json");
+    let bytes = std::fs::read(&path).ok()?;
+    let raw: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
+    raw.get("blossomServerUrl")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(str::to_owned)
+}
+
 fn load_mcp_proxy_tools() -> Result<Vec<McpProxyTool>> {
     let manifest_path = match std::env::var("TENEX_MCP_MANIFEST") {
         Ok(path) if !path.is_empty() => std::path::PathBuf::from(path),
@@ -947,6 +960,10 @@ async fn run() -> Result<()> {
 
     let agent_slug = agent_config.identity_name().to_string();
     let escalation_pubkey = escalation::resolve_escalation_pubkey(&base_dir, &project_agents);
+    let agent_keys = nostr::Keys::parse(&agent_config.nsec)
+        .context("Failed to parse agent nsec for tool signing")?;
+    let blossom_url = read_blossom_server_url(&base_dir)
+        .unwrap_or_else(|| "https://blossom.primal.net".to_string());
     let suppress_response = Arc::new(AtomicBool::new(false));
     let agents_md = Arc::new(tools::agents_md::AgentsMdReminderState::new(project_root));
     let tool_set = ToolSet {
@@ -983,6 +1000,8 @@ async fn run() -> Result<()> {
         runtime_state: runtime_state.clone(),
         message_injections: injection_tracker.clone(),
         telegram_config: agent_config.telegram,
+        blossom_url,
+        agent_keys,
     };
 
     // Keep a handle with shared Arc refs so we can read the pending final turn

@@ -165,6 +165,7 @@ impl Tool for DelegateCrossProjectTool {
             args_json: Some(args_json),
             referenced_messages: vec![delegation_ref],
             usage: None,
+            extra_tags: Vec::new(),
         };
 
         self.state

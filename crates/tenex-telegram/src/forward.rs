@@ -101,6 +101,7 @@ fn render_tool_event(tool_name: &str, event: &Event) -> Option<String> {
         args_json,
         referenced_messages: Vec::new(),
         usage: None,
+        extra_tags: Vec::new(),
     };
     crate::tool_publications::render_tool_publication(&intent)
 }
