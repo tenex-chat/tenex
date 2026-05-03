@@ -4,6 +4,7 @@
 
 pub mod config;
 pub mod control_socket;
+pub mod display;
 pub mod lockfile;
 pub mod nostr;
 pub mod supervisor;
@@ -13,7 +14,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use clap::Parser;
-use tracing::{error, info};
+use tracing::{error, info, Instrument};
 
 const COMPANION_DAEMONS: [&str; 4] = [
     "tenex-summarizer",
@@ -57,21 +58,36 @@ pub async fn run(args: DaemonArgs) -> Result<()> {
 
     let cfg = config::load(&base_dir)
         .with_context(|| format!("loading config from {}", base_dir.display()))?;
-    info!(
-        base_dir = %base_dir.display(),
-        relays = ?cfg.relays,
-        whitelisted = cfg.whitelisted_pubkeys.len(),
-        "config loaded",
-    );
+    display::header(&base_dir, cfg.relays.len());
 
     let _lock = lockfile::Lockfile::acquire(&base_dir).context("acquiring daemon lockfile")?;
     let backend_keys = crate::nostr_pub::backend_signer::ensure_backend_keys(&base_dir)
         .context("loading daemon signer")?;
 
-    let boot_argv = default_boot_argv();
-    info!(boot_command = %boot_argv.join(" "), "boot command resolved");
+    whitelist_export::write_backend_pubkey(&base_dir, &backend_keys)
+        .context("publish backend pubkey for whitelist daemon")?;
+
+    let boot_argv = if let Some(cmd) = args.ts {
+        let argv = shell_words::split(&cmd).with_context(|| format!("parsing --ts: {cmd}"))?;
+        if argv.is_empty() {
+            return Err(anyhow::anyhow!("--ts is empty"));
+        }
+        argv
+    } else {
+        default_boot_argv()
+    };
 
     let supervisor = supervisor::Supervisor::new(boot_argv, base_dir.clone());
+
+    // Bootstrap the whitelist trust daemon as a supervised foreground child.
+    // Every runtime gates inbound events through it and fails closed on socket
+    // errors, so the daemon must be ready before any project runtime starts.
+    if let Err(e) = start_whitelist_service(&supervisor, &base_dir).await {
+        supervisor.shutdown().await;
+        return Err(e);
+    }
+    display::service_ready("whitelist");
+
 
     // Bootstrap the identity daemon. Runtime code relies on this service for
     // pubkey display names; fail startup if the socket cannot be reached.
@@ -79,16 +95,24 @@ pub async fn run(args: DaemonArgs) -> Result<()> {
         supervisor.shutdown().await;
         return Err(e);
     }
-    info!("identity daemon ready");
+    display::service_ready("identity");
+
+    // Start the LLM config IPC server. TypeScript runtimes resolve config
+    // names and report key failures through this socket rather than reading
+    // providers.json / llms.json directly.
+    {
+        let llm_base = base_dir.clone();
+        tokio::spawn(async move {
+            if let Err(e) = tenex_llm_config::Server::start(llm_base).await {
+                error!(error = %e, "llm-config IPC server failed");
+            }
+        });
+    }
+    display::service_ready("llm-config");
+
 
     // Spawn host-level companion daemons. Binaries are expected alongside the
     // tenex binary (same target/ dir for cargo builds, same bin/ for installs).
-    if args.disable_scheduled_jobs {
-        info!("scheduled-task companion disabled by --disable-scheduled-jobs");
-    }
-    if args.disable_intervention {
-        info!("intervention companion disabled by --disable-intervention");
-    }
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
             for name in
@@ -97,7 +121,6 @@ pub async fn run(args: DaemonArgs) -> Result<()> {
                 let path = dir.join(name);
                 if path.exists() {
                     supervisor.boot_binary(name.to_string(), path).await;
-                    info!(name, "companion daemon queued");
                 } else {
                     tracing::warn!(name, "companion binary not found; skipping");
                 }
@@ -120,17 +143,26 @@ pub async fn run(args: DaemonArgs) -> Result<()> {
     if !args.boot.is_empty() {
         info!(prefixes = ?args.boot, "queued --boot prefixes; awaiting matching project discovery");
     }
-    let mut nostr_handle = nostr::run(cfg, backend_keys, supervisor.clone(), args.boot).await?;
+    let mut nostr_handle = nostr::run(cfg, base_dir.clone(), backend_keys, supervisor.clone(), args.boot).await?;
 
-    // Publish the installed-agent inventory (kind:24011) immediately and then
-    // every 30 seconds so Nostr clients always have a fresh view of what agents
-    // are available on this installation.
+    // Publish the backend heartbeat (kind:24012) and installed-agent inventory
+    // (kind:24011) immediately and then every 30 seconds so Nostr clients see
+    // both backend liveness and a fresh view of what agents are available on
+    // this installation.
     {
         let base_dir_clone = base_dir.clone();
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(std::time::Duration::from_secs(30));
             loop {
                 interval.tick().await;
+                if let Err(e) =
+                    crate::nostr_pub::backend_heartbeat::publish_backend_heartbeat(
+                        &base_dir_clone,
+                    )
+                    .await
+                {
+                    tracing::warn!(error = %e, "24012 heartbeat publish failed");
+                }
                 if let Err(e) =
                     crate::nostr_pub::installed_agents::publish_installed_agents_inventory(
                         &base_dir_clone,
@@ -143,17 +175,39 @@ pub async fn run(args: DaemonArgs) -> Result<()> {
         });
     }
 
-    tokio::select! {
-        _ = wait_for_signal() => {
-            info!("shutdown signal received");
+    let signal_received = tokio::select! {
+        signal = wait_for_signal() => {
+            info!(signal = signal.unwrap_or("unknown"), "shutdown signal received");
+            Some(signal.unwrap_or("unknown"))
         }
         res = &mut nostr_handle => {
             error!(?res, "nostr task exited unexpectedly; tearing down");
+            None
         }
+    };
+
+    if let Some(signal_type) = signal_received {
+        let shutdown_start = std::time::Instant::now();
+        let span = tracing::info_span!(
+            "tenex.daemon.graceful_shutdown",
+            "signal.type" = signal_type,
+            "shutdown.duration_ms" = tracing::field::Empty,
+        );
+        async {
+            supervisor.shutdown().await;
+            nostr_handle.abort();
+            tracing::Span::current().record(
+                "shutdown.duration_ms",
+                shutdown_start.elapsed().as_millis() as i64,
+            );
+        }
+        .instrument(span)
+        .await;
+    } else {
+        nostr_handle.abort();
+        supervisor.shutdown().await;
     }
 
-    nostr_handle.abort();
-    supervisor.shutdown().await;
     Ok(())
 }
 
@@ -184,25 +238,25 @@ async fn start_identity_service(supervisor: &supervisor::Supervisor) -> Result<(
         .context("waiting for identity daemon readiness")
 }
 
-async fn wait_for_signal() {
+async fn wait_for_signal() -> Option<&'static str> {
     use tokio::signal::unix::{signal, SignalKind};
     let mut sigint = match signal(SignalKind::interrupt()) {
         Ok(s) => s,
         Err(e) => {
             error!(error = %e, "failed to install SIGINT handler");
-            return;
+            return None;
         }
     };
     let mut sigterm = match signal(SignalKind::terminate()) {
         Ok(s) => s,
         Err(e) => {
             error!(error = %e, "failed to install SIGTERM handler");
-            return;
+            return None;
         }
     };
     tokio::select! {
-        _ = sigint.recv() => {},
-        _ = sigterm.recv() => {},
+        _ = sigint.recv() => Some("sigint"),
+        _ = sigterm.recv() => Some("sigterm"),
     }
 }
 

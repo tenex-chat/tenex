@@ -20,6 +20,10 @@ pub const PROJECT_STATUS: u16 = 24010;
 /// kind:24011 — TenexInstalledAgentList.
 pub const INSTALLED_AGENT_LIST: u16 = 24011;
 
+/// kind:24012 — TenexBackendHeartbeat. Periodic liveness signal published by
+/// the daemon's backend signer.
+pub const BACKEND_HEARTBEAT: u16 = 24012;
+
 /// kind:24020 — TenexAgentConfigUpdate.
 pub const AGENT_CONFIG_UPDATE: u16 = 24020;
 
