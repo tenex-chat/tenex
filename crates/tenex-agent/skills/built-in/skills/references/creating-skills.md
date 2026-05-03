@@ -58,24 +58,20 @@ Skills follow a **progressive-disclosure** pattern: only the frontmatter is prel
 
 ## Where to install a skill
 
-Skills are loaded from five scope directories in this precedence order — if the same skill ID exists in more than one, the higher-precedence directory wins:
+Skills are loaded from four scope directories in this precedence order — if the same skill ID exists in more than one, the higher-precedence directory wins:
 
 | # | Scope | Path | When to use |
 |---|---|---|---|
 | 1 | **Built-in** | `$TENEX_BASE_DIR/skills/built-in/<id>/` | Reserved for skills shipped with TENEX itself. **Never install here.** |
 | 2 | **Agent** | `$AGENT_HOME/skills/<id>/` | This agent, every project. The agent's personal toolkit. |
-| 3 | **Agent-project** | `$PROJECT_BASE/.agents/<short-pubkey>/skills/<id>/` | This agent, this project only. Project-specific personal extensions. |
-| 4 | **Project** | `$PROJECT_BASE/.agents/skills/<id>/` | Every agent on this project. Shared team conventions. |
-| 5 | **Shared** | `$HOME/.agents/skills/<id>/` | Every agent, every project, on this machine. Rarely the right choice — prefer **Agent** scope for personal cross-project skills. |
-
-`<short-pubkey>` is the first 8 hex characters of the agent's pubkey.
+| 3 | **Project** | `$PROJECT_BASE/.agents/skills/<id>/` | Every agent on this project. Shared team conventions. |
+| 4 | **Shared** | `$HOME/.agents/skills/<id>/` | Every agent, every project, on this machine. Rarely the right choice — prefer **Agent** scope for personal cross-project skills. |
 
 ### Choosing a scope
 
 Ask: *who else benefits from this skill?*
 
-- Only this agent on this project → **Agent-project**
-- Only this agent, but on every project → **Agent**
+- Only this agent, on every project → **Agent**
 - The whole team on this project → **Project**
 - Genuinely every agent on this machine → **Shared** (uncommon — confirm explicitly)
 
@@ -84,9 +80,6 @@ Never write to **Built-in** — those skills ship with TENEX and are managed by 
 ### Install commands
 
 ```bash
-# Agent-project (this agent, this project)
-npx skills add <owner/repo@skill> --dir "$PROJECT_BASE/.agents/<short-pubkey>/skills" -y
-
 # Agent (this agent, every project)
 npx skills add <owner/repo@skill> --dir "$AGENT_HOME/skills" -y
 

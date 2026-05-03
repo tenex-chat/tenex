@@ -78,6 +78,10 @@ pub(super) async fn dispatch_notification(
             // notification, not from an external Nostr author.
             is_external: false,
             response_tee: None,
+            // Server-initiated push: there is no upstream daemon span
+            // to parent against, so the resulting `tenex.runtime.dispatch`
+            // becomes a fresh root.
+            trace_carrier: tenex_telemetry::inject_current(),
         },
     )
     .await

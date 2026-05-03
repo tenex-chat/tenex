@@ -31,7 +31,7 @@ impl Tool for SkillListTool {
     async fn definition(&self, _prompt: String) -> ToolDefinition {
         ToolDefinition {
             name: Self::NAME.to_string(),
-            description: "List all available skills grouped by scope (builtIn, agent, agentProject, project, shared) with per-scope counts and total.".to_string(),
+            description: "List all available skills grouped by scope (builtIn, agent, project, shared) with per-scope counts and total.".to_string(),
             parameters: json!({
                 "type": "object",
                 "properties": {}
@@ -43,7 +43,7 @@ impl Tool for SkillListTool {
         let all_skills = skills::list_available_skills(&self.ctx);
         let grouped = skills::group_by_scope(&all_skills);
 
-        let scope_keys = ["builtIn", "agent", "agentProject", "project", "shared"];
+        let scope_keys = ["builtIn", "agent", "project", "shared"];
         let mut scopes = serde_json::Map::new();
         let mut counts = serde_json::Map::new();
         let mut total = 0usize;

@@ -10,6 +10,7 @@ use rig::streaming::{
     RawStreamingChoice, RawStreamingToolCall, StreamedAssistantContent,
     StreamingCompletionResponse, StreamingResult,
 };
+use tracing::{field, info_span, Instrument, Span};
 
 use crate::cassette::{CassetteRecorder, CassetteToolCall};
 use crate::cassette_request::request_debug;
@@ -18,17 +19,24 @@ use crate::cassette_request::request_debug;
 pub struct RecordingClient<C> {
     inner: C,
     recorder: Option<CassetteRecorder>,
+    provider: &'static str,
 }
 
 #[derive(Clone)]
 pub struct RecordingModel<M> {
     inner: M,
     recorder: Option<CassetteRecorder>,
+    provider: &'static str,
+    model_id: String,
 }
 
 impl<C> RecordingClient<C> {
-    pub fn new(inner: C, recorder: Option<CassetteRecorder>) -> Self {
-        Self { inner, recorder }
+    pub fn new(inner: C, recorder: Option<CassetteRecorder>, provider: &'static str) -> Self {
+        Self {
+            inner,
+            recorder,
+            provider,
+        }
     }
 }
 
@@ -37,6 +45,8 @@ impl<M> RecordingModel<M> {
         RecordingModel {
             inner: f(self.inner),
             recorder: self.recorder,
+            provider: self.provider,
+            model_id: self.model_id,
         }
     }
 }
@@ -60,9 +70,12 @@ where
     type Client = RecordingClient<M::Client>;
 
     fn make(client: &Self::Client, model: impl Into<String>) -> Self {
+        let model_id = model.into();
         Self {
-            inner: M::make(&client.inner, model.into()),
+            inner: M::make(&client.inner, model_id.clone()),
             recorder: client.recorder.clone(),
+            provider: client.provider,
+            model_id,
         }
     }
 
@@ -72,19 +85,51 @@ where
     ) -> Result<CompletionResponse<Self::Response>, CompletionError> {
         let turn = self.recorder.as_ref().map(CassetteRecorder::next_turn);
         let request_debug = request_debug(&request);
+        let input_messages = serde_json::to_string(&request.chat_history).unwrap_or_default();
+        let span = info_span!(
+            "chat",
+            otel.name = format!("chat {}", self.model_id),
+            otel.kind = "client",
+            "gen_ai.provider.name" = self.provider,
+            "gen_ai.operation.name" = "chat",
+            "gen_ai.request.model" = %self.model_id,
+            "gen_ai.input.messages" = %input_messages,
+            "gen_ai.output.messages" = field::Empty,
+            "gen_ai.response.model" = field::Empty,
+            "gen_ai.response.id" = field::Empty,
+            "gen_ai.response.finish_reasons" = field::Empty,
+            "gen_ai.usage.input_tokens" = field::Empty,
+            "gen_ai.usage.output_tokens" = field::Empty,
+            "gen_ai.usage.cache_read.input_tokens" = field::Empty,
+            "gen_ai.usage.cache_creation.input_tokens" = field::Empty,
+        );
         let started = Instant::now();
-        let result = self.inner.completion(request).await;
-        if let (Some(recorder), Some(turn), Ok(response)) = (&self.recorder, turn, &result) {
-            let (content, tool_calls) = assistant_items_to_cassette(response.choice.clone());
-            recorder.record_turn(
-                turn,
-                started.elapsed().as_millis() as u64,
-                &request_debug,
-                &content,
-                &tool_calls,
-            );
+        let result = self
+            .inner
+            .completion(request)
+            .instrument(span.clone())
+            .await;
+        match result {
+            Ok(response) => {
+                span.in_scope(|| record_completion_response(&response));
+                if let (Some(recorder), Some(turn)) = (&self.recorder, turn) {
+                    let (content, tool_calls) =
+                        assistant_items_to_cassette(response.choice.clone());
+                    recorder.record_turn(
+                        turn,
+                        started.elapsed().as_millis() as u64,
+                        &request_debug,
+                        &content,
+                        &tool_calls,
+                    );
+                }
+                Ok(response)
+            }
+            Err(err) => {
+                span.in_scope(|| tenex_telemetry::record_current_error(&err));
+                Err(err)
+            }
         }
-        result
     }
 
     async fn stream(
@@ -93,90 +138,166 @@ where
     ) -> Result<StreamingCompletionResponse<Self::StreamingResponse>, CompletionError> {
         let turn = self.recorder.as_ref().map(CassetteRecorder::next_turn);
         let request_debug = request_debug(&request);
+        let input_messages = serde_json::to_string(&request.chat_history).unwrap_or_default();
+        let span = info_span!(
+            "chat",
+            otel.name = format!("chat {}", self.model_id),
+            otel.kind = "client",
+            "gen_ai.provider.name" = self.provider,
+            "gen_ai.operation.name" = "chat",
+            "gen_ai.request.model" = %self.model_id,
+            "gen_ai.request.stream" = true,
+            "gen_ai.input.messages" = %input_messages,
+            "gen_ai.output.messages" = field::Empty,
+            "gen_ai.response.model" = field::Empty,
+            "gen_ai.response.id" = field::Empty,
+            "gen_ai.response.finish_reasons" = field::Empty,
+            "gen_ai.response.time_to_first_chunk" = field::Empty,
+            "gen_ai.usage.input_tokens" = field::Empty,
+            "gen_ai.usage.output_tokens" = field::Empty,
+            "gen_ai.usage.cache_read.input_tokens" = field::Empty,
+            "gen_ai.usage.cache_creation.input_tokens" = field::Empty,
+        );
         let started = Instant::now();
-        let inner = self.inner.stream(request).await?;
-        let state = (
+        let inner = match self.inner.stream(request).instrument(span.clone()).await {
+            Ok(inner) => inner,
+            Err(err) => {
+                span.in_scope(|| tenex_telemetry::record_current_error(&err));
+                return Err(err);
+            }
+        };
+        let state = StreamState {
             inner,
-            self.recorder.clone(),
+            recorder: self.recorder.clone(),
             turn,
             started,
             request_debug,
-            String::new(),
-            Vec::<CassetteToolCall>::new(),
-            false,
-        );
-        let stream = futures::stream::unfold(
-            state,
-            |(
-                mut inner,
-                recorder,
-                turn,
-                started,
-                request_debug,
-                mut content,
-                mut tool_calls,
-                mut recorded,
-            )| async move {
-                match inner.next().await {
-                    Some(Ok(item)) => {
-                        let raw = streamed_to_raw(item, &mut content, &mut tool_calls);
-                        if matches!(raw, RawStreamingChoice::FinalResponse(_)) {
-                            record_once(
-                                &recorder,
-                                turn,
-                                started,
-                                &request_debug,
-                                &content,
-                                &tool_calls,
-                            );
-                            recorded = true;
-                        }
-                        Some((
-                            Ok(raw),
-                            (
-                                inner,
-                                recorder,
-                                turn,
-                                started,
-                                request_debug,
-                                content,
-                                tool_calls,
-                                recorded,
-                            ),
-                        ))
+            content: String::new(),
+            tool_calls: Vec::new(),
+            recorded: false,
+            first_chunk_recorded: false,
+            span,
+        };
+        let stream = futures::stream::unfold(state, |mut state| async move {
+            let next = state.inner.next().instrument(state.span.clone()).await;
+            let span = state.span.clone();
+            match next {
+                Some(Ok(item)) => {
+                    if !state.first_chunk_recorded {
+                        span.record(
+                            "gen_ai.response.time_to_first_chunk",
+                            state.started.elapsed().as_millis() as i64,
+                        );
+                        state.first_chunk_recorded = true;
                     }
-                    Some(Err(err)) => Some((
-                        Err(err),
-                        (
-                            inner,
-                            recorder,
-                            turn,
-                            started,
-                            request_debug,
-                            content,
-                            tool_calls,
-                            recorded,
-                        ),
-                    )),
-                    None => {
-                        if !recorded {
-                            record_once(
-                                &recorder,
-                                turn,
-                                started,
-                                &request_debug,
-                                &content,
-                                &tool_calls,
-                            );
-                        }
-                        None
+                    let raw = streamed_to_raw(item, &mut state.content, &mut state.tool_calls);
+                    if let RawStreamingChoice::FinalResponse(response) = &raw {
+                        record_streaming_final(&span, response);
+                        record_once(
+                            &state.recorder,
+                            state.turn,
+                            state.started,
+                            &state.request_debug,
+                            &state.content,
+                            &state.tool_calls,
+                        );
+                        state.recorded = true;
                     }
+                    Some((Ok(raw), state))
                 }
-            },
-        );
+                Some(Err(err)) => {
+                    span.in_scope(|| tenex_telemetry::record_current_error(&err));
+                    Some((Err(err), state))
+                }
+                None => {
+                    if !state.recorded {
+                        record_once(
+                            &state.recorder,
+                            state.turn,
+                            state.started,
+                            &state.request_debug,
+                            &state.content,
+                            &state.tool_calls,
+                        );
+                    }
+                    None
+                }
+            }
+        });
         Ok(StreamingCompletionResponse::stream(
             Box::pin(stream) as StreamingResult<_>
         ))
+    }
+}
+
+struct StreamState<S> {
+    inner: S,
+    recorder: Option<CassetteRecorder>,
+    turn: Option<usize>,
+    started: Instant,
+    request_debug: String,
+    content: String,
+    tool_calls: Vec<CassetteToolCall>,
+    recorded: bool,
+    first_chunk_recorded: bool,
+    span: Span,
+}
+
+fn record_completion_response<T>(response: &CompletionResponse<T>) {
+    let span = Span::current();
+    let output = serde_json::to_string(&response.choice).unwrap_or_default();
+    span.record("gen_ai.output.messages", output.as_str());
+    if let Some(id) = response.message_id.as_deref() {
+        span.record("gen_ai.response.id", id);
+    }
+    let usage = response.usage;
+    span.record("gen_ai.usage.input_tokens", usage.input_tokens as i64);
+    span.record("gen_ai.usage.output_tokens", usage.output_tokens as i64);
+    span.record(
+        "gen_ai.usage.cache_read.input_tokens",
+        usage.cached_input_tokens as i64,
+    );
+    span.record(
+        "gen_ai.usage.cache_creation.input_tokens",
+        usage.cache_creation_input_tokens as i64,
+    );
+    span.record("gen_ai.response.finish_reasons", finish_reasons(response));
+}
+
+fn record_streaming_final<R>(span: &Span, response: &R)
+where
+    R: GetTokenUsage,
+{
+    if let Some(usage) = response.token_usage() {
+        span.record("gen_ai.usage.input_tokens", usage.input_tokens as i64);
+        span.record("gen_ai.usage.output_tokens", usage.output_tokens as i64);
+        span.record(
+            "gen_ai.usage.cache_read.input_tokens",
+            usage.cached_input_tokens as i64,
+        );
+        span.record(
+            "gen_ai.usage.cache_creation.input_tokens",
+            usage.cache_creation_input_tokens as i64,
+        );
+    }
+}
+
+fn finish_reasons<T>(response: &CompletionResponse<T>) -> &'static str {
+    let mut had_tool_call = false;
+    let mut had_text = false;
+    for item in response.choice.iter() {
+        match item {
+            AssistantContent::ToolCall(_) => had_tool_call = true,
+            AssistantContent::Text(_) => had_text = true,
+            _ => {}
+        }
+    }
+    if had_tool_call {
+        "tool_calls"
+    } else if had_text {
+        "stop"
+    } else {
+        "unknown"
     }
 }
 

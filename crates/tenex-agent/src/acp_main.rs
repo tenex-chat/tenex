@@ -49,19 +49,24 @@ use tenex_protocol::{
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let telemetry = tenex_telemetry::init("tenex-agent-acp");
-    let result = run().await;
-    telemetry.shutdown();
-    result
-}
-
-async fn run() -> Result<()> {
+    // The `--mcp` mode is a self-contained stdio server that doesn't need
+    // identity-aware Resource attributes, so initialise telemetry minimally
+    // and short-circuit. The non-MCP path threads identity through into init.
     let args: Vec<String> = std::env::args().collect();
     if args.get(1).map(String::as_str) == Some("--mcp") {
+        let telemetry = tenex_telemetry::init(tenex_telemetry::TelemetryInit {
+            service_name: "tenex-agent-acp".to_string(),
+            base_dir: None,
+            kind: tenex_telemetry::TelemetryKind::Subprocess,
+            extra_resource: vec![],
+        });
         let context_path = args
             .get(2)
-            .context("Usage: tenex-agent-acp --mcp <context.json>")?;
-        return acp_mcp::run_stdio_server(context_path).await;
+            .context("Usage: tenex-agent-acp --mcp <context.json>")?
+            .clone();
+        let result = acp_mcp::run_stdio_server(&context_path).await;
+        bounded_shutdown(telemetry).await;
+        return result;
     }
     if args.len() < 2 {
         anyhow::bail!("Usage: tenex-agent-acp <agent.json>");
@@ -70,6 +75,70 @@ async fn run() -> Result<()> {
     let project_id = std::env::var("TENEX_PROJECT_ID")
         .context("TENEX_PROJECT_ID environment variable is required")?;
     let agent_config = AcpAgentConfig::load(&args[1])?;
+    let agent_keys =
+        nostr::Keys::parse(&agent_config.nsec).context("Failed to parse agent nsec")?;
+    let pubkey_hex = agent_keys.public_key().to_hex();
+    let agent_slug = agent_config.identity_name().to_string();
+
+    let extra_resource = vec![
+        opentelemetry::KeyValue::new("service.instance.id", std::process::id().to_string()),
+        opentelemetry::KeyValue::new("tenex.agent.pubkey", pubkey_hex.clone()),
+        opentelemetry::KeyValue::new("tenex.agent.slug", agent_slug.clone()),
+        opentelemetry::KeyValue::new("project.id", project_id.clone()),
+    ];
+    let telemetry = tenex_telemetry::init(tenex_telemetry::TelemetryInit {
+        service_name: "tenex-agent-acp".to_string(),
+        base_dir: None,
+        kind: tenex_telemetry::TelemetryKind::Subprocess,
+        extra_resource,
+    });
+
+    let shutdown_signal = async {
+        use tokio::signal::unix::{signal, SignalKind};
+        let mut sigterm =
+            signal(SignalKind::terminate()).expect("install SIGTERM handler");
+        let mut sigint =
+            signal(SignalKind::interrupt()).expect("install SIGINT handler");
+        tokio::select! {
+            _ = sigterm.recv() => (),
+            _ = sigint.recv() => (),
+        }
+    };
+
+    let result = tokio::select! {
+        res = run(args, project_id, agent_config, pubkey_hex) => res,
+        () = shutdown_signal => {
+            eprintln!("[tenex-agent-acp] received shutdown signal");
+            Ok(())
+        }
+    };
+
+    bounded_shutdown(telemetry).await;
+    result
+}
+
+async fn bounded_shutdown(telemetry: tenex_telemetry::TelemetryGuard) {
+    // Mirrors the daemon-subprocess shutdown sequence in `tenex-agent`'s
+    // main: flush off the tokio runtime so a wedged exporter cannot block,
+    // bounded at 10s overall.
+    let _ = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        tokio::task::spawn_blocking(|| {
+            if let Err(err) = tenex_telemetry::force_flush(std::time::Duration::from_secs(5)) {
+                eprintln!("[tenex-agent-acp] telemetry flush: {err}");
+            }
+        }),
+    )
+    .await;
+    telemetry.shutdown();
+}
+
+async fn run(
+    args: Vec<String>,
+    project_id: String,
+    agent_config: AcpAgentConfig,
+    pubkey_hex: String,
+) -> Result<()> {
     let default_model = agent_config
         .default_model()
         .ok_or_else(|| anyhow::anyhow!(
@@ -92,9 +161,12 @@ async fn run() -> Result<()> {
         NostrChannel::from_nsec(&agent_config.nsec, stdout_sink.clone())
             .context("Failed to initialize Nostr channel")?,
     );
-    let pubkey_hex = match channel.identity() {
-        PrincipalRef::Nostr { pubkey, .. } => pubkey.to_hex(),
-    };
+    debug_assert_eq!(
+        match channel.identity() {
+            PrincipalRef::Nostr { pubkey, .. } => pubkey.to_hex(),
+        },
+        pubkey_hex
+    );
 
     let project_root = agent_config
         .working_directory

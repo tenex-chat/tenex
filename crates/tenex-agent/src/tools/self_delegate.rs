@@ -58,6 +58,7 @@ impl Tool for SelfDelegateTool {
 
     async fn call(&self, args: SelfDelegateArgs) -> Result<String, SelfDelegateError> {
         let PrincipalRef::Nostr { pubkey, .. } = self.state.channel.identity().clone();
+        let pubkey_hex = pubkey.to_hex();
 
         let ral = self.state.meta.lock().unwrap().ral;
         let ctx = self.state.build_ctx(ral);
@@ -93,6 +94,11 @@ impl Tool for SelfDelegateTool {
         let delegation_event_id = match &delegation_ref {
             MessageRef::Nostr { event_id } => event_id.to_hex(),
         };
+
+        let span = tracing::Span::current();
+        span.record("delegated.conversation.id", delegation_event_id.as_str());
+        span.record("delegated.agent.pubkey", pubkey_hex.as_str());
+        span.record("delegated.event.id", delegation_event_id.as_str());
 
         let args_json = serde_json::to_string(&args).unwrap_or_default();
         let tool_use_intent = ToolUseIntent {

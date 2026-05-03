@@ -1,3 +1,4 @@
+mod agent_config_publish;
 mod agent_config_update;
 mod control;
 mod control_process;
@@ -23,10 +24,13 @@ use nostr_sdk::prelude::*;
 use notify::{
     Config as NotifyConfig, Event as NotifyEvent, RecommendedWatcher, RecursiveMode, Watcher,
 };
+use opentelemetry::baggage::BaggageExt;
+use opentelemetry::{Context as OtelContext, KeyValue};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter};
 use tracing::{info, info_span, warn, Instrument};
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 use control::{serve_control_socket, RuntimeControlState};
 use tenex_conversations::{
@@ -167,6 +171,14 @@ struct DispatchJob {
     /// (`tenex-telegram` etc). Each event the agent emits is also forwarded
     /// to the bridge so it can render the reply on the originating channel.
     response_tee: Option<transport::TransportTee>,
+    /// W3C trace context captured at the moment this job was constructed,
+    /// while still inside the `tenex.daemon.event_received` span scope.
+    /// Used by `spawn_dispatch_job` to parent the `tenex.runtime.dispatch`
+    /// span deterministically and by `run_agent` to populate the
+    /// child agent's `TRACEPARENT` / `TRACESTATE` / `BAGGAGE` env vars.
+    /// Bypassing ambient capture (`Span::current()` at spawn time) is
+    /// what fixes the cross-turn parent-context bug.
+    trace_carrier: Option<tenex_telemetry::TraceCarrier>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -312,10 +324,13 @@ impl DispatchCoordinator {
         next
     }
 
-    fn active_agent_pubkeys(&self) -> Vec<String> {
+    fn active_agent_pubkeys_for_conversation(&self, conv_id: &str) -> Vec<String> {
         let mut out = Vec::new();
         for (key, entry) in &self.entries {
-            if entry.active_runs > 0 && !out.contains(&key.agent_pubkey) {
+            if entry.active_runs > 0
+                && key.conversation_id == conv_id
+                && !out.contains(&key.agent_pubkey)
+            {
                 out.push(key.agent_pubkey.clone());
             }
         }
@@ -424,26 +439,17 @@ pub async fn run(args: RuntimeArgs) -> Result<()> {
     let keys_status = backend_keys.clone();
     let meta_status = meta.clone();
     let agent_snapshot_status = agent_snapshot_state.clone();
-    let base_dir_status = base_dir.clone();
     let whitelist_status = cfg.whitelisted_pubkeys.clone();
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(30));
         loop {
             interval.tick().await;
             let snapshot = agent_snapshot_status.read().unwrap().clone();
-            let models_status = match crate::store::llms::LlmsDoc::load(&base_dir_status) {
-                Ok(llms) => project_status::collect_model_access(&llms, &snapshot.agents),
-                Err(e) => {
-                    warn!(error = %e, "24010 model tag collection failed");
-                    Vec::new()
-                }
-            };
             match project_status::build_project_status_event(
                 &keys_status,
                 &meta_status,
                 &snapshot.agents,
                 &snapshot.project_agents,
-                &models_status,
                 &whitelist_status,
             ) {
                 Ok(event) => {
@@ -558,10 +564,53 @@ pub async fn run(args: RuntimeArgs) -> Result<()> {
             result = notifications.recv() => {
                 match result {
                     Ok(RelayPoolNotification::Event { event, .. }) => {
+                        // For conversation-bearing events, parent the
+                        // ingress span under this conversation's
+                        // persistent root (set on the first turn,
+                        // frozen thereafter). Admin events
+                        // (project / stop / agent-config) get fresh
+                        // roots — they're not part of any conversation.
+                        let is_admin_event = event.kind == Kind::Custom(PROJECT_KIND)
+                            || event.kind
+                                == Kind::Custom(tenex_protocol::nostr::kinds::STOP_COMMAND)
+                            || event.kind
+                                == Kind::Custom(
+                                    tenex_protocol::nostr::kinds::AGENT_CONFIG_UPDATE,
+                                );
+                        let conversation_root_carrier = if is_admin_event {
+                            None
+                        } else {
+                            let conv_id = conversation_id_from_event(&event);
+                            conversation_trace_root(&shared.store, &conv_id)
+                        };
+
+                        let event_received_span = info_span!(
+                            "tenex.daemon.event_received",
+                            event.id = %event.id.to_hex(),
+                            event.kind = event.kind.as_u16(),
+                            event.pubkey = %event.pubkey.to_hex(),
+                            is_external = tracing::field::Empty,
+                            outcome = tracing::field::Empty,
+                        );
+                        if let Some(parent_ctx) = conversation_root_carrier
+                            .as_ref()
+                            .and_then(tenex_telemetry::extract)
+                        {
+                            if let Err(err) = event_received_span.set_parent(parent_ctx) {
+                                warn!(
+                                    error = %err,
+                                    "failed to parent event_received under conversation root",
+                                );
+                            }
+                        }
+                        let _event_received_enter = event_received_span.enter();
+
                         if !mark_seen(&shared.seen, event.id) {
+                            event_received_span.record("outcome", "dropped_scope");
                             continue;
                         }
                         if event.kind == Kind::Custom(PROJECT_KIND) {
+                            event_received_span.record("outcome", "project_definition_update");
                             if let Err(e) = handle_project_definition_update(
                                 &shared,
                                 &reload_context,
@@ -569,17 +618,21 @@ pub async fn run(args: RuntimeArgs) -> Result<()> {
                             )
                             .await
                             {
+                                tenex_telemetry::record_current_error(&e);
                                 warn!(event_id = %event.id.to_hex()[..8], error = %e, "project definition update failed");
                             }
                             continue;
                         }
                         if event.kind == Kind::Custom(tenex_protocol::nostr::kinds::STOP_COMMAND) {
+                            event_received_span.record("outcome", "stop_command");
                             if let Err(e) = handle_stop_command(shared.clone(), &event).await {
+                                tenex_telemetry::record_current_error(&e);
                                 warn!(event_id = %event.id.to_hex()[..8], error = %e, "stop command failed");
                             }
                             continue;
                         }
                         if event.kind == Kind::Custom(tenex_protocol::nostr::kinds::AGENT_CONFIG_UPDATE) {
+                            event_received_span.record("outcome", "agent_config_update");
                             if let Err(e) = handle_agent_config_update(
                                 &shared,
                                 &reload_context,
@@ -587,21 +640,29 @@ pub async fn run(args: RuntimeArgs) -> Result<()> {
                             )
                             .await
                             {
+                                tenex_telemetry::record_current_error(&e);
                                 warn!(event_id = %event.id.to_hex()[..8], error = %e, "agent config update failed");
                             }
                             continue;
                         }
                         if !event_matches_project_scope(&event, &shared.project_addr) {
+                            event_received_span.record("outcome", "dropped_scope");
                             continue;
                         }
                         let agent_pubkeys = shared.agent_pubkeys();
                         if agent_pubkeys.contains(&event.pubkey.to_hex())
                             && !targets_project_agent(&event, &agent_pubkeys)
                         {
+                            event_received_span.record("outcome", "dropped_scope");
                             continue;
                         }
                         let short = &event.id.to_hex()[..8];
-                        info!(event_id = short, "received event");
+                        tracing::event!(
+                            parent: &event_received_span,
+                            tracing::Level::INFO,
+                            event_id = short,
+                            "received event",
+                        );
 
                         // Author classification. Trusted system authors and
                         // project agents take the existing dispatch path.
@@ -616,6 +677,7 @@ pub async fn run(args: RuntimeArgs) -> Result<()> {
                             shared.trusted_author_pubkeys.contains(&author_hex);
                         let author_is_agent = agent_pubkeys.contains(&author_hex);
                         let is_external = !author_trusted && !author_is_agent;
+                        event_received_span.record("is_external", is_external);
 
                         if is_external {
                             if !tenex_protocol::event_filter::is_conversation_event(&event) {
@@ -623,12 +685,16 @@ pub async fn run(args: RuntimeArgs) -> Result<()> {
                                 // events from external authors entirely. We
                                 // don't trust unauthorized parties to forge
                                 // structured runtime signals.
+                                event_received_span
+                                    .record("outcome", "dropped_external_non_conversation");
                                 continue;
                             }
                             let conv_id = conversation_id_from_event(&event);
                             if let Err(e) =
                                 persist_user_message(&shared.store, &event, &conv_id)
                             {
+                                tenex_telemetry::record_current_error(&e);
+                                event_received_span.record("outcome", "dropped_scope");
                                 warn!(
                                     event_id = short,
                                     error = %e,
@@ -637,16 +703,21 @@ pub async fn run(args: RuntimeArgs) -> Result<()> {
                                 continue;
                             }
                             if !shared.route_unauthorized_authors {
-                                info!(
+                                event_received_span
+                                    .record("outcome", "dropped_external_disabled");
+                                tracing::event!(
+                                    parent: &event_received_span,
+                                    tracing::Level::INFO,
                                     event_id = short,
                                     author = %&author_hex[..8],
-                                    "external author persisted; routeUnauthorizedAuthors=false"
+                                    "external author persisted; routeUnauthorizedAuthors=false",
                                 );
                                 continue;
                             }
                             // The firewall LLM call can take up to 15s. Run
                             // the firewall + dispatch flow in a spawned task
                             // so the relay event loop keeps draining.
+                            event_received_span.record("outcome", "external_dispatched");
                             tokio::spawn(run_external_dispatch(
                                 shared.clone(),
                                 event,
@@ -665,35 +736,82 @@ pub async fn run(args: RuntimeArgs) -> Result<()> {
                         }
                         match select_dispatch_target(&shared, &event) {
                             Ok((agent, conv_id, completion_recipient_pubkey)) => {
-                                info!(event_id = short, agent = %agent.slug, conversation_id = %conv_id, is_external, "dispatching");
-                                if is_agent_blocked(&shared.store, &conv_id, &agent.pubkey) {
-                                    warn!(
+                                // Baggage scope is the synchronous block that
+                                // builds the `DispatchJob`. The carrier
+                                // captures the trace context here; baggage is
+                                // re-attached on the dispatch span's parent
+                                // context inside `spawn_dispatch_job`, which
+                                // is what survives the `tokio::spawn` boundary
+                                // and propagates to the spawned child agent.
+                                // The `ContextGuard` is `!Send`, so it must
+                                // be dropped before the `.await` on
+                                // `accept_dispatch`.
+                                let job = {
+                                    let _baggage_guard = OtelContext::current()
+                                        .with_baggage([
+                                            KeyValue::new(
+                                                "conversation.id",
+                                                conv_id.clone(),
+                                            ),
+                                            KeyValue::new(
+                                                "project.id",
+                                                shared.project_id.clone(),
+                                            ),
+                                        ])
+                                        .attach();
+                                    tracing::event!(
+                                        parent: &event_received_span,
+                                        tracing::Level::INFO,
                                         event_id = short,
                                         agent = %agent.slug,
                                         conversation_id = %conv_id,
-                                        "agent is blocked in conversation"
+                                        is_external,
+                                        "dispatching",
                                     );
-                                    continue;
-                                }
-                                let agent_json = base_dir
-                                    .join("agents")
-                                    .join(format!("{}.json", agent.pubkey));
-                                let job = DispatchJob {
-                                    event: *event,
-                                    agent: agent.clone(),
-                                    conv_id,
-                                    agent_json,
-                                    allow_driver_preempt: false,
-                                    completion_recipient_pubkey,
-                                    is_external,
-                                    response_tee: None,
+                                    if is_agent_blocked(&shared.store, &conv_id, &agent.pubkey) {
+                                        event_received_span.record("outcome", "dropped_blocked");
+                                        tracing::event!(
+                                            parent: &event_received_span,
+                                            tracing::Level::WARN,
+                                            event_id = short,
+                                            agent = %agent.slug,
+                                            conversation_id = %conv_id,
+                                            "agent is blocked in conversation",
+                                        );
+                                        continue;
+                                    }
+                                    let agent_json = base_dir
+                                        .join("agents")
+                                        .join(format!("{}.json", agent.pubkey));
+                                    let trace_carrier = tenex_telemetry::inject_current();
+                                    DispatchJob {
+                                        event: *event,
+                                        agent: agent.clone(),
+                                        conv_id,
+                                        agent_json,
+                                        allow_driver_preempt: false,
+                                        completion_recipient_pubkey,
+                                        is_external,
+                                        response_tee: None,
+                                        trace_carrier,
+                                    }
                                 };
+                                event_received_span.record("outcome", "dispatched");
                                 if let Err(e) = accept_dispatch(shared.clone(), job).await {
+                                    tenex_telemetry::record_current_error(&e);
                                     warn!(event_id = short, agent = %agent.slug, error = %e, "dispatch failed");
                                 }
                             }
                             Err(e) => {
-                                warn!(event_id = short, error = %e, "no dispatch target");
+                                event_received_span.record("outcome", "dropped_no_target");
+                                tenex_telemetry::record_current_error(&e);
+                                tracing::event!(
+                                    parent: &event_received_span,
+                                    tracing::Level::WARN,
+                                    event_id = short,
+                                    error = %e,
+                                    "no dispatch target",
+                                );
                             }
                         }
                     }
@@ -1085,21 +1203,115 @@ async fn load_agent_snapshot_after_change(
     )
 }
 
-async fn publish_project_status_now(shared: &RuntimeShared, meta: &ProjectMetadata) {
+/// Build + send a 34011 for a single agent (looked up in the current
+/// snapshot). Bound to `RuntimeShared` so call sites stay one-liners; all
+/// failure modes are logged inside `agent_config_publish::publish_one`.
+async fn republish_agent_config(shared: &RuntimeShared, agent_pubkey: &str) {
     let snapshot = shared.agent_snapshot();
-    let models_status = match crate::store::llms::LlmsDoc::load(&shared.base_dir) {
-        Ok(llms) => project_status::collect_model_access(&llms, &snapshot.agents),
-        Err(error) => {
-            warn!(error = %error, "24010 model tag collection failed");
-            Vec::new()
+    agent_config_publish::publish_one(
+        agent_pubkey,
+        &snapshot.agents,
+        &shared.backend_keys.public_key(),
+        &shared.base_dir,
+        &shared.project_dir,
+        &shared.client,
+    )
+    .await;
+}
+
+/// Republish 34011 for **every** agent in the current snapshot. Used after
+/// a bulk reload (`reload_agent_snapshot`) where individual change
+/// attribution is unavailable — keeps the relay-side view consistent with
+/// the post-reload truth.
+async fn republish_all_agent_configs(shared: &RuntimeShared) {
+    let snapshot = shared.agent_snapshot();
+    for agent in &snapshot.agents {
+        agent_config_publish::publish_one(
+            &agent.pubkey,
+            &snapshot.agents,
+            &shared.backend_keys.public_key(),
+            &shared.base_dir,
+            &shared.project_dir,
+            &shared.client,
+        )
+        .await;
+    }
+}
+
+/// Startup-only: REQ kind:34011 for every managed agent's pubkey, wait up
+/// to 5s for EOSE (or just take whatever is buffered if the relay times
+/// out), then publish a fresh 34011 for any agent that's missing or whose
+/// remote `created_at` is older than the local config-file mtime.
+///
+/// Failures during the REQ are logged and treated as "relay silent" —
+/// every agent then gets a publish, which is the safe direction.
+async fn startup_publish_missing_agent_configs(shared: &RuntimeShared) {
+    let snapshot = shared.agent_snapshot();
+    if snapshot.agents.is_empty() {
+        return;
+    }
+
+    let authors: Vec<PublicKey> = snapshot
+        .agents
+        .iter()
+        .filter_map(|a| PublicKey::from_hex(&a.pubkey).ok())
+        .collect();
+
+    let existing = if authors.is_empty() {
+        // Couldn't parse any agent pubkey — skip the REQ and publish all.
+        std::collections::HashMap::new()
+    } else {
+        let filter = agent_config_publish::startup_filter(&authors);
+        match shared
+            .client
+            .fetch_events(filter, agent_config_publish::STARTUP_FETCH_TIMEOUT)
+            .await
+        {
+            Ok(events) => {
+                let collected: Vec<_> = events.into_iter().collect();
+                info!(
+                    count = collected.len(),
+                    "startup: fetched existing 34011 events"
+                );
+                agent_config_publish::fold_existing_agent_configs(&collected)
+            }
+            Err(error) => {
+                warn!(error = %error, "startup: 34011 fetch failed; treating all agents as missing");
+                std::collections::HashMap::new()
+            }
         }
     };
+
+    let needing = agent_config_publish::agents_needing_publish(
+        &snapshot.agents,
+        &shared.base_dir,
+        &existing,
+    );
+    if needing.is_empty() {
+        info!("startup: every agent already has a fresh 34011 on relays");
+        return;
+    }
+    info!(count = needing.len(), "startup: publishing missing/stale 34011 events");
+    for pubkey in needing {
+        agent_config_publish::publish_one(
+            &pubkey,
+            &snapshot.agents,
+            &shared.backend_keys.public_key(),
+            &shared.base_dir,
+            &shared.project_dir,
+            &shared.client,
+        )
+        .await;
+    }
+}
+
+async fn publish_project_status_now(shared: &RuntimeShared, meta: &ProjectMetadata) {
+    let snapshot = shared.agent_snapshot();
     match project_status::build_project_status_event(
         &shared.backend_keys,
         meta,
         &snapshot.agents,
         &snapshot.project_agents,
-        &models_status,
         &shared.whitelisted_pubkeys,
     ) {
         Ok(event) => {
@@ -1166,17 +1378,32 @@ async fn handle_transport_dispatch(
         .base_dir
         .join("agents")
         .join(format!("{}.json", agent.pubkey));
-    let job = DispatchJob {
-        event,
-        agent,
-        conv_id,
-        agent_json,
-        allow_driver_preempt: false,
-        completion_recipient_pubkey,
-        // Transport-bridged events (telegram, etc.) come through
-        // already-authenticated paths — never marked external.
-        is_external: false,
-        response_tee: Some(tee.clone()),
+    // Baggage scope is the synchronous block that builds the `DispatchJob`.
+    // The `ContextGuard` is `!Send`, so it must be dropped before the
+    // `.await` on `accept_dispatch`. `spawn_dispatch_job` re-attaches the
+    // baggage on the dispatch span's parent context for cross-spawn
+    // propagation.
+    let job = {
+        let _baggage_guard = OtelContext::current()
+            .with_baggage([
+                KeyValue::new("conversation.id", conv_id.clone()),
+                KeyValue::new("project.id", shared.project_id.clone()),
+            ])
+            .attach();
+        let trace_carrier = tenex_telemetry::inject_current();
+        DispatchJob {
+            event,
+            agent,
+            conv_id,
+            agent_json,
+            allow_driver_preempt: false,
+            completion_recipient_pubkey,
+            // Transport-bridged events (telegram, etc.) come through
+            // already-authenticated paths — never marked external.
+            is_external: false,
+            response_tee: Some(tee.clone()),
+            trace_carrier,
+        }
     };
     if let Err(e) = accept_dispatch(shared, job).await {
         // Job is dropped here without ever reaching `run_agent`. Mark the
@@ -1245,15 +1472,28 @@ async fn run_external_dispatch(
                 .base_dir
                 .join("agents")
                 .join(format!("{}.json", agent.pubkey));
-            let job = DispatchJob {
-                event: *event,
-                agent: agent.clone(),
-                conv_id,
-                agent_json,
-                allow_driver_preempt: false,
-                completion_recipient_pubkey,
-                is_external: true,
-                response_tee: None,
+            // Baggage scope is the synchronous block that builds the
+            // `DispatchJob`. `ContextGuard` is `!Send` and so must be
+            // dropped before the `.await` on `accept_dispatch`.
+            let job = {
+                let _baggage_guard = OtelContext::current()
+                    .with_baggage([
+                        KeyValue::new("conversation.id", conv_id.clone()),
+                        KeyValue::new("project.id", shared.project_id.clone()),
+                    ])
+                    .attach();
+                let trace_carrier = tenex_telemetry::inject_current();
+                DispatchJob {
+                    event: *event,
+                    agent: agent.clone(),
+                    conv_id,
+                    agent_json,
+                    allow_driver_preempt: false,
+                    completion_recipient_pubkey,
+                    is_external: true,
+                    response_tee: None,
+                    trace_carrier,
+                }
             };
             if let Err(e) = accept_dispatch(shared, job).await {
                 warn!(event_id = short, agent = %agent.slug, error = %e, "dispatch failed");
@@ -1267,6 +1507,15 @@ async fn run_external_dispatch(
 
 async fn accept_dispatch(shared: Arc<RuntimeShared>, mut job: DispatchJob) -> Result<()> {
     persist_user_message(&shared.store, &job.event, &job.conv_id)?;
+    if let Some(carrier) = job.trace_carrier.as_ref() {
+        if let Err(err) = remember_conversation_trace_root(&shared.store, &job.conv_id, carrier) {
+            warn!(
+                error = %err,
+                conversation_id = %job.conv_id,
+                "failed to persist conversation trace root",
+            );
+        }
+    }
     if is_agent_blocked(&shared.store, &job.conv_id, &job.agent.pubkey) {
         warn!(
             conversation_id = %job.conv_id,
@@ -1300,51 +1549,51 @@ async fn accept_dispatch(shared: Arc<RuntimeShared>, mut job: DispatchJob) -> Re
 fn spawn_dispatch_job(shared: Arc<RuntimeShared>, job: DispatchJob) {
     let key = DispatchKey::new(job.agent.pubkey.clone(), job.conv_id.clone());
     tokio::spawn(async move {
-        let previous_trace = conversation_trace_carrier(&shared.store, &job.conv_id);
         let dispatch_span = info_span!(
             "tenex.runtime.dispatch",
             event.id = %job.event.id.to_hex(),
             event.pubkey = %job.event.pubkey.to_hex(),
-            conversation.id = %job.conv_id,
-            project.id = %shared.project_id,
             agent.slug = %job.agent.slug,
             agent.pubkey = %job.agent.pubkey,
         );
-        if let Some(carrier) = previous_trace.as_ref() {
-            tenex_telemetry::add_link_to_span(
-                &dispatch_span,
-                carrier,
-                vec![
-                    (
-                        "tenex.link.kind",
-                        "conversation.previous_dispatch".to_string(),
-                    ),
-                    ("conversation.id", job.conv_id.clone()),
-                    ("agent.pubkey", job.agent.pubkey.clone()),
-                ],
-            );
+
+        // Parent the dispatch span deterministically from the carrier
+        // captured inside `tenex.daemon.event_received`. Layer baggage
+        // back on so descendant spans (`tenex.agent.turn` and below)
+        // pick up `conversation.id` / `project.id` via the
+        // `BaggageSpanProcessor`, since `tokio::spawn` does not carry
+        // the daemon-side context guard across the spawn boundary.
+        let parent_ctx = job
+            .trace_carrier
+            .as_ref()
+            .and_then(tenex_telemetry::extract)
+            .unwrap_or_else(OtelContext::current)
+            .with_baggage([
+                KeyValue::new("conversation.id", job.conv_id.clone()),
+                KeyValue::new("project.id", shared.project_id.clone()),
+            ]);
+        if let Err(err) = dispatch_span.set_parent(parent_ctx) {
+            warn!(error = %err, "failed to set dispatch span parent");
         }
 
         let run_result = async {
-            if let Err(e) = remember_current_conversation_trace(&shared.store, &job) {
-                warn!(
-                    conversation_id = %job.conv_id,
-                    error = %e,
-                    "failed to persist conversation trace context"
-                );
+            match run_agent(shared.clone(), job.clone(), key.clone()).await {
+                Ok(()) => Ok(()),
+                Err(e) => {
+                    tenex_telemetry::record_current_error(&e);
+                    warn!(
+                        event_id = %job.event.id.to_hex()[..8],
+                        agent = %job.agent.slug,
+                        error = %e,
+                        "agent run failed"
+                    );
+                    Err(e)
+                }
             }
-            run_agent(shared.clone(), job.clone(), key.clone()).await
         }
         .instrument(dispatch_span)
         .await;
-        if let Err(e) = run_result {
-            warn!(
-                event_id = %job.event.id.to_hex()[..8],
-                agent = %job.agent.slug,
-                error = %e,
-                "agent run failed"
-            );
-        }
+        let _ = run_result;
 
         let consumed = consumed_message_event_ids(&shared.store, &job.conv_id, &job.agent.pubkey);
         let maybe_next = {
@@ -1420,8 +1669,17 @@ async fn dispatch_project_agent_target(
         .base_dir
         .join("agents")
         .join(format!("{}.json", agent.pubkey));
-    accept_dispatch(
-        shared,
+    // Baggage scope is the synchronous block that builds the `DispatchJob`.
+    // `ContextGuard` is `!Send` and so must be dropped before the `.await`
+    // on `accept_dispatch`.
+    let job = {
+        let _baggage_guard = OtelContext::current()
+            .with_baggage([
+                KeyValue::new("conversation.id", conv_id.clone()),
+                KeyValue::new("project.id", shared.project_id.clone()),
+            ])
+            .attach();
+        let trace_carrier = tenex_telemetry::inject_current();
         DispatchJob {
             event: event.clone(),
             agent,
@@ -1434,9 +1692,10 @@ async fn dispatch_project_agent_target(
             // external authors are caught earlier in the relay loop.
             is_external: false,
             response_tee: None,
-        },
-    )
-    .await
+            trace_carrier,
+        }
+    };
+    accept_dispatch(shared, job).await
 }
 
 async fn handle_stop_command(shared: Arc<RuntimeShared>, event: &Event) -> Result<()> {
@@ -1478,78 +1737,6 @@ fn mark_seen(seen: &Arc<Mutex<HashSet<EventId>>>, event_id: EventId) -> bool {
     seen.insert(event_id)
 }
 
-fn conversation_trace_carrier(
-    store: &Arc<Mutex<ConversationStore>>,
-    conv_id: &str,
-) -> Option<tenex_telemetry::TraceCarrier> {
-    let Ok(conversation) = store.lock().unwrap().get_conversation(conv_id) else {
-        return None;
-    };
-    trace_carrier_from_runtime_state(&conversation?.runtime_state)
-}
-
-fn remember_current_conversation_trace(
-    store: &Arc<Mutex<ConversationStore>>,
-    job: &DispatchJob,
-) -> Result<()> {
-    let Some(carrier) = tenex_telemetry::current_trace_context() else {
-        return Ok(());
-    };
-    let event_id = job.event.id.to_hex();
-    let mut store = store.lock().unwrap();
-    store.update_runtime_state(&job.conv_id, |state| {
-        write_trace_carrier_to_runtime_state(state, &carrier, &event_id, &job.agent.pubkey);
-    })?;
-    Ok(())
-}
-
-fn trace_carrier_from_runtime_state(state: &Value) -> Option<tenex_telemetry::TraceCarrier> {
-    let trace = state
-        .get("rustRuntime")?
-        .get("telemetry")?
-        .get("lastTrace")?;
-    let traceparent = trace.get("traceparent")?.as_str()?.to_string();
-    let tracestate = trace
-        .get("tracestate")
-        .and_then(Value::as_str)
-        .map(str::to_string);
-    Some(tenex_telemetry::TraceCarrier {
-        traceparent,
-        tracestate,
-    })
-}
-
-fn write_trace_carrier_to_runtime_state(
-    state: &mut Value,
-    carrier: &tenex_telemetry::TraceCarrier,
-    trigger_event_id: &str,
-    agent_pubkey: &str,
-) {
-    let state = ensure_json_object(state);
-    let rust_runtime = ensure_child_object(state, "rustRuntime");
-    let telemetry = ensure_child_object(rust_runtime, "telemetry");
-
-    let mut trace = Map::new();
-    trace.insert(
-        "traceparent".to_string(),
-        Value::String(carrier.traceparent.clone()),
-    );
-    if let Some(tracestate) = carrier.tracestate.clone() {
-        trace.insert("tracestate".to_string(), Value::String(tracestate));
-    }
-    trace.insert(
-        "triggerEventId".to_string(),
-        Value::String(trigger_event_id.to_string()),
-    );
-    trace.insert(
-        "agentPubkey".to_string(),
-        Value::String(agent_pubkey.to_string()),
-    );
-    trace.insert("updatedAt".to_string(), Value::Number(now_ms().into()));
-
-    telemetry.insert("lastTrace".to_string(), Value::Object(trace));
-}
-
 fn ensure_json_object(value: &mut Value) -> &mut Map<String, Value> {
     if !value.is_object() {
         *value = Value::Object(Map::new());
@@ -1570,9 +1757,14 @@ fn ensure_child_object<'a>(
 async fn publish_active_status(shared: &RuntimeShared, conv_id: &str) {
     let active = {
         let coordinator = shared.coordinator.lock().unwrap();
-        coordinator.active_agent_pubkeys()
+        coordinator.active_agent_pubkeys_for_conversation(conv_id)
     };
     let refs: Vec<&str> = active.iter().map(String::as_str).collect();
+    info!(
+        conversation_id = conv_id,
+        active_agents = ?refs,
+        "publishing 24133 operations status"
+    );
     send_operations_status(
         &shared.client,
         &shared.backend_keys,
@@ -1779,6 +1971,75 @@ fn write_delegation_route(state: &mut Value, route: &DelegationRoute) {
         "delegation".to_string(),
         serde_json::to_value(route).unwrap_or_else(|_| Value::Object(Map::new())),
     );
+}
+
+/// Read the persisted root trace carrier for a conversation. Set once on the
+/// first turn that reaches `accept_dispatch`; every subsequent turn parents
+/// its `tenex.daemon.event_received` span under this carrier so all turns of
+/// one conversation share a `trace_id` and render as one Jaeger trace.
+fn conversation_trace_root(
+    store: &Arc<Mutex<ConversationStore>>,
+    conv_id: &str,
+) -> Option<tenex_telemetry::TraceCarrier> {
+    let store = store.lock().unwrap();
+    let conversation = store.get_conversation(conv_id).ok().flatten()?;
+    trace_root_from_runtime_state(&conversation.runtime_state)
+}
+
+fn trace_root_from_runtime_state(state: &Value) -> Option<tenex_telemetry::TraceCarrier> {
+    let root = state.get("rustRuntime")?.get("telemetry")?.get("trace_root")?;
+    let traceparent = root.get("traceparent")?.as_str()?.to_string();
+    let tracestate = root
+        .get("tracestate")
+        .and_then(|v| v.as_str())
+        .map(String::from);
+    let baggage = root
+        .get("baggage")
+        .and_then(|v| v.as_str())
+        .map(String::from);
+    Some(tenex_telemetry::TraceCarrier {
+        traceparent,
+        tracestate,
+        baggage,
+    })
+}
+
+/// Persist the root trace carrier for this conversation if and only if no
+/// carrier has been written yet. Subsequent calls are no-ops, freezing the
+/// first turn's `tenex.daemon.event_received` as the conversation's trace
+/// anchor. The atomic absent-check + write happens under the conversation
+/// store's mutex inside `update_runtime_state`.
+fn remember_conversation_trace_root(
+    store: &Arc<Mutex<ConversationStore>>,
+    conv_id: &str,
+    carrier: &tenex_telemetry::TraceCarrier,
+) -> Result<()> {
+    let mut store = store.lock().unwrap();
+    store.update_runtime_state(conv_id, |state| {
+        write_trace_root_if_absent(state, carrier);
+    })?;
+    Ok(())
+}
+
+fn write_trace_root_if_absent(state: &mut Value, carrier: &tenex_telemetry::TraceCarrier) {
+    let state = ensure_json_object(state);
+    let rust_runtime = ensure_child_object(state, "rustRuntime");
+    let telemetry = ensure_child_object(rust_runtime, "telemetry");
+    if telemetry.contains_key("trace_root") {
+        return;
+    }
+    let mut entry = Map::new();
+    entry.insert(
+        "traceparent".to_string(),
+        Value::String(carrier.traceparent.clone()),
+    );
+    if let Some(tracestate) = carrier.tracestate.as_ref() {
+        entry.insert("tracestate".to_string(), Value::String(tracestate.clone()));
+    }
+    if let Some(baggage) = carrier.baggage.as_ref() {
+        entry.insert("baggage".to_string(), Value::String(baggage.clone()));
+    }
+    telemetry.insert("trace_root".to_string(), Value::Object(entry));
 }
 
 fn first_conversation_author(
@@ -2039,6 +2300,43 @@ fn select_agent<'a>(
     )
 }
 
+fn extract_agent_error_message(stderr_lines: &[String]) -> String {
+    // Prefer the last line that looks like an application-level error.
+    stderr_lines
+        .iter()
+        .rev()
+        .find(|l| l.starts_with("Error:") || l.starts_with("error:"))
+        .or_else(|| stderr_lines.iter().rev().find(|l| !l.trim().is_empty()))
+        .cloned()
+        .unwrap_or_else(|| "agent process exited with non-zero status".to_string())
+}
+
+async fn publish_agent_error(shared: &RuntimeShared, job: &DispatchJob, error_msg: &str) {
+    let content = format!("⚠️ {}: {error_msg}", job.agent.slug);
+    let triggering_id = job.event.id.to_hex();
+    let user_pubkey = job.event.pubkey.to_hex();
+    let tags: Vec<Tag> = [
+        ["e", triggering_id.as_str()],
+        ["p", user_pubkey.as_str()],
+        ["a", shared.project_addr.as_str()],
+    ]
+    .iter()
+    .filter_map(|parts| Tag::parse(*parts).ok())
+    .collect();
+
+    match EventBuilder::new(Kind::TextNote, content)
+        .tags(tags)
+        .sign_with_keys(&shared.backend_keys)
+    {
+        Ok(event) => {
+            if let Err(e) = shared.client.send_event(&event).await {
+                warn!(error = %e, "failed to publish agent error event");
+            }
+        }
+        Err(e) => warn!(error = %e, "failed to sign agent error event"),
+    }
+}
+
 async fn run_agent(shared: Arc<RuntimeShared>, job: DispatchJob, key: DispatchKey) -> Result<()> {
     let job = refresh_job_agent(&shared, job)?;
     if !job.agent_json.exists() {
@@ -2061,7 +2359,7 @@ async fn run_agent(shared: Arc<RuntimeShared>, job: DispatchJob, key: DispatchKe
         .current_dir(&shared.project_dir)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::inherit())
+        .stderr(Stdio::piped())
         .process_group(0)
         .kill_on_drop(false);
     command.env("TENEX_CONVERSATION_ID", &job.conv_id);
@@ -2074,10 +2372,13 @@ async fn run_agent(shared: Arc<RuntimeShared>, job: DispatchJob, key: DispatchKe
     if job.is_external {
         command.env("TENEX_TRIGGER_IS_EXTERNAL", "1");
     }
-    if let Some(carrier) = tenex_telemetry::current_trace_context() {
-        command.env("TRACEPARENT", carrier.traceparent);
-        if let Some(tracestate) = carrier.tracestate {
+    if let Some(carrier) = tenex_telemetry::inject_current() {
+        command.env("TRACEPARENT", &carrier.traceparent);
+        if let Some(tracestate) = carrier.tracestate.as_deref() {
             command.env("TRACESTATE", tracestate);
+        }
+        if let Some(baggage) = carrier.baggage.as_deref() {
+            command.env("BAGGAGE", baggage);
         }
     }
     let mcp_bridge = if runtime_kind == AgentRuntimeKind::Tenex {
@@ -2106,6 +2407,22 @@ async fn run_agent(shared: Arc<RuntimeShared>, job: DispatchJob, key: DispatchKe
             w.write_all(b"\n").await?;
             w.flush().await?;
         }
+
+        // Drain stderr in background, forwarding each line to our own stderr
+        // so nothing is lost on screen. Lines are also collected so we can
+        // surface them in the error event if the agent exits non-zero.
+        let stderr_collector = {
+            let stderr = child.stderr.take().context("child has no stderr")?;
+            tokio::spawn(async move {
+                let mut lines = BufReader::new(stderr).lines();
+                let mut collected: Vec<String> = Vec::new();
+                while let Ok(Some(line)) = lines.next_line().await {
+                    eprintln!("{line}");
+                    collected.push(line);
+                }
+                collected
+            })
+        };
 
         // Forward each signed event from the agent's stdout to the relay,
         // and persist it to the conversation store.
@@ -2172,8 +2489,11 @@ async fn run_agent(shared: Arc<RuntimeShared>, job: DispatchJob, key: DispatchKe
         }
 
         let status = child.wait().await?;
+        let stderr_lines = stderr_collector.await.unwrap_or_default();
         if !status.success() {
-            warn!(code = ?status.code(), "tenex-agent exited non-zero");
+            let error_msg = extract_agent_error_message(&stderr_lines);
+            warn!(code = ?status.code(), error = %error_msg, "tenex-agent exited non-zero");
+            publish_agent_error(&shared, &job, &error_msg).await;
         }
 
         Ok(())
@@ -2570,31 +2890,8 @@ mod tests {
             completion_recipient_pubkey: None,
             is_external: false,
             response_tee: None,
+            trace_carrier: None,
         }
-    }
-
-    #[test]
-    fn runtime_state_trace_carrier_round_trips_without_clobbering_existing_state() {
-        let carrier = tenex_telemetry::TraceCarrier {
-            traceparent: "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01".to_string(),
-            tracestate: Some("vendor=value".to_string()),
-        };
-        let mut state = serde_json::json!({
-            "rustRuntime": {
-                "consumedMessages": {
-                    "event1": {"agentPubkey": "agent1", "conversationId": "conv1"}
-                }
-            }
-        });
-
-        write_trace_carrier_to_runtime_state(&mut state, &carrier, "event2", "agent2");
-
-        assert_eq!(trace_carrier_from_runtime_state(&state), Some(carrier));
-        assert!(state
-            .get("rustRuntime")
-            .and_then(|v| v.get("consumedMessages"))
-            .and_then(|v| v.get("event1"))
-            .is_some());
     }
 
     #[test]
@@ -2719,6 +3016,41 @@ mod tests {
         });
 
         assert!(!runtime_state_driver_busy(&state, &key));
+    }
+
+    #[test]
+    fn trace_root_round_trips_and_is_write_once() {
+        let mut state = serde_json::json!({
+            "rustRuntime": { "driver": { "agentPubkey": "a" } }
+        });
+        let first = tenex_telemetry::TraceCarrier {
+            traceparent: "00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbb-01".to_string(),
+            tracestate: Some("vendor=one".to_string()),
+            baggage: Some("conversation.id=abc".to_string()),
+        };
+        let second = tenex_telemetry::TraceCarrier {
+            traceparent: "00-cccccccccccccccccccccccccccccccc-dddddddddddddddd-01".to_string(),
+            tracestate: None,
+            baggage: None,
+        };
+
+        write_trace_root_if_absent(&mut state, &first);
+        assert_eq!(trace_root_from_runtime_state(&state), Some(first.clone()));
+        // Pre-existing siblings preserved.
+        assert_eq!(
+            state["rustRuntime"]["driver"]["agentPubkey"],
+            serde_json::Value::String("a".to_string())
+        );
+
+        // Second write must be a no-op.
+        write_trace_root_if_absent(&mut state, &second);
+        assert_eq!(trace_root_from_runtime_state(&state), Some(first));
+    }
+
+    #[test]
+    fn trace_root_returns_none_when_absent() {
+        let state = serde_json::json!({ "rustRuntime": { "telemetry": {} } });
+        assert_eq!(trace_root_from_runtime_state(&state), None);
     }
 
     #[test]
@@ -2854,6 +3186,7 @@ mod tests {
             completion_recipient_pubkey: None,
             is_external: false,
             response_tee: None,
+            trace_carrier: None,
         };
         let delegation = signed_event_from(
             &parent_keys,

@@ -15,6 +15,7 @@
 //! Each helper is bounded to a single Nostr kind. Adding a new kind = new
 //! file, no shared abstractions.
 
+pub mod agent_config;
 pub mod backend_heartbeat;
 pub mod backend_signer;
 pub mod installed_agents;

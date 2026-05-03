@@ -1463,14 +1463,6 @@ async function runAgentConfigUpdateProbe(context: ScenarioContext): Promise<void
                     tag[0] === "model" &&
                     tag[1] === agentConfigUpdateModelName &&
                     tag.slice(2).includes("worker")
-            ) &&
-            agentConfigUpdateSkills.every((skill) =>
-                event.tags.some(
-                    (tag) =>
-                        tag[0] === "skill" &&
-                        tag[1] === skill &&
-                        tag.slice(2).includes("worker")
-                )
             ),
         timeoutMs,
         "24010 status after agent config update"

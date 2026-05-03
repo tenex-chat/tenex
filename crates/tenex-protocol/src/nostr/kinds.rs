@@ -39,6 +39,12 @@ pub const STREAM_TEXT_DELTA: u16 = 24135;
 /// kind:30023 — NIP-23 long-form article (replaceable).
 pub const LONG_FORM_ARTICLE: u16 = 30023;
 
+/// kind:34011 — TenexAgentConfig. Per-agent capability announcement
+/// (NIP-33 addressable, signed by the agent itself). Lists the models,
+/// skills, and MCP servers available to that agent, with `"active"`
+/// markers on the currently-selected ones.
+pub const AGENT_CONFIG: u16 = 34011;
+
 /// kind:31933 — NIP-33 project event.
 pub const PROJECT: u16 = 31933;
 

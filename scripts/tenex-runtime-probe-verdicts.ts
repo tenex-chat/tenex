@@ -11,7 +11,6 @@ import {
     acpDelegationMcpUserRequest,
     acpProbeModelName,
     agentConfigUpdateModelName,
-    agentConfigUpdateSkills,
     backendKind1RoutingCompletionText,
     backendKind1RoutingRequest,
     convReminderCompletionText,
@@ -649,12 +648,6 @@ function evaluateAgentConfigUpdate(events: Event[], context: EvaluateContext): V
                 tag.slice(2).includes("worker")
         )
     );
-    const missingSkill = agentConfigUpdateSkills.find(
-        (skill) =>
-            !updatedStatus?.tags.some(
-                (tag) => tag[0] === "skill" && tag[1] === skill && tag.slice(2).includes("worker")
-            )
-    );
 
     return [
         {
@@ -666,11 +659,6 @@ function evaluateAgentConfigUpdate(events: Event[], context: EvaluateContext): V
             name: "Project status reflected updated model",
             ok: Boolean(updatedStatus),
             detail: `Expected a 24010 model tag for ${agentConfigUpdateModelName} containing worker.`,
-        },
-        {
-            name: "Project status reflected updated skills",
-            ok: Boolean(updatedStatus) && missingSkill === undefined,
-            detail: `Expected 24010 skill tags for ${agentConfigUpdateSkills.join(", ")} containing worker; missing ${missingSkill ?? "<none>"}.`,
         },
     ];
 }

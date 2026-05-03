@@ -7,6 +7,7 @@
 //! group reaches every descendant on shutdown.
 
 use std::collections::HashMap;
+use std::os::unix::process::ExitStatusExt;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
@@ -15,7 +16,25 @@ use std::time::Duration;
 use tokio::process::Command;
 use tokio::sync::{watch, Mutex};
 use tokio::task::JoinHandle;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info, warn, Instrument};
+
+use super::display;
+
+/// Outcome of a single supervised child invocation, used to drive the surrounding
+/// restart loop after the instrumented spawn-and-watch future completes.
+enum ChildOutcome {
+    /// Child exited cleanly (status 0); supervisor should stop restarting.
+    CleanExit,
+    /// Child crashed or `wait()` failed; supervisor should back off and restart.
+    Crashed,
+    /// `cmd.spawn()` itself failed; supervisor should back off and retry.
+    SpawnFailed,
+    /// Shutdown signalled and the child was terminated; supervisor should stop.
+    ShutdownTerminated,
+    /// `shutdown` channel changed but did not transition to `true` (reset path);
+    /// supervisor should reset its backoff and re-enter the spawn loop.
+    ShutdownReset,
+}
 
 const RESTART_BACKOFF_INITIAL_MS: u64 = 1_000;
 const RESTART_BACKOFF_MAX_MS: u64 = 30_000;
@@ -147,57 +166,86 @@ async fn supervise(
         cmd.process_group(0);
         cmd.kill_on_drop(false);
 
-        info!(key, program = %program, "spawning service");
-        let mut child = match cmd.spawn() {
-            Ok(c) => c,
-            Err(e) => {
-                error!(key, error = %e, "spawn failed");
+        debug!(key, program = %program, "spawning service");
+
+        let span = tracing::info_span!(
+            "tenex.daemon.child_spawn",
+            "supervised.key" = %key,
+            "supervised.program" = %program,
+            "exit.code" = tracing::field::Empty,
+            "exit.signal" = tracing::field::Empty,
+        );
+
+        let outcome = async {
+            let mut child = match cmd.spawn() {
+                Ok(c) => c,
+                Err(e) => {
+                    error!(key, error = %e, "spawn failed");
+                    tenex_telemetry::record_current_error(&e);
+                    display::service_crashed(key, None);
+                    return ChildOutcome::SpawnFailed;
+                }
+            };
+
+            debug!(key, pid = ?child.id(), "service started");
+            display::service_started(key);
+
+            tokio::select! {
+                res = child.wait() => match res {
+                    Ok(status) if status.success() => {
+                        tracing::Span::current().record("exit.code", 0_i64);
+                        display::service_exited_cleanly(key);
+                        ChildOutcome::CleanExit
+                    }
+                    Ok(status) => {
+                        let code = status.code();
+                        let signal = status.signal();
+                        if let Some(c) = code {
+                            tracing::Span::current().record("exit.code", c as i64);
+                        }
+                        if let Some(s) = signal {
+                            tracing::Span::current().record("exit.signal", s as i64);
+                        }
+                        let crash = format!(
+                            "child {key} exited with code={code:?} signal={signal:?}",
+                        );
+                        tenex_telemetry::record_current_error(&crash);
+                        display::service_crashed(key, code);
+                        ChildOutcome::Crashed
+                    }
+                    Err(e) => {
+                        error!(key, error = %e, "wait failed");
+                        tenex_telemetry::record_current_error(&e);
+                        display::service_crashed(key, None);
+                        ChildOutcome::Crashed
+                    }
+                },
+                _ = shutdown.changed() => {
+                    if *shutdown.borrow() {
+                        terminate(key, &mut child).await;
+                        ChildOutcome::ShutdownTerminated
+                    } else {
+                        ChildOutcome::ShutdownReset
+                    }
+                }
+            }
+        }
+        .instrument(span)
+        .await;
+
+        match outcome {
+            ChildOutcome::CleanExit | ChildOutcome::ShutdownTerminated => return,
+            ChildOutcome::ShutdownReset => {
+                backoff_ms = RESTART_BACKOFF_INITIAL_MS;
+                continue;
+            }
+            ChildOutcome::Crashed | ChildOutcome::SpawnFailed => {
                 if !sleep_or_shutdown(backoff_ms, shutdown).await {
                     return;
                 }
                 backoff_ms = (backoff_ms.saturating_mul(2)).min(RESTART_BACKOFF_MAX_MS);
-                continue;
             }
-        };
-
-        let pid = child.id();
-        info!(key, ?pid, "service started");
-
-        let restart = tokio::select! {
-            res = child.wait() => {
-                match res {
-                    Ok(status) if status.success() => {
-                        info!(key, "service exited cleanly; not restarting");
-                        return;
-                    }
-                    Ok(status) => {
-                        warn!(key, code = ?status.code(), "service exited");
-                        true
-                    }
-                    Err(e) => {
-                        error!(key, error = %e, "wait failed");
-                        true
-                    }
-                }
-            }
-            _ = shutdown.changed() => {
-                if *shutdown.borrow() {
-                    terminate(key, &mut child).await;
-                    return;
-                }
-                backoff_ms = RESTART_BACKOFF_INITIAL_MS;
-                false
-            }
-        };
-
-        if !restart {
-            continue;
         }
-
-        if !sleep_or_shutdown(backoff_ms, shutdown).await {
-            return;
-        }
-        backoff_ms = (backoff_ms.saturating_mul(2)).min(RESTART_BACKOFF_MAX_MS);
     }
 }
 

@@ -47,6 +47,7 @@ futures = "0.3"
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1", features = ["v4"] }
 tenex-telemetry = { path = "../tenex-telemetry" }
+opentelemetry = "0.31"
 tracing = "0.1"
 tracing-opentelemetry = "0.32"
 sha2 = "0.10"

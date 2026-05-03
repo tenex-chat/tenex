@@ -182,7 +182,7 @@ The following skills have been loaded for this conversation. These provide addit
 </skill>
 </loaded-skills>
 ```
-Injected when any skills are preloaded (from `default.skills` in agent config or `self_applied_skills` from the conversation store). Omitted when no skills are active. Includes an aggregated `<skill-tool-permissions>` block when skills declare `only-tools`/`allow-tools`/`deny-tools` in their frontmatter (LLM-guidance only; not enforced at the tool-call level). Skills are discovered from five scope directories in precedence order: `builtIn` → `agent` → `agentProject` → `project` → `shared`.
+Injected when any skills are preloaded (from `default.skills` in agent config or `self_applied_skills` from the conversation store). Omitted when no skills are active. Includes an aggregated `<skill-tool-permissions>` block when skills declare `only-tools`/`allow-tools`/`deny-tools` in their frontmatter (LLM-guidance only; not enforced at the tool-call level). Skills are discovered from four scope directories in precedence order: `builtIn` → `agent` → `project` → `shared`.
 
 ### Fragment 07 — Environment Variables
 ```xml
@@ -484,7 +484,7 @@ List conversations sorted by most recent activity. By default it lists the curre
 Returns a plain-text tree with delegation children nested under their parent conversation when runtime metadata links them.
 
 ### `skill_list`
-List all available skills grouped by scope. Returns a JSON object with `total` count, per-scope `counts`, and `scopes` map (keys: `builtIn`, `agent`, `agentProject`, `project`, `shared`). Each skill entry includes `identifier`, optional `name`, optional `description` (truncated at 150 chars), `hasTools`, and `scope`.
+List all available skills grouped by scope. Returns a JSON object with `total` count, per-scope `counts`, and `scopes` map (keys: `builtIn`, `agent`, `project`, `shared`). Each skill entry includes `identifier`, optional `name`, optional `description` (truncated at 150 chars), `hasTools`, and `scope`.
 
 No parameters.
 

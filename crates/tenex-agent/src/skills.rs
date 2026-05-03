@@ -7,7 +7,6 @@ use std::path::{Path, PathBuf};
 pub enum SkillScope {
     BuiltIn,
     Agent,
-    AgentProject,
     Project,
     Shared,
 }
@@ -17,7 +16,6 @@ impl SkillScope {
         match self {
             SkillScope::BuiltIn => "builtIn",
             SkillScope::Agent => "agent",
-            SkillScope::AgentProject => "agentProject",
             SkillScope::Project => "project",
             SkillScope::Shared => "shared",
         }
@@ -191,9 +189,8 @@ fn short_pubkey(pubkey: &str) -> &str {
     }
 }
 
-/// Returns skill lookup directories in precedence order (first-seen-wins).
-/// Order replicates TypeScript SkillService.getLookupDirectories() exactly:
-/// built-in first, then agent, agent-project, project, shared.
+/// Returns skill lookup directories in precedence order (first-seen-wins):
+/// built-in first, then agent, project, shared.
 pub fn lookup_dirs(ctx: &SkillLookupCtx) -> Vec<(PathBuf, SkillScope)> {
     let short = short_pubkey(&ctx.agent_pubkey);
     let mut dirs = Vec::new();
@@ -214,18 +211,11 @@ pub fn lookup_dirs(ctx: &SkillLookupCtx) -> Vec<(PathBuf, SkillScope)> {
     let agent_dir = ctx.base_dir.join("home").join(short).join("skills");
     dirs.push((agent_dir, SkillScope::Agent));
 
-    // 3. Agent-project skills
-    let agent_project_dir = Path::new(&ctx.project_path)
-        .join(".agents")
-        .join(short)
-        .join("skills");
-    dirs.push((agent_project_dir, SkillScope::AgentProject));
-
-    // 4. Project shared skills
+    // 3. Project shared skills
     let project_dir = Path::new(&ctx.project_path).join(".agents").join("skills");
     dirs.push((project_dir, SkillScope::Project));
 
-    // 5. Global shared skills
+    // 4. Global shared skills
     if let Some(home) = dirs_next::home_dir() {
         dirs.push((home.join(".agents").join("skills"), SkillScope::Shared));
     }
@@ -546,7 +536,7 @@ mod tests {
 /// Group skills by scope into a map keyed by scope string.
 pub fn group_by_scope(skills: &[SkillData]) -> HashMap<&'static str, Vec<SkillSummary>> {
     let mut map: HashMap<&'static str, Vec<SkillSummary>> = HashMap::new();
-    for scope_key in &["builtIn", "agent", "agentProject", "project", "shared"] {
+    for scope_key in &["builtIn", "agent", "project", "shared"] {
         map.insert(scope_key, Vec::new());
     }
     for skill in skills {

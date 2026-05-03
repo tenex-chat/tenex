@@ -150,6 +150,11 @@ impl Tool for DelegateTool {
             MessageRef::Nostr { event_id } => event_id.to_hex(),
         };
 
+        let span = tracing::Span::current();
+        span.record("delegated.conversation.id", delegation_event_id.as_str());
+        span.record("delegated.agent.pubkey", pubkey_hex.as_str());
+        span.record("delegated.event.id", delegation_event_id.as_str());
+
         let args_json = serde_json::to_string(&args).unwrap_or_default();
         let tool_use_intent = ToolUseIntent {
             tool_name: "delegate".to_string(),

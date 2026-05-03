@@ -17,7 +17,7 @@ use std::sync::{Arc, Mutex};
 use rig::completion::ToolDefinition;
 use rig::tool::{ToolDyn, ToolError};
 use rig::wasm_compat::WasmBoxedFuture;
-use tracing::{info_span, Instrument};
+use tracing::{field, info_span, Instrument, Span};
 
 use crate::injections::MessageInjectionTracker;
 use crate::runtime_state::RuntimeStateHandle;
@@ -107,11 +107,23 @@ impl ToolDyn for RecordingTool {
                 state.start_tool(&call_id, &tool_name, &args_json);
             }
 
-            let mut result = self
-                .inner
-                .call(args)
-                .instrument(info_span!("tenex.agent.tool_call", tool.name = %tool_name))
-                .await;
+            let span = info_span!(
+                "execute_tool",
+                otel.name = format!("execute_tool {}", tool_name),
+                otel.kind = "internal",
+                "gen_ai.tool.name" = %tool_name,
+                "gen_ai.tool.call.id" = %call_id,
+                "gen_ai.tool.type" = "function",
+                "gen_ai.tool.call.arguments" = %args_json,
+                "gen_ai.tool.call.result" = field::Empty,
+                "gen_ai.tool.is_error" = field::Empty,
+                "error.type" = field::Empty,
+                "delegated.conversation.id" = field::Empty,
+                "delegated.agent.pubkey" = field::Empty,
+                "delegated.event.id" = field::Empty,
+            );
+
+            let mut result = self.inner.call(args).instrument(span.clone()).await;
 
             if let Some(state) = &self.runtime_state {
                 state.finish_tool(&call_id);
@@ -139,6 +151,8 @@ impl ToolDyn for RecordingTool {
                 Err(e) => (serde_json::Value::String(e.to_string()), true),
             };
 
+            record_tool_outcome(&span, &result_json, &result);
+
             self.recorder.push(ToolCallRecord {
                 call_id,
                 tool_name,
@@ -150,6 +164,24 @@ impl ToolDyn for RecordingTool {
 
             result
         })
+    }
+}
+
+fn record_tool_outcome(
+    span: &Span,
+    result_json: &serde_json::Value,
+    result: &Result<String, ToolError>,
+) {
+    span.record(
+        "gen_ai.tool.call.result",
+        serde_json::to_string(result_json)
+            .unwrap_or_default()
+            .as_str(),
+    );
+    if let Err(err) = result {
+        span.record("gen_ai.tool.is_error", true);
+        span.record("error.type", std::any::type_name_of_val(err));
+        span.in_scope(|| tenex_telemetry::record_current_error(err));
     }
 }
 

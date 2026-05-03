@@ -305,30 +305,82 @@ fn format_relative_time(elapsed_secs: i64) -> String {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let telemetry = tenex_telemetry::init("tenex-agent");
-    let root_span = info_span!("tenex.agent.process");
-    if let Some(parent) = tenex_telemetry::parent_context_from_env() {
-        let _ = root_span.set_parent(parent);
-    }
-    let result = run().instrument(root_span).await;
-    telemetry.shutdown();
-    result
-}
-
-async fn run() -> Result<()> {
+    // Identity must be loaded before telemetry init so that the OTel `Resource`
+    // carries `tenex.agent.pubkey`, `tenex.agent.slug`, and `project.id` on
+    // every span — the deleted `tenex.agent.process` wrapper used to hold these
+    // as span attributes.
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 2 {
         anyhow::bail!(
             "Usage: tenex-agent <agent.json>\n\nExample:\n  cargo run -p tenex-agent -- ~/.tenex/agents/<pubkey>.json < event.json"
         );
     }
-
-    // Mandatory project context — the daemon sets this before spawning the agent.
     let project_id = std::env::var("TENEX_PROJECT_ID")
         .context("TENEX_PROJECT_ID environment variable is required")?;
-
     let agent_config = config::AgentConfig::load(&args[1])?;
+    let agent_keys = nostr::Keys::parse(&agent_config.nsec)
+        .context("Failed to parse agent nsec")?;
+    let pubkey_hex = agent_keys.public_key().to_hex();
+    let agent_slug = agent_config.identity_name().to_string();
 
+    let extra_resource = vec![
+        opentelemetry::KeyValue::new("service.instance.id", std::process::id().to_string()),
+        opentelemetry::KeyValue::new("tenex.agent.pubkey", pubkey_hex.clone()),
+        opentelemetry::KeyValue::new("tenex.agent.slug", agent_slug.clone()),
+        opentelemetry::KeyValue::new("project.id", project_id.clone()),
+    ];
+    let telemetry = tenex_telemetry::init(tenex_telemetry::TelemetryInit {
+        service_name: "tenex-agent".to_string(),
+        base_dir: None,
+        kind: tenex_telemetry::TelemetryKind::Subprocess,
+        extra_resource,
+    });
+
+    // Race the agent's main work against SIGTERM/SIGINT; on signal we still
+    // exit through the bounded shutdown sequence below so spans flush.
+    let shutdown_signal = async {
+        use tokio::signal::unix::{signal, SignalKind};
+        let mut sigterm = signal(SignalKind::terminate())
+            .expect("install SIGTERM handler");
+        let mut sigint = signal(SignalKind::interrupt())
+            .expect("install SIGINT handler");
+        tokio::select! {
+            _ = sigterm.recv() => (),
+            _ = sigint.recv() => (),
+        }
+    };
+
+    let result = tokio::select! {
+        res = run(args, project_id, agent_config, agent_keys, pubkey_hex, agent_slug) => res,
+        () = shutdown_signal => {
+            eprintln!("[tenex-agent] received shutdown signal");
+            Ok(())
+        }
+    };
+
+    // Bounded shutdown: flush in a blocking thread off the tokio runtime so
+    // a wedged exporter cannot stall the runtime drop. 10s ceiling overall.
+    let _ = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        tokio::task::spawn_blocking(|| {
+            if let Err(err) = tenex_telemetry::force_flush(std::time::Duration::from_secs(5)) {
+                eprintln!("[tenex-agent] telemetry flush: {err}");
+            }
+        }),
+    )
+    .await;
+    telemetry.shutdown();
+    result
+}
+
+async fn run(
+    args: Vec<String>,
+    project_id: String,
+    agent_config: config::AgentConfig,
+    agent_keys: nostr::Keys,
+    pubkey_hex: String,
+    agent_slug: String,
+) -> Result<()> {
     // Read triggering envelope from stdin
     let envelope = read_one_from_stdin()
         .await
@@ -342,9 +394,12 @@ async fn run() -> Result<()> {
         NostrChannel::from_nsec(&agent_config.nsec, StdoutNdjsonSink::new())
             .context("Failed to initialize Nostr channel")?,
     );
-    let pubkey_hex = match channel.identity() {
-        PrincipalRef::Nostr { pubkey, .. } => pubkey.to_hex(),
-    };
+    debug_assert_eq!(
+        match channel.identity() {
+            PrincipalRef::Nostr { pubkey, .. } => pubkey.to_hex(),
+        },
+        pubkey_hex
+    );
 
     // Resolve working directory and current branch.
     // The project_root is the canonical base path; working_dir may differ when
@@ -958,10 +1013,7 @@ async fn run() -> Result<()> {
         initial_history.len()
     );
 
-    let agent_slug = agent_config.identity_name().to_string();
     let escalation_pubkey = escalation::resolve_escalation_pubkey(&base_dir, &project_agents);
-    let agent_keys = nostr::Keys::parse(&agent_config.nsec)
-        .context("Failed to parse agent nsec for tool signing")?;
     let blossom_url = read_blossom_server_url(&base_dir)
         .unwrap_or_else(|| "https://blossom.primal.net".to_string());
     let suppress_response = Arc::new(AtomicBool::new(false));
@@ -1089,17 +1141,30 @@ async fn run() -> Result<()> {
             }
         };
 
+        // `agent.slug`, `agent.pubkey`, `project.id` live on the OTel Resource
+        // (set in `main`), so every span emitted by this process carries them
+        // automatically. `conversation.id` arrives via baggage on the parent
+        // context and is materialised by `BaggageSpanProcessor`.
         let turn_span = info_span!(
             "tenex.agent.turn",
-            agent.slug = %agent_slug,
-            agent.pubkey = %pubkey_hex,
-            conversation.id = %conversation_id,
-            project.id = %project_id,
             llm.provider = %resolved.provider,
             llm.model = %resolved.model,
             history.messages = initial_history.len(),
         );
-        let final_response = async {
+        // The deleted `tenex.agent.process` wrapper used to hold the parent
+        // context. Each turn now extracts the carrier from env vars set by
+        // the daemon's `tenex.runtime.dispatch` span at child spawn.
+        if let Ok(traceparent) = std::env::var("TRACEPARENT") {
+            let carrier = tenex_telemetry::TraceCarrier {
+                traceparent,
+                tracestate: std::env::var("TRACESTATE").ok(),
+                baggage: std::env::var("BAGGAGE").ok(),
+            };
+            if let Some(parent) = tenex_telemetry::extract(&carrier) {
+                let _ = turn_span.set_parent(parent);
+            }
+        }
+        let turn_body = async {
             let response = match resolved.provider.as_str() {
                 "openrouter" => {
                     let key = resolved
@@ -1109,6 +1174,7 @@ async fn run() -> Result<()> {
                     let client = RecordingClient::new(
                         openrouter::Client::new(&key)?,
                         cassette_recorder.clone(),
+                        "openrouter",
                     );
                     run_agent!(
                         client,
@@ -1128,6 +1194,7 @@ async fn run() -> Result<()> {
                     let client = RecordingClient::new(
                         openai::CompletionsClient::builder().api_key(&key).build()?,
                         cassette_recorder.clone(),
+                        "openai",
                     );
                     run_agent!(
                         client,
@@ -1144,7 +1211,11 @@ async fn run() -> Result<()> {
                     if let Some(url) = &resolved.base_url {
                         builder = builder.base_url(url);
                     }
-                    let client = RecordingClient::new(builder.build()?, cassette_recorder.clone());
+                    let client = RecordingClient::new(
+                        builder.build()?,
+                        cassette_recorder.clone(),
+                        "ollama",
+                    );
                     run_agent!(
                         client,
                         &resolved.model,
@@ -1159,6 +1230,7 @@ async fn run() -> Result<()> {
                     let client = RecordingClient::new(
                         mock_llm::MockClient::from_env(&agent_slug)?,
                         cassette_recorder.clone(),
+                        "mock",
                     );
                     run_agent!(
                         client,
@@ -1186,6 +1258,7 @@ async fn run() -> Result<()> {
                                 .http_client(http_client)
                                 .build()?,
                             cassette_recorder.clone(),
+                            "anthropic",
                         );
                         run_agent!(
                             client,
@@ -1206,6 +1279,7 @@ async fn run() -> Result<()> {
                         let client = RecordingClient::new(
                             anthropic::Client::new(&key)?,
                             cassette_recorder.clone(),
+                            "anthropic",
                         );
                         run_agent!(
                             client,
@@ -1223,6 +1297,15 @@ async fn run() -> Result<()> {
                 }
             };
             Ok::<_, anyhow::Error>(response)
+        };
+        let final_response = async move {
+            match turn_body.await {
+                Ok(v) => Ok(v),
+                Err(e) => {
+                    tenex_telemetry::record_current_error(&e);
+                    Err(e)
+                }
+            }
         }
         .instrument(turn_span)
         .await?;

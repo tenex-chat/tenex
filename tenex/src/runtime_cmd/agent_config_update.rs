@@ -37,6 +37,48 @@ pub(crate) fn apply_event(
     project_dtag: &str,
     agent_pubkeys: &HashSet<String>,
 ) -> Result<ConfigUpdateOutcome> {
+    let span = tracing::info_span!(
+        "tenex.daemon.agent_config_update",
+        "agent.pubkey" = tracing::field::Empty,
+        "agent.updated" = tracing::field::Empty,
+        "config.has_reset" = tracing::field::Empty,
+        "config.has_model" = tracing::field::Empty,
+        "config.skill_count" = tracing::field::Empty,
+        "config.mcp_count" = tracing::field::Empty,
+        "ignored_reason" = tracing::field::Empty,
+    );
+    span.in_scope(|| {
+        let result = apply_event_inner(base_dir, event, project_addr, project_dtag, agent_pubkeys);
+        match &result {
+            Ok(outcome) => record_outcome(outcome),
+            Err(e) => tenex_telemetry::record_current_error(e),
+        }
+        result
+    })
+}
+
+fn record_outcome(outcome: &ConfigUpdateOutcome) {
+    let span = tracing::Span::current();
+    if let Some(pubkey) = outcome.agent_pubkey.as_deref() {
+        span.record("agent.pubkey", pubkey);
+    }
+    span.record("agent.updated", outcome.config_updated);
+    span.record("config.has_reset", outcome.has_reset);
+    span.record("config.has_model", outcome.has_model);
+    span.record("config.skill_count", outcome.skill_count as i64);
+    span.record("config.mcp_count", outcome.mcp_count as i64);
+    if let Some(reason) = outcome.ignored_reason {
+        span.record("ignored_reason", reason);
+    }
+}
+
+fn apply_event_inner(
+    base_dir: &Path,
+    event: &Event,
+    project_addr: &str,
+    project_dtag: &str,
+    agent_pubkeys: &HashSet<String>,
+) -> Result<ConfigUpdateOutcome> {
     let Some(agent_pubkey) = first_tag_value(event, "p") else {
         return Ok(ConfigUpdateOutcome::ignored("missing p tag", None));
     };

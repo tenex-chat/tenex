@@ -73,8 +73,22 @@ async fn main() -> Result<()> {
     // relies on a shared cache (e.g. the Telegram media gate).
     normalize_base_dir_env();
 
-    let telemetry =
-        tenex_telemetry::init_with_base_dir("tenex-daemon", command_base_dir(&cli.command));
+    let telemetry = {
+        let (kind, service_name) = match &cli.command {
+            Command::Daemon(_) => (tenex_telemetry::TelemetryKind::Daemon, "tenex-daemon"),
+            Command::Runtime(_) => (
+                tenex_telemetry::TelemetryKind::Subprocess,
+                "tenex-runtime",
+            ),
+            _ => (tenex_telemetry::TelemetryKind::Cli, "tenex-cli"),
+        };
+        tenex_telemetry::init(tenex_telemetry::TelemetryInit {
+            service_name: service_name.to_string(),
+            base_dir: command_base_dir(&cli.command).map(std::path::Path::to_path_buf),
+            kind,
+            extra_resource: vec![],
+        })
+    };
     let result = match cli.command {
         Command::Config(args) => config_cmd::run(args).await,
         Command::Onboard(args) => onboard::run(args).await,

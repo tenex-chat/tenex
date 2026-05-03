@@ -34,7 +34,12 @@ enum Command {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let telemetry = tenex_telemetry::init("tenex-summarizer");
+    let telemetry = tenex_telemetry::init(tenex_telemetry::TelemetryInit {
+        service_name: "tenex-summarizer".to_string(),
+        base_dir: None,
+        kind: tenex_telemetry::TelemetryKind::Subprocess,
+        extra_resource: vec![],
+    });
 
     let cli = Cli::parse();
     let result = match cli.command.unwrap_or(Command::Run) {
