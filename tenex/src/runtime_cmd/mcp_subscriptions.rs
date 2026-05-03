@@ -149,7 +149,7 @@ impl McpSubscriptionRegistry {
         validate_resource_uri(&req.resource_uri)?;
         ensure_agent_can_access_server(&shared, &req.agent_pubkey, &req.server_name)?;
 
-        let now = super::now_ms();
+        let now = super::runtime_setup::now_ms();
         let record = McpSubscription {
             id: format!("mcp-sub-{}-{}", now, uuid::Uuid::new_v4().simple()),
             agent_pubkey: req.agent_pubkey,
@@ -383,7 +383,7 @@ impl McpSubscriptionRegistry {
     }
 
     fn mark_delivered(&self, subscription_id: &str) -> Result<()> {
-        let now = super::now_ms();
+        let now = super::runtime_setup::now_ms();
         if let Some(subscription) = self.subscriptions.lock().unwrap().get_mut(subscription_id) {
             subscription.notifications_received += 1;
             subscription.last_notification_at = Some(now);
@@ -395,7 +395,7 @@ impl McpSubscriptionRegistry {
     }
 
     fn mark_error(&self, subscription_id: &str, error: String) -> Result<()> {
-        let now = super::now_ms();
+        let now = super::runtime_setup::now_ms();
         if let Some(subscription) = self.subscriptions.lock().unwrap().get_mut(subscription_id) {
             subscription.status = McpSubscriptionStatus::Error;
             subscription.last_error = Some(error);

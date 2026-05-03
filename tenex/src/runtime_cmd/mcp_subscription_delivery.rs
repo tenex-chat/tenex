@@ -4,8 +4,12 @@ use anyhow::{Context, Result};
 use nostr_sdk::prelude::*;
 use tracing::warn;
 
+use super::agent_subprocess::DispatchJob;
+use super::dispatch_pipeline::accept_dispatch;
+use super::event_routing::mark_seen;
 use super::mcp_subscriptions::McpSubscription;
-use super::{accept_dispatch, first_conversation_author, mark_seen, DispatchJob, RuntimeShared};
+use super::runtime_state_store::first_conversation_author;
+use super::RuntimeShared;
 
 pub(super) async fn dispatch_notification(
     shared: Arc<RuntimeShared>,
