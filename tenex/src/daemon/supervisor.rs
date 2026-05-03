@@ -163,16 +163,20 @@ async fn supervise(
         let pid = child.id();
         info!(key, ?pid, "service started");
 
-        let exited_cleanly = tokio::select! {
+        let restart = tokio::select! {
             res = child.wait() => {
                 match res {
+                    Ok(status) if status.success() => {
+                        info!(key, "service exited cleanly; not restarting");
+                        return;
+                    }
                     Ok(status) => {
                         warn!(key, code = ?status.code(), "service exited");
-                        false
+                        true
                     }
                     Err(e) => {
                         error!(key, error = %e, "wait failed");
-                        false
+                        true
                     }
                 }
             }
@@ -181,13 +185,13 @@ async fn supervise(
                     terminate(key, &mut child).await;
                     return;
                 }
-                true
+                backoff_ms = RESTART_BACKOFF_INITIAL_MS;
+                false
             }
         };
 
-        if exited_cleanly {
-            // Reset backoff after a healthy run that we ended ourselves.
-            backoff_ms = RESTART_BACKOFF_INITIAL_MS;
+        if !restart {
+            continue;
         }
 
         if !sleep_or_shutdown(backoff_ms, shutdown).await {
