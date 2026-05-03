@@ -11,6 +11,7 @@
 //! never reach this process.
 
 use std::collections::HashSet;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -22,7 +23,9 @@ use tokio::time::Duration;
 use tracing::{debug, info, warn};
 
 use super::config::Config;
+use super::display;
 use super::supervisor::Supervisor;
+use crate::store::atomic;
 
 const PROJECT_KIND: u16 = 31933;
 const BOOT_KIND: u16 = 24000;
@@ -45,10 +48,12 @@ struct RuntimeCtx<'a> {
     boot_authors: &'a [PublicKey],
     startup_ts: Timestamp,
     debounce_handle: Arc<Mutex<Option<JoinHandle<()>>>>,
+    base_dir: &'a Path,
 }
 
 pub async fn run(
     cfg: Config,
+    base_dir: PathBuf,
     backend_keys: Keys,
     supervisor: Supervisor,
     pending_boot_prefixes: Vec<String>,
@@ -79,7 +84,7 @@ pub async fn run(
         }
     }
     client.connect().await;
-    info!(relays = cfg.relays.len(), "connected to relays");
+    display::watching(cfg.relays.len());
 
     let discovery_filter = Filter::new()
         .kind(Kind::Custom(PROJECT_KIND))
@@ -126,6 +131,7 @@ pub async fn run(
                     boot_authors: &boot_authors,
                     startup_ts,
                     debounce_handle: Arc::clone(&debounce_handle),
+                    base_dir: &base_dir,
                 };
                 handle_event(&ctx, &event).await;
             }
@@ -152,6 +158,33 @@ async fn handle_project(ctx: &RuntimeCtx<'_>, event: &Event) {
         return;
     };
     let address = format!("{}:{}:{}", PROJECT_KIND, event.pubkey.to_hex(), d_tag);
+
+    // Persist the 31933 whenever the relay's copy is newer than what's on disk.
+    // This must run before the per-session dedupe below: kind:31933 is a
+    // replaceable event, so a republished version (e.g. updated p-tags) must
+    // overwrite the cached `event.json` even when the project has already been
+    // discovered this session — otherwise `tenex runtime <d_tag>` keeps
+    // booting against stale membership.
+    let event_path = ctx
+        .base_dir
+        .join("projects")
+        .join(&d_tag)
+        .join("event.json");
+    let should_write = match std::fs::read(&event_path) {
+        Err(_) => true,
+        Ok(existing) => {
+            let existing_created_at = serde_json::from_slice::<serde_json::Value>(&existing)
+                .ok()
+                .and_then(|v| v["created_at"].as_u64())
+                .unwrap_or(0);
+            event.created_at.as_secs() > existing_created_at
+        }
+    };
+    if should_write {
+        if let Err(e) = atomic::write(&event_path, event.as_json().as_bytes()) {
+            warn!(d_tag, error = %e, "failed to persist project event");
+        }
+    }
 
     let inserted = {
         let mut k = ctx.known.lock().await;
@@ -270,7 +303,7 @@ async fn handle_boot_trigger(
     }
     let d_tag = parts[2].to_string();
 
-    info!(d_tag, ?kind, event_id = %event.id, "boot trigger");
+    display::project_booted(&d_tag);
     supervisor.boot(d_tag).await;
 }
 
