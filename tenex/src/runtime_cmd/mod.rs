@@ -1001,6 +1001,12 @@ async fn reload_agent_snapshot(
     )
     .await?;
     publish_project_status_now(shared, ctx.meta).await;
+    // Bulk reload: republish 34011 for every agent. Individual change
+    // attribution isn't available here (an agent may have been added,
+    // removed, or had its config rewritten), so the safe play is to keep
+    // every per-agent capability event in lock-step with the post-reload
+    // snapshot.
+    republish_all_agent_configs(shared).await;
 
     let added = new_pubkeys.difference(&old_pubkeys).count();
     let removed = old_pubkeys.difference(&new_pubkeys).count();
@@ -1112,6 +1118,10 @@ async fn reload_project_membership_snapshot(
         .context("reading reloaded project metadata")?
         .context("reloaded project metadata is missing")?;
     publish_project_status_now(shared, &project_meta).await;
+    // Project membership reload (project definition event re-ingested).
+    // The agent set may have shifted; mirror the per-agent 34011s so the
+    // TUI's union-render stays consistent.
+    republish_all_agent_configs(shared).await;
 
     let added = new_pubkeys.difference(&old_pubkeys).count();
     let removed = old_pubkeys.difference(&new_pubkeys).count();
