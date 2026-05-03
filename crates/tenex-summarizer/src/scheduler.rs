@@ -80,7 +80,10 @@ async fn scan_once(cfg: &Config, state: &SummaryStateStore, publisher: &Publishe
         let candidates = match source::list_candidates(project, DEBOUNCE_SECS, MAX_AGE_SECS) {
             Ok(c) => c,
             Err(e) => {
-                warn!(d_tag = %project.d_tag, error = %e, "list_candidates failed");
+                // Debug-format anyhow so the underlying cause chain (e.g. the
+                // rusqlite error behind a `with_context("open <path>")`) is
+                // not swallowed by the top-level context message.
+                warn!(d_tag = %project.d_tag, error = ?e, "list_candidates failed");
                 continue;
             }
         };
