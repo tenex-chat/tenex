@@ -545,16 +545,36 @@ pub async fn run(args: RuntimeArgs) -> Result<()> {
         meta: &meta,
     };
 
+    // Startup-only: REQ kind:34011 for every managed agent's pubkey, diff
+    // against on-disk config mtimes, publish the gaps. Bounded by a 5s
+    // fetch timeout so a slow relay can't block the runtime from coming up.
+    startup_publish_missing_agent_configs(&shared).await;
+
     loop {
         tokio::select! {
             Some(event) = agent_fs_rx.recv() => {
                 match event {
                     Ok(event) if agent_config_event_is_relevant(&event) => {
+                        // Capture which agent file(s) fired before we reload
+                        // the snapshot — `reload_agent_snapshot` already
+                        // republishes 34011 for every agent, but we also
+                        // emit a targeted republish per changed file so the
+                        // logs attribute the change to the right agent and
+                        // so a future bulk-reload skip optimization stays
+                        // safe.
+                        let changed_pubkeys: Vec<String> = event
+                            .paths
+                            .iter()
+                            .filter_map(|p| agent_config_publish::agent_pubkey_from_path(p))
+                            .collect();
                         tokio::time::sleep(Duration::from_millis(100)).await;
                         if let Err(error) = reload_agent_snapshot(&shared, &reload_context)
                         .await
                         {
                             warn!(error = %error, "agent config reload failed");
+                        }
+                        for agent_pubkey in changed_pubkeys {
+                            republish_agent_config(&shared, &agent_pubkey).await;
                         }
                     }
                     Ok(_) => {}

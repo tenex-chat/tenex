@@ -421,4 +421,95 @@ mod tests {
         fs::remove_dir_all(&base_dir).ok();
         fs::remove_dir_all(&project_path).ok();
     }
+
+    /// Codex finding #5: when an agent has no explicit `model` in its
+    /// `default_config_json`, the runtime falls back to `LlmsDoc::default_config()`.
+    /// The published 34011 must mark THAT model as `active`, not leave the
+    /// agent's row model-less in the TUI.
+    #[tokio::test]
+    async fn build_event_marks_llms_default_model_active_when_agent_has_no_model() {
+        let base_dir = unique_temp("base-fallback");
+        let project_path = unique_temp("proj-fallback");
+
+        let llms = load_llms(serde_json::json!({
+            "configurations": {
+                "alpha": { "provider": "mock", "model": "a" },
+                "beta":  { "provider": "mock", "model": "b" }
+            },
+            "default": "beta"
+        }));
+
+        // Agent intentionally has no "model" key.
+        let (agent, _keys) = agent_with_signer(
+            "no-model",
+            serde_json::json!({ "skills": [] }),
+            serde_json::json!({}),
+        );
+
+        let backend_pk = nostr_sdk::PublicKey::from_hex(BACKEND_PK_HEX).unwrap();
+        let event =
+            build_agent_config_event(&agent, &backend_pk, &base_dir, &project_path, &llms)
+                .await
+                .expect("event built");
+
+        let m_tags = extract(&event, "model");
+        // Fallback: beta (the LlmsDoc default) is marked active.
+        assert!(
+            m_tags.contains(&vec!["model", "beta", "active"]),
+            "expected ['model','beta','active'], got {m_tags:?}"
+        );
+        assert!(m_tags.contains(&vec!["model", "alpha"]));
+
+        fs::remove_dir_all(&base_dir).ok();
+        fs::remove_dir_all(&project_path).ok();
+    }
+
+    /// Codex finding #4: signer must own the agent's pubkey. A swapped
+    /// `signer_ref` (or bunker URI pointing at a different account) would
+    /// otherwise produce a cryptographically valid 34011 announcing
+    /// capabilities for a key the project doesn't actually manage.
+    #[tokio::test]
+    async fn build_event_rejects_signer_with_mismatched_pubkey() {
+        let base_dir = unique_temp("base-mismatch");
+        let project_path = unique_temp("proj-mismatch");
+        let llms = load_llms(serde_json::json!({ "configurations": {} }));
+
+        // Real signer for a different key, but agent.pubkey points elsewhere.
+        let other = nostr_sdk::Keys::generate();
+        let nsec_bech32 = other.secret_key().to_bech32().unwrap();
+        let mut agent = Agent {
+            pubkey: "0".repeat(64), // arbitrary, definitely not other's pk
+            slug: "spoofed".into(),
+            name: "spoofed".into(),
+            role: None,
+            description: None,
+            instructions: None,
+            use_criteria: None,
+            category: None,
+            signer_ref: Some(format!("nsec:{nsec_bech32}")),
+            event_id: None,
+            status: None,
+            default_config_json: None,
+            telegram_config_json: None,
+            mcp_servers_json: None,
+        };
+        // Sanity: ensure they really differ.
+        assert_ne!(agent.pubkey, other.public_key().to_hex());
+
+        let backend_pk = nostr_sdk::PublicKey::from_hex(BACKEND_PK_HEX).unwrap();
+        let err = build_agent_config_event(&agent, &backend_pk, &base_dir, &project_path, &llms)
+            .await
+            .expect_err("mismatch must fail");
+        let msg = err.to_string();
+        assert!(msg.contains("signer mismatch"), "unexpected error: {msg}");
+
+        // And the matching-pubkey path still succeeds.
+        agent.pubkey = other.public_key().to_hex();
+        build_agent_config_event(&agent, &backend_pk, &base_dir, &project_path, &llms)
+            .await
+            .expect("matching pubkey should succeed");
+
+        fs::remove_dir_all(&base_dir).ok();
+        fs::remove_dir_all(&project_path).ok();
+    }
 }

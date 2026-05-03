@@ -105,7 +105,7 @@ fn file_mtime_secs(path: &Path) -> Option<u64> {
 pub(super) fn fold_existing_agent_configs(events: &[Event]) -> HashMap<String, u64> {
     let mut out: HashMap<String, u64> = HashMap::new();
     for ev in events {
-        let ts = ev.created_at.as_u64();
+        let ts = ev.created_at.as_secs();
         let pk = ev.pubkey.to_hex();
         out.entry(pk)
             .and_modify(|existing| {
