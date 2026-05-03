@@ -33,6 +33,8 @@ mod tools;
 mod turn_loop;
 
 use anyhow::{Context, Result};
+use tracing::{info_span, Instrument};
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -49,8 +51,8 @@ async fn main() -> Result<()> {
     let project_id = std::env::var("TENEX_PROJECT_ID")
         .context("TENEX_PROJECT_ID environment variable is required")?;
     let agent_config = config::AgentConfig::load(&args[1])?;
-    let agent_keys = nostr::Keys::parse(&agent_config.nsec)
-        .context("Failed to parse agent nsec")?;
+    let agent_keys =
+        nostr::Keys::parse(&agent_config.nsec).context("Failed to parse agent nsec")?;
     let pubkey_hex = agent_keys.public_key().to_hex();
     let agent_slug = agent_config.identity_name().to_string();
 
@@ -71,10 +73,8 @@ async fn main() -> Result<()> {
     // exit through the bounded shutdown sequence below so spans flush.
     let shutdown_signal = async {
         use tokio::signal::unix::{signal, SignalKind};
-        let mut sigterm = signal(SignalKind::terminate())
-            .expect("install SIGTERM handler");
-        let mut sigint = signal(SignalKind::interrupt())
-            .expect("install SIGINT handler");
+        let mut sigterm = signal(SignalKind::terminate()).expect("install SIGTERM handler");
+        let mut sigint = signal(SignalKind::interrupt()).expect("install SIGINT handler");
         tokio::select! {
             _ = sigterm.recv() => (),
             _ = sigint.recv() => (),
@@ -112,14 +112,47 @@ async fn run(
     pubkey_hex: String,
     agent_slug: String,
 ) -> Result<()> {
-    let mut boot = agent_bootstrap::build(
-        &args,
-        project_id,
-        agent_config,
-        agent_keys,
-        pubkey_hex,
-        agent_slug,
-    )
-    .await?;
-    turn_loop::run_turn_loop(&mut boot).await
+    // `tenex.agent.turn` wraps the entire agent process — bootstrap and
+    // re-engagement loop both nest under it. The deleted `tenex.agent.process`
+    // wrapper used to play this role; we restore the wrap here so bootstrap-
+    // time spans (e.g. `rag.context_discovery`) have a proper parent. Each
+    // agent spawn is one turn (per OTel design), so the wrapper is bounded by
+    // process lifetime and does not regress the multi-hour-wrapper anti-pattern.
+    //
+    // Late-bound fields are populated after `agent_bootstrap::build` resolves
+    // the model and projects history.
+    let turn_span = info_span!(
+        "tenex.agent.turn",
+        llm.provider = tracing::field::Empty,
+        llm.model = tracing::field::Empty,
+        history.messages = tracing::field::Empty,
+    );
+    if let Ok(traceparent) = std::env::var("TRACEPARENT") {
+        let carrier = tenex_telemetry::TraceCarrier {
+            traceparent,
+            tracestate: std::env::var("TRACESTATE").ok(),
+            baggage: std::env::var("BAGGAGE").ok(),
+        };
+        if let Some(parent) = tenex_telemetry::extract(&carrier) {
+            let _ = turn_span.set_parent(parent);
+        }
+    }
+    async move {
+        let mut boot = agent_bootstrap::build(
+            &args,
+            project_id,
+            agent_config,
+            agent_keys,
+            pubkey_hex,
+            agent_slug,
+        )
+        .await?;
+        let span = tracing::Span::current();
+        span.record("llm.provider", boot.resolved.provider.as_str());
+        span.record("llm.model", boot.resolved.model.as_str());
+        span.record("history.messages", boot.initial_history.len() as i64);
+        turn_loop::run_turn_loop(&mut boot).await
+    }
+    .instrument(turn_span)
+    .await
 }

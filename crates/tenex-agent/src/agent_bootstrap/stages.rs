@@ -339,6 +339,10 @@ pub(super) fn build_shell_env(
 /// Run RAG-backed proactive context discovery for the inbound message and
 /// render it as a `<proactive-context>` block. Returns `None` when the store
 /// is absent or no relevant rows pass the score threshold.
+///
+/// Always emits a `rag.context_discovery` span so an absent store is
+/// distinguishable from an empty result set in telemetry. Phase counts and
+/// LLM child spans are populated by [`context_discovery::discover_context`].
 pub(super) async fn proactive_context_block(
     rag_store: Option<&Arc<RagStore>>,
     envelope_content: &str,
@@ -346,37 +350,72 @@ pub(super) async fn proactive_context_block(
     agent_pubkey: &str,
     resolved: &ResolvedModel,
 ) -> Option<String> {
-    let store = rag_store?;
+    use tracing::{info_span, Instrument};
+
+    const SCORE_THRESHOLD: f64 = 0.65;
+    const MAX_RESULTS: i64 = 5;
     let collections = [
         "conversations".to_string(),
         format!("project_{project_id}"),
         format!("agent_{agent_pubkey}"),
     ];
-    let refs: Vec<&str> = collections.iter().map(|s| s.as_str()).collect();
-    let relevant =
-        context_discovery::discover_context(envelope_content, store, &refs, resolved).await;
-    if relevant.is_empty() {
-        return None;
-    }
-    let mut block = String::from(
-        "\n\n<proactive-context>\nPotentially relevant information retrieved based on your task:\n",
+    let collection_count = collections.len() as i64;
+
+    let span = info_span!(
+        "rag.context_discovery",
+        outcome = tracing::field::Empty,
+        score.threshold = SCORE_THRESHOLD,
+        max_results = MAX_RESULTS,
+        collection.count = collection_count,
+        query.word_count = tracing::field::Empty,
+        planner.used = tracing::field::Empty,
+        queries.count = tracing::field::Empty,
+        raw_count = tracing::field::Empty,
+        deduped_count = tracing::field::Empty,
+        filtered_count = tracing::field::Empty,
+        returned_count = tracing::field::Empty,
+        top_score = tracing::field::Empty,
+        reranker.used = tracing::field::Empty,
     );
-    for (i, r) in relevant.iter().enumerate() {
-        let snippet: String = r.content.chars().take(300).collect();
-        let ellipsis = if r.content.len() > 300 { "…" } else { "" };
-        block.push_str(&format!(
-            "\n[{}] score:{:.2} collection:{}{}\n{}{}\n",
-            i + 1,
-            r.score,
-            r.collection,
-            r.title
-                .as_deref()
-                .map(|t| format!(" title:{t}"))
-                .unwrap_or_default(),
-            snippet,
-            ellipsis,
-        ));
+
+    async move {
+        let Some(store) = rag_store else {
+            tracing::Span::current().record("outcome", "no_store");
+            return None;
+        };
+
+        let refs: Vec<&str> = collections.iter().map(|s| s.as_str()).collect();
+        let relevant =
+            context_discovery::discover_context(envelope_content, store, &refs, resolved).await;
+
+        if relevant.is_empty() {
+            tracing::Span::current().record("outcome", "empty_results");
+            return None;
+        }
+        tracing::Span::current().record("outcome", "returned");
+
+        let mut block = String::from(
+            "\n\n<proactive-context>\nPotentially relevant information retrieved based on your task:\n",
+        );
+        for (i, r) in relevant.iter().enumerate() {
+            let snippet: String = r.content.chars().take(300).collect();
+            let ellipsis = if r.content.len() > 300 { "…" } else { "" };
+            block.push_str(&format!(
+                "\n[{}] score:{:.2} collection:{}{}\n{}{}\n",
+                i + 1,
+                r.score,
+                r.collection,
+                r.title
+                    .as_deref()
+                    .map(|t| format!(" title:{t}"))
+                    .unwrap_or_default(),
+                snippet,
+                ellipsis,
+            ));
+        }
+        block.push_str("</proactive-context>");
+        Some(block)
     }
-    block.push_str("</proactive-context>");
-    Some(block)
+    .instrument(span)
+    .await
 }

@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use std::time::Duration;
 use tenex_rag::store::VectorStore;
 use tenex_rag::{RagStore, SearchResult};
+use tracing::{info_span, warn, Instrument, Span};
 
 const SCORE_THRESHOLD: f32 = 0.65;
 const MAX_RESULTS: usize = 5;
@@ -21,14 +22,23 @@ const LLM_TIMEOUT_SECS: u64 = 5;
 ///
 /// On any LLM failure the function falls back gracefully — never propagates
 /// errors to the caller.
+///
+/// Telemetry: records phase counts and model attrs onto the **current** span
+/// (the caller is expected to enter a `rag.context_discovery` span before
+/// calling). Emits child spans `rag.plan`, `rag.search`, `rag.rerank` per
+/// phase. The `outcome` attr is the caller's responsibility because the
+/// `no_store` outcome is decided before this function is invoked.
 pub async fn discover_context<S: VectorStore>(
     query: &str,
     rag_store: &RagStore<S>,
     collections: &[&str],
     resolved: &ResolvedModel,
 ) -> Vec<SearchResult> {
+    let parent = Span::current();
     let word_count = query.split_whitespace().count();
     let use_planner = word_count > WORD_COUNT_THRESHOLD;
+    parent.record("query.word_count", word_count as i64);
+    parent.record("planner.used", use_planner);
 
     // Step 1: Determine search queries (planner or raw query as fallback).
     let queries = if use_planner {
@@ -36,33 +46,48 @@ pub async fn discover_context<S: VectorStore>(
     } else {
         vec![query.to_string()]
     };
-
-    tracing::info!(
-        target: "rag.context_discovery.planner",
-        word_count,
-        use_planner,
-        query_count = queries.len(),
-        "context discovery planner decision"
-    );
+    parent.record("queries.count", queries.len() as i64);
 
     // Step 2: Search with each query and deduplicate by document ID.
     let mut by_id: HashMap<String, SearchResult> = HashMap::new();
-    for q in &queries {
-        match rag_store.search(q, collections, MAX_RESULTS * 2).await {
-            Ok(results) => {
-                for r in results {
-                    let existing_score = by_id.get(&r.id).map(|e| e.score).unwrap_or(0.0);
-                    if r.score > existing_score {
-                        by_id.insert(r.id.clone(), r);
+    let mut raw_count: usize = 0;
+    let search_span = info_span!(
+        "rag.search",
+        queries.count = queries.len() as i64,
+        results.raw = tracing::field::Empty,
+        results.deduped = tracing::field::Empty,
+    );
+    async {
+        for q in &queries {
+            match rag_store.search(q, collections, MAX_RESULTS * 2).await {
+                Ok(results) => {
+                    raw_count += results.len();
+                    for r in results {
+                        let existing_score = by_id.get(&r.id).map(|e| e.score).unwrap_or(0.0);
+                        if r.score > existing_score {
+                            by_id.insert(r.id.clone(), r);
+                        }
                     }
                 }
+                Err(e) => {
+                    warn!(
+                        error = %e,
+                        "rag.search query failed",
+                    );
+                }
             }
-            Err(e) => eprintln!("[tenex-agent] Context discovery search failed: {e}"),
         }
+        let s = Span::current();
+        s.record("results.raw", raw_count as i64);
+        s.record("results.deduped", by_id.len() as i64);
     }
+    .instrument(search_span)
+    .await;
+
+    parent.record("raw_count", raw_count as i64);
+    parent.record("deduped_count", by_id.len() as i64);
 
     // Step 3: Filter at threshold and sort by score descending.
-    let raw_count = by_id.len();
     let mut filtered: Vec<SearchResult> = by_id
         .into_values()
         .filter(|r| r.score >= SCORE_THRESHOLD)
@@ -72,24 +97,21 @@ pub async fn discover_context<S: VectorStore>(
             .partial_cmp(&a.score)
             .unwrap_or(std::cmp::Ordering::Equal)
     });
-    let filtered_count = filtered.len();
+    parent.record("filtered_count", filtered.len() as i64);
 
     // Step 4: Rerank with LLM if more than 3 results, then take top 5.
-    if filtered.len() > 3 {
+    let reranker_used = filtered.len() > 3;
+    parent.record("reranker.used", reranker_used);
+    if reranker_used {
         filtered = rerank_results(query, filtered, resolved).await;
     }
 
     filtered.truncate(MAX_RESULTS);
 
-    let top_score = filtered.first().map(|r| r.score);
-    tracing::info!(
-        target: "rag.context_discovery.retrieval",
-        raw_count,
-        filtered_count,
-        returned_count = filtered.len(),
-        top_score = top_score.map(|s| s as f64),
-        "context discovery retrieval outcome"
-    );
+    parent.record("returned_count", filtered.len() as i64);
+    if let Some(top) = filtered.first().map(|r| r.score) {
+        parent.record("top_score", top as f64);
+    }
 
     filtered
 }
@@ -103,23 +125,47 @@ async fn plan_queries(query: &str, resolved: &ResolvedModel) -> Vec<String> {
         Return ONLY a JSON array of strings, nothing else. Example: [\"query 1\", \"query 2\"]";
     let user = format!("User message:\n{query}");
 
-    let result = tokio::time::timeout(
-        Duration::from_secs(LLM_TIMEOUT_SECS),
-        call_llm(resolved, system, user),
-    )
-    .await;
+    // GenAI semconv attributes (`gen_ai.*`) on phase span — keeps domain name
+    // (`rag.plan`) for trace readability while remaining queryable like every
+    // other LLM call in the system.
+    let plan_span = info_span!(
+        "rag.plan",
+        gen_ai.system = resolved.provider.as_str(),
+        gen_ai.request.model = resolved.model.as_str(),
+        gen_ai.operation.name = "chat",
+        timeout.secs = LLM_TIMEOUT_SECS as i64,
+        fallback.reason = tracing::field::Empty,
+    );
+    async {
+        let result = tokio::time::timeout(
+            Duration::from_secs(LLM_TIMEOUT_SECS),
+            call_llm(resolved, system, user),
+        )
+        .await;
 
-    match result {
-        Ok(Ok(text)) => parse_query_array(&text).unwrap_or_else(|| vec![query.to_string()]),
-        Ok(Err(e)) => {
-            eprintln!("[tenex-agent] Context discovery planner failed: {e}");
-            vec![query.to_string()]
-        }
-        Err(_) => {
-            eprintln!("[tenex-agent] Context discovery planner timed out");
-            vec![query.to_string()]
+        match result {
+            Ok(Ok(text)) => match parse_query_array(&text) {
+                Some(qs) => qs,
+                None => {
+                    Span::current().record("fallback.reason", "parse_error");
+                    warn!(text = %text, "rag.plan: failed to parse query array");
+                    vec![query.to_string()]
+                }
+            },
+            Ok(Err(e)) => {
+                Span::current().record("fallback.reason", "error");
+                warn!(error = %e, "rag.plan: LLM call failed");
+                vec![query.to_string()]
+            }
+            Err(_) => {
+                Span::current().record("fallback.reason", "timeout");
+                warn!(timeout_secs = LLM_TIMEOUT_SECS, "rag.plan: LLM call timed out");
+                vec![query.to_string()]
+            }
         }
     }
+    .instrument(plan_span)
+    .await
 }
 
 /// Ask the LLM to score and reorder results by relevance (0-10).
@@ -147,35 +193,52 @@ async fn rerank_results(
 
     let user = format!("Query: {query}\n\nDocuments:\n{docs_text}");
 
-    let result = tokio::time::timeout(
-        Duration::from_secs(LLM_TIMEOUT_SECS),
-        call_llm(resolved, system, user),
-    )
-    .await;
+    let rerank_span = info_span!(
+        "rag.rerank",
+        gen_ai.system = resolved.provider.as_str(),
+        gen_ai.request.model = resolved.model.as_str(),
+        gen_ai.operation.name = "chat",
+        timeout.secs = LLM_TIMEOUT_SECS as i64,
+        documents.count = results.len() as i64,
+        fallback.reason = tracing::field::Empty,
+    );
+    async {
+        let result = tokio::time::timeout(
+            Duration::from_secs(LLM_TIMEOUT_SECS),
+            call_llm(resolved, system, user),
+        )
+        .await;
 
-    match result {
-        Ok(Ok(text)) => {
-            if let Some(scores) = parse_score_array(&text, results.len()) {
-                let mut indexed: Vec<(usize, SearchResult, u32)> = results
-                    .into_iter()
-                    .enumerate()
-                    .map(|(i, r)| (i, r, scores[i]))
-                    .collect();
-                indexed.sort_by_key(|(_, _, score)| Reverse(*score));
-                indexed.into_iter().map(|(_, r, _)| r).collect()
-            } else {
+        match result {
+            Ok(Ok(text)) => {
+                if let Some(scores) = parse_score_array(&text, results.len()) {
+                    let mut indexed: Vec<(usize, SearchResult, u32)> = results
+                        .into_iter()
+                        .enumerate()
+                        .map(|(i, r)| (i, r, scores[i]))
+                        .collect();
+                    indexed.sort_by_key(|(_, _, score)| Reverse(*score));
+                    indexed.into_iter().map(|(_, r, _)| r).collect()
+                } else {
+                    Span::current().record("fallback.reason", "parse_error");
+                    warn!(text = %text, "rag.rerank: failed to parse score array");
+                    results
+                }
+            }
+            Ok(Err(e)) => {
+                Span::current().record("fallback.reason", "error");
+                warn!(error = %e, "rag.rerank: LLM call failed");
+                results
+            }
+            Err(_) => {
+                Span::current().record("fallback.reason", "timeout");
+                warn!(timeout_secs = LLM_TIMEOUT_SECS, "rag.rerank: LLM call timed out");
                 results
             }
         }
-        Ok(Err(e)) => {
-            eprintln!("[tenex-agent] Context discovery reranker failed: {e}");
-            results
-        }
-        Err(_) => {
-            eprintln!("[tenex-agent] Context discovery reranker timed out");
-            results
-        }
     }
+    .instrument(rerank_span)
+    .await
 }
 
 /// Parse a JSON array of strings, stripping markdown fences if present.

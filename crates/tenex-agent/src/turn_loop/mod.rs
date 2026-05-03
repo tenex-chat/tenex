@@ -19,7 +19,6 @@ use tenex_protocol::{CompletionIntent, ConversationIntent, Intent, LlmUsage};
 use tenex_supervision::supervisor::PostCompletionOutcome;
 use tenex_supervision::types::{TodoEntry as SupTodoEntry, TodoStatus as SupTodoStatus};
 use tracing::{info_span, Instrument};
-use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 use crate::agent_bootstrap::AgentBootstrap;
 use crate::cassette_client::{RecordingClient, RecordingModel};
@@ -33,8 +32,10 @@ pub(crate) async fn run_turn_loop(boot: &mut AgentBootstrap) -> Result<()> {
     let mut current_message = std::mem::take(&mut boot.user_message);
     // extra history accumulated from re-engagement turns (user + assistant pairs).
     let mut re_engage_history: Vec<RigMessage> = Vec::new();
+    let mut iteration: u64 = 0;
 
     'agent_loop: loop {
+        iteration += 1;
         boot.suppress_response.store(false, Ordering::Release);
         let current_history: Vec<RigMessage> = {
             let mut h = boot.initial_history.clone();
@@ -82,29 +83,11 @@ pub(crate) async fn run_turn_loop(boot: &mut AgentBootstrap) -> Result<()> {
             }
         };
 
-        // `agent.slug`, `agent.pubkey`, `project.id` live on the OTel Resource
-        // (set in `main`), so every span emitted by this process carries them
-        // automatically. `conversation.id` arrives via baggage on the parent
-        // context and is materialised by `BaggageSpanProcessor`.
-        let turn_span = info_span!(
-            "tenex.agent.turn",
-            llm.provider = %boot.resolved.provider,
-            llm.model = %boot.resolved.model,
-            history.messages = boot.initial_history.len(),
-        );
-        // The deleted `tenex.agent.process` wrapper used to hold the parent
-        // context. Each turn now extracts the carrier from env vars set by
-        // the daemon's `tenex.runtime.dispatch` span at child spawn.
-        if let Ok(traceparent) = std::env::var("TRACEPARENT") {
-            let carrier = tenex_telemetry::TraceCarrier {
-                traceparent,
-                tracestate: std::env::var("TRACESTATE").ok(),
-                baggage: std::env::var("BAGGAGE").ok(),
-            };
-            if let Some(parent) = tenex_telemetry::extract(&carrier) {
-                let _ = turn_span.set_parent(parent);
-            }
-        }
+        // Per-iteration child of `tenex.agent.turn` (created in `main::run`).
+        // The outer turn span owns the model/history attrs and the env-extracted
+        // parent context; this iteration span scopes one supervisor cycle so
+        // re-engagements show up as siblings.
+        let iteration_span = info_span!("tenex.agent.iteration", iteration = iteration);
         let resolved = &boot.resolved;
         let cassette_recorder = &boot.cassette_recorder;
         let system_prompt = &boot.system_prompt;
@@ -157,11 +140,8 @@ pub(crate) async fn run_turn_loop(boot: &mut AgentBootstrap) -> Result<()> {
                     if let Some(url) = &resolved.base_url {
                         builder = builder.base_url(url);
                     }
-                    let client = RecordingClient::new(
-                        builder.build()?,
-                        cassette_recorder.clone(),
-                        "ollama",
-                    );
+                    let client =
+                        RecordingClient::new(builder.build()?, cassette_recorder.clone(), "ollama");
                     run_agent!(
                         client,
                         &resolved.model,
@@ -253,7 +233,7 @@ pub(crate) async fn run_turn_loop(boot: &mut AgentBootstrap) -> Result<()> {
                 }
             }
         }
-        .instrument(turn_span)
+        .instrument(iteration_span)
         .await?;
 
         if let Some(state) = &boot.runtime_state {
@@ -414,4 +394,3 @@ pub(crate) async fn run_turn_loop(boot: &mut AgentBootstrap) -> Result<()> {
 
     Ok(())
 }
-
