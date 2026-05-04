@@ -10,13 +10,15 @@
 //! Trust enforcement is relay-side via `authors`. Author-untrusted boot events
 //! never reach this process.
 
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, Result};
 use nostr_sdk::prelude::*;
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::net::UnixStream;
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 use tokio::time::Duration;
@@ -49,6 +51,7 @@ struct RuntimeCtx<'a> {
     startup_ts: Timestamp,
     debounce_handle: Arc<Mutex<Option<JoinHandle<()>>>>,
     base_dir: &'a Path,
+    backend_pubkey: PublicKey,
 }
 
 pub async fn run(
@@ -75,7 +78,8 @@ pub async fn run(
     }
 
     let mut boot_authors = discovery_authors.clone();
-    push_unique_pubkey(&mut boot_authors, backend_keys.public_key());
+    let backend_pubkey = backend_keys.public_key();
+    push_unique_pubkey(&mut boot_authors, backend_pubkey);
 
     let client = Client::builder()
         .signer(backend_keys)
@@ -135,6 +139,7 @@ pub async fn run(
                     startup_ts,
                     debounce_handle: Arc::clone(&debounce_handle),
                     base_dir: &base_dir,
+                    backend_pubkey,
                 };
                 handle_event(&ctx, &event).await;
             }
@@ -217,6 +222,8 @@ async fn handle_project(ctx: &RuntimeCtx<'_>, event: &Event) {
         let known = Arc::clone(&ctx.known);
         let boot_authors: Vec<PublicKey> = ctx.boot_authors.to_vec();
         let startup_ts = ctx.startup_ts;
+        let base_dir = ctx.base_dir.to_path_buf();
+        let backend_pubkey = ctx.backend_pubkey;
         *dh = Some(tokio::spawn(async move {
             tokio::time::sleep(Duration::from_millis(200)).await;
             let addresses: Vec<String> = {
@@ -229,7 +236,90 @@ async fn handle_project(ctx: &RuntimeCtx<'_>, event: &Event) {
             {
                 warn!(error = %e, "failed to update boot trigger subscription");
             }
+            if let Err(e) =
+                push_remote_pubkey_watch(&base_dir, &addresses, &backend_pubkey).await
+            {
+                warn!(error = %e, "failed to update remote-pubkey kind:0 watch");
+            }
         }));
+    }
+}
+
+/// Recompute the union of remote (non-locally-signed) member pubkeys across
+/// every known project and tell the identity daemon to maintain an always-on
+/// kind:0 subscription for that set.
+///
+/// Excludes this backend's own pubkey defensively — even though it shouldn't
+/// appear in a 31933 p-tag, lacking a local agent JSON would otherwise let it
+/// slip through the "remote" filter.
+async fn push_remote_pubkey_watch(
+    base_dir: &Path,
+    addresses: &[String],
+    backend_pubkey: &PublicKey,
+) -> Result<()> {
+    let backend_hex = backend_pubkey.to_hex();
+    let mut union: BTreeSet<String> = BTreeSet::new();
+    for address in addresses {
+        let parts: Vec<&str> = address.splitn(3, ':').collect();
+        if parts.len() != 3 {
+            continue;
+        }
+        let d_tag = parts[2];
+        let project = match tenex_project::Project::open(d_tag, base_dir) {
+            Ok(p) => p,
+            Err(e) => {
+                debug!(d_tag, error = %e, "skipping project for remote-pubkey watch");
+                continue;
+            }
+        };
+        match project.remote_member_pubkeys() {
+            Ok(pubkeys) => {
+                for pk in pubkeys {
+                    if pk != backend_hex {
+                        union.insert(pk);
+                    }
+                }
+            }
+            Err(e) => {
+                debug!(d_tag, error = %e, "failed to enumerate remote members");
+            }
+        }
+    }
+
+    let pubkeys: Vec<String> = union.into_iter().collect();
+    send_watch_authors(base_dir, &pubkeys).await
+}
+
+/// Send `WATCH_AUTHORS [<pk>...]` over the identity daemon Unix socket. A
+/// missing socket is treated as "identity daemon not up yet" and silently
+/// skipped — the next debounce will retry.
+async fn send_watch_authors(base_dir: &Path, pubkeys: &[String]) -> Result<()> {
+    let socket = base_dir.join(tenex_identity::paths::IDENTITY_SOCKET_FILENAME);
+    if !socket.exists() {
+        debug!(path = %socket.display(), "identity socket absent; skipping WATCH_AUTHORS");
+        return Ok(());
+    }
+
+    let stream = UnixStream::connect(&socket).await?;
+    let (reader_half, mut writer_half) = stream.into_split();
+
+    let line = if pubkeys.is_empty() {
+        "WATCH_AUTHORS\n".to_string()
+    } else {
+        format!("WATCH_AUTHORS {}\n", pubkeys.join(" "))
+    };
+    writer_half.write_all(line.as_bytes()).await?;
+    writer_half.flush().await?;
+
+    let mut reader = BufReader::new(reader_half);
+    let mut response = String::new();
+    reader.read_line(&mut response).await?;
+    let trimmed = response.trim();
+    if trimmed.starts_with("OK") {
+        debug!(count = pubkeys.len(), "identity WATCH_AUTHORS updated");
+        Ok(())
+    } else {
+        Err(anyhow!("identity daemon rejected WATCH_AUTHORS: {trimmed}"))
     }
 }
 

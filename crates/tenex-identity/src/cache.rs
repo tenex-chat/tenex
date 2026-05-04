@@ -128,6 +128,59 @@ impl IdentityCache {
         Ok(())
     }
 
+    /// Like [`Self::upsert`], but only writes when `view.created_at` is newer
+    /// than (or equal to) the cached row's `created_at`. Used by the always-on
+    /// kind:0 consumer, where multiple relays may deliver out-of-order copies
+    /// of the same author's metadata and an unconditional upsert would let an
+    /// older event clobber a fresher one.
+    ///
+    /// A fresh row is always inserted on first sight (no existing row → no
+    /// ordering constraint). `fetched_at` is refreshed regardless so cache TTL
+    /// reflects the most recent observation, even when content is unchanged.
+    pub fn upsert_if_newer(&self, view: &IdentityView) -> Result<()> {
+        let conn = self.conn.lock().expect("identity cache mutex poisoned");
+        conn.execute(
+            "INSERT INTO identities
+                (pubkey, display_name, name, nip05, picture, banner,
+                 about, lud16, slug, use_criteria, backend_name, event_id, created_at, fetched_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+             ON CONFLICT(pubkey) DO UPDATE SET
+                display_name = excluded.display_name,
+                name         = excluded.name,
+                nip05        = excluded.nip05,
+                picture      = excluded.picture,
+                banner       = excluded.banner,
+                about        = excluded.about,
+                lud16        = excluded.lud16,
+                slug         = excluded.slug,
+                use_criteria = excluded.use_criteria,
+                backend_name = excluded.backend_name,
+                event_id     = excluded.event_id,
+                created_at   = excluded.created_at,
+                fetched_at   = excluded.fetched_at
+             WHERE excluded.created_at IS NULL
+                OR identities.created_at IS NULL
+                OR excluded.created_at >= identities.created_at",
+            params![
+                view.pubkey,
+                view.display_name,
+                view.name,
+                view.nip05,
+                view.picture,
+                view.banner,
+                view.about,
+                view.lud16,
+                view.slug,
+                view.use_criteria,
+                view.backend_name,
+                view.event_id,
+                view.created_at,
+                view.fetched_at,
+            ],
+        )?;
+        Ok(())
+    }
+
     /// Returns the total number of cached rows.
     pub fn count(&self) -> Result<i64> {
         let conn = self.conn.lock().expect("identity cache mutex poisoned");

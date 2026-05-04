@@ -31,6 +31,34 @@ pub struct IdentityView {
 }
 
 impl IdentityView {
+    /// Build an [`IdentityView`] from a Nostr kind:0 [`nostr::Event`].
+    ///
+    /// `fetched_at` is the Unix-second timestamp at which the event was
+    /// received and is stamped onto the row so the cache TTL keys off arrival
+    /// time, not the event's own `created_at`.
+    pub fn from_event(event: &nostr::Event, fetched_at: i64) -> Self {
+        let metadata: nostr::Metadata = serde_json::from_str(&event.content).unwrap_or_default();
+        let slug = crate::tags::first_tag_value(event, "slug");
+        let use_criteria = crate::tags::first_tag_value(event, "use-criteria");
+        let backend_name = crate::tags::first_tag_value(event, "backend");
+        Self {
+            pubkey: event.pubkey.to_hex(),
+            display_name: metadata.display_name,
+            name: metadata.name,
+            nip05: metadata.nip05,
+            picture: metadata.picture,
+            banner: metadata.banner,
+            about: metadata.about,
+            lud16: metadata.lud16,
+            slug,
+            use_criteria,
+            backend_name,
+            event_id: Some(event.id.to_hex()),
+            created_at: Some(event.created_at.as_secs() as i64),
+            fetched_at,
+        }
+    }
+
     /// Best display name: display_name → name → shortened pubkey (first 8 hex chars).
     pub fn best_name(&self) -> &str {
         if let Some(dn) = &self.display_name {

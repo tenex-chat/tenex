@@ -117,6 +117,31 @@ impl Project {
         Ok(agents)
     }
 
+    /// Members listed in the project's 31933 whose agent JSON projection is
+    /// either absent or carries no `signer_ref` — i.e. agents this backend
+    /// cannot sign for. These are the pubkeys we depend on remote backends to
+    /// publish kind:0 metadata for, so callers that maintain an always-on
+    /// kind:0 subscription should target exactly this set.
+    ///
+    /// The result is sorted and deduplicated.
+    pub fn remote_member_pubkeys(&self) -> Result<Vec<String>> {
+        let pubkeys = self.member_pubkeys()?;
+        let mut out = Vec::with_capacity(pubkeys.len());
+        for pk in pubkeys {
+            let path = paths::agent_file(&self.base_dir, &pk);
+            let is_local = match try_read_agent_file(&path, &pk) {
+                Ok(agent) => agent.signer_ref.is_some(),
+                Err(_) => false,
+            };
+            if !is_local {
+                out.push(pk);
+            }
+        }
+        out.sort();
+        out.dedup();
+        Ok(out)
+    }
+
     pub fn project_agents(&self) -> Result<Vec<ProjectAgent>> {
         let pubkeys = self.member_pubkeys()?;
         let pm_pubkey = pubkeys.first().cloned();

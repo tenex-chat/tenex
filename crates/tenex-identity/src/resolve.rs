@@ -129,27 +129,7 @@ pub async fn batch_resolve(
     }
 
     for (hex_pk, event) in by_author {
-        let metadata: nostr::Metadata = serde_json::from_str(&event.content).unwrap_or_default();
-        let slug = crate::tags::first_tag_value(&event, "slug");
-        let use_criteria = crate::tags::first_tag_value(&event, "use-criteria");
-        let backend_name = crate::tags::first_tag_value(&event, "backend");
-
-        let view = IdentityView {
-            pubkey: hex_pk.clone(),
-            display_name: metadata.display_name,
-            name: metadata.name,
-            nip05: metadata.nip05,
-            picture: metadata.picture,
-            banner: metadata.banner,
-            about: metadata.about,
-            lud16: metadata.lud16,
-            slug,
-            use_criteria,
-            backend_name,
-            event_id: Some(event.id.to_hex()),
-            created_at: Some(event.created_at.as_secs() as i64),
-            fetched_at,
-        };
+        let view = IdentityView::from_event(&event, fetched_at);
 
         if let Err(e) = cache.upsert(&view) {
             tracing::warn!(pubkey = %hex_pk, error = %e, "batch_resolve: upsert failed");
