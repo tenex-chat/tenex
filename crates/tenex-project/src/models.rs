@@ -42,6 +42,11 @@ pub struct Agent {
     /// different backend — we may have its metadata but not its key, and any
     /// inter-agent coordination must assume disjoint filesystems.
     pub is_local: bool,
+    /// Human-readable name of the backend that manages this agent, sourced
+    /// from the `["backend", "<name>"]` tag on the agent's kind:0 event.
+    /// `None` for locally-managed agents or when the remote hasn't published
+    /// a backend name.
+    pub backend_name: Option<String>,
 }
 
 /// Project-scoped membership row.

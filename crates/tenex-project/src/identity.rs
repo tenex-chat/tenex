@@ -14,6 +14,7 @@ pub(crate) struct RemoteAgentView {
     pub(crate) display_name: Option<String>,
     pub(crate) slug: Option<String>,
     pub(crate) use_criteria: Option<String>,
+    pub(crate) backend_name: Option<String>,
 }
 
 /// Per-pubkey lookup against the host-wide identity service.
@@ -69,6 +70,7 @@ impl UnavailableAgentNames for IdentityServiceAgentNames {
             display_name,
             slug: trim_nonempty(view.slug),
             use_criteria: trim_nonempty(view.use_criteria),
+            backend_name: trim_nonempty(view.backend_name),
         }
     }
 }

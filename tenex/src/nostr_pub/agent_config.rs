@@ -318,6 +318,7 @@ mod tests {
             telegram_config_json: None,
             mcp_servers_json: Some(mcps.to_string()),
             is_local: true,
+            backend_name: None,
         };
         (agent, keys)
     }
@@ -534,6 +535,7 @@ mod tests {
             telegram_config_json: None,
             mcp_servers_json: None,
             is_local: true,
+            backend_name: None,
         };
         // Sanity: ensure they really differ.
         assert_ne!(agent.pubkey, other.public_key().to_hex());

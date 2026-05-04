@@ -73,6 +73,7 @@ fn expected_agent() -> Agent {
         telegram_config_json: None,
         mcp_servers_json: None,
         is_local: true,
+        backend_name: None,
     }
 }
 

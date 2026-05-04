@@ -50,6 +50,7 @@ fn agent_with_skills(slug: &str, pubkey: &str, skills: &[&str], mcps: &[&str]) -
         telegram_config_json: None,
         mcp_servers_json,
         is_local: true,
+        backend_name: None,
     }
 }
 

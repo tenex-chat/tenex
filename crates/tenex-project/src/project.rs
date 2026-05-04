@@ -277,6 +277,7 @@ fn try_read_agent_file(
         telegram_config_json: raw.telegram_config_json,
         mcp_servers_json: raw.mcp_servers_json,
         is_local,
+        backend_name: None,
     })
 }
 
@@ -302,5 +303,6 @@ fn remote_agent_stub(pubkey: &str, names: &dyn UnavailableAgentNames) -> Agent {
         telegram_config_json: None,
         mcp_servers_json: None,
         is_local: false,
+        backend_name: view.backend_name,
     }
 }

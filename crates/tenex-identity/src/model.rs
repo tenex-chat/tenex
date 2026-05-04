@@ -19,6 +19,10 @@ pub struct IdentityView {
     /// (`["use-criteria", "<text>"]`). Tells callers when to delegate to
     /// this agent.
     pub use_criteria: Option<String>,
+    /// TENEX-agent extension: the human-readable backend name from the
+    /// `["backend", "<name>"]` event tag. Identifies which backend instance
+    /// manages this agent so peers can label it in their agent lists.
+    pub backend_name: Option<String>,
     pub event_id: Option<String>,
     /// Unix seconds from the kind:0 event's created_at field.
     pub created_at: Option<i64>,
