@@ -1,373 +1,353 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"log"
-	"os"
-	"path/filepath"
-	"strings"
 	"sync"
-	"time"
 
 	"github.com/fiatjaf/eventstore"
 	"github.com/fiatjaf/khatru"
 	"github.com/nbd-wtf/go-nostr"
 )
 
-// deferredSub records a subscription that was deferred (LimitZero) because the
-// client was not yet whitelisted. Stored so we can backfill when they are later
-// added to the whitelist.
-type deferredSub struct {
+// activeSub records an open subscription for a non-backend authenticated
+// viewer. It exists so we can backfill the subscription if the viewer's
+// access expands later — either by being added to the backend whitelist via
+// kind 14199, or by being added as a member to a private project via 31933.
+type activeSub struct {
 	ws     *khatru.WebSocket
-	id     string
+	subID  string
 	filter nostr.Filter
-	ctx    context.Context // reqCtx — canceled on CLOSE or disconnect
+	ctx    context.Context // canceled on CLOSE or disconnect
 }
 
-// ACL manages a pubkey whitelist for read access control.
-// Admin pubkeys (from config) are always whitelisted. Publishing a kind 14199
-// event with p-tags dynamically whitelists those tagged pubkeys. Whitelisting
-// is transitive: if A whitelists B, and B has a 14199 tagging C, C also gets
-// whitelisted.
+// ACL combines two layers of access control:
+//
+//   - A backend-tier whitelist of pubkeys derived from kind 14199 events
+//     (TENEX backend agents / operators). Whitelisted pubkeys read everything.
+//   - A per-project registry derived from kind 31933 events that gates
+//     visibility of private projects and events a-tagging them. Non-whitelisted
+//     authenticated viewers are filtered against this registry at delivery time.
+//
+// Open non-backend subscriptions are tracked so they can be backfilled with
+// previously-hidden events when the viewer's access expands.
 type ACL struct {
-	adminPubkeys map[string]bool
-	whitelist    map[string]bool
-	fileAllow    map[string]bool
-	deferred     map[string][]deferredSub // pubkey -> pending subs awaiting whitelist
-	mu           sync.RWMutex
+	whitelist map[string]bool
+	mu        sync.RWMutex
 
-	storage eventstore.Store
+	storage  eventstore.Store
+	registry *ProjectRegistry
 
-	requireAuth       bool
-	whitelistFilePath string
+	subsMu     sync.Mutex
+	activeSubs map[string][]*activeSub
 }
 
-func NewACL(adminPubkeys []string, storage eventstore.Store, requireAuth bool) *ACL {
-	admins := make(map[string]bool, len(adminPubkeys))
-	for _, pk := range adminPubkeys {
-		admins[pk] = true
-	}
-
+func NewACL(storage eventstore.Store) *ACL {
 	acl := &ACL{
-		adminPubkeys:      admins,
-		whitelist:         make(map[string]bool),
-		fileAllow:         make(map[string]bool),
-		deferred:          make(map[string][]deferredSub),
-		storage:           storage,
-		requireAuth:       requireAuth,
-		whitelistFilePath: defaultDaemonWhitelistPath(),
+		whitelist:  make(map[string]bool),
+		storage:    storage,
+		registry:   NewProjectRegistry(),
+		activeSubs: make(map[string][]*activeSub),
 	}
 
-	acl.loadWhitelistFile()
-	acl.buildWhitelistFromStorage()
+	acl.buildFromStorage()
 	return acl
 }
 
-func (a *ACL) IsWhitelisted(pubkey string) bool {
+// Registry exposes the project registry for filter wrappers.
+func (a *ACL) Registry() *ProjectRegistry { return a.registry }
+
+// IsBackendWhitelisted reports whether pubkey has unrestricted read access.
+func (a *ACL) IsBackendWhitelisted(pubkey string) bool {
 	if pubkey == "" {
 		return false
 	}
 	a.mu.RLock()
 	defer a.mu.RUnlock()
-	return a.adminPubkeys[pubkey] || a.whitelist[pubkey] || a.fileAllow[pubkey]
+	return a.whitelist[pubkey]
 }
 
-func defaultDaemonWhitelistPath() string {
-	if base := os.Getenv("TENEX_BASE_DIR"); base != "" {
-		return filepath.Join(base, "daemon", "whitelist.txt")
-	}
-	return expandPath("~/.tenex/daemon/whitelist.txt")
-}
-
-// StartWhitelistFileSync polls daemon/whitelist.txt so newly added pubkeys
-// become effective without restarting the relay.
-func (a *ACL) StartWhitelistFileSync(ctx context.Context) {
-	// Initial refresh on startup.
-	a.loadWhitelistFile()
-
-	ticker := time.NewTicker(2 * time.Second)
-	go func() {
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				a.loadWhitelistFile()
-			}
-		}
-	}()
-}
-
-func (a *ACL) loadWhitelistFile() {
-	path := a.whitelistFilePath
-	if path == "" {
-		return
-	}
-
-	fileAllow := make(map[string]bool)
-
-	file, err := os.Open(path)
-	if err != nil {
-		// Missing file means no daemon whitelist entries.
-		if !os.IsNotExist(err) {
-			log.Printf("[acl] failed to open whitelist file %s: %v", path, err)
-		}
-	} else {
-		defer file.Close()
-
-		scanner := bufio.NewScanner(file)
-		lineNo := 0
-		for scanner.Scan() {
-			lineNo++
-			line := strings.TrimSpace(scanner.Text())
-			if idx := strings.Index(line, "#"); idx >= 0 {
-				line = strings.TrimSpace(line[:idx])
-			}
-			if line == "" {
-				continue
-			}
-			if !nostr.IsValidPublicKey(line) {
-				log.Printf("[acl] ignoring invalid pubkey in %s:%d", path, lineNo)
-				continue
-			}
-			fileAllow[line] = true
-		}
-		if err := scanner.Err(); err != nil {
-			log.Printf("[acl] failed reading whitelist file %s: %v", path, err)
-		}
-	}
-
-	a.mu.Lock()
-	prev := a.fileAllow
-	changed := !samePubkeySet(prev, fileAllow)
-	a.fileAllow = fileAllow
-	a.mu.Unlock()
-
-	if changed {
-		log.Printf("[acl] loaded %d pubkey(s) from whitelist file %s", len(fileAllow), path)
-	}
-}
-
-func samePubkeySet(a, b map[string]bool) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for k := range a {
-		if !b[k] {
-			return false
-		}
-	}
-	return true
-}
-
-// buildWhitelistFromStorage queries all stored 14199 events and whitelists
-// every p-tagged pubkey.  A 14199 is self-authorizing: the author signed it,
-// so we trust their declaration of backends/agents unconditionally.
-func (a *ACL) buildWhitelistFromStorage() {
-	ch, err := a.storage.QueryEvents(context.Background(), nostr.Filter{
+// buildFromStorage seeds the backend whitelist from stored kind 14199 events
+// and the project registry from stored kind 31933 events.
+func (a *ACL) buildFromStorage() {
+	ch14199, err := a.storage.QueryEvents(context.Background(), nostr.Filter{
 		Kinds: []int{14199},
 	})
 	if err != nil {
 		log.Printf("[acl] failed to query stored 14199 events: %v", err)
-		return
-	}
-
-	for evt := range ch {
-		// Whitelist the 14199 author themselves
-		if !a.adminPubkeys[evt.PubKey] && !a.whitelist[evt.PubKey] {
-			a.whitelist[evt.PubKey] = true
-			log.Printf("[acl] whitelisted author %s... (published 14199)", truncatePubkey(evt.PubKey))
-		}
-
-		for _, tag := range evt.Tags {
-			if len(tag) >= 2 && tag[0] == "p" {
-				pk := tag[1]
-				if !a.adminPubkeys[pk] && !a.whitelist[pk] {
-					a.whitelist[pk] = true
-					log.Printf("[acl] whitelisted %s... (from stored 14199 by %s...)", truncatePubkey(pk), truncatePubkey(evt.PubKey))
+	} else {
+		for evt := range ch14199 {
+			for _, tag := range evt.Tags {
+				if len(tag) >= 2 && tag[0] == "p" {
+					pk := tag[1]
+					if !a.whitelist[pk] {
+						a.whitelist[pk] = true
+						log.Printf("[acl] whitelisted %s... (from stored 14199 by %s...)", truncatePubkey(pk), truncatePubkey(evt.PubKey))
+					}
 				}
 			}
 		}
 	}
 
-	log.Printf("[acl] built whitelist: %d admin(s), %d dynamic entries", len(a.adminPubkeys), len(a.whitelist))
+	ch31933, err := a.storage.QueryEvents(context.Background(), nostr.Filter{
+		Kinds: []int{projectKind},
+	})
+	if err != nil {
+		log.Printf("[acl] failed to query stored 31933 events: %v", err)
+	} else {
+		count := 0
+		for evt := range ch31933 {
+			a.registry.Upsert(evt)
+			count++
+		}
+		log.Printf("[acl] loaded %d project(s) into registry", count)
+	}
+
+	log.Printf("[acl] backend whitelist: %d entries", len(a.whitelist))
 }
 
-// ProcessWhitelistEvent handles a kind 14199 event.  A 14199 is
-// self-authorizing: any authenticated user can publish one to declare
-// their backends/agents.  The author and all p-tagged pubkeys are
-// whitelisted unconditionally.
+// ProcessWhitelistEvent handles a kind 14199 event: every p-tagged pubkey is
+// added to the backend whitelist, and any of their open subscriptions are
+// backfilled with previously-hidden events.
 func (a *ACL) ProcessWhitelistEvent(event *nostr.Event) {
 	if event.Kind != 14199 {
 		return
 	}
 
 	a.mu.Lock()
-
 	var newlyWhitelisted []string
-
-	if !a.adminPubkeys[event.PubKey] && !a.whitelist[event.PubKey] {
-		a.whitelist[event.PubKey] = true
-		newlyWhitelisted = append(newlyWhitelisted, event.PubKey)
-		log.Printf("[acl] whitelisted author %s... (published 14199)", truncatePubkey(event.PubKey))
-	}
-
 	for _, tag := range event.Tags {
 		if len(tag) >= 2 && tag[0] == "p" {
 			pk := tag[1]
-			if !a.adminPubkeys[pk] && !a.whitelist[pk] {
+			if !a.whitelist[pk] {
 				a.whitelist[pk] = true
 				newlyWhitelisted = append(newlyWhitelisted, pk)
 				log.Printf("[acl] whitelisted %s... (14199 from %s...)", truncatePubkey(pk), truncatePubkey(event.PubKey))
 			}
 		}
 	}
-
-	// Pull deferred subs for newly whitelisted pubkeys while still under lock.
-	toBackfill := make(map[string][]deferredSub, len(newlyWhitelisted))
-	for _, pk := range newlyWhitelisted {
-		if subs := a.deferred[pk]; len(subs) > 0 {
-			toBackfill[pk] = subs
-			delete(a.deferred, pk)
-		}
-	}
-
 	a.mu.Unlock()
 
-	for pk, subs := range toBackfill {
-		go a.backfillSubs(pk, subs)
+	for _, pk := range newlyWhitelisted {
+		go a.backfillBackendGrant(pk)
 	}
 }
 
-func (a *ACL) backfillSubs(pubkey string, subs []deferredSub) {
-	for _, sub := range subs {
-		if sub.ctx.Err() != nil {
-			continue // subscription already closed or connection dropped
-		}
-		ch, err := a.storage.QueryEvents(sub.ctx, sub.filter)
-		if err != nil {
-			log.Printf("[acl] backfill query failed for %s...: %v", truncatePubkey(pubkey), err)
-			continue
-		}
-		count := 0
-		for event := range ch {
-			if sub.ctx.Err() != nil {
-				go func() {
-					for range ch {
-					}
-				}()
-				break
-			}
-			sub.ws.WriteJSON(nostr.EventEnvelope{SubscriptionID: &sub.id, Event: *event})
-			count++
-		}
-		log.Printf("[acl] backfilled %d event(s) to %s... (sub %s)", count, truncatePubkey(pubkey), sub.id)
+// PreventBroadcastHook gates live event delivery. Backend-whitelisted viewers
+// receive everything; everyone else is filtered through the project registry.
+func (a *ACL) PreventBroadcastHook(ws *khatru.WebSocket, event *nostr.Event) bool {
+	viewer := ws.AuthedPublicKey
+	if a.IsBackendWhitelisted(viewer) {
+		return false
+	}
+	return !a.registry.CanDeliver(viewer, event)
+}
+
+// processProjectEvent records a kind 31933 event in the project registry and
+// backfills open subscriptions for newly-granted members.
+func (a *ACL) processProjectEvent(event *nostr.Event) {
+	prev := a.registry.Upsert(event)
+	if event == nil || event.Kind != projectKind {
+		return
+	}
+
+	current := a.registry.Get(projectAddress(event.PubKey, projectDTag(event)))
+	if current == nil {
+		return
+	}
+
+	newMembers := diffNewMembers(prev, current)
+	for _, pk := range newMembers {
+		go a.backfillProjectGrant(pk)
 	}
 }
 
-// Public readable kinds are available to authenticated non-whitelisted users.
-// These are TENEX metadata streams that should be broadly visible.
-func isPublicReadableKind(kind int) bool {
-	return kind == 4199 || kind == 14199 || kind == 34199
+// OnEventSavedHook routes kind 14199 (backend whitelist) and kind 31933
+// (project registry) updates to their respective handlers.
+func (a *ACL) OnEventSavedHook(ctx context.Context, event *nostr.Event) {
+	switch event.Kind {
+	case 14199:
+		a.ProcessWhitelistEvent(event)
+	case projectKind:
+		a.processProjectEvent(event)
+	}
 }
 
-// isEphemeral returns true for kinds 20000-29999
-func isEphemeral(kind int) bool {
-	return kind >= 20000 && kind <= 29999
-}
-
-func isNonRestrictedKind(kind int) bool {
-	return isEphemeral(kind) || isPublicReadableKind(kind)
-}
-
-// OverwriteFilterHook defers subscriptions for authenticated but non-whitelisted
-// pubkeys by setting LimitZero, which skips stored event queries but still
-// registers the listener for live events.
-//
-// Exception: filters that request only public-readable kinds (4199, 34199) or
-// ephemeral kinds are allowed for non-whitelisted users.
-//
-// Unauthenticated users are left unmodified so RejectFilter can send
-// auth-required.
+// OverwriteFilterHook records the open subscription so it can be backfilled
+// later if the viewer is granted backend access (14199) or added to a private
+// project (31933). Backend-whitelisted viewers and unauthenticated requests
+// are not tracked.
 func (a *ACL) OverwriteFilterHook(ctx context.Context, filter *nostr.Filter) {
-	if !a.requireAuth {
-		return
-	}
-
-	// Filters that request only non-restricted kinds bypass ACL.
-	if len(filter.Kinds) > 0 {
-		allNonRestricted := true
-		for _, k := range filter.Kinds {
-			if !isNonRestrictedKind(k) {
-				allNonRestricted = false
-				break
-			}
-		}
-		if allNonRestricted {
-			return
-		}
-	}
-
 	pubkey := khatru.GetAuthed(ctx)
-
-	// Not authenticated: don't set LimitZero, let RejectFilter handle auth-required
-	if pubkey == "" {
+	if pubkey == "" || a.IsBackendWhitelisted(pubkey) {
 		return
 	}
 
-	// Authenticated and whitelisted: allow normally
-	if a.IsWhitelisted(pubkey) {
-		return
-	}
-
-	// Authenticated but not whitelisted: record the sub for later backfill, then defer.
 	ws := khatru.GetConnection(ctx)
 	subID := khatru.GetSubscriptionID(ctx)
-	filterCopy := *filter // copy before LimitZero is set
-
-	a.mu.Lock()
-	a.deferred[pubkey] = append(a.deferred[pubkey], deferredSub{
-		ws:     ws,
-		id:     subID,
-		filter: filterCopy,
-		ctx:    ctx,
-	})
-	a.mu.Unlock()
-
-	filter.LimitZero = true
-	log.Printf("[acl] deferred subscription for non-whitelisted pubkey %s...", truncatePubkey(pubkey))
-}
-
-// PreventBroadcastHook blocks live event delivery to non-whitelisted
-// subscribers.
-//
-// Exceptions for non-whitelisted users:
-// - Ephemeral events (20000-29999)
-// - Public readable events (4199, 34199)
-func (a *ACL) PreventBroadcastHook(ws *khatru.WebSocket, event *nostr.Event) bool {
-	if !a.requireAuth {
-		return false
-	}
-
-	if isNonRestrictedKind(event.Kind) {
-		return false
-	}
-
-	if a.IsWhitelisted(ws.AuthedPublicKey) {
-		return false
-	}
-
-	return true
-}
-
-// OnEventSavedHook processes kind 14199 events to update the whitelist.
-func (a *ACL) OnEventSavedHook(ctx context.Context, event *nostr.Event) {
-	if event.Kind != 14199 {
+	if ws == nil || subID == "" {
 		return
 	}
-	a.ProcessWhitelistEvent(event)
+
+	sub := &activeSub{
+		ws:     ws,
+		subID:  subID,
+		filter: *filter,
+		ctx:    ctx,
+	}
+	a.registerSub(pubkey, sub)
+}
+
+func (a *ACL) registerSub(viewer string, sub *activeSub) {
+	a.subsMu.Lock()
+	a.activeSubs[viewer] = append(a.activeSubs[viewer], sub)
+	a.subsMu.Unlock()
+
+	go func() {
+		<-sub.ctx.Done()
+		a.unregisterSub(viewer, sub)
+	}()
+}
+
+func (a *ACL) unregisterSub(viewer string, sub *activeSub) {
+	a.subsMu.Lock()
+	defer a.subsMu.Unlock()
+	subs := a.activeSubs[viewer]
+	for i, s := range subs {
+		if s == sub {
+			a.activeSubs[viewer] = append(subs[:i], subs[i+1:]...)
+			break
+		}
+	}
+	if len(a.activeSubs[viewer]) == 0 {
+		delete(a.activeSubs, viewer)
+	}
+}
+
+func (a *ACL) snapshotSubs(viewer string) []*activeSub {
+	a.subsMu.Lock()
+	defer a.subsMu.Unlock()
+	subs := a.activeSubs[viewer]
+	out := make([]*activeSub, len(subs))
+	copy(out, subs)
+	return out
+}
+
+// backfillBackendGrant ships every event matching each open subscription's
+// filter, since the viewer is now backend-tier and may read everything.
+func (a *ACL) backfillBackendGrant(viewer string) {
+	subs := a.snapshotSubs(viewer)
+	for _, sub := range subs {
+		a.replayUnfiltered(sub, viewer)
+	}
+}
+
+// backfillProjectGrant ships matching events to the viewer's open
+// subscriptions, applying the (now more permissive) project ACL. The client
+// may receive duplicates of events it already saw; events are idempotent by id.
+func (a *ACL) backfillProjectGrant(viewer string) {
+	subs := a.snapshotSubs(viewer)
+	for _, sub := range subs {
+		a.replayWithACL(sub, viewer)
+	}
+}
+
+func (a *ACL) replayUnfiltered(sub *activeSub, viewer string) {
+	if sub.ctx.Err() != nil {
+		return
+	}
+	ch, err := a.storage.QueryEvents(sub.ctx, sub.filter)
+	if err != nil {
+		log.Printf("[acl] backfill query failed for %s...: %v", truncatePubkey(viewer), err)
+		return
+	}
+	count := 0
+	for evt := range ch {
+		if sub.ctx.Err() != nil {
+			drain(ch)
+			break
+		}
+		sub.ws.WriteJSON(nostr.EventEnvelope{SubscriptionID: &sub.subID, Event: *evt})
+		count++
+	}
+	log.Printf("[acl] backend backfill: sent %d event(s) to %s... (sub %s)", count, truncatePubkey(viewer), sub.subID)
+}
+
+func (a *ACL) replayWithACL(sub *activeSub, viewer string) {
+	if sub.ctx.Err() != nil {
+		return
+	}
+	ch, err := a.storage.QueryEvents(sub.ctx, sub.filter)
+	if err != nil {
+		log.Printf("[acl] project backfill query failed for %s...: %v", truncatePubkey(viewer), err)
+		return
+	}
+	count := 0
+	for evt := range ch {
+		if sub.ctx.Err() != nil {
+			drain(ch)
+			break
+		}
+		if !a.registry.CanDeliver(viewer, evt) {
+			continue
+		}
+		sub.ws.WriteJSON(nostr.EventEnvelope{SubscriptionID: &sub.subID, Event: *evt})
+		count++
+	}
+	log.Printf("[acl] project backfill: sent %d event(s) to %s... (sub %s)", count, truncatePubkey(viewer), sub.subID)
+}
+
+func drain(ch chan *nostr.Event) {
+	go func() {
+		for range ch {
+		}
+	}()
+}
+
+// projectDTag returns the d-tag of a kind 31933 event, or "" if absent.
+func projectDTag(event *nostr.Event) string {
+	for _, tag := range event.Tags {
+		if len(tag) >= 2 && tag[0] == "d" {
+			return tag[1]
+		}
+	}
+	return ""
+}
+
+// diffNewMembers returns members present in current but not in prev. The author
+// is treated as an implicit member; transitions in authorship are also
+// reported. Empty pubkeys are skipped.
+func diffNewMembers(prev, current *ProjectACL) []string {
+	if current == nil {
+		return nil
+	}
+	prevSet := map[string]struct{}{}
+	if prev != nil {
+		if prev.AuthorPubkey != "" {
+			prevSet[prev.AuthorPubkey] = struct{}{}
+		}
+		for pk := range prev.Members {
+			prevSet[pk] = struct{}{}
+		}
+	}
+
+	var out []string
+	add := func(pk string) {
+		if pk == "" {
+			return
+		}
+		if _, seen := prevSet[pk]; seen {
+			return
+		}
+		prevSet[pk] = struct{}{} // dedupe within current
+		out = append(out, pk)
+	}
+
+	add(current.AuthorPubkey)
+	for pk := range current.Members {
+		add(pk)
+	}
+	return out
 }
 
 func truncatePubkey(s string) string {

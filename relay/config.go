@@ -10,14 +10,12 @@ import (
 
 // Config represents the relay configuration
 type Config struct {
-	Port         int          `json:"port"`
-	BindAddress  string       `json:"bind_address"`
-	DataDir      string       `json:"data_dir"`
-	RequireAuth  bool         `json:"require_auth"`
-	NIP11        NIP11Config  `json:"nip11"`
-	Limits       LimitsConfig `json:"limits"`
-	Sync         SyncConfig   `json:"sync"`
-	AdminPubkeys []string     `json:"admin_pubkeys"`
+	Port        int          `json:"port"`
+	BindAddress string       `json:"bind_address"`
+	DataDir     string       `json:"data_dir"`
+	NIP11       NIP11Config  `json:"nip11"`
+	Limits      LimitsConfig `json:"limits"`
+	Sync        SyncConfig   `json:"sync"`
 }
 
 // NIP11Config contains all NIP-11 relay information document fields
@@ -62,7 +60,6 @@ func DefaultConfig() *Config {
 		Port:        7777,
 		BindAddress: "127.0.0.1",
 		DataDir:     defaultDataDir(),
-		RequireAuth: true,
 		NIP11: NIP11Config{
 			Name:          "TENEX Local Relay",
 			Description:   "Local Nostr relay for TENEX",

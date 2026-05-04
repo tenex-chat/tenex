@@ -71,9 +71,15 @@ func NewRelay(config *Config) (*Relay, error) {
 	relay.Info.Software = config.NIP11.Software
 	relay.Info.Version = config.NIP11.Version
 
+	acl := NewACL(db)
+	authLogger := newAuthLogger(config)
+
 	relay.StoreEvent = append(relay.StoreEvent, db.SaveEvent)
 	relay.OnEphemeralEvent = append(relay.OnEphemeralEvent, ephemeralCache.Store)
-	relay.QueryEvents = append(relay.QueryEvents, ephemeralCache.QueryEvents, instrumentQueryEvents(db.QueryEvents))
+	relay.QueryEvents = append(relay.QueryEvents,
+		scopeFilterQueryEvents(acl, authLogger, ephemeralCache.QueryEvents),
+		scopeFilterQueryEvents(acl, authLogger, instrumentQueryEvents(db.QueryEvents)),
+	)
 	relay.DeleteEvent = append(relay.DeleteEvent, db.DeleteEvent)
 	relay.CountEvents = append(relay.CountEvents, dbImpl.CountEvents)
 
@@ -100,6 +106,9 @@ func NewRelay(config *Config) (*Relay, error) {
 							log.Printf("NIP-9: failed to delete event %s: %v", targetID, err)
 						} else {
 							log.Printf("NIP-9: deleted event %s (requested by %s...)", truncateForLog(targetID, 12), truncateForLog(event.PubKey, 12))
+							if targetEvent.Kind == projectKind {
+								acl.Registry().Delete(projectAddress(targetEvent.PubKey, projectDTag(targetEvent)))
+							}
 						}
 					} else {
 						log.Printf("NIP-9: ignoring deletion request for %s (pubkey mismatch)", truncateForLog(targetID, 12))
@@ -137,22 +146,10 @@ func NewRelay(config *Config) (*Relay, error) {
 	relay.RejectFilter = append(relay.RejectFilter,
 		queryRateLimiter,
 		func(ctx context.Context, filter nostr.Filter) (reject bool, msg string) {
-			if !config.RequireAuth || khatru.GetAuthed(ctx) != "" {
+			if khatru.GetAuthed(ctx) != "" {
 				return false, ""
 			}
-			// Allow unauthenticated subscriptions for ephemeral-only filters
-			if len(filter.Kinds) > 0 {
-				allEphemeral := true
-				for _, k := range filter.Kinds {
-					if !isEphemeral(k) {
-						allEphemeral = false
-						break
-					}
-				}
-				if allEphemeral {
-					return false, ""
-				}
-			}
+			authLogger.LogREQRejected(ctx, filter)
 			khatru.RequestAuth(ctx)
 			return true, "auth-required: authenticate to subscribe"
 		},
@@ -165,6 +162,17 @@ func NewRelay(config *Config) (*Relay, error) {
 
 	relay.RejectCountFilter = append(relay.RejectCountFilter,
 		queryRateLimiter,
+		func(ctx context.Context, filter nostr.Filter) (reject bool, msg string) {
+			pubkey := khatru.GetAuthed(ctx)
+			if pubkey == "" {
+				khatru.RequestAuth(ctx)
+				return true, "auth-required: authenticate to count"
+			}
+			if !acl.IsBackendWhitelisted(pubkey) {
+				return true, "restricted: count is reserved for backend-tier clients"
+			}
+			return false, ""
+		},
 		policies.NoSearchQueries,
 		policies.NoEmptyFilters,
 		func(ctx context.Context, filter nostr.Filter) (reject bool, msg string) {
@@ -177,9 +185,15 @@ func NewRelay(config *Config) (*Relay, error) {
 		recentHistoricalQueries.Apply(ctx, filter)
 	})
 
-	acl := NewACL(config.AdminPubkeys, db, config.RequireAuth)
 	relay.OverwriteFilter = append(relay.OverwriteFilter, acl.OverwriteFilterHook)
-	relay.PreventBroadcast = append(relay.PreventBroadcast, acl.PreventBroadcastHook)
+
+	relay.PreventBroadcast = append(relay.PreventBroadcast, func(ws *khatru.WebSocket, event *nostr.Event) bool {
+		blocked := acl.PreventBroadcastHook(ws, event)
+		if blocked {
+			authLogger.LogEventWithheld(ws.AuthedPublicKey, event, "broadcast")
+		}
+		return blocked
+	})
 	relay.OnEventSaved = append(relay.OnEventSaved, acl.OnEventSavedHook)
 
 	return &Relay{
@@ -195,7 +209,6 @@ func (r *Relay) Start(ctx context.Context) error {
 	r.mu.Lock()
 	r.startTime = time.Now()
 	r.mu.Unlock()
-	r.acl.StartWhitelistFileSync(ctx)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", r.handleHealth)
@@ -223,8 +236,11 @@ func (r *Relay) Start(ctx context.Context) error {
 	if len(r.config.Sync.Relays) > 0 {
 		r.syncer = NewSyncer(r.config.Sync, r.db)
 		r.syncer.OnEventStored = func(event *nostr.Event) {
-			if event.Kind == 14199 {
+			switch event.Kind {
+			case 14199:
 				r.acl.ProcessWhitelistEvent(event)
+			case 31933:
+				r.acl.processProjectEvent(event)
 			}
 		}
 		r.syncer.Start(ctx)
@@ -441,6 +457,78 @@ func historicalQuerySignature(filter nostr.Filter) string {
 	}
 
 	return b.String()
+}
+
+// scopeFilterQueryEvents wraps a stored-event handler so that non-backend
+// authenticated viewers only receive events permitted by the project registry.
+// Backend-whitelisted viewers bypass the filter entirely.
+//
+// In addition to the project ACL, viewers can always see events that e-tag
+// any of their own events present in the same query result — this lets a
+// non-member who posted into a private project still see replies to their
+// posts. The wrapper streams events that pass the project ACL immediately
+// while buffering the rest; once the underlying stream closes, the buffer is
+// re-checked against the set of viewer-owned event ids collected so far.
+func scopeFilterQueryEvents(
+	acl *ACL,
+	authLogger *AuthLogger,
+	next func(ctx context.Context, filter nostr.Filter) (chan *nostr.Event, error),
+) func(ctx context.Context, filter nostr.Filter) (chan *nostr.Event, error) {
+	return func(ctx context.Context, filter nostr.Filter) (chan *nostr.Event, error) {
+		ch, err := next(ctx, filter)
+		if err != nil || ch == nil {
+			return ch, err
+		}
+
+		viewer := khatru.GetAuthed(ctx)
+		if acl.IsBackendWhitelisted(viewer) {
+			return ch, nil
+		}
+
+		registry := acl.Registry()
+		out := make(chan *nostr.Event)
+		go func() {
+			defer close(out)
+
+			ownedIDs := make(map[string]struct{})
+			var deferred []*nostr.Event
+
+			for evt := range ch {
+				if evt.PubKey == viewer {
+					ownedIDs[evt.ID] = struct{}{}
+				}
+				if registry.CanDeliver(viewer, evt) {
+					out <- evt
+					continue
+				}
+				deferred = append(deferred, evt)
+			}
+
+			for _, evt := range deferred {
+				if eventReferencesOwnedID(evt, ownedIDs) {
+					out <- evt
+					continue
+				}
+				authLogger.LogEventWithheld(viewer, evt, "historical")
+			}
+		}()
+		return out, nil
+	}
+}
+
+func eventReferencesOwnedID(event *nostr.Event, ownedIDs map[string]struct{}) bool {
+	if len(ownedIDs) == 0 {
+		return false
+	}
+	for _, tag := range event.Tags {
+		if len(tag) < 2 || tag[0] != "e" {
+			continue
+		}
+		if _, ok := ownedIDs[tag[1]]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 func instrumentQueryEvents(
