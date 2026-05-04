@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"sync"
+	"time"
 
 	"github.com/fiatjaf/eventstore"
 	"github.com/fiatjaf/khatru"
@@ -135,12 +136,59 @@ func (a *ACL) ProcessWhitelistEvent(event *nostr.Event) {
 
 // PreventBroadcastHook gates live event delivery. Backend-whitelisted viewers
 // receive everything; everyone else is filtered through the project registry.
+//
+// As an extension to the project ACL: an event that would otherwise be hidden
+// is still delivered if it e-tags any event the viewer authored. This keeps
+// non-members in the loop on replies to their own posts inside private
+// projects they don't belong to.
 func (a *ACL) PreventBroadcastHook(ws *khatru.WebSocket, event *nostr.Event) bool {
 	viewer := ws.AuthedPublicKey
 	if a.IsBackendWhitelisted(viewer) {
 		return false
 	}
-	return !a.registry.CanDeliver(viewer, event)
+	if a.registry.CanDeliver(viewer, event) {
+		return false
+	}
+	if a.viewerAuthoredAnyETaggedEvent(viewer, event) {
+		return false
+	}
+	return true
+}
+
+// viewerAuthoredAnyETaggedEvent reports whether viewer is the author of any
+// event referenced by an "e" tag on event. It runs a single targeted storage
+// query (IDs ∩ Authors) so the cost stays bounded even when the event has
+// many e-tags.
+func (a *ACL) viewerAuthoredAnyETaggedEvent(viewer string, event *nostr.Event) bool {
+	if viewer == "" || event == nil {
+		return false
+	}
+	var ids []string
+	for _, tag := range event.Tags {
+		if len(tag) >= 2 && tag[0] == "e" && tag[1] != "" {
+			ids = append(ids, tag[1])
+		}
+	}
+	if len(ids) == 0 {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	ch, err := a.storage.QueryEvents(ctx, nostr.Filter{
+		IDs:     ids,
+		Authors: []string{viewer},
+		Limit:   1,
+	})
+	if err != nil {
+		log.Printf("[acl] e-tag ownership lookup failed for %s...: %v", truncatePubkey(viewer), err)
+		return false
+	}
+	found := false
+	for range ch {
+		found = true
+		// Drain remaining (shouldn't happen with Limit:1 but be defensive).
+	}
+	return found
 }
 
 // processProjectEvent records a kind 31933 event in the project registry and

@@ -1,9 +1,13 @@
 package main
 
 import (
+	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	evbadger "github.com/fiatjaf/eventstore/badger"
 	"github.com/nbd-wtf/go-nostr"
 )
 
@@ -304,6 +308,86 @@ func TestDiffNewMembers(t *testing.T) {
 	got = diffNewMembers(curr, curr)
 	if len(got) != 0 {
 		t.Errorf("expected no new members on identity diff, got %v", got)
+	}
+}
+
+func TestViewerAuthoredAnyETaggedEvent(t *testing.T) {
+	tmp, err := os.MkdirTemp("", "live-etag-*")
+	if err != nil {
+		t.Fatalf("temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmp)
+
+	storage := &evbadger.BadgerBackend{
+		Path:                  filepath.Join(tmp, "badger"),
+		BadgerOptionsModifier: silentBadger,
+	}
+	if err := storage.Init(); err != nil {
+		t.Fatalf("init storage: %v", err)
+	}
+	defer storage.Close()
+
+	viewer := makePubkey('v')
+	stranger := makePubkey('s')
+
+	ownEventID := strings.Repeat("1", 64)
+	if err := storage.SaveEvent(context.Background(), &nostr.Event{
+		ID:        ownEventID,
+		PubKey:    viewer,
+		CreatedAt: nostr.Now(),
+		Kind:      1,
+		Tags:      nostr.Tags{},
+		Content:   "mine",
+		Sig:       strings.Repeat("a", 128),
+	}); err != nil {
+		t.Fatalf("save own event: %v", err)
+	}
+
+	otherEventID := strings.Repeat("2", 64)
+	if err := storage.SaveEvent(context.Background(), &nostr.Event{
+		ID:        otherEventID,
+		PubKey:    stranger,
+		CreatedAt: nostr.Now(),
+		Kind:      1,
+		Tags:      nostr.Tags{},
+		Content:   "stranger's",
+		Sig:       strings.Repeat("b", 128),
+	}); err != nil {
+		t.Fatalf("save other event: %v", err)
+	}
+
+	acl := &ACL{
+		whitelist:  make(map[string]bool),
+		storage:    storage,
+		registry:   NewProjectRegistry(),
+		activeSubs: make(map[string][]*activeSub),
+	}
+
+	reply := &nostr.Event{
+		Kind:   1,
+		PubKey: stranger,
+		Tags:   nostr.Tags{{"e", ownEventID}, {"p", viewer}},
+	}
+	if !acl.viewerAuthoredAnyETaggedEvent(viewer, reply) {
+		t.Error("expected viewer ownership to be detected via e-tag")
+	}
+
+	unrelated := &nostr.Event{
+		Kind:   1,
+		PubKey: stranger,
+		Tags:   nostr.Tags{{"e", otherEventID}},
+	}
+	if acl.viewerAuthoredAnyETaggedEvent(viewer, unrelated) {
+		t.Error("e-tag pointing at someone else's event must not match")
+	}
+
+	noETags := &nostr.Event{Kind: 1, PubKey: stranger}
+	if acl.viewerAuthoredAnyETaggedEvent(viewer, noETags) {
+		t.Error("event without e-tags must not match")
+	}
+
+	if acl.viewerAuthoredAnyETaggedEvent("", reply) {
+		t.Error("empty viewer must short-circuit to false")
 	}
 }
 
