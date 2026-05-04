@@ -254,6 +254,7 @@ pub(crate) async fn build(
         conv_store: conv_store.as_ref(),
         conversation_id: &conversation_id,
         agent_default_skills: agent_config.default.as_ref().and_then(|d| d.skills.clone()),
+        envelope_skills: envelope.metadata.skills.clone(),
     });
 
     // Shared self-applied skills state (pre-seeded from persistence; updated by skills_set tool).

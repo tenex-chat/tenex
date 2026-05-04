@@ -75,7 +75,7 @@ fn build_event_emits_one_skill_tag_per_universe_entry() {
     write_skill_dir(&tmp, "beta", true);
 
     let keys = Keys::generate();
-    let event = build_project_status_event(&keys, &project_meta(), &tmp, &tmp, &[]).unwrap();
+    let event = build_project_status_event(&keys, &project_meta(), &tmp, &[]).unwrap();
 
     let all = tags(&event);
 
@@ -115,7 +115,7 @@ fn build_event_emits_skill_tags_independent_of_agent_state() {
     write_skill_dir(&tmp, "gamma", true);
 
     let keys = Keys::generate();
-    let event = build_project_status_event(&keys, &project_meta(), &tmp, &tmp, &[]).unwrap();
+    let event = build_project_status_event(&keys, &project_meta(), &tmp, &[]).unwrap();
 
     let all = tags(&event);
     assert!(

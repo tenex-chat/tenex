@@ -187,6 +187,7 @@ pub(super) struct SkillContextInputs<'a> {
     pub conv_store: Option<&'a ConversationStore>,
     pub conversation_id: &'a str,
     pub agent_default_skills: Option<Vec<String>>,
+    pub envelope_skills: Vec<String>,
 }
 
 /// Outputs of [`build_skill_context`].
@@ -221,6 +222,11 @@ pub(super) fn build_skill_context(inputs: SkillContextInputs<'_>) -> SkillContex
         .unwrap_or_default();
 
     let mut all_skill_ids: Vec<String> = inputs.agent_default_skills.unwrap_or_default();
+    for id in &inputs.envelope_skills {
+        if !all_skill_ids.contains(id) {
+            all_skill_ids.push(id.clone());
+        }
+    }
     for id in &initial_self_applied {
         if !all_skill_ids.contains(id) {
             all_skill_ids.push(id.clone());

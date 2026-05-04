@@ -40,7 +40,7 @@
 //! deterministic event content (same convention as `project_status.rs`).
 
 use std::collections::{BTreeSet, HashSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Result};
 use nostr_sdk::{Event, EventBuilder, Kind, PublicKey, Tag, TagKind};
@@ -65,27 +65,57 @@ fn short_pubkey(pubkey: &str) -> &str {
     }
 }
 
-/// Enumerate skill IDs installed in the agent's own home directory
-/// (`{base_dir}/home/<short_pubkey>/skills`). These are the only skills
-/// advertised on the agent's kind:0 profile — shared skills (built-in,
-/// user-global) and project-scoped skills are advertised on kind:24010.
-fn list_agent_skill_ids(agent_pubkey: &str, base_dir: &Path) -> Vec<String> {
-    let dir = base_dir
-        .join("home")
-        .join(short_pubkey(agent_pubkey))
-        .join("skills");
+/// Lookup directories for *globally* reachable skills — mirrors the canonical
+/// layout in `tenex_agent::skills::lookup_dirs`, but **excludes** the
+/// project-shared source (`{project_path}/.agents/skills/`). Project-shared
+/// skills belong on kind:24010, not on the per-agent kind:0.
+///
+/// Sources, in precedence order:
+/// 1. Built-in (`{base_dir}/skills/built-in`)
+/// 2. Agent home (`{base_dir}/home/<short_pubkey>/skills`)
+/// 3. User-global (`~/.agents/skills`)
+///
+/// Built-in and user-global are backend-specific (depend on what's installed
+/// on the machine where this agent runs), so they must be announced on the
+/// per-agent kind:0, not on the per-project kind:24010.
+fn global_skill_dirs(agent_pubkey: &str, base_dir: &Path) -> Vec<PathBuf> {
+    let short = short_pubkey(agent_pubkey);
+    let mut dirs: Vec<PathBuf> = Vec::new();
+
+    // 1. Built-in (shipped with the TENEX installation)
+    let builtin = base_dir.join("skills").join("built-in");
+    if builtin.exists() {
+        dirs.push(builtin);
+    }
+
+    // 2. Agent home skills
+    dirs.push(base_dir.join("home").join(short).join("skills"));
+
+    // 3. User-global shared skills
+    if let Some(home) = dirs_next::home_dir() {
+        dirs.push(home.join(".agents").join("skills"));
+    }
+
+    dirs
+}
+
+/// Enumerate skill IDs across the global (non-project) skill dirs.
+/// First-seen wins (matches the precedence used by the runtime skill loader).
+fn list_global_skill_ids(agent_pubkey: &str, base_dir: &Path) -> Vec<String> {
     let mut seen: BTreeSet<String> = BTreeSet::new();
-    let entries = match std::fs::read_dir(&dir) {
-        Ok(e) => e,
-        Err(_) => return Vec::new(),
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if !path.is_dir() || !path.join("SKILL.md").exists() {
-            continue;
-        }
-        if let Some(id) = path.file_name().and_then(|n| n.to_str()) {
-            seen.insert(id.to_string());
+    for dir in global_skill_dirs(agent_pubkey, base_dir) {
+        let entries = match std::fs::read_dir(&dir) {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_dir() || !path.join("SKILL.md").exists() {
+                continue;
+            }
+            if let Some(id) = path.file_name().and_then(|n| n.to_str()) {
+                seen.insert(id.to_string());
+            }
         }
     }
     seen.into_iter().collect()
@@ -218,8 +248,8 @@ pub async fn build_agent_config_event(
         tags.push(Tag::custom(TagKind::Custom("model".into()), vals));
     }
 
-    // Skills — agent-home only, sorted by id; "active" on those in default_config.
-    for id in list_agent_skill_ids(&signer_pubkey, base_dir) {
+    // Skills — built-in + agent-home + user-global; "active" on those in default_config.
+    for id in list_global_skill_ids(&signer_pubkey, base_dir) {
         let mut vals = vec![id.clone()];
         if active.skills.contains(&id) {
             vals.push("active".to_string());
@@ -340,9 +370,10 @@ mod tests {
 
     #[tokio::test]
     async fn build_event_emits_expected_tags_with_active_markers() {
-        // Two global skills: one in agent-home (source 2), one in user-global
-        // (source 3). Plus a project-shared skill on disk that MUST NOT appear
-        // on kind:0 (it belongs on 24010).
+        // Three global skills: built-in (source 1), agent-home (source 2),
+        // user-global (source 3, real fs — present only if the dev has skills
+        // there, so we don't assert on it). Plus a project-scoped skill that
+        // MUST NOT appear on kind:0 (it belongs on kind:24010).
         let base_dir = unique_temp("base");
         let project_path = unique_temp("proj");
 
@@ -366,6 +397,11 @@ mod tests {
             serde_json::json!({ "model": "alpha", "skills": ["home-only"] }),
             serde_json::json!({ "github": { "command": "gh" } }),
         );
+
+        // Source 1: built-in skills.
+        let builtin_skills = base_dir.join("skills").join("built-in");
+        fs::create_dir_all(&builtin_skills).unwrap();
+        write_skill(&builtin_skills, "builtin-skill");
 
         // Source 2: agent-home skills (seed with actual short pubkey).
         let short = &agent.pubkey[..8];
@@ -400,9 +436,13 @@ mod tests {
         assert!(m_tags.contains(&vec!["model", "alpha", "active"]));
         assert!(m_tags.contains(&vec!["model", "beta"]));
 
-        // skill tags: home-only active. Project-scoped `project-only` MUST NOT
-        // appear here — it belongs on the 24010 event.
+        // skill tags: built-in available, home-only active.
+        // Project-scoped `project-only` MUST NOT appear — it belongs on kind:24010.
         let s_tags = extract(&event, "skill");
+        assert!(
+            s_tags.contains(&vec!["skill", "builtin-skill"]),
+            "built-in skill must appear on kind:0: {s_tags:?}",
+        );
         assert!(s_tags.contains(&vec!["skill", "home-only", "active"]));
         assert!(
             !s_tags.iter().any(|t| t.get(1) == Some(&"project-only")),

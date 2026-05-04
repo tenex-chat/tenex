@@ -7,19 +7,17 @@
 //! content = ""
 //! tags    = ["a", "31933:<owner_pk>:<d_tag>"]
 //!         + ["p", <owner_pk>] (+ ["p", <whitelisted_pk>]..., deduped)
-//!         + ["skill", <id>]                              (one per available skill)
+//!         + ["skill", <id>]                              (one per project-scoped skill)
 //! ```
 //!
-//! Skills emitted here are the **shared** skill universe available to every
-//! agent in the project:
-//! - Project-scoped: `{project_path}/.agents/skills/<id>/SKILL.md`
-//! - Built-in: `{base_dir}/skills/built-in/<id>/SKILL.md`
-//! - User-global: `~/.agents/skills/<id>/SKILL.md`
+//! Skills emitted here are **project-scoped only** — skills installed at
+//! `{project_path}/.agents/skills/<id>/SKILL.md`. These are the same across
+//! every backend that has access to the project directory.
 //!
-//! Per-agent assignments are not emitted on 24010 — they live on each agent's
-//! kind:0 profile. Agent-home skills (installed per-agent) likewise live
-//! exclusively on the agent's kind:0 profile. Agent, model, and MCP tags are
-//! NOT emitted here — the available agents are on kind:24011, per-agent
+//! Built-in (`{base_dir}/skills/built-in`) and user-global (`~/.agents/skills`)
+//! skills are backend-specific and therefore live on each agent's kind:0 profile,
+//! not here. Per-agent assignments are likewise on kind:0. Agent, model, and MCP
+//! tags are NOT emitted here — the available agents are on kind:24011, per-agent
 //! capabilities on kind:0.
 //!
 //! tool/branch/scheduled-task tags are not emitted — they require
@@ -63,31 +61,11 @@ pub fn project_scoped_skill_ids(project_path: &Path) -> HashSet<String> {
     skill_ids_in_dir(&project_path.join(".agents").join("skills"))
 }
 
-/// Return skill IDs from all shared (non-agent-home) sources:
-/// built-in (`{base_dir}/skills/built-in`), user-global (`~/.agents/skills`),
-/// and project-scoped (`{project_path}/.agents/skills/`).
-fn shared_skill_ids(project_path: &Path, base_dir: &Path) -> HashSet<String> {
-    let mut out = project_scoped_skill_ids(project_path);
-
-    for id in skill_ids_in_dir(&base_dir.join("skills").join("built-in")) {
-        out.insert(id);
-    }
-
-    if let Some(home) = dirs_next::home_dir() {
-        for id in skill_ids_in_dir(&home.join(".agents").join("skills")) {
-            out.insert(id);
-        }
-    }
-
-    out
-}
-
 /// Build (but do not send) a kind:24010 project status event.
 pub fn build_project_status_event(
     keys: &Keys,
     meta: &ProjectMetadata,
     project_path: &Path,
-    base_dir: &Path,
     whitelisted_pubkeys: &[String],
 ) -> Result<Event> {
     let owner_pk = meta
@@ -108,12 +86,11 @@ pub fn build_project_status_event(
         }
     }
 
-    // ─── Shared skill emission ────────────────────────────────────────────────
+    // ─── Project-scoped skill emission ────────────────────────────────────────
     //
-    // Emit one ["skill", <id>] tag per skill present in the shared universe
-    // (project-scoped ∪ built-in ∪ user-global). Per-agent assignments are
-    // carried on each agent's kind:0 profile, not here.
-    let universe: BTreeSet<String> = shared_skill_ids(project_path, base_dir).into_iter().collect();
+    // Emit one ["skill", <id>] tag per project-scoped skill. Built-in and
+    // user-global skills are backend-specific; they live on each agent's kind:0.
+    let universe: BTreeSet<String> = project_scoped_skill_ids(project_path).into_iter().collect();
     for id in &universe {
         tags.push(Tag::custom(
             TagKind::Custom("skill".into()),

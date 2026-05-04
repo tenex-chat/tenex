@@ -32,6 +32,7 @@ pub fn decode(event: &Event) -> Result<InboundEnvelope, DecodeError> {
     let mut reply_targets: Vec<MessageRef> = Vec::new();
     let mut delegation_parent_conversation: Option<ConversationRef> = None;
     let mut project_a_tags: Vec<String> = Vec::new();
+    let mut skills: Vec<String> = Vec::new();
     let mut recipients: Vec<PrincipalRef> = Vec::new();
     let mut root_event_id: Option<EventId> = None;
     let mut reply_to: Option<MessageRef> = None;
@@ -95,6 +96,11 @@ pub fn decode(event: &Event) -> Result<InboundEnvelope, DecodeError> {
                     }
                 }
             }
+            "skill" => {
+                if let Some(id) = parts.get(1) {
+                    skills.push(id.clone());
+                }
+            }
             "telegram-chat-id" => telegram_chat_id = parts.get(1).cloned(),
             "telegram-message-id" => telegram_message_id = parts.get(1).cloned(),
             "telegram-thread-id" => telegram_thread_id = parts.get(1).cloned(),
@@ -136,6 +142,7 @@ pub fn decode(event: &Event) -> Result<InboundEnvelope, DecodeError> {
         delegation_parent_conversation,
         is_kill_signal: kind_u16 == kinds::STOP_COMMAND,
         project_a_tags,
+        skills,
         telegram,
     };
 

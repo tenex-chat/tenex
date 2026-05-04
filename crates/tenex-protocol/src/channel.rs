@@ -95,6 +95,7 @@ pub struct InboundMetadata {
     pub delegation_parent_conversation: Option<ConversationRef>,
     pub is_kill_signal: bool,
     pub project_a_tags: Vec<String>,
+    pub skills: Vec<String>,
     /// Populated when the event was injected by the Telegram daemon.
     pub telegram: Option<TelegramTransportMetadata>,
 }

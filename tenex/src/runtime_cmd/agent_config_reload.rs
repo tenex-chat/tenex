@@ -385,7 +385,6 @@ pub(super) async fn publish_project_status_now(shared: &RuntimeShared, meta: &Pr
         &shared.backend_keys,
         meta,
         &shared.project_dir,
-        &shared.base_dir,
         &shared.whitelisted_pubkeys,
     ) {
         Ok(event) => {
