@@ -7,6 +7,7 @@ pub mod control_socket;
 pub mod display;
 pub mod lockfile;
 pub mod nostr;
+pub mod reap;
 pub mod supervisor;
 
 use std::path::PathBuf;
@@ -61,6 +62,13 @@ pub async fn run(args: DaemonArgs) -> Result<()> {
     display::header(&base_dir, cfg.relays.len());
 
     let _lock = lockfile::Lockfile::acquire(&base_dir).context("acquiring daemon lockfile")?;
+
+    // We hold the daemon lockfile, so we are the sole authority for this
+    // base_dir. Any process still flock-holding a companion pid file is an
+    // orphan from a previous supervisor that died ungracefully — kill it
+    // before booting the new generation.
+    reap::reap_orphans(&base_dir).context("reaping orphan companion daemons")?;
+
     let backend_keys =
         tenex_backend_keys::ensure(&base_dir).context("loading daemon signer")?;
 

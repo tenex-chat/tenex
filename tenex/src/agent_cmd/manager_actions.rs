@@ -525,8 +525,9 @@ pub async fn offer_auto_merge_for_duplicate_slugs(
 /// 2. Print step header `(0/0  <slug>)` plus context lines:
 ///    `Name: <name>`, `Role: <role>`, `Status: <active|inactive>`,
 ///    `Projects: <csv>`.
-/// 3. Select prompt `"Agent"` with three choices:
-///    `"Assign to projects"` → `assign-projects`
+/// 3. Select prompt `"Agent"` with choices:
+///    `"Assign to projects"` → `assign-projects` (only when an owner
+///        signer is configured — publishing a kind:31933 update requires it)
 ///    `"Delete permanently"` → `delete`
 ///    `"Back"` → `back`
 /// 4. Branch:
@@ -560,16 +561,14 @@ pub async fn show_agent_detail(
         display::context(&format!("Status: {status_text}"));
         display::context(&format!("Projects: {}", format_projects(&entry.projects)));
 
-        let action = match prompts::select(
-            "Agent",
-            vec![
-                CHOICE_ASSIGN.to_owned(),
-                CHOICE_DELETE.to_owned(),
-                CHOICE_BACK.to_owned(),
-            ],
-        )
-        .prompt()
-        {
+        let mut choices = Vec::with_capacity(3);
+        if owner_keys.is_some() {
+            choices.push(CHOICE_ASSIGN.to_owned());
+        }
+        choices.push(CHOICE_DELETE.to_owned());
+        choices.push(CHOICE_BACK.to_owned());
+
+        let action = match prompts::select("Agent", choices).prompt() {
             Ok(s) => s,
             Err(inquire::InquireError::OperationCanceled)
             | Err(inquire::InquireError::OperationInterrupted) => return Ok(()),
@@ -579,15 +578,7 @@ pub async fn show_agent_detail(
         match action.as_str() {
             CHOICE_BACK => return Ok(()),
             CHOICE_ASSIGN => {
-                let Some(keys) = owner_keys else {
-                    display::blank();
-                    display::hint(
-                        "Assigning agents to projects publishes a kind:31933 event. \
-                         Set $TENEX_NSEC or populate \"ownerNsec\" in the TENEX config, \
-                         then re-run.",
-                    );
-                    continue;
-                };
+                let keys = owner_keys.expect("CHOICE_ASSIGN only offered when owner_keys is Some");
                 let snapshot = entry.clone();
                 assign_agent_to_projects(base_dir, keys, Some(&snapshot), page_size).await?;
                 continue;

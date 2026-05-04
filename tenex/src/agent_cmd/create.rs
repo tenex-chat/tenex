@@ -66,30 +66,17 @@ pub async fn run(base_dir: &std::path::Path) -> Result<()> {
         return Ok(());
     };
 
-    let Some(projects) = prompt_projects(base_dir)? else {
-        return Ok(());
-    };
-
-    // If the user picked projects, the create flow will need to publish a
-    // kind:31933 update — that requires an owner signer. Refuse up front
-    // (before any LLM work or local writes commit) when no signer is
-    // configured, so the user knows to set $TENEX_NSEC or remove the
-    // project selections rather than hitting an interactive prompt mid-flow.
-    let owner_keys: Option<Keys> = if projects.is_empty() {
-        None
+    // Project assignment publishes a kind:31933 update, which needs an owner
+    // signer. When none is configured we skip the prompt entirely — the agent
+    // is created locally with no project memberships.
+    let owner_keys: Option<Keys> = try_resolve_owner_signer(base_dir)?;
+    let projects: Vec<String> = if owner_keys.is_some() {
+        let Some(selected) = prompt_projects(base_dir)? else {
+            return Ok(());
+        };
+        selected
     } else {
-        match try_resolve_owner_signer(base_dir)? {
-            Some(k) => Some(k),
-            None => {
-                display::blank();
-                display::hint(
-                    "Assigning a new agent to projects publishes a kind:31933 event. \
-                     Set $TENEX_NSEC or populate \"ownerNsec\" in the TENEX config and re-run, \
-                     or pick zero projects to create a local-only agent.",
-                );
-                return Ok(());
-            }
-        }
+        Vec::new()
     };
 
     display::blank();

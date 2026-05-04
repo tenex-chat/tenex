@@ -94,6 +94,14 @@ pub fn service_exited_cleanly(key: &str) {
     );
 }
 
+pub fn orphan_reaped(label: &str, pid: i32) {
+    println!(
+        "  {dim}↻  {label}  reaping orphan (pid {pid}){reset}",
+        dim = dim(),
+        reset = reset(),
+    );
+}
+
 pub fn service_crashed(key: &str, code: Option<i32>) {
     let code_str = code
         .map(|c| c.to_string())
