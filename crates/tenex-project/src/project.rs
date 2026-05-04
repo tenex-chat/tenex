@@ -10,7 +10,7 @@ use serde::Deserialize;
 
 use crate::error::{Error, Result};
 use crate::id::{normalize_project_id, ProjectDTag};
-use crate::identity::{log_unavailable_agent, IdentityServiceAgentNames};
+use crate::identity::{log_unavailable_agent, IdentityServiceAgentNames, UnavailableAgentNames};
 use crate::models::{Agent, ProjectAgent, ProjectMetadata};
 use crate::paths;
 use crate::signer::{signer_for, Signer, SignerError};
@@ -53,6 +53,14 @@ impl Project {
         Ok(Some(metadata_from_event(&self.d_tag, &ev)))
     }
 
+    /// Agents this backend has a local JSON projection for.
+    ///
+    /// Used by the daemon when it needs to spawn or sign-as an agent — i.e.,
+    /// every code path that requires local nsec or full agent metadata. This
+    /// is *not* the right method for "what agents exist in this project" —
+    /// the project's 31933 event lists members regardless of where each
+    /// runs. For the comprehensive list (used in agent prompts and any
+    /// inter-backend awareness) call [`Self::all_project_agents`].
     pub fn agents(&self) -> Result<Vec<Agent>> {
         let pubkeys = self.member_pubkeys()?;
         let unavailable_names = IdentityServiceAgentNames::new(&self.base_dir);
@@ -66,6 +74,43 @@ impl Project {
                 }
                 Err(e) => {
                     tracing::warn!(pubkey = %pk, error = %e, "skipping unreadable agent file")
+                }
+            }
+        }
+        Ok(agents)
+    }
+
+    /// Every agent that the project's 31933 event names as a member.
+    ///
+    /// Locally-managed agents (JSON projection on disk) are returned with
+    /// full metadata and `is_local = true` when the projection holds an
+    /// nsec. Members without a local projection — i.e., agents that run on
+    /// a different backend — are returned as stubs with `is_local = false`,
+    /// `slug` and `name` filled from the identity service when available
+    /// (falling back to a short pubkey), and the remaining fields `None`.
+    ///
+    /// This is the list every agent should be aware of. Remote agents
+    /// cannot be delegated to via the local `delegate` tool (no usable
+    /// slug, no signer here), but they *do* exist in the project, and the
+    /// running agent must know that.
+    pub fn all_project_agents(&self) -> Result<Vec<Agent>> {
+        let pubkeys = self.member_pubkeys()?;
+        let unavailable_names = IdentityServiceAgentNames::new(&self.base_dir);
+        let mut agents = Vec::with_capacity(pubkeys.len());
+        for pk in &pubkeys {
+            let path = paths::agent_file(&self.base_dir, pk);
+            match try_read_agent_file(&path, pk) {
+                Ok(a) => agents.push(a),
+                Err(AgentFileReadError::Unavailable) => {
+                    agents.push(remote_agent_stub(pk, &unavailable_names));
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        pubkey = %pk,
+                        error = %e,
+                        "treating unreadable agent file as remote stub",
+                    );
+                    agents.push(remote_agent_stub(pk, &unavailable_names));
                 }
             }
         }
@@ -209,13 +254,13 @@ fn try_read_agent_file(
     if !path.is_file() {
         return Err(AgentFileReadError::Unavailable);
     }
-
     let raw = tenex_agent_registry::read_agent_projection_file(path, pubkey).map_err(|e| {
         AgentFileReadError::Other(Error::Other(format!(
             "read agent file {}: {e}",
             path.display()
         )))
     })?;
+    let is_local = raw.signer_ref.is_some();
     Ok(Agent {
         pubkey: raw.pubkey,
         slug: raw.slug,
@@ -231,5 +276,31 @@ fn try_read_agent_file(
         default_config_json: raw.default_config_json,
         telegram_config_json: raw.telegram_config_json,
         mcp_servers_json: raw.mcp_servers_json,
+        is_local,
     })
+}
+
+fn remote_agent_stub(pubkey: &str, names: &dyn UnavailableAgentNames) -> Agent {
+    let short = pubkey
+        .chars()
+        .take(8.min(pubkey.len()))
+        .collect::<String>();
+    let view = names.view(pubkey);
+    Agent {
+        pubkey: pubkey.to_string(),
+        slug: view.slug.unwrap_or_else(|| short.clone()),
+        name: view.display_name.unwrap_or_else(|| short.clone()),
+        role: None,
+        description: None,
+        instructions: None,
+        use_criteria: view.use_criteria,
+        category: None,
+        signer_ref: None,
+        event_id: None,
+        status: None,
+        default_config_json: None,
+        telegram_config_json: None,
+        mcp_servers_json: None,
+        is_local: false,
+    }
 }

@@ -53,7 +53,7 @@ impl IdentityCache {
         let conn = self.conn.lock().expect("identity cache mutex poisoned");
         let result = conn.query_row(
             "SELECT pubkey, display_name, name, nip05, picture, banner,
-                    about, lud16, event_id, created_at, fetched_at
+                    about, lud16, slug, use_criteria, event_id, created_at, fetched_at
                FROM identities
               WHERE pubkey = ?1 AND fetched_at >= ?2",
             params![pubkey, threshold],
@@ -72,7 +72,7 @@ impl IdentityCache {
         let conn = self.conn.lock().expect("identity cache mutex poisoned");
         let result = conn.query_row(
             "SELECT pubkey, display_name, name, nip05, picture, banner,
-                    about, lud16, event_id, created_at, fetched_at
+                    about, lud16, slug, use_criteria, event_id, created_at, fetched_at
                FROM identities
               WHERE pubkey = ?1",
             params![pubkey],
@@ -92,8 +92,8 @@ impl IdentityCache {
         conn.execute(
             "INSERT INTO identities
                 (pubkey, display_name, name, nip05, picture, banner,
-                 about, lud16, event_id, created_at, fetched_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+                 about, lud16, slug, use_criteria, event_id, created_at, fetched_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
              ON CONFLICT(pubkey) DO UPDATE SET
                 display_name = excluded.display_name,
                 name         = excluded.name,
@@ -102,6 +102,8 @@ impl IdentityCache {
                 banner       = excluded.banner,
                 about        = excluded.about,
                 lud16        = excluded.lud16,
+                slug         = excluded.slug,
+                use_criteria = excluded.use_criteria,
                 event_id     = excluded.event_id,
                 created_at   = excluded.created_at,
                 fetched_at   = excluded.fetched_at",
@@ -114,6 +116,8 @@ impl IdentityCache {
                 view.banner,
                 view.about,
                 view.lud16,
+                view.slug,
+                view.use_criteria,
                 view.event_id,
                 view.created_at,
                 view.fetched_at,
@@ -145,8 +149,10 @@ fn row_to_view(row: &rusqlite::Row<'_>) -> rusqlite::Result<IdentityView> {
         banner: row.get(5)?,
         about: row.get(6)?,
         lud16: row.get(7)?,
-        event_id: row.get(8)?,
-        created_at: row.get(9)?,
-        fetched_at: row.get(10)?,
+        slug: row.get(8)?,
+        use_criteria: row.get(9)?,
+        event_id: row.get(10)?,
+        created_at: row.get(11)?,
+        fetched_at: row.get(12)?,
     })
 }

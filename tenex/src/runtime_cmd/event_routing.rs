@@ -117,7 +117,11 @@ pub(super) async fn dispatch_project_agent_target(
             // This path handles agent-emitted events (delegations,
             // completions). Inter-agent traffic is never external —
             // external authors are caught earlier in the relay loop.
+            // It also is never cross-backend: only locally-spawned agents
+            // emit through this pipe (their stdout). Remote agents reach
+            // us via the relay loop instead.
             is_external: false,
+            is_remote_agent: false,
             response_tee: None,
             trace_carrier,
         }
@@ -307,6 +311,7 @@ mod tests {
             default_config_json: None,
             telegram_config_json: None,
             mcp_servers_json: None,
+            is_local: true,
         }
     }
 

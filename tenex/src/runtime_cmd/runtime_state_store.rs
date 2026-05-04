@@ -427,6 +427,7 @@ mod tests {
             default_config_json: None,
             telegram_config_json: None,
             mcp_servers_json: None,
+            is_local: true,
         }
     }
 
@@ -528,6 +529,7 @@ mod tests {
             allow_driver_preempt: false,
             completion_recipient_pubkey: None,
             is_external: false,
+            is_remote_agent: false,
             response_tee: None,
             trace_carrier: None,
         };
@@ -636,6 +638,7 @@ mod tests {
             allow_driver_preempt: false,
             completion_recipient_pubkey: None,
             is_external: false,
+            is_remote_agent: false,
             response_tee: None,
             trace_carrier: None,
         };

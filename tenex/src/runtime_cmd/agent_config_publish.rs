@@ -208,6 +208,7 @@ mod tests {
             default_config_json: None,
             telegram_config_json: None,
             mcp_servers_json: None,
+            is_local: true,
         };
         (agent, keys)
     }

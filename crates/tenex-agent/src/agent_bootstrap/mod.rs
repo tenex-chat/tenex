@@ -330,11 +330,31 @@ pub(crate) async fn build(
     } else {
         None
     };
+    // The runtime sets this when the trigger event was authored by a
+    // project agent that this backend does not run locally — i.e., the
+    // requester lives in a different daemon process and almost certainly
+    // on a different host. The disclosure tells the agent there is no
+    // shared filesystem with the requester so it can avoid local-path
+    // assumptions when coordinating.
+    let trigger_from_remote_agent = std::env::var("TENEX_TRIGGER_FROM_REMOTE_AGENT")
+        .map(|v| v == "1")
+        .unwrap_or(false);
+    let remote_agent_disclosure = if trigger_from_remote_agent {
+        Some(
+            "[system] This message is from another project agent running on a different \
+             backend. You do not share a filesystem or workspace with the requester — do not \
+             reference local paths or assume access to the same files. Coordinate via the \
+             conversation, not via the filesystem.",
+        )
+    } else {
+        None
+    };
     let user_message = helpers::compose_user_message(
         &envelope.content,
         &todo_reminder,
         conversation_reminders_text.as_deref(),
         external_disclosure,
+        remote_agent_disclosure,
     );
 
     // Shared todo state across tool calls (pre-seeded from persistence).

@@ -25,6 +25,7 @@ pub mod protocol;
 pub mod resolve;
 pub mod schema;
 pub mod server;
+pub(crate) mod tags;
 
 pub use cache::IdentityCache;
 pub use client::wait_until_ready;

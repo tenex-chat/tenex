@@ -11,6 +11,14 @@ pub struct IdentityView {
     pub banner: Option<String>,
     pub about: Option<String>,
     pub lud16: Option<String>,
+    /// TENEX-agent extension: short stable handle published in the kind:0
+    /// content JSON under the `slug` key. Used by remote-backend agent
+    /// listings so peers can be addressed by name rather than pubkey.
+    pub slug: Option<String>,
+    /// TENEX-agent extension: the agent's `use-criteria` event tag value
+    /// (`["use-criteria", "<text>"]`). Tells callers when to delegate to
+    /// this agent.
+    pub use_criteria: Option<String>,
     pub event_id: Option<String>,
     /// Unix seconds from the kind:0 event's created_at field.
     pub created_at: Option<i64>,

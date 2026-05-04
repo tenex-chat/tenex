@@ -37,6 +37,11 @@ pub struct Agent {
     pub default_config_json: Option<String>,
     pub telegram_config_json: Option<String>,
     pub mcp_servers_json: Option<String>,
+    /// True when this backend can sign as the agent (its on-disk projection
+    /// holds an nsec). False when the agent is a project member but runs on a
+    /// different backend — we may have its metadata but not its key, and any
+    /// inter-agent coordination must assume disjoint filesystems.
+    pub is_local: bool,
 }
 
 /// Project-scoped membership row.

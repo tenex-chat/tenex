@@ -326,6 +326,7 @@ mod tests {
             default_config_json: Some(default_cfg.to_string()),
             telegram_config_json: None,
             mcp_servers_json: Some(mcps.to_string()),
+            is_local: true,
         };
         (agent, keys)
     }
@@ -538,6 +539,7 @@ mod tests {
             default_config_json: None,
             telegram_config_json: None,
             mcp_servers_json: None,
+            is_local: true,
         };
         // Sanity: ensure they really differ.
         assert_ne!(agent.pubkey, other.public_key().to_hex());

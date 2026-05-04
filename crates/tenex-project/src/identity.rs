@@ -5,8 +5,32 @@ use std::time::Duration;
 
 const IDENTITY_QUERY_TIMEOUT: Duration = Duration::from_secs(2);
 
+/// What the identity service can tell us about a non-local agent.
+///
+/// All fields are best-effort: an absent identity service or missing kind:0
+/// event yields `RemoteAgentView::default()`.
+#[derive(Default)]
+pub(crate) struct RemoteAgentView {
+    pub(crate) display_name: Option<String>,
+    pub(crate) slug: Option<String>,
+    pub(crate) use_criteria: Option<String>,
+}
+
+/// Per-pubkey lookup against the host-wide identity service.
+///
+/// Used to label agents whose JSON projection is not local — i.e. agents
+/// running on a different backend. Their kind:0 events carry TENEX-extension
+/// tags (`slug`, `use-criteria`) that let us render them in the
+/// `<available-agents>` block alongside locally-managed agents.
 pub(crate) trait UnavailableAgentNames {
-    fn display_name(&self, pubkey: &str) -> Option<String>;
+    /// Single fetch returning every field the renderer might want; cheaper
+    /// than calling separate accessors when more than one is needed.
+    fn view(&self, pubkey: &str) -> RemoteAgentView;
+
+    /// Convenience: just the display name (used by `log_unavailable_agent`).
+    fn display_name(&self, pubkey: &str) -> Option<String> {
+        self.view(pubkey).display_name
+    }
 }
 
 pub(crate) struct IdentityServiceAgentNames {
@@ -22,8 +46,30 @@ impl IdentityServiceAgentNames {
 }
 
 impl UnavailableAgentNames for IdentityServiceAgentNames {
-    fn display_name(&self, pubkey: &str) -> Option<String> {
-        resolve_identity_display_name(&self.socket_path, pubkey)
+    fn view(&self, pubkey: &str) -> RemoteAgentView {
+        let Some(view) = resolve_identity_view(&self.socket_path, pubkey) else {
+            return RemoteAgentView::default();
+        };
+        // No kind:0 event → treat as completely empty.
+        if view.event_id.is_none() {
+            return RemoteAgentView::default();
+        }
+        let display_name = {
+            let name = view.best_name().trim().to_string();
+            if name.is_empty() {
+                None
+            } else {
+                Some(name)
+            }
+        };
+        let trim_nonempty = |s: Option<String>| {
+            s.map(|v| v.trim().to_string()).filter(|v| !v.is_empty())
+        };
+        RemoteAgentView {
+            display_name,
+            slug: trim_nonempty(view.slug),
+            use_criteria: trim_nonempty(view.use_criteria),
+        }
     }
 }
 
@@ -38,7 +84,7 @@ pub(crate) fn log_unavailable_agent(pubkey: &str, names: &dyn UnavailableAgentNa
     );
 }
 
-fn resolve_identity_display_name(socket_path: &Path, pubkey: &str) -> Option<String> {
+fn resolve_identity_view(socket_path: &Path, pubkey: &str) -> Option<tenex_identity::IdentityView> {
     if !socket_path.exists() {
         return None;
     }
@@ -59,15 +105,7 @@ fn resolve_identity_display_name(socket_path: &Path, pubkey: &str) -> Option<Str
         return None;
     }
 
-    let identity: tenex_identity::IdentityView = serde_json::from_str(trimmed).ok()?;
-    identity.event_id.as_ref()?;
-
-    let name = identity.best_name().trim();
-    if name.is_empty() {
-        None
-    } else {
-        Some(name.to_string())
-    }
+    serde_json::from_str(trimmed).ok()
 }
 
 fn short_pubkey(pubkey: &str) -> String {

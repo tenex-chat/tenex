@@ -38,7 +38,14 @@ pub(super) fn open_project(project_id: &str, agent_pubkey: &str) -> anyhow::Resu
         .metadata()
         .context("Failed to read project metadata")?
         .context("Project metadata is missing — has the project been ingested?")?;
-    let project_agents = Arc::new(project.agents().context("Failed to read project agents")?);
+    // Use the comprehensive list — every member named in the project's
+    // 31933 event — so the running agent is aware of peers that live on
+    // other backends. Locality is encoded on `Agent::is_local`.
+    let project_agents = Arc::new(
+        project
+            .all_project_agents()
+            .context("Failed to read project agents")?,
+    );
     let is_pm_agent = project
         .project_agents()
         .context("Failed to read project membership")?

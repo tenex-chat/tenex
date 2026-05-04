@@ -45,6 +45,13 @@ pub(super) struct DispatchJob {
     /// Surfaces to the agent process as `TENEX_TRIGGER_IS_EXTERNAL=1`,
     /// which the agent uses to inject a disclosure into the user message.
     pub(super) is_external: bool,
+    /// True when the triggering event was authored by a project agent that
+    /// this backend does not run locally — i.e., the requester lives in a
+    /// different daemon process and (almost certainly) on a different
+    /// filesystem. Surfaces to the agent process as
+    /// `TENEX_TRIGGER_FROM_REMOTE_AGENT=1`, which the agent uses to inject
+    /// a "no shared filesystem" disclosure into the user message.
+    pub(super) is_remote_agent: bool,
     /// Set when this dispatch was triggered via the transport-bridge socket
     /// (`tenex-telegram` etc). Each event the agent emits is also forwarded
     /// to the bridge so it can render the reply on the originating channel.
@@ -179,6 +186,9 @@ async fn run_agent(shared: Arc<RuntimeShared>, job: DispatchJob, key: DispatchKe
     }
     if job.is_external {
         command.env("TENEX_TRIGGER_IS_EXTERNAL", "1");
+    }
+    if job.is_remote_agent {
+        command.env("TENEX_TRIGGER_FROM_REMOTE_AGENT", "1");
     }
     if let Some(carrier) = tenex_telemetry::inject_current() {
         command.env("TRACEPARENT", &carrier.traceparent);

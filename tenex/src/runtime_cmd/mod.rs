@@ -81,6 +81,7 @@ struct RuntimeShared {
     /// they are still persisted to the conversation store for context but
     /// never trigger an agent run.
     route_unauthorized_authors: bool,
+    backend_name: Option<String>,
     project_id: String,
     project_dir: PathBuf,
     base_dir: PathBuf,
@@ -102,6 +103,19 @@ impl RuntimeShared {
 
     fn agent_pubkeys(&self) -> HashSet<String> {
         self.agent_snapshot.read().unwrap().agent_pubkeys.clone()
+    }
+
+    /// Pubkeys of every project member, regardless of whether this backend
+    /// has the agent's nsec on disk. The difference with [`agent_pubkeys`]
+    /// is exactly the set of remote-running agents.
+    fn project_member_pubkeys(&self) -> HashSet<String> {
+        self.agent_snapshot
+            .read()
+            .unwrap()
+            .project_agents
+            .iter()
+            .map(|pa| pa.agent_pubkey.clone())
+            .collect()
     }
 }
 
@@ -316,6 +330,7 @@ pub async fn run(args: RuntimeArgs) -> Result<()> {
         whitelisted_pubkeys: cfg.whitelisted_pubkeys.clone(),
         trusted_author_pubkeys,
         route_unauthorized_authors: cfg.route_unauthorized_authors,
+        backend_name: cfg.backend_name.clone(),
         project_id: meta.d_tag.clone(),
         project_dir: project_dir.clone(),
         base_dir: base_dir.clone(),
@@ -365,7 +380,7 @@ pub async fn run(args: RuntimeArgs) -> Result<()> {
         meta: &meta,
     };
 
-    // Startup-only: REQ kind:34011 for every managed agent's pubkey, diff
+    // Startup-only: REQ kind:0 for every managed agent's pubkey, diff
     // against on-disk config mtimes, publish the gaps. Bounded by a 5s
     // fetch timeout so a slow relay can't block the runtime from coming up.
     startup_publish_missing_agent_configs(&shared).await;
@@ -377,7 +392,7 @@ pub async fn run(args: RuntimeArgs) -> Result<()> {
                     Ok(event) if agent_config_event_is_relevant(&event) => {
                         // Capture which agent file(s) fired before we reload
                         // the snapshot — `reload_agent_snapshot` already
-                        // republishes 34011 for every agent, but we also
+                        // republishes kind:0 for every agent, but we also
                         // emit a targeted republish per changed file so the
                         // logs attribute the change to the right agent and
                         // so a future bulk-reload skip optimization stays

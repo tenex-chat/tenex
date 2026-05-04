@@ -81,6 +81,7 @@ pub(super) async fn dispatch_notification(
             // MCP-driven dispatches synthesize an event from a server
             // notification, not from an external Nostr author.
             is_external: false,
+            is_remote_agent: false,
             response_tee: None,
             // Server-initiated push: there is no upstream daemon span
             // to parent against, so the resulting `tenex.runtime.dispatch`

@@ -255,6 +255,9 @@ Your nsec and other secrets are in $AGENT_HOME/.env (auto-loaded in shell sessio
             .iter()
             .map(|a| {
                 let mut line = format!("  - {} ({})", a.slug, a.name);
+                if !a.is_local {
+                    line.push_str(" [remote-backend]");
+                }
                 if let Some(desc) = &a.description {
                     line.push_str(&format!(": {desc}"));
                 } else if let Some(role) = &a.role {
@@ -266,8 +269,15 @@ Your nsec and other secrets are in $AGENT_HOME/.env (auto-loaded in shell sessio
                 line
             })
             .collect();
+        let any_remote = agents.iter().any(|a| !a.is_local);
+        let header = if any_remote {
+            "<available-agents>\n[remote-backend] tagged agents run on a different host — you do not share a filesystem with them. Coordinate via the conversation, not local paths.\n"
+        } else {
+            "<available-agents>\n"
+        };
         parts.push(format!(
-            "<available-agents>\n{}\n</available-agents>",
+            "{}{}\n</available-agents>",
+            header,
             agent_lines.join("\n")
         ));
     }

@@ -9,7 +9,7 @@ use rusqlite::Connection;
 
 use crate::error::{IdentityError, Result};
 
-pub const EXPECTED_SCHEMA_VERSION: i64 = 1;
+pub const EXPECTED_SCHEMA_VERSION: i64 = 2;
 
 const MIGRATION_V1: &str = r#"
 CREATE TABLE identities (
@@ -27,9 +27,17 @@ CREATE TABLE identities (
 );
 "#;
 
-/// Migrations indexed by target version. v1 is the initial schema.
+/// v2: TENEX-agent extensions to kind:0 (slug from content JSON, use_criteria
+/// from the `use-criteria` event tag) so remote-backend agents can be
+/// rendered with their proper handle and dispatch hints.
+const MIGRATION_V2: &str = r#"
+ALTER TABLE identities ADD COLUMN slug TEXT;
+ALTER TABLE identities ADD COLUMN use_criteria TEXT;
+"#;
+
+/// Migrations indexed by target version.
 fn migrations() -> &'static [(i64, &'static str)] {
-    &[(1, MIGRATION_V1)]
+    &[(1, MIGRATION_V1), (2, MIGRATION_V2)]
 }
 
 /// Configure pragmas required by the crate. Must run on every connection.

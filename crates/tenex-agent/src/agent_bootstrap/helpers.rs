@@ -274,12 +274,15 @@ pub(super) async fn resolve_agent_category(
 
 /// Compose the initial user message that drives the first turn: the inbound
 /// envelope content followed by any todo reminder, conversation reminders,
-/// and external-trigger disclosure.
+/// the external-trigger disclosure (when an unauthorized user was routed by
+/// the firewall), and the remote-agent disclosure (when the requester is a
+/// project agent running on a different backend).
 pub(super) fn compose_user_message(
     envelope_content: &str,
     todo_reminder: &str,
     conversation_reminders_text: Option<&str>,
     external_disclosure: Option<&str>,
+    remote_agent_disclosure: Option<&str>,
 ) -> String {
     let mut msg = envelope_content.to_string();
     if !todo_reminder.is_empty() {
@@ -289,6 +292,9 @@ pub(super) fn compose_user_message(
         msg = format!("{msg}\n\n{reminders_text}");
     }
     if let Some(disclosure) = external_disclosure {
+        msg = format!("{msg}\n\n{disclosure}");
+    }
+    if let Some(disclosure) = remote_agent_disclosure {
         msg = format!("{msg}\n\n{disclosure}");
     }
     msg

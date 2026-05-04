@@ -165,10 +165,17 @@ async fn process_relay_event_inner(
     // claim. We persist them into the conversation store so they can ground
     // future whitelisted-user replies, then either drop them (config off)
     // or run them through the firewall.
+    //
+    // `author_is_remote_agent` distinguishes a third class: an event signed
+    // by a project agent whose nsec lives on a *different* backend. Those
+    // are still trusted (they're members of the project), but the recipient
+    // must know the requester does not share a filesystem with it.
     let author_hex = event.pubkey.to_hex();
     let author_trusted = shared.trusted_author_pubkeys.contains(&author_hex);
     let author_is_agent = agent_pubkeys.contains(&author_hex);
-    let is_external = !author_trusted && !author_is_agent;
+    let author_is_remote_agent =
+        !author_is_agent && shared.project_member_pubkeys().contains(&author_hex);
+    let is_external = !author_trusted && !author_is_agent && !author_is_remote_agent;
     event_received_span.record("is_external", is_external);
 
     if is_external {
@@ -262,6 +269,7 @@ async fn process_relay_event_inner(
                     allow_driver_preempt: false,
                     completion_recipient_pubkey,
                     is_external,
+                    is_remote_agent: author_is_remote_agent,
                     response_tee: None,
                     trace_carrier,
                 }
@@ -364,6 +372,7 @@ pub(super) async fn handle_transport_dispatch(
             // Transport-bridged events (telegram, etc.) come through
             // already-authenticated paths — never marked external.
             is_external: false,
+            is_remote_agent: false,
             response_tee: Some(tee.clone()),
             trace_carrier,
         }
@@ -454,6 +463,7 @@ pub(super) async fn run_external_dispatch(
                     allow_driver_preempt: false,
                     completion_recipient_pubkey,
                     is_external: true,
+                    is_remote_agent: false,
                     response_tee: None,
                     trace_carrier,
                 }

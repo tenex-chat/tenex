@@ -130,6 +130,8 @@ pub async fn batch_resolve(
 
     for (hex_pk, event) in by_author {
         let metadata: nostr::Metadata = serde_json::from_str(&event.content).unwrap_or_default();
+        let slug = crate::tags::first_tag_value(&event, "slug");
+        let use_criteria = crate::tags::first_tag_value(&event, "use-criteria");
 
         let view = IdentityView {
             pubkey: hex_pk.clone(),
@@ -140,6 +142,8 @@ pub async fn batch_resolve(
             banner: metadata.banner,
             about: metadata.about,
             lud16: metadata.lud16,
+            slug,
+            use_criteria,
             event_id: Some(event.id.to_hex()),
             created_at: Some(event.created_at.as_secs() as i64),
             fetched_at,
