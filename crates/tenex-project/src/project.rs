@@ -287,12 +287,13 @@ fn remote_agent_stub(pubkey: &str, names: &dyn UnavailableAgentNames) -> Agent {
         .take(8.min(pubkey.len()))
         .collect::<String>();
     let view = names.view(pubkey);
+    let name = view.display_name.unwrap_or_else(|| short.clone());
     Agent {
         pubkey: pubkey.to_string(),
-        slug: view.slug.unwrap_or_else(|| short.clone()),
-        name: view.display_name.unwrap_or_else(|| short.clone()),
+        slug: view.slug.unwrap_or_else(|| name.clone()),
+        name,
         role: None,
-        description: None,
+        description: view.about,
         instructions: None,
         use_criteria: view.use_criteria,
         category: None,

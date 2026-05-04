@@ -254,7 +254,7 @@ Your nsec and other secrets are in $AGENT_HOME/.env (auto-loaded in shell sessio
         let agent_lines: Vec<String> = agents
             .iter()
             .map(|a| {
-                let mut line = format!("  - {} ({})", a.slug, a.name);
+                let mut line = format!("  - {}", a.slug);
                 if !a.is_local {
                     if let Some(backend) = &a.backend_name {
                         line.push_str(&format!(" [remote agent running on {backend}]"));

@@ -13,6 +13,7 @@ const IDENTITY_QUERY_TIMEOUT: Duration = Duration::from_secs(2);
 pub(crate) struct RemoteAgentView {
     pub(crate) display_name: Option<String>,
     pub(crate) slug: Option<String>,
+    pub(crate) about: Option<String>,
     pub(crate) use_criteria: Option<String>,
     pub(crate) backend_name: Option<String>,
 }
@@ -69,6 +70,7 @@ impl UnavailableAgentNames for IdentityServiceAgentNames {
         RemoteAgentView {
             display_name,
             slug: trim_nonempty(view.slug),
+            about: trim_nonempty(view.about),
             use_criteria: trim_nonempty(view.use_criteria),
             backend_name: trim_nonempty(view.backend_name),
         }
