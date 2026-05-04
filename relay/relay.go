@@ -149,6 +149,10 @@ func NewRelay(config *Config) (*Relay, error) {
 			if khatru.GetAuthed(ctx) != "" {
 				return false, ""
 			}
+			// kind:0 (profile metadata) is globally public — no auth required.
+			if isMetadataOnlyFilter(filter) {
+				return false, ""
+			}
 			authLogger.LogREQRejected(ctx, filter)
 			khatru.RequestAuth(ctx)
 			return true, "auth-required: authenticate to subscribe"
@@ -319,6 +323,21 @@ func shouldApplyDefaultTimeWindow(filter nostr.Filter) bool {
 	}
 	if isReplaceableDiscoveryFilter(filter) {
 		return false
+	}
+	return true
+}
+
+// isMetadataOnlyFilter returns true when the filter exclusively requests
+// kind:0 events (NIP-01 profile metadata), which are globally public and
+// require no authentication.
+func isMetadataOnlyFilter(filter nostr.Filter) bool {
+	if len(filter.Kinds) == 0 {
+		return false
+	}
+	for _, k := range filter.Kinds {
+		if k != 0 {
+			return false
+		}
 	}
 	return true
 }
