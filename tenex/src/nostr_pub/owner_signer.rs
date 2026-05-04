@@ -1,24 +1,24 @@
 //! Resolve the project owner's nsec into a signing key.
 //!
-//! Mirrors `src/commands/agent/ownerSigner.ts` (the TS module that
-//! replaced the NIP-46 flow when project-31933 mutations switched to
-//! direct nsec signing).
-//!
-//! Source order (matches TS at `:60-77`):
+//! Source order:
 //! 1. `TENEX_NSEC` env var
 //! 2. `ownerNsec` field in the TENEX config
-//! 3. Interactive prompt (with optional persistence)
+//! 3. `Ok(None)` — callers decide how to handle a missing signer
+//!    (refuse, degrade to local-only, or surface a hint).
 //!
-//! Returns `Keys` whose pubkey **must still be validated** against the
-//! actual project owner pubkey by the publish layer. This module only
+//! There is deliberately no interactive nsec prompt: TENEX commands
+//! must never block on a hidden secret entry. Configure the env var or
+//! the config field once; subsequent invocations resolve silently.
+//!
+//! The returned `Keys` pubkey **must still be validated** against the
+//! actual project owner pubkey by the publish layer — this module only
 //! resolves "what nsec did the human provide?" — it does not assume the
 //! pubkey it derives is the right one.
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, Result};
 use nostr_sdk::Keys;
 
 use crate::store::tenex_config::TenexConfigDoc;
-use crate::tui::prompts;
 
 const ENV_VAR: &str = "TENEX_NSEC";
 
@@ -28,10 +28,9 @@ fn build_signer(nsec: &str) -> Result<Keys> {
 
 /// Non-prompting resolution: env var, then TENEX config, then `Ok(None)`.
 ///
-/// Used by callers (notably the agent manager) where local-only operation
-/// is valid and an interactive nsec prompt would be a UX regression. If
-/// the configured value is malformed, the parse error is surfaced rather
-/// than silently dropped — that's a misconfiguration, not "no signer".
+/// If the configured value is malformed, the parse error is surfaced
+/// rather than silently dropped — that's a misconfiguration, not "no
+/// signer".
 pub fn try_resolve_owner_signer(base_dir: &std::path::Path) -> Result<Option<Keys>> {
     if let Ok(env) = std::env::var(ENV_VAR) {
         let trimmed = env.trim();
@@ -49,95 +48,6 @@ pub fn try_resolve_owner_signer(base_dir: &std::path::Path) -> Result<Option<Key
     }
 
     Ok(None)
-}
-
-/// Resolve the project owner's nsec and return signing keys.
-///
-/// Errors with the verbatim TS string `"Owner nsec required: set
-/// $TENEX_NSEC or \"ownerNsec\" in TENEX config."` if all three sources
-/// fail.
-pub fn resolve_owner_signer(base_dir: &std::path::Path) -> Result<Keys> {
-    if let Ok(env) = std::env::var(ENV_VAR) {
-        let trimmed = env.trim();
-        if !trimmed.is_empty() {
-            return build_signer(trimmed);
-        }
-    }
-
-    let mut doc = TenexConfigDoc::load(base_dir)?;
-    if let Some(configured) = doc.owner_nsec() {
-        let trimmed = configured.trim();
-        if !trimmed.is_empty() {
-            return build_signer(trimmed);
-        }
-    }
-
-    // Interactive fallback. TS at agent/ownerSigner.ts:68-70 emits:
-    //   console.log(chalk.dim(
-    //       `\nNo owner nsec configured. Set $${ENV_VAR}, populate
-    //        "ownerNsec" in TENEX config, or enter it now.`,
-    //   ));
-    // The leading \n is INSIDE the dim wrap — mirror byte-for-byte.
-    println!(
-        "{}",
-        crate::tui::theme::chalk_dim(&format!(
-            "\nNo owner nsec configured. Set ${ENV_VAR}, populate \"ownerNsec\" in TENEX config, or enter it now.",
-        )),
-    );
-
-    let prompted = match prompt_for_nsec()? {
-        Some(p) => p,
-        None => {
-            return Err(anyhow!(
-                "Owner nsec required: set ${ENV_VAR} or \"ownerNsec\" in TENEX config."
-            ));
-        }
-    };
-
-    let signer = build_signer(&prompted.nsec)?;
-
-    if prompted.persist {
-        doc.set_owner_nsec(prompted.nsec);
-        doc.save(base_dir)
-            .context("save owner nsec to TENEX config")?;
-    }
-
-    Ok(signer)
-}
-
-struct PromptedNsec {
-    nsec: String,
-    persist: bool,
-}
-
-fn prompt_for_nsec() -> Result<Option<PromptedNsec>> {
-    // Password prompt (masked).
-    let nsec =
-        match prompts::password("Owner nsec (hex or bech32) — leave blank to abort:").prompt() {
-            Ok(s) => s,
-            Err(inquire::InquireError::OperationCanceled)
-            | Err(inquire::InquireError::OperationInterrupted) => return Ok(None),
-            Err(e) => return Err(anyhow!("nsec prompt: {e}")),
-        };
-    let trimmed = nsec.trim().to_owned();
-    if trimmed.is_empty() {
-        return Ok(None);
-    }
-
-    let persist = match prompts::confirm("Save this nsec to your TENEX config for future sessions?")
-        .with_default(false)
-        .prompt()
-    {
-        Ok(b) => b,
-        Err(inquire::InquireError::OperationCanceled)
-        | Err(inquire::InquireError::OperationInterrupted) => false,
-        Err(e) => return Err(anyhow!("persist prompt: {e}")),
-    };
-
-    Ok(Some(PromptedNsec {
-        nsec: trimmed,
-        persist,
-    }))
 }
 
 #[cfg(test)]
@@ -162,7 +72,8 @@ mod tests {
 
     fn seed_config_owner(base: &std::path::Path, nsec: &str) {
         let mut doc = TenexConfigDoc::load(base).unwrap();
-        doc.set_owner_nsec(nsec.to_owned());
+        doc.raw_mut()
+            .insert("ownerNsec".into(), serde_json::Value::String(nsec.to_owned()));
         doc.save(base).unwrap();
     }
 
@@ -225,19 +136,19 @@ mod tests {
     }
 
     #[test]
-    fn resolve_uses_env_var_first() {
+    fn try_resolve_uses_env_var_first() {
         // Seed a malformed config nsec, then set the env var to a real
-        // hex secret. `resolve_owner_signer` should pick the env var and
-        // never hit the config path. The env-var swap and the resolve
-        // call must happen *inside the same* `with_env_var` invocation —
-        // the helper's lock is non-reentrant, so nesting two calls
-        // deadlocks.
+        // hex secret. `try_resolve_owner_signer` should pick the env var
+        // and never hit the config path. The env-var swap and the
+        // resolve call must happen *inside the same* `with_env_var`
+        // invocation — the helper's lock is non-reentrant, so nesting
+        // two calls deadlocks.
         let keys = Keys::generate();
         let hex = keys.secret_key().to_secret_hex();
         let base = unique_temp();
         seed_config_owner(&base, "nsec1somethingDifferent000000000000");
         with_env_var(Some(&hex), || {
-            let resolved = resolve_owner_signer(&base).unwrap();
+            let resolved = try_resolve_owner_signer(&base).unwrap().unwrap();
             assert_eq!(
                 resolved.public_key(),
                 keys.public_key(),
@@ -248,60 +159,73 @@ mod tests {
     }
 
     #[test]
-    fn resolve_falls_back_to_config_when_env_unset() {
+    fn try_resolve_falls_back_to_config_when_env_unset() {
         with_env_var(None, || {
             let keys = Keys::generate();
             let hex = keys.secret_key().to_secret_hex();
             let base = unique_temp();
             seed_config_owner(&base, &hex);
-            let resolved = resolve_owner_signer(&base).unwrap();
+            let resolved = try_resolve_owner_signer(&base).unwrap().unwrap();
             assert_eq!(resolved.public_key(), keys.public_key());
             std::fs::remove_dir_all(&base).ok();
         });
     }
 
     #[test]
-    fn resolve_treats_empty_env_as_unset_and_falls_through_to_config() {
+    fn try_resolve_treats_empty_env_as_unset_and_falls_through_to_config() {
         with_env_var(Some(""), || {
             let keys = Keys::generate();
             let hex = keys.secret_key().to_secret_hex();
             let base = unique_temp();
             seed_config_owner(&base, &hex);
-            let resolved = resolve_owner_signer(&base).unwrap();
+            let resolved = try_resolve_owner_signer(&base).unwrap().unwrap();
             assert_eq!(resolved.public_key(), keys.public_key());
             std::fs::remove_dir_all(&base).ok();
         });
     }
 
     #[test]
-    fn resolve_treats_whitespace_only_env_as_unset() {
+    fn try_resolve_treats_whitespace_only_env_as_unset() {
         with_env_var(Some("   \n"), || {
             let keys = Keys::generate();
             let hex = keys.secret_key().to_secret_hex();
             let base = unique_temp();
             seed_config_owner(&base, &hex);
-            let resolved = resolve_owner_signer(&base).unwrap();
+            let resolved = try_resolve_owner_signer(&base).unwrap().unwrap();
             assert_eq!(resolved.public_key(), keys.public_key());
             std::fs::remove_dir_all(&base).ok();
         });
     }
 
     #[test]
-    fn resolve_treats_empty_config_as_unset_and_skips_to_prompt_path() {
-        // We can't run the prompt here, but we can verify that an empty
-        // config string does not get fed to `build_signer` (which would
-        // error with a different message). The interactive prompt path is
-        // unreachable in tests since stdin isn't a TTY — instead the
-        // resolve function returns the verbatim "Owner nsec required" error.
+    fn try_resolve_returns_none_when_env_and_config_both_unset() {
+        // No env var, whitespace-only config — both treated as "no
+        // signer". `try_resolve_owner_signer` returns `Ok(None)` so
+        // callers can decide how to handle the absence (degrade to
+        // local-only, or refuse with a clear hint).
         with_env_var(None, || {
             let base = unique_temp();
             seed_config_owner(&base, "   ");
-            let err = resolve_owner_signer(&base).unwrap_err().to_string();
-            // Either the prompt-required message (ideal) or any error that
-            // is NOT the "Could not load owner nsec" build_signer error.
+            let resolved = try_resolve_owner_signer(&base).unwrap();
             assert!(
-                !err.starts_with("Could not load owner nsec:"),
-                "whitespace-only config should not be passed to build_signer; got: {err}"
+                resolved.is_none(),
+                "whitespace-only config + no env should resolve to None, got: {resolved:?}"
+            );
+            std::fs::remove_dir_all(&base).ok();
+        });
+    }
+
+    #[test]
+    fn try_resolve_surfaces_malformed_configured_value() {
+        // A configured value that isn't a valid nsec is a misconfiguration
+        // — surface the parse error rather than silently dropping it.
+        with_env_var(None, || {
+            let base = unique_temp();
+            seed_config_owner(&base, "not-a-real-key");
+            let err = try_resolve_owner_signer(&base).unwrap_err().to_string();
+            assert!(
+                err.starts_with("Could not load owner nsec:"),
+                "expected parse error to surface; got: {err}"
             );
             std::fs::remove_dir_all(&base).ok();
         });

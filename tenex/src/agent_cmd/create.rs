@@ -8,9 +8,10 @@ use crate::agent_cmd::create_prompts::{
     existing_slugs, prompt_editor, prompt_model_config, prompt_projects, prompt_required,
     slug_from_name,
 };
-use crate::nostr_pub::owner_signer::resolve_owner_signer;
+use crate::nostr_pub::owner_signer::try_resolve_owner_signer;
 use crate::nostr_pub::project_mutation::sync_many_project_memberships;
 use crate::tui::{display, prompts};
+use nostr_sdk::Keys;
 
 pub async fn run(base_dir: &std::path::Path) -> Result<()> {
     display::blank();
@@ -69,6 +70,28 @@ pub async fn run(base_dir: &std::path::Path) -> Result<()> {
         return Ok(());
     };
 
+    // If the user picked projects, the create flow will need to publish a
+    // kind:31933 update — that requires an owner signer. Refuse up front
+    // (before any LLM work or local writes commit) when no signer is
+    // configured, so the user knows to set $TENEX_NSEC or remove the
+    // project selections rather than hitting an interactive prompt mid-flow.
+    let owner_keys: Option<Keys> = if projects.is_empty() {
+        None
+    } else {
+        match try_resolve_owner_signer(base_dir)? {
+            Some(k) => Some(k),
+            None => {
+                display::blank();
+                display::hint(
+                    "Assigning a new agent to projects publishes a kind:31933 event. \
+                     Set $TENEX_NSEC or populate \"ownerNsec\" in the TENEX config and re-run, \
+                     or pick zero projects to create a local-only agent.",
+                );
+                return Ok(());
+            }
+        }
+    };
+
     display::blank();
     display::summary_line("Name", &generated.name);
     display::summary_line("Slug", &slug);
@@ -104,7 +127,7 @@ pub async fn run(base_dir: &std::path::Path) -> Result<()> {
         model_config,
         category: generated.category,
     };
-    let pubkey = save_created_agent(base_dir, &draft, &projects).await?;
+    let pubkey = save_created_agent(base_dir, &draft, &projects, owner_keys.as_ref()).await?;
     display::blank();
     display::success(&format!("Created \"{}\" ({})", draft.name, draft.slug));
     display::context(&format!("Pubkey: {pubkey}"));
@@ -141,6 +164,7 @@ async fn save_created_agent(
     base_dir: &std::path::Path,
     draft: &AgentCreateDraft,
     projects: &[String],
+    owner_keys: Option<&Keys>,
 ) -> Result<String> {
     let doc = build_agent_doc(draft)?;
     let mut storage = AgentStorage::open(base_dir)?;
@@ -151,13 +175,15 @@ async fn save_created_agent(
     drop(storage);
 
     if !projects.is_empty() {
-        let keys = resolve_owner_signer(base_dir)?;
+        let keys = owner_keys.ok_or_else(|| {
+            anyhow!("create flow received project assignments without an owner signer")
+        })?;
         let mut storage = AgentStorage::open(base_dir)?;
         for project in projects {
             storage.add_agent_to_project(&pubkey, project)?;
         }
         drop(storage);
-        sync_many_project_memberships(base_dir, &keys, projects).await?;
+        sync_many_project_memberships(base_dir, keys, projects).await?;
     }
 
     if let Err(e) =

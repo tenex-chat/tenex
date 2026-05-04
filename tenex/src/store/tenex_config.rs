@@ -115,10 +115,6 @@ impl TenexConfigDoc {
         string_field(&self.raw, "ownerNsec")
     }
 
-    pub fn set_owner_nsec(&mut self, nsec: String) {
-        self.raw.insert("ownerNsec".into(), Value::String(nsec));
-    }
-
     pub fn backend_name(&self) -> Option<String> {
         string_field(&self.raw, "backendName")
     }
