@@ -6,14 +6,43 @@
 //! default path) on first use; failures collapse to a no-op so accounting
 //! never breaks the calling code path.
 
+use std::future::Future;
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use tokio::sync::OnceCell;
 
 use crate::recorder::{
-    LlmCallFinish, LlmCallStart, RecordedMessage, Recorder, RootKind, RootKindOrStr, TraceRoot,
+    LlmCallFinish, LlmCallStart, RecordedMessage, Recorder, RootKind, RootKindOrStr, TraceHandle,
+    TraceRoot,
 };
+
+tokio::task_local! {
+    static CURRENT_TRACE: TraceHandle;
+}
+
+/// Run `fut` with `handle` installed as the ambient accounting trace for
+/// the current async task. While this scope is active, [`record_llm_call`]
+/// will open spans on `handle` instead of opening a fresh trace per call.
+///
+/// `handle = None` is a no-op scope: `fut` runs unchanged and any nested
+/// `record_llm_call` falls through to its open-its-own-trace behavior.
+/// This shape lets the agent turn loop forward the result of
+/// [`open_trace`] (which itself can be `None` if the recorder failed to
+/// open) without branching at every call site.
+pub async fn with_trace<F, T>(handle: Option<TraceHandle>, fut: F) -> T
+where
+    F: Future<Output = T>,
+{
+    match handle {
+        Some(h) => CURRENT_TRACE.scope(h, fut).await,
+        None => fut.await,
+    }
+}
+
+fn current_trace() -> Option<TraceHandle> {
+    CURRENT_TRACE.try_with(|t| t.clone()).ok()
+}
 
 static RECORDER: OnceCell<Option<Arc<Recorder>>> = OnceCell::const_new();
 
@@ -79,33 +108,46 @@ pub struct RecordLlmCall {
     pub finish_reason: Option<String>,
 }
 
-/// Record one completed LLM call as a single-span trace. Submission is
-/// queued; the writer drains asynchronously. Errors are logged to stderr
-/// and swallowed. Callers that need durability before exit (e.g. the agent
-/// turn loop closing out a request) must call [`flush`] explicitly.
+/// Record one completed LLM call. If a trace is active in the current
+/// task (set via [`with_trace`]), the call is recorded as a child span on
+/// that trace and the trace is left open. Otherwise a fresh single-span
+/// trace is opened and closed for this call alone.
+///
+/// Submission is queued; the writer drains asynchronously. Errors are
+/// logged to stderr and swallowed. Callers that need durability before
+/// exit (e.g. the agent turn loop closing out a request) must call
+/// [`flush`] explicitly.
 pub async fn record_llm_call(params: RecordLlmCall) {
-    let Some(rec) = recorder().await else {
-        return;
-    };
-    let trace = match rec
-        .open_trace(TraceRoot {
-            root_kind: params.root_kind,
-            project_id: params.project_id,
-            conversation_id: params.conversation_id,
-            user_pubkey: params.user_pubkey,
-            triggering_event_id: params.triggering_event_id,
-            triggering_kind: params.triggering_kind,
-            triggering_pubkey: params
-                .triggering_pubkey
-                .or_else(|| params.agent_pubkey.clone()),
-            ..Default::default()
-        })
-        .await
-    {
-        Ok(t) => t,
-        Err(e) => {
-            eprintln!("[tenex-accounting] open_trace failed: {e:#}");
-            return;
+    let ambient = current_trace();
+    let owns_trace = ambient.is_none();
+    let trace = match ambient {
+        Some(t) => t,
+        None => {
+            let Some(rec) = recorder().await else {
+                return;
+            };
+            match rec
+                .open_trace(TraceRoot {
+                    root_kind: params.root_kind,
+                    project_id: params.project_id.clone(),
+                    conversation_id: params.conversation_id.clone(),
+                    user_pubkey: params.user_pubkey.clone(),
+                    triggering_event_id: params.triggering_event_id.clone(),
+                    triggering_kind: params.triggering_kind,
+                    triggering_pubkey: params
+                        .triggering_pubkey
+                        .clone()
+                        .or_else(|| params.agent_pubkey.clone()),
+                    ..Default::default()
+                })
+                .await
+            {
+                Ok(t) => t,
+                Err(e) => {
+                    eprintln!("[tenex-accounting] open_trace failed: {e:#}");
+                    return;
+                }
+            }
         }
     };
     let mut messages = Vec::new();
@@ -164,7 +206,48 @@ pub async fn record_llm_call(params: RecordLlmCall) {
     {
         eprintln!("[tenex-accounting] llm finish_ok failed: {e:#}");
     }
-    if let Err(e) = trace.finish_ok(None).await {
+    if owns_trace {
+        if let Err(e) = trace.finish_ok(None).await {
+            eprintln!("[tenex-accounting] trace.finish_ok failed: {e:#}");
+        }
+    }
+}
+
+/// Open a trace from `params` (the same root-kind / context fields used
+/// by [`record_llm_call`]) and return the handle. The caller is
+/// responsible for installing it via [`with_trace`] and finishing it via
+/// [`finish_trace`].
+pub async fn open_trace(params: &RecordLlmCall) -> Option<TraceHandle> {
+    let rec = recorder().await?;
+    match rec
+        .open_trace(TraceRoot {
+            root_kind: params.root_kind.clone(),
+            project_id: params.project_id.clone(),
+            conversation_id: params.conversation_id.clone(),
+            user_pubkey: params.user_pubkey.clone(),
+            triggering_event_id: params.triggering_event_id.clone(),
+            triggering_kind: params.triggering_kind,
+            triggering_pubkey: params
+                .triggering_pubkey
+                .clone()
+                .or_else(|| params.agent_pubkey.clone()),
+            ..Default::default()
+        })
+        .await
+    {
+        Ok(t) => Some(t),
+        Err(e) => {
+            eprintln!("[tenex-accounting] open_trace failed: {e:#}");
+            None
+        }
+    }
+}
+
+/// Finalize a trace previously returned by [`open_trace`]. No-op if the
+/// trace is `None`.
+pub async fn finish_trace(trace: Option<TraceHandle>) {
+    let Some(t) = trace else { return };
+    if let Err(e) = t.finish_ok(None).await {
         eprintln!("[tenex-accounting] trace.finish_ok failed: {e:#}");
     }
 }

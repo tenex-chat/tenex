@@ -4,7 +4,7 @@
 //! database does not abort an in-flight agent turn — the rig response has
 //! already been emitted by the time these run.
 
-use tenex_accounting::{flush as flush_accounting, record_llm_call, LlmUsage, RecordLlmCall, RootKind};
+use tenex_accounting::{record_llm_call, LlmUsage, RecordLlmCall, RootKind};
 use tenex_context::{
     BreakpointHint, BreakpointKind, CacheObservation, Message as CtxMessage,
     ToolCall as CtxToolCall, TurnRecord,
@@ -172,5 +172,4 @@ pub(super) async fn record_turn_outcome(
         ..Default::default()
     })
     .await;
-    flush_accounting().await;
 }

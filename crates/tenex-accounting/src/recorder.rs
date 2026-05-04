@@ -4,11 +4,18 @@
 //!
 //! ```ignore
 //! let recorder = Recorder::open(PathBuf::from("~/.tenex/data/accounting/hot.db")).await?;
-//! let trace = recorder.open_trace(TraceRoot { kind: RootKind::UserMessage, ... }).await?;
+//! let trace = recorder.open_trace(TraceRoot {
+//!     root_kind: RootKindOrStr::Known(RootKind::UserMessage),
+//!     ..Default::default()
+//! }).await?;
 //! let span = trace.open_llm_call(LlmCallStart { provider, model, ... }).await?;
 //! span.finish_ok(LlmCallFinish { input_tokens, output_tokens, ... }).await;
-//! trace.finish_ok(...).await;
+//! trace.finish_ok(None).await;
 //! ```
+//!
+//! Most callers should not use this API directly — go through
+//! [`crate::simple`] which handles the lazy-open singleton recorder, the
+//! task-local trace scope, and the open/close lifecycle.
 //!
 //! Writes go through a single mpsc-backed writer task that serializes inserts
 //! and updates in batched transactions. The hot path (caller side) only does

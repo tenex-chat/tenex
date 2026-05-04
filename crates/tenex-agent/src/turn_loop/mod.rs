@@ -15,6 +15,9 @@ use std::sync::atomic::Ordering;
 use anyhow::{Context, Result};
 use rig::completion::Message as RigMessage;
 use rig::providers::{anthropic, ollama, openai, openrouter};
+use tenex_accounting::{
+    finish_trace, flush as flush_accounting, open_trace, with_trace, RecordLlmCall, RootKind,
+};
 use tenex_protocol::{CompletionIntent, ConversationIntent, Intent, LlmUsage};
 use tenex_supervision::supervisor::PostCompletionOutcome;
 use tenex_supervision::types::{TodoEntry as SupTodoEntry, TodoStatus as SupTodoStatus};
@@ -88,6 +91,20 @@ pub(crate) async fn run_turn_loop(boot: &mut AgentBootstrap) -> Result<()> {
         // parent context; this iteration span scopes one supervisor cycle so
         // re-engagements show up as siblings.
         let iteration_span = info_span!("tenex.agent.iteration", iteration = iteration);
+
+        // Open the accounting trace covering this iteration's main stream
+        // and any in-turn ancillary LLM calls (rag_search, learn,
+        // conversation_get analysis). Re-engagement iterations get sibling
+        // traces. Categorize, compaction, and context_discovery run before
+        // run_turn_loop so they are unaffected.
+        let accounting_trace = open_trace(&RecordLlmCall {
+            root_kind: RootKind::UserMessage.into(),
+            agent_pubkey: Some(boot.pubkey_hex.clone()),
+            conversation_id: Some(boot.conversation_id.clone()),
+            project_id: Some(boot.project_id.clone()),
+            ..Default::default()
+        })
+        .await;
         let resolved = &boot.resolved;
         let cassette_recorder = &boot.cassette_recorder;
         let system_prompt = &boot.system_prompt;
@@ -224,17 +241,32 @@ pub(crate) async fn run_turn_loop(boot: &mut AgentBootstrap) -> Result<()> {
             };
             Ok::<_, anyhow::Error>(response)
         };
-        let final_response = async move {
-            match turn_body.await {
-                Ok(v) => Ok(v),
-                Err(e) => {
-                    tenex_telemetry::record_current_error(&e);
-                    Err(e)
+        // Always finalize the accounting trace, even if the streaming or
+        // persistence path fails partway through — otherwise the trace row
+        // stays open in the DB.
+        let turn_result = with_trace(
+            accounting_trace.clone(),
+            async move {
+                match turn_body.await {
+                    Ok(v) => Ok(v),
+                    Err(e) => {
+                        tenex_telemetry::record_current_error(&e);
+                        Err(e)
+                    }
                 }
             }
-        }
-        .instrument(iteration_span)
-        .await?;
+            .instrument(iteration_span),
+        )
+        .await;
+
+        let final_response = match turn_result {
+            Ok(v) => v,
+            Err(e) => {
+                finish_trace(accounting_trace).await;
+                flush_accounting().await;
+                return Err(e);
+            }
+        };
 
         if let Some(state) = &boot.runtime_state {
             state.release_driver();
@@ -260,16 +292,22 @@ pub(crate) async fn run_turn_loop(boot: &mut AgentBootstrap) -> Result<()> {
                 &boot.pubkey_hex,
                 &recorded_calls,
             );
-            persistence::record_turn_outcome(
-                boot,
-                store,
-                &current_message,
-                final_response.response(),
-                &recorded_calls,
-                &final_response.usage(),
+            with_trace(
+                accounting_trace.clone(),
+                persistence::record_turn_outcome(
+                    boot,
+                    store,
+                    &current_message,
+                    final_response.response(),
+                    &recorded_calls,
+                    &final_response.usage(),
+                ),
             )
             .await;
         }
+
+        finish_trace(accounting_trace).await;
+        flush_accounting().await;
 
         eprintln!("[tenex-agent] Agent completed.");
 
