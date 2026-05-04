@@ -405,9 +405,16 @@ pub(super) async fn run_external_dispatch(
         title: shared.project_title.as_str(),
         d_tag: shared.project_id.as_str(),
     };
+    println!(
+        "[firewall] checking event {event_id_hex} from {author_short}: {}",
+        event.content.chars().take(120).collect::<String>()
+    );
     match tenex_firewall::check(&shared.base_dir, firewall_ctx, &event.content).await {
-        tenex_firewall::Verdict::Safe => {}
+        tenex_firewall::Verdict::Safe => {
+            println!("[firewall] SAFE event {event_id_hex} from {author_short}");
+        }
         tenex_firewall::Verdict::Unsafe { reason } => {
+            println!("[firewall] UNSAFE event {event_id_hex} from {author_short}: {reason}");
             warn!(
                 event_id = short,
                 author = %author_short,

@@ -8,13 +8,15 @@
 
 use anyhow::{anyhow, Result};
 use rig::client::{CompletionClient, Nothing};
-use rig::completion::Prompt;
+use rig::completion::{Completion, Message};
 use rig::providers::{anthropic, ollama, openai, openrouter};
+use tenex_accounting::{record_llm_call, RecordLlmCall, RootKindOrStr};
 use tenex_agent_registry::{
     build_user_prompt, parse_category, system_prompt, AgentCategory, AgentMetadata, AgentStorage,
 };
 
 use crate::config::ResolvedModel;
+use crate::llm_accounting::{assistant_text, usage_from_rig};
 
 /// Send `metadata` to the resolved LLM and parse a category from the
 /// response. `Ok(None)` means the model returned no canonical literal —
@@ -22,71 +24,102 @@ use crate::config::ResolvedModel;
 pub async fn classify_via_llm(
     resolved: &ResolvedModel,
     metadata: &AgentMetadata,
+    pubkey_hex: &str,
 ) -> Result<Option<AgentCategory>> {
     let preamble = system_prompt();
     let user = build_user_prompt(metadata);
+    let history: Vec<Message> = Vec::new();
 
-    let response = match resolved.provider.as_str() {
+    let (response, usage) = match resolved.provider.as_str() {
         "openrouter" => {
             let key = resolved
                 .api_key
                 .as_deref()
                 .ok_or_else(|| anyhow!("no OpenRouter API key"))?;
-            openrouter::Client::new(key)?
+            let resp = openrouter::Client::new(key)?
                 .agent(&resolved.model)
                 .preamble(&preamble)
                 .max_tokens(64)
                 .build()
-                .prompt(user)
+                .completion(user.clone(), history.clone())
                 .await
                 .map_err(|e| anyhow!("{e:?}"))?
+                .send()
+                .await
+                .map_err(|e| anyhow!("{e:?}"))?;
+            (assistant_text(&resp.choice), resp.usage)
         }
         "openai" => {
             let key = resolved
                 .api_key
                 .as_deref()
                 .ok_or_else(|| anyhow!("no OpenAI API key"))?;
-            openai::CompletionsClient::builder()
+            let resp = openai::CompletionsClient::builder()
                 .api_key(key)
                 .build()?
                 .agent(&resolved.model)
                 .preamble(&preamble)
                 .max_tokens(64)
                 .build()
-                .prompt(user)
+                .completion(user.clone(), history.clone())
                 .await
                 .map_err(|e| anyhow!("{e:?}"))?
+                .send()
+                .await
+                .map_err(|e| anyhow!("{e:?}"))?;
+            (assistant_text(&resp.choice), resp.usage)
         }
         "ollama" => {
             let mut builder = ollama::Client::builder().api_key(Nothing);
             if let Some(url) = resolved.base_url.as_deref() {
                 builder = builder.base_url(url);
             }
-            builder
+            let resp = builder
                 .build()?
                 .agent(&resolved.model)
                 .preamble(&preamble)
                 .max_tokens(64)
                 .build()
-                .prompt(user)
+                .completion(user.clone(), history.clone())
                 .await
                 .map_err(|e| anyhow!("{e:?}"))?
+                .send()
+                .await
+                .map_err(|e| anyhow!("{e:?}"))?;
+            (assistant_text(&resp.choice), resp.usage)
         }
         _ => {
             let key = resolved
                 .api_key
                 .as_deref()
                 .ok_or_else(|| anyhow!("no Anthropic API key"))?;
-            anthropic::Client::new(key)?
+            let resp = anthropic::Client::new(key)?
                 .agent(&resolved.model)
                 .preamble(&preamble)
                 .max_tokens(64)
                 .build()
-                .prompt(user)
+                .completion(user.clone(), history.clone())
                 .await
                 .map_err(|e| anyhow!("{e:?}"))?
+                .send()
+                .await
+                .map_err(|e| anyhow!("{e:?}"))?;
+            (assistant_text(&resp.choice), resp.usage)
         }
     };
+
+    record_llm_call(RecordLlmCall {
+        root_kind: RootKindOrStr::Other("categorize".into()),
+        provider: resolved.provider.clone(),
+        provider_model_id: resolved.model.clone(),
+        operation: "categorize".into(),
+        agent_pubkey: Some(pubkey_hex.to_string()),
+        user_message: Some(user),
+        assistant_response: Some(response.clone()),
+        usage: usage_from_rig(&usage),
+        ..Default::default()
+    })
+    .await;
 
     Ok(parse_category(&response))
 }
@@ -101,7 +134,7 @@ pub async fn backfill_and_persist(
     base_dir: &std::path::Path,
     pubkey_hex: &str,
 ) -> Result<AgentCategory> {
-    let category = classify_via_llm(resolved, metadata)
+    let category = classify_via_llm(resolved, metadata, pubkey_hex)
         .await?
         .ok_or_else(|| anyhow!("LLM returned no canonical category"))?;
     let mut storage = AgentStorage::open(base_dir)?;

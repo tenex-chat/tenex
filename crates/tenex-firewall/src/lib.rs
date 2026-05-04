@@ -25,6 +25,7 @@ use serde::{Deserialize, Serialize};
 use tenex_llm_config::key_health::KeyHealthTracker;
 use tenex_llm_config::resolver::ConfigStore;
 use tenex_llm_config::{ResolvedConfig, StandardConfig};
+use tracing::Instrument as _;
 
 /// Project-side context handed to the firewall so it can judge whether a
 /// message is on-topic versus spam. Only fields that are stable across
@@ -51,15 +52,28 @@ pub enum Verdict {
 /// response) collapse to `Verdict::Unsafe { reason }` — see the
 /// fail-closed rationale on the crate docs.
 pub async fn check(base_dir: &Path, project: ProjectContext<'_>, content: &str) -> Verdict {
-    match run(base_dir, project, content).await {
+    let span = tracing::info_span!(
+        "tenex.firewall.check",
+        project.d_tag = project.d_tag,
+        verdict = tracing::field::Empty,
+    );
+    let verdict = match run(base_dir, project, content).instrument(span.clone()).await {
         Ok(v) => v,
         Err(e) => {
-            tracing::warn!(error = %e, "firewall failed closed");
+            tracing::warn!(parent: &span, error = %e, "firewall failed closed");
             Verdict::Unsafe {
                 reason: format!("firewall error: {e}"),
             }
         }
-    }
+    };
+    span.record(
+        "verdict",
+        match &verdict {
+            Verdict::Safe => "safe",
+            Verdict::Unsafe { .. } => "unsafe",
+        },
+    );
+    verdict
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
