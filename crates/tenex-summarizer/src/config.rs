@@ -75,17 +75,9 @@ pub struct LlmSelection {
 impl LlmSelection {
     fn resolve() -> Result<Self> {
         let store = ConfigStore::load(&paths::base_dir())?;
-        let role = if store.llms.roles.contains_key("summarization") {
-            "summarization"
-        } else if store.llms.roles.contains_key("default") {
-            "default"
-        } else {
-            return Err(anyhow!(
-                "llms.json has neither `summarization` nor `default`"
-            ));
-        };
-        let standard =
-            resolved_config_default_standard(store.resolve_role(role, &KeyHealthTracker::new())?)?;
+        let resolved =
+            store.resolve_role_or_default("summarization", &KeyHealthTracker::new())?;
+        let standard = resolved_config_default_standard(resolved)?;
         Ok(Self {
             provider: standard.provider,
             model: standard.model,

@@ -27,7 +27,7 @@ pub struct AgentGenerationResult {
 
 pub fn resolve_role_model(base_dir: &std::path::Path, role_key: &str) -> Result<PromptModel> {
     let store = ConfigStore::load(base_dir)?;
-    let resolved = store.resolve_role(role_key, &KeyHealthTracker::new())?;
+    let resolved = store.resolve_role_or_default(role_key, &KeyHealthTracker::new())?;
     prompt_model_from_resolved_config(&resolved)
 }
 

@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result};
 use serde::Deserialize;
 use std::fs;
 use std::path::Path;
@@ -67,22 +67,12 @@ impl ResolvedModel {
     }
 
     /// Resolve a named role from `llms.json`, falling back to the `default`
-    /// role when the requested role isn't assigned. Mirrors the pattern in
-    /// `tenex-summarizer::config::LlmSelection::resolve`.
+    /// role when the requested role isn't assigned.
     pub fn resolve_role(base_dir: &Path, role: &str) -> Result<Self> {
         let store = ConfigStore::load(base_dir)?;
-        let key_health = KeyHealthTracker::new();
-        let resolved_role = if store.llms.roles.contains_key(role) {
-            role
-        } else if store.llms.roles.contains_key("default") {
-            "default"
-        } else {
-            return Err(anyhow!(
-                "llms.json has neither `{role}` nor `default` role"
-            ));
-        };
-        let standard =
-            resolved_config_default_standard(store.resolve_role(resolved_role, &key_health)?)?;
+        let resolved =
+            store.resolve_role_or_default(role, &KeyHealthTracker::new())?;
+        let standard = resolved_config_default_standard(resolved)?;
         Ok(Self::from_standard(standard))
     }
 

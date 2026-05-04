@@ -5,7 +5,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use tenex_llm_config::{
     key_health::KeyHealthTracker,
-    resolver::{load_llms, load_providers, resolve_config},
+    resolver::{load_llms, load_providers, resolve_config, ConfigStore},
     ResolvedConfig, StandardConfig,
 };
 
@@ -182,6 +182,60 @@ fn resolves_role_summarization() {
         .get("summarization")
         .expect("summarization role should be configured");
     resolve_config(name, &llms, &providers, &kh).expect("summarization role should resolve");
+}
+
+#[test]
+fn resolve_role_or_default_uses_assigned_role_when_set() {
+    let dir = base_dir();
+    let store = ConfigStore::load(&dir.path).unwrap();
+    let kh = KeyHealthTracker::new();
+
+    let resp = standard(store.resolve_role_or_default("summarization", &kh).unwrap());
+    assert_eq!(resp.provider, "codex");
+    assert_eq!(resp.model, "gpt-5.4");
+}
+
+#[test]
+fn resolve_role_or_default_falls_back_to_default_when_unset() {
+    let dir = base_dir();
+    let store = ConfigStore::load(&dir.path).unwrap();
+    let kh = KeyHealthTracker::new();
+
+    // `supervision` isn't set in the fixture; expect the `default` config.
+    let resp = standard(store.resolve_role_or_default("supervision", &kh).unwrap());
+    assert_eq!(resp.provider, "anthropic");
+    assert_eq!(resp.model, "claude-opus-4-6");
+}
+
+#[test]
+fn resolve_role_or_default_errors_when_neither_role_nor_default_set() {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let path = std::env::temp_dir().join(format!(
+        "tenex-llm-config-empty-{}-{nanos}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&path).unwrap();
+    std::fs::write(
+        path.join("llms.json"),
+        r#"{"configurations":{"opus":{"provider":"anthropic","model":"claude-opus-4-6"}}}"#,
+    )
+    .unwrap();
+    std::fs::write(path.join("providers.json"), r#"{"providers":{}}"#).unwrap();
+
+    let store = ConfigStore::load(&path).unwrap();
+    let err = store
+        .resolve_role_or_default("supervision", &KeyHealthTracker::new())
+        .unwrap_err();
+    let msg = err.to_string();
+    assert!(
+        msg.contains("supervision") && msg.contains("default"),
+        "unexpected error: {msg}"
+    );
+
+    std::fs::remove_dir_all(&path).ok();
 }
 
 #[test]

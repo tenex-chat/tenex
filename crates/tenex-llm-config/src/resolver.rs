@@ -47,6 +47,31 @@ impl ConfigStore {
         resolve_role(role, &self.llms, &self.providers, key_health)
     }
 
+    /// Resolve a named role, falling back to the `default` role when the
+    /// requested role has no assignment in `llms.json`.
+    ///
+    /// The role-assignment TUI displays unset roles using the `default`
+    /// fallback; this resolver mirrors that display so callers see the same
+    /// model the user expects. Use [`ConfigStore::resolve_role`] when a role
+    /// must be configured explicitly (e.g. firewall, where missing means the
+    /// feature is intentionally off).
+    pub fn resolve_role_or_default(
+        &self,
+        role: &str,
+        key_health: &KeyHealthTracker,
+    ) -> Result<ResolvedConfig> {
+        let resolved_role = if self.llms.roles.contains_key(role) {
+            role
+        } else if self.llms.roles.contains_key("default") {
+            "default"
+        } else {
+            return Err(anyhow!(
+                "llms.json has neither `{role}` nor `default` role"
+            ));
+        };
+        resolve_role(resolved_role, &self.llms, &self.providers, key_health)
+    }
+
     pub fn resolve_model_reference(
         &self,
         raw_model: Option<&str>,
