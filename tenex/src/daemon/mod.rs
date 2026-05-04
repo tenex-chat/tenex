@@ -64,30 +64,7 @@ pub async fn run(args: DaemonArgs) -> Result<()> {
     let backend_keys = crate::nostr_pub::backend_signer::ensure_backend_keys(&base_dir)
         .context("loading daemon signer")?;
 
-    whitelist_export::write_backend_pubkey(&base_dir, &backend_keys)
-        .context("publish backend pubkey for whitelist daemon")?;
-
-    let boot_argv = if let Some(cmd) = args.ts {
-        let argv = shell_words::split(&cmd).with_context(|| format!("parsing --ts: {cmd}"))?;
-        if argv.is_empty() {
-            return Err(anyhow::anyhow!("--ts is empty"));
-        }
-        argv
-    } else {
-        default_boot_argv()
-    };
-
-    let supervisor = supervisor::Supervisor::new(boot_argv, base_dir.clone());
-
-    // Bootstrap the whitelist trust daemon as a supervised foreground child.
-    // Every runtime gates inbound events through it and fails closed on socket
-    // errors, so the daemon must be ready before any project runtime starts.
-    if let Err(e) = start_whitelist_service(&supervisor, &base_dir).await {
-        supervisor.shutdown().await;
-        return Err(e);
-    }
-    display::service_ready("whitelist");
-
+    let supervisor = supervisor::Supervisor::new(default_boot_argv(), base_dir.clone());
 
     // Bootstrap the identity daemon. Runtime code relies on this service for
     // pubkey display names; fail startup if the socket cannot be reached.
@@ -96,20 +73,6 @@ pub async fn run(args: DaemonArgs) -> Result<()> {
         return Err(e);
     }
     display::service_ready("identity");
-
-    // Start the LLM config IPC server. TypeScript runtimes resolve config
-    // names and report key failures through this socket rather than reading
-    // providers.json / llms.json directly.
-    {
-        let llm_base = base_dir.clone();
-        tokio::spawn(async move {
-            if let Err(e) = tenex_llm_config::Server::start(llm_base).await {
-                error!(error = %e, "llm-config IPC server failed");
-            }
-        });
-    }
-    display::service_ready("llm-config");
-
 
     // Spawn host-level companion daemons. Binaries are expected alongside the
     // tenex binary (same target/ dir for cargo builds, same bin/ for installs).

@@ -11,10 +11,18 @@
 //! tags    = ["a", "31933:<owner_pk>:<d_tag>"]
 //!         + ["p", <owner_pk>] (+ ["p", <whitelisted_pk>]..., deduped)
 //!         + ["agent", <pk>, <slug>]  or  ["agent", <pk>, <slug>, "pm"]
+//!         + ["skill", <id>]                              (universe — project-scoped only)
+//!         + ["skill", <id>, <slug_1>, <slug_2>, ...]     (assignments — agents that enabled it)
 //! ```
 //!
-//! Model, MCP, and skill tags are NOT emitted on 24010 — every per-agent
-//! capability lives on the per-agent kind:34011 events.
+//! Skills emitted here are **only** project-scoped — the flat per-project
+//! source `{project_path}/.agents/skills/<id>/SKILL.md`. The skill universe
+//! is shared across all agents in the project; per-agent assignments come
+//! from each agent's `default_config_json["skills"]`. All other skill scopes
+//! (built-in, agent-home, user-global) live on the per-agent kind:34011 events.
+//!
+//! Model and MCP tags are NOT emitted on 24010 — those capabilities live
+//! entirely on the per-agent kind:34011 events.
 //!
 //! tool/branch/scheduled-task tags are not emitted — they require
 //! infrastructure (tool registry, git, scheduler storage) not yet available
@@ -22,19 +30,71 @@
 //!
 //! Signed with the backend signer.
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::path::Path;
 
 use anyhow::{anyhow, Result};
 use nostr_sdk::{Event, EventBuilder, Keys, Kind, Tag, TagKind};
+use serde_json::Value;
 
 use tenex_project::{models::ProjectAgent, Agent, ProjectMetadata};
 
 const KIND: u16 = 24010;
 
+/// Return the set of project-scoped skill IDs available in this project.
+///
+/// Reads `{project_path}/.agents/skills/` (flat, shared across all agents in
+/// the project) and includes every subdirectory that contains a `SKILL.md`
+/// file. Returns an empty set if the directory does not exist (does not panic).
+pub fn project_scoped_skill_ids(project_path: &Path) -> HashSet<String> {
+    let dir = project_path.join(".agents").join("skills");
+
+    let mut out = HashSet::new();
+    let entries = match std::fs::read_dir(&dir) {
+        Ok(e) => e,
+        Err(_) => return out,
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        if !path.join("SKILL.md").exists() {
+            continue;
+        }
+        if let Some(id) = path.file_name().and_then(|n| n.to_str()) {
+            out.insert(id.to_string());
+        }
+    }
+    out
+}
+
+/// Pull the array of enabled skill IDs out of an agent's `default_config_json`.
+fn parse_enabled_skill_ids(agent: &Agent) -> HashSet<String> {
+    let mut out = HashSet::new();
+    let Some(raw) = agent.default_config_json.as_deref() else {
+        return out;
+    };
+    let Ok(Value::Object(map)) = serde_json::from_str::<Value>(raw) else {
+        return out;
+    };
+    if let Some(Value::Array(skills)) = map.get("skills") {
+        for v in skills {
+            if let Some(s) = v.as_str() {
+                if !s.is_empty() {
+                    out.insert(s.to_string());
+                }
+            }
+        }
+    }
+    out
+}
+
 /// Build (but do not send) a kind:24010 project status event.
 pub fn build_project_status_event(
     keys: &Keys,
     meta: &ProjectMetadata,
+    project_path: &Path,
     agents: &[Agent],
     project_agents: &[ProjectAgent],
     whitelisted_pubkeys: &[String],
@@ -69,6 +129,38 @@ pub fn build_project_status_event(
             vals.push("pm".to_string());
         }
         tags.push(Tag::custom(TagKind::Custom("agent".into()), vals));
+    }
+
+    // ─── Project-scoped skill emission ────────────────────────────────────────
+    //
+    // The skill universe is a single set per project (flat directory, shared
+    // across all agents). Per-agent assignments come from each agent's
+    // `default_config_json["skills"]`; an agent "owns" an assignment iff the
+    // skill is present in the project universe AND listed in its config.
+    let on_disk: HashSet<String> = project_scoped_skill_ids(project_path);
+    let universe: BTreeSet<String> = on_disk.iter().cloned().collect();
+    let mut assignments: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+
+    for agent in agents {
+        let enabled = parse_enabled_skill_ids(agent);
+        for id in enabled.intersection(&on_disk) {
+            assignments
+                .entry(id.clone())
+                .or_default()
+                .insert(agent.slug.clone());
+        }
+    }
+
+    // Pass 2: emit tags grouped by skill ID, sorted ascending.
+    for id in &universe {
+        tags.push(Tag::custom(TagKind::Custom("skill".into()), vec![id.clone()]));
+        if let Some(slugs) = assignments.get(id) {
+            if !slugs.is_empty() {
+                let mut vals = vec![id.clone()];
+                vals.extend(slugs.iter().cloned());
+                tags.push(Tag::custom(TagKind::Custom("skill".into()), vals));
+            }
+        }
     }
 
     let event = EventBuilder::new(Kind::Custom(KIND), "")

@@ -95,10 +95,8 @@ async fn main() -> Result<()> {
 
     let shutdown_signal = async {
         use tokio::signal::unix::{signal, SignalKind};
-        let mut sigterm =
-            signal(SignalKind::terminate()).expect("install SIGTERM handler");
-        let mut sigint =
-            signal(SignalKind::interrupt()).expect("install SIGINT handler");
+        let mut sigterm = signal(SignalKind::terminate()).expect("install SIGTERM handler");
+        let mut sigint = signal(SignalKind::interrupt()).expect("install SIGINT handler");
         tokio::select! {
             _ = sigterm.recv() => (),
             _ = sigint.recv() => (),
@@ -152,6 +150,9 @@ async fn run(
     let envelope = read_one_from_stdin()
         .await
         .context("Failed to parse triggering event from stdin")?;
+    let trigger_event_id = match &envelope.message {
+        MessageRef::Nostr { event_id } => event_id.to_hex(),
+    };
 
     let stdout_sink = SharedStdoutEventSink::new();
     let pending_external_work = Arc::new(AtomicBool::new(false));
@@ -309,6 +310,7 @@ async fn run(
         &pubkey_hex,
         &system_prompt,
         &acp_config.backend,
+        Some(&trigger_event_id),
     )
     .await;
     let prompt = render_acp_prompt(&system_prompt, &history, &envelope.content);
@@ -554,6 +556,7 @@ async fn render_history(
     agent_pubkey: &str,
     system_prompt: &str,
     backend: &str,
+    exclude_nostr_event_id: Option<&str>,
 ) -> String {
     let Some(store) = store else {
         return String::new();
@@ -567,7 +570,7 @@ async fn render_history(
         max_context_tokens: 200_000,
     };
     let tool_defs: Vec<ToolDef> = Vec::new();
-    match tenex_context::project(
+    match tenex_context::project_with_excluded_event(
         store,
         conversation_id,
         agent_pubkey,
@@ -576,6 +579,7 @@ async fn render_history(
         &tool_defs,
         None,
         None,
+        exclude_nostr_event_id,
     )
     .await
     {

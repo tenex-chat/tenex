@@ -237,10 +237,7 @@ pub(crate) async fn build(
         agent_config_path: &args[1],
         conv_store: conv_store.as_ref(),
         conversation_id: &conversation_id,
-        agent_default_skills: agent_config
-            .default
-            .as_ref()
-            .and_then(|d| d.skills.clone()),
+        agent_default_skills: agent_config.default.as_ref().and_then(|d| d.skills.clone()),
     });
 
     // Shared self-applied skills state (pre-seeded from persistence; updated by skills_set tool).
@@ -404,6 +401,7 @@ pub(crate) async fn build(
         &system_prompt,
         &resolved,
         &base_dir,
+        Some(&trigger_event_id),
     )
     .await;
     eprintln!(
@@ -491,4 +489,3 @@ pub(crate) async fn build(
         suppress_response,
     })
 }
-

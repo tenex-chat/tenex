@@ -36,8 +36,16 @@ pub(crate) fn project_messages(
     agent_pubkey: &str,
     system_prompt: &str,
     name_resolver: Option<&dyn DisplayNameResolver>,
+    exclude_nostr_event_id: Option<&str>,
 ) -> anyhow::Result<Vec<Message>> {
-    let history = store.list_messages(conversation_id, MessageQuery::default())?;
+    let history: Vec<MessageRecord> = store
+        .list_messages(conversation_id, MessageQuery::default())?
+        .into_iter()
+        .filter(|record| {
+            exclude_nostr_event_id
+                .is_none_or(|event_id| record.nostr_event_id.as_deref() != Some(event_id))
+        })
+        .collect();
     // Attribution: when more than one distinct pubkey has authored a
     // user-role message in this conversation, prefix each user message
     // with `[name]` so the agent can disambiguate authors. Single-author

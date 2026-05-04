@@ -22,6 +22,25 @@ pub struct CassetteToolCall {
     pub args: serde_json::Value,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CassettePartialToolCall {
+    pub name: Option<String>,
+    pub args: String,
+    pub args_truncated: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CassetteStreamError {
+    pub class: String,
+    pub message: String,
+    pub retryable: String,
+    pub failed_at_ms: u64,
+    pub partial_content: String,
+    pub partial_tool_calls: Vec<CassettePartialToolCall>,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct CassetteTurnRecord<'a> {
@@ -35,6 +54,8 @@ struct CassetteTurnRecord<'a> {
     request_debug: &'a str,
     content: &'a str,
     tool_calls: &'a [CassetteToolCall],
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<&'a CassetteStreamError>,
 }
 
 impl CassetteRecorder {
@@ -98,9 +119,64 @@ impl CassetteRecorder {
             request_debug,
             content,
             tool_calls,
+            error: None,
         };
         let line = serde_json::to_string(&record).context("serialize cassette turn")?;
         append_jsonl(&self.path, &line).context("append cassette turn")
+    }
+
+    pub(crate) fn record_stream_error(
+        &self,
+        turn: usize,
+        duration_ms: u64,
+        request_debug: &str,
+        content: &str,
+        tool_calls: &[CassetteToolCall],
+        error: &CassetteStreamError,
+    ) {
+        if let Err(err) = self.try_record_stream_error(
+            turn,
+            duration_ms,
+            request_debug,
+            content,
+            tool_calls,
+            error,
+        ) {
+            eprintln!(
+                "[tenex-agent cassette] failed to append LLM cassette {}: {err}",
+                self.path.display()
+            );
+        }
+    }
+
+    fn try_record_stream_error(
+        &self,
+        turn: usize,
+        duration_ms: u64,
+        request_debug: &str,
+        content: &str,
+        tool_calls: &[CassetteToolCall],
+        error: &CassetteStreamError,
+    ) -> Result<()> {
+        let timestamp_ms = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+        let record = CassetteTurnRecord {
+            version: 1,
+            agent: &self.agent,
+            provider: &self.provider,
+            model: &self.model,
+            turn,
+            duration_ms,
+            timestamp_ms,
+            request_debug,
+            content,
+            tool_calls,
+            error: Some(error),
+        };
+        let line = serde_json::to_string(&record).context("serialize cassette stream error")?;
+        append_jsonl(&self.path, &line).context("append cassette stream error")
     }
 }
 

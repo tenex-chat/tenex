@@ -77,8 +77,9 @@ impl Strategy for CompactionToolStrategy {
         if total_msgs <= 1 + self.keep_tail {
             return Ok(());
         }
-        let compact_end = total_msgs - self.keep_tail;
+        let mut compact_end = total_msgs - self.keep_tail;
         let compact_start = 1;
+        compact_end = extend_over_split_tool_results(&ctx.messages, compact_start, compact_end);
         if compact_end <= compact_start {
             return Ok(());
         }
@@ -103,6 +104,32 @@ impl Strategy for CompactionToolStrategy {
         ctx.telemetry.strategies_applied.push(NAME.to_string());
         Ok(())
     }
+}
+
+fn extend_over_split_tool_results(
+    messages: &[Message],
+    compact_start: usize,
+    mut compact_end: usize,
+) -> usize {
+    let compacted_tool_call_ids = messages[compact_start..compact_end]
+        .iter()
+        .flat_map(|msg| match msg {
+            Message::Assistant { tool_calls, .. } => tool_calls
+                .iter()
+                .map(|tool_call| tool_call.id.as_str())
+                .collect::<Vec<_>>(),
+            _ => Vec::new(),
+        })
+        .collect::<std::collections::HashSet<_>>();
+
+    while let Some(Message::ToolResult { tool_call_id, .. }) = messages.get(compact_end) {
+        if !compacted_tool_call_ids.contains(tool_call_id.as_str()) {
+            break;
+        }
+        compact_end += 1;
+    }
+
+    compact_end
 }
 
 #[cfg(test)]

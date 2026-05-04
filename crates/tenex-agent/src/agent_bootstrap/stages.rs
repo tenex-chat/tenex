@@ -63,7 +63,6 @@ pub(super) fn open_project(project_id: &str, agent_pubkey: &str) -> anyhow::Resu
     })
 }
 
-
 /// Project the persisted conversation history into rig messages for this
 /// turn. Returns an empty vector when the store is absent or projection
 /// fails (with a log line).
@@ -74,6 +73,7 @@ pub(super) async fn project_history(
     system_prompt: &str,
     resolved: &ResolvedModel,
     base_dir: &std::path::Path,
+    exclude_nostr_event_id: Option<&str>,
 ) -> Vec<RigMessage> {
     let Some(store) = conv_store else {
         return Vec::new();
@@ -91,7 +91,7 @@ pub(super) async fn project_history(
         compaction::LlmCompactionSummarizer::new(Arc::new(resolved.clone())),
     ));
     let name_resolver = identity_resolver::IdentityServiceResolver::new(base_dir);
-    match tenex_context::project(
+    match tenex_context::project_with_excluded_event(
         store,
         conversation_id,
         pubkey_hex,
@@ -100,6 +100,7 @@ pub(super) async fn project_history(
         &tool_defs,
         summarizer,
         Some(&name_resolver),
+        exclude_nostr_event_id,
     )
     .await
     {

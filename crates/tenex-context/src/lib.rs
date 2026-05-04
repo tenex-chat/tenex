@@ -53,6 +53,38 @@ pub async fn project(
     summarizer: Option<std::sync::Arc<dyn CompactionSummarizer>>,
     name_resolver: Option<&dyn DisplayNameResolver>,
 ) -> anyhow::Result<Projection> {
+    project_with_excluded_event(
+        store,
+        conversation_id,
+        agent_pubkey,
+        system_prompt,
+        model_profile,
+        tool_defs,
+        summarizer,
+        name_resolver,
+        None,
+    )
+    .await
+}
+
+/// Like [`project`], but omits one materialized Nostr event from history.
+///
+/// Agent runners pass the triggering user event separately as the live prompt;
+/// when the runtime has already materialized that same event into the
+/// conversation DB, excluding it here prevents the current user message from
+/// appearing twice in the provider request.
+#[allow(clippy::too_many_arguments)]
+pub async fn project_with_excluded_event(
+    store: &ConversationStore,
+    conversation_id: &str,
+    agent_pubkey: &str,
+    system_prompt: &str,
+    model_profile: &ModelProfile,
+    tool_defs: &[ToolDef],
+    summarizer: Option<std::sync::Arc<dyn CompactionSummarizer>>,
+    name_resolver: Option<&dyn DisplayNameResolver>,
+    exclude_nostr_event_id: Option<&str>,
+) -> anyhow::Result<Projection> {
     tracing::trace!(
         conversation_id,
         agent_pubkey,
@@ -67,6 +99,7 @@ pub async fn project(
         agent_pubkey,
         system_prompt,
         name_resolver,
+        exclude_nostr_event_id,
     )?;
     let telemetry = ProjectionTelemetry::default();
     let agent_todos = store

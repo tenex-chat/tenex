@@ -132,10 +132,9 @@ pub(super) async fn build_event_for(
     agent: &Agent,
     backend_pubkey: &PublicKey,
     base_dir: &Path,
-    project_dir: &Path,
 ) -> Result<Event> {
     let llms = LlmsDoc::load(base_dir).context("loading llms.json for agent config publish")?;
-    build_agent_config_event(agent, backend_pubkey, base_dir, project_dir, &llms)
+    build_agent_config_event(agent, backend_pubkey, base_dir, &llms)
         .await
         .with_context(|| format!("building 34011 for agent {}", agent.slug))
 }
@@ -148,14 +147,13 @@ pub(super) async fn publish_one(
     agents: &[Agent],
     backend_pubkey: &PublicKey,
     base_dir: &Path,
-    project_dir: &Path,
     client: &nostr_sdk::Client,
 ) {
     let Some(agent) = agents.iter().find(|a| a.pubkey == agent_pubkey) else {
         warn!(agent_pubkey, "skip 34011 publish: agent not in snapshot");
         return;
     };
-    match build_event_for(agent, backend_pubkey, base_dir, project_dir).await {
+    match build_event_for(agent, backend_pubkey, base_dir).await {
         Ok(event) => match client.send_event(&event).await {
             Ok(_) => info!(agent = %agent.slug, "published 34011 agent config"),
             Err(error) => warn!(agent = %agent.slug, error = %error, "34011 publish failed"),
@@ -317,7 +315,6 @@ mod tests {
     #[tokio::test]
     async fn build_event_for_emits_expected_kind_d_tag_and_p_tag() {
         let base_dir = unique_temp("publish");
-        let project_dir = unique_temp("project");
         // Minimal llms.json so build_agent_config_event can load it.
         fs::write(
             base_dir.join("llms.json"),
@@ -331,7 +328,7 @@ mod tests {
         let backend_keys = Keys::generate();
         let backend_pk = backend_keys.public_key();
 
-        let event = build_event_for(&agent, &backend_pk, &base_dir, &project_dir)
+        let event = build_event_for(&agent, &backend_pk, &base_dir)
             .await
             .expect("build succeeds");
 
@@ -347,7 +344,7 @@ mod tests {
                     .flatten()
             })
             .expect("d tag present");
-        assert_eq!(d_tag_value, agent.pubkey, "d-tag = agent pubkey");
+        assert_eq!(d_tag_value, agent.slug, "d-tag = agent slug");
 
         let p_tag_value = event
             .tags
@@ -362,6 +359,5 @@ mod tests {
         assert_eq!(p_tag_value, backend_pk.to_hex(), "p-tag = backend pubkey");
 
         fs::remove_dir_all(&base_dir).ok();
-        fs::remove_dir_all(&project_dir).ok();
     }
 }

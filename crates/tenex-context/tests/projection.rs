@@ -3,8 +3,8 @@
 
 use serde_json::json;
 use tenex_context::{
-    project, record_turn, BreakpointKind, CacheObservation, DisplayNameResolver, Message,
-    ModelProfile, ToolDef, TurnRecord,
+    project, project_with_excluded_event, record_turn, BreakpointKind, CacheObservation,
+    DisplayNameResolver, Message, ModelProfile, ToolDef, TurnRecord,
 };
 use tenex_conversations::{ConversationStore, NewMessage, NewToolMessage};
 
@@ -40,10 +40,30 @@ fn no_cache_profile() -> ModelProfile {
     }
 }
 
+fn tiny_profile() -> ModelProfile {
+    ModelProfile {
+        provider: "anthropic".into(),
+        model_id: "claude-test".into(),
+        prompt_cache: true,
+        ephemeral_reminders: false,
+        image_support: false,
+        max_context_tokens: 40,
+    }
+}
+
 fn append_user(store: &ConversationStore, record_id: &str, content: &str) {
+    append_user_with_event(store, record_id, None, content);
+}
+
+fn append_user_with_event(
+    store: &ConversationStore,
+    record_id: &str,
+    nostr_event_id: Option<&str>,
+    content: &str,
+) {
     let msg = NewMessage {
         record_id: record_id.into(),
-        nostr_event_id: None,
+        nostr_event_id: nostr_event_id.map(str::to_string),
         author_pubkey: USER_PUBKEY.into(),
         sender_pubkey: None,
         ral: None,
@@ -268,6 +288,56 @@ async fn unknown_tool_results_are_decay_eligible() {
     );
 }
 
+#[tokio::test]
+async fn compaction_keeps_tool_call_pairs_atomic() {
+    let store = open_store();
+
+    append_user(&store, "old-1", &"older user context ".repeat(20));
+    append_user(&store, "old-2", &"more old context ".repeat(20));
+    append_assistant(&store, "asst-tools", "I will inspect files");
+    append_tool_result(&store, "call-a", "shell", "first result");
+    append_tool_result(&store, "call-b", "shell", "second result");
+    append_user(&store, "tail-1", "recent user 1");
+    append_assistant(&store, "tail-2", "recent assistant 2");
+    append_user(&store, "tail-3", "recent user 3");
+    append_assistant(&store, "tail-4", "recent assistant 4");
+    append_user(&store, "tail-5", "recent user 5");
+
+    let projection = project(
+        &store,
+        CONVO_ID,
+        AGENT_PUBKEY,
+        "system",
+        &tiny_profile(),
+        &[],
+        None,
+        None,
+    )
+    .await
+    .expect("project");
+
+    assert!(
+        projection.telemetry.compacted_count > 0,
+        "fixture should trigger compaction"
+    );
+
+    let mut visible_tool_calls = std::collections::HashSet::new();
+    for msg in &projection.messages {
+        match msg {
+            Message::Assistant { tool_calls, .. } => {
+                for tool_call in tool_calls {
+                    visible_tool_calls.insert(tool_call.id.as_str());
+                }
+            }
+            Message::ToolResult { tool_call_id, .. } => assert!(
+                visible_tool_calls.contains(tool_call_id.as_str()),
+                "tool result {tool_call_id} must not survive without its assistant tool call"
+            ),
+            _ => {}
+        }
+    }
+}
+
 #[test]
 fn record_turn_round_trip_writes_prompt_history() {
     let store = open_store();
@@ -362,6 +432,52 @@ async fn no_prompt_cache_emits_no_message_stream_breakpoint() {
         .iter()
         .any(|b| b.kind == BreakpointKind::SystemAnchor);
     assert!(has_system_anchor, "SystemAnchor still emitted");
+}
+
+#[tokio::test]
+async fn projection_can_exclude_live_trigger_event_from_history() {
+    let store = open_store();
+    append_user_with_event(
+        &store,
+        "event:old-event",
+        Some("old-event"),
+        "prior user message",
+    );
+    append_user_with_event(
+        &store,
+        "event:current-event",
+        Some("current-event"),
+        "current user message",
+    );
+
+    let projection = project_with_excluded_event(
+        &store,
+        CONVO_ID,
+        AGENT_PUBKEY,
+        "system",
+        &cacheable_profile(),
+        &[],
+        None,
+        None,
+        Some("current-event"),
+    )
+    .await
+    .expect("project");
+
+    assert!(
+        projection
+            .messages
+            .iter()
+            .any(|m| matches!(m, Message::User { content } if content == "prior user message")),
+        "prior history remains visible"
+    );
+    assert!(
+        projection
+            .messages
+            .iter()
+            .all(|m| !matches!(m, Message::User { content } if content == "current user message")),
+        "live trigger event must be sent as the turn prompt, not duplicated in history"
+    );
 }
 
 // ── Author attribution ────────────────────────────────────────────────────────
