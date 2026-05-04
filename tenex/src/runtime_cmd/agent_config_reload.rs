@@ -69,11 +69,6 @@ pub(super) async fn reload_agent_snapshot(
     )
     .await?;
     publish_project_status_now(shared, ctx.meta).await;
-    // Bulk reload: republish kind:0 for every agent. Individual change
-    // attribution isn't available here (an agent may have been added,
-    // removed, or had its config rewritten), so the safe play is to keep
-    // every per-agent profile in lock-step with the post-reload snapshot.
-    republish_all_agent_configs(shared).await;
 
     let added = new_pubkeys.difference(&old_pubkeys).count();
     let removed = old_pubkeys.difference(&new_pubkeys).count();
@@ -236,6 +231,9 @@ pub(super) async fn handle_agent_config_update(
 
     if outcome.config_updated {
         reload_agent_snapshot(shared, ctx).await?;
+        if let Some(agent_pubkey) = outcome.agent_pubkey.as_deref() {
+            republish_agent_config(shared, agent_pubkey).await;
+        }
     }
 
     Ok(())

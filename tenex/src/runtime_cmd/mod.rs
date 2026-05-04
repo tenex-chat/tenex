@@ -396,12 +396,11 @@ pub async fn run(args: RuntimeArgs) -> Result<()> {
                 match event {
                     Ok(event) if agent_config_event_is_relevant(&event) => {
                         // Capture which agent file(s) fired before we reload
-                        // the snapshot — `reload_agent_snapshot` already
-                        // republishes kind:0 for every agent, but we also
-                        // emit a targeted republish per changed file so the
-                        // logs attribute the change to the right agent and
-                        // so a future bulk-reload skip optimization stays
-                        // safe.
+                        // the snapshot, then emit a targeted republish per
+                        // changed file. `reload_agent_snapshot` only
+                        // refreshes the in-memory snapshot and resubscribes
+                        // filters; per-agent kind:0 republishes are the
+                        // caller's responsibility.
                         let changed_pubkeys: Vec<String> = event
                             .paths
                             .iter()
