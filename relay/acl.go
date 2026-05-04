@@ -157,15 +157,16 @@ func (a *ACL) PreventBroadcastHook(ws *khatru.WebSocket, event *nostr.Event) boo
 
 // viewerAuthoredAnyETaggedEvent reports whether viewer is the author of any
 // event referenced by an "e" tag on event. It runs a single targeted storage
-// query (IDs ∩ Authors) so the cost stays bounded even when the event has
-// many e-tags.
+// query by event id and checks authorship in-process (the BadgerBackend
+// query planner short-circuits to the id index and ignores filter.Authors
+// when ids are present, so we have to filter client-side).
 func (a *ACL) viewerAuthoredAnyETaggedEvent(viewer string, event *nostr.Event) bool {
 	if viewer == "" || event == nil {
 		return false
 	}
 	var ids []string
 	for _, tag := range event.Tags {
-		if len(tag) >= 2 && tag[0] == "e" && tag[1] != "" {
+		if len(tag) >= 2 && tag[0] == "e" && len(tag[1]) == 64 {
 			ids = append(ids, tag[1])
 		}
 	}
@@ -175,18 +176,18 @@ func (a *ACL) viewerAuthoredAnyETaggedEvent(viewer string, event *nostr.Event) b
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	ch, err := a.storage.QueryEvents(ctx, nostr.Filter{
-		IDs:     ids,
-		Authors: []string{viewer},
-		Limit:   1,
+		IDs:   ids,
+		Limit: len(ids),
 	})
 	if err != nil {
 		log.Printf("[acl] e-tag ownership lookup failed for %s...: %v", truncatePubkey(viewer), err)
 		return false
 	}
 	found := false
-	for range ch {
-		found = true
-		// Drain remaining (shouldn't happen with Limit:1 but be defensive).
+	for evt := range ch {
+		if evt.PubKey == viewer {
+			found = true
+		}
 	}
 	return found
 }

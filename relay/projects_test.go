@@ -327,8 +327,9 @@ func TestViewerAuthoredAnyETaggedEvent(t *testing.T) {
 	}
 	defer storage.Close()
 
-	viewer := makePubkey('v')
-	stranger := makePubkey('s')
+	// Use hex-valid pubkey/id strings — BadgerBackend hex-decodes them.
+	viewer := makePubkey('a')
+	stranger := makePubkey('b')
 
 	ownEventID := strings.Repeat("1", 64)
 	if err := storage.SaveEvent(context.Background(), &nostr.Event{
