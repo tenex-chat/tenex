@@ -5,7 +5,7 @@ use nostr_sdk::prelude::*;
 use tracing::warn;
 
 use super::agent_subprocess::DispatchJob;
-use super::dispatch_pipeline::accept_dispatch;
+use super::dispatch_pipeline::{accept_dispatch, persist_user_message};
 use super::event_routing::mark_seen;
 use super::mcp_subscriptions::McpSubscription;
 use super::runtime_state_store::first_conversation_author;
@@ -69,6 +69,7 @@ pub(super) async fn dispatch_notification(
         .base_dir
         .join("agents")
         .join(format!("{}.json", agent.pubkey));
+    persist_user_message(&shared.store, &event, &subscription.conversation_id)?;
     accept_dispatch(
         shared,
         DispatchJob {

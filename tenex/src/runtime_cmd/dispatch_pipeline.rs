@@ -2,9 +2,11 @@
 //! `DispatchJob` and feeds it into the coordinator funnels through this
 //! module.
 //!
-//! - [`accept_dispatch`] is the single funnel — persist the user message,
-//!   freeze the conversation trace root, sync persisted driver state, then
-//!   either start the job immediately via `spawn_dispatch_job` or queue it.
+//! - [`accept_dispatch`] is the single dispatch funnel — freezes the
+//!   conversation trace root, syncs persisted driver state, then either
+//!   starts the job immediately via `spawn_dispatch_job` or queues it.
+//!   Callers MUST `persist_user_message` before invoking; the funnel
+//!   assumes the inbound event is already in the conversation store.
 //! - [`handle_transport_dispatch`] handles synthesized events from the
 //!   control socket (telegram bridge etc).
 //! - [`run_external_dispatch`] runs firewall screening for events from
@@ -222,6 +224,12 @@ async fn process_relay_event_inner(
     }
     match select_dispatch_target(shared, &event) {
         Ok((agent, conv_id, completion_recipient_pubkey)) => {
+            if let Err(e) = persist_user_message(&shared.store, &event, &conv_id) {
+                tenex_telemetry::record_current_error(&e);
+                event_received_span.record("outcome", "dropped_persist_failed");
+                warn!(event_id = short, error = %e, "trusted persist failed");
+                return;
+            }
             // Baggage scope is the synchronous block that builds the
             // `DispatchJob`. The carrier captures the trace context here;
             // baggage is re-attached on the dispatch span's parent context
@@ -281,14 +289,25 @@ async fn process_relay_event_inner(
             }
         }
         Err(e) => {
-            event_received_span.record("outcome", "dropped_no_target");
+            // No local handler for this trusted event — persist it anyway
+            // so the conversation store reflects everything we observed
+            // on the project's #a thread, not just turns we ran ourselves.
+            // Future local-agent turns and the embedder backfill rely on
+            // this completeness.
+            let conv_id = conversation_id_from_event(&event);
+            if let Err(perr) = persist_user_message(&shared.store, &event, &conv_id) {
+                tenex_telemetry::record_current_error(&perr);
+                warn!(event_id = short, error = %perr, "no-target persist failed");
+            }
+            event_received_span.record("outcome", "persisted_no_target");
             tenex_telemetry::record_current_error(&e);
             tracing::event!(
                 parent: event_received_span,
-                tracing::Level::WARN,
+                tracing::Level::INFO,
                 event_id = short,
+                conversation_id = %conv_id,
                 error = %e,
-                "no dispatch target",
+                "no dispatch target; persisted for context",
             );
         }
     }
@@ -340,6 +359,11 @@ pub(super) async fn handle_transport_dispatch(
             "agent {} is blocked in conversation {conv_id}",
             agent.slug
         ));
+        return;
+    }
+
+    if let Err(e) = persist_user_message(&shared.store, &event, &conv_id) {
+        tee.send_error(format!("persist failed: {e}"));
         return;
     }
 
@@ -489,7 +513,6 @@ pub(super) async fn accept_dispatch(
     shared: Arc<RuntimeShared>,
     mut job: DispatchJob,
 ) -> Result<()> {
-    persist_user_message(&shared.store, &job.event, &job.conv_id)?;
     if let Some(carrier) = job.trace_carrier.as_ref() {
         if let Err(err) = remember_conversation_trace_root(&shared.store, &job.conv_id, carrier) {
             warn!(

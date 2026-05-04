@@ -26,7 +26,7 @@ use tracing::warn;
 use tenex_project::{models::ProjectAgent, Agent};
 
 use super::agent_subprocess::DispatchJob;
-use super::dispatch_pipeline::accept_dispatch;
+use super::dispatch_pipeline::{accept_dispatch, persist_user_message};
 use super::runtime_state_store::{
     delegation_route_for_completion, register_delegation_route_if_needed,
 };
@@ -92,6 +92,7 @@ pub(super) async fn dispatch_project_agent_target(
     }
 
     let (agent, conv_id, completion_recipient_pubkey) = select_dispatch_target(&shared, event)?;
+    persist_user_message(&shared.store, event, &conv_id)?;
     let agent_json = shared
         .base_dir
         .join("agents")
@@ -231,7 +232,15 @@ pub(super) fn select_agent<'a>(
         anyhow::bail!("directed event does not target a current project agent");
     }
 
-    // No #p tags: fall back to the PM agent (handles project-wide events).
+    // PM fallback only fires for fresh top-level events (no `e` tag). An
+    // untargeted reply belongs to whichever agent is already on the thread;
+    // dragging the PM in by default pulls it into every conversation in the
+    // project — including replies between a remote agent and a user.
+    if has_any_tag(event, "e") {
+        anyhow::bail!("untargeted reply does not name a project agent");
+    }
+
+    // No #p tags and no #e tags: project-wide event. Fall back to the PM.
     let pm_pubkey = project_agents
         .iter()
         .find(|pa| pa.is_pm)
@@ -420,5 +429,70 @@ mod tests {
             vec![tag(&["a", &project]), tag(&["p", &unknown_pubkey])],
         );
         assert!(select_agent(&unknown_direct, &agents, &project_agents).is_err());
+    }
+
+    #[test]
+    fn select_agent_does_not_fall_back_to_pm_for_reply_without_p_tag() {
+        // Regression: a reply (carries an `e` tag) without a `p` tag must
+        // not be auto-routed to the PM. A remote agent's untargeted replies
+        // were pulling the local PM into every thread in the project, even
+        // threads the PM had no part in.
+        let owner = Keys::generate().public_key().to_hex();
+        let pm_pubkey = Keys::generate().public_key().to_hex();
+        let worker_pubkey = Keys::generate().public_key().to_hex();
+        let project = format!("31933:{owner}:local-project");
+        let agents = vec![agent(&pm_pubkey), agent(&worker_pubkey)];
+        let project_agents = vec![
+            ProjectAgent {
+                agent_pubkey: pm_pubkey.clone(),
+                is_pm: true,
+            },
+            ProjectAgent {
+                agent_pubkey: worker_pubkey.clone(),
+                is_pm: false,
+            },
+        ];
+
+        let root_id = "a".repeat(64);
+        let reply_no_p = signed_event(
+            Kind::TextNote,
+            "untargeted reply",
+            vec![tag(&["a", &project]), tag(&["e", &root_id, "", "root"])],
+        );
+
+        assert!(select_agent(&reply_no_p, &agents, &project_agents).is_err());
+    }
+
+    #[test]
+    fn select_agent_routes_direct_mention_inside_reply() {
+        let owner = Keys::generate().public_key().to_hex();
+        let pm_pubkey = Keys::generate().public_key().to_hex();
+        let worker_pubkey = Keys::generate().public_key().to_hex();
+        let project = format!("31933:{owner}:local-project");
+        let agents = vec![agent(&pm_pubkey), agent(&worker_pubkey)];
+        let project_agents = vec![
+            ProjectAgent {
+                agent_pubkey: pm_pubkey.clone(),
+                is_pm: true,
+            },
+            ProjectAgent {
+                agent_pubkey: worker_pubkey.clone(),
+                is_pm: false,
+            },
+        ];
+
+        let root_id = "a".repeat(64);
+        let reply_to_worker = signed_event(
+            Kind::TextNote,
+            "reply naming worker",
+            vec![
+                tag(&["a", &project]),
+                tag(&["e", &root_id, "", "root"]),
+                tag(&["p", &worker_pubkey]),
+            ],
+        );
+
+        let selected = select_agent(&reply_to_worker, &agents, &project_agents).unwrap();
+        assert_eq!(selected.pubkey, worker_pubkey);
     }
 }
