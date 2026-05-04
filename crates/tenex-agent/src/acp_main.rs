@@ -3,6 +3,8 @@ mod acp_mcp;
 mod acp_process;
 #[path = "categorize.rs"]
 mod categorize;
+#[path = "llm_accounting.rs"]
+mod llm_accounting;
 // `config.rs` is shared with the main `tenex-agent` binary; ACP only
 // uses the LLM-resolution helpers, so the agent-side structs read as dead from
 // this binary's perspective.

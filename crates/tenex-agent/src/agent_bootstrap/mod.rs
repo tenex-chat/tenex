@@ -409,6 +409,7 @@ pub(crate) async fn build(
         &envelope.content,
         &project_id,
         &pubkey_hex,
+        &conversation_id,
         &resolved,
     )
     .await
@@ -436,6 +437,7 @@ pub(crate) async fn build(
         conv_store.as_ref(),
         &conversation_id,
         &pubkey_hex,
+        &project_id,
         &system_prompt,
         &resolved,
         &base_dir,

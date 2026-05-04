@@ -1,9 +1,12 @@
 use crate::config::ResolvedModel;
+use crate::llm_accounting::{assistant_text, usage_from_rig};
+use rig::completion::{Completion, Message};
 use rig::providers::{anthropic, ollama, openai, openrouter};
-use rig::{client::CompletionClient, completion::Prompt, completion::ToolDefinition, tool::Tool};
+use rig::{client::CompletionClient, completion::ToolDefinition, tool::Tool};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::sync::Arc;
+use tenex_accounting::{record_llm_call, RecordLlmCall, RootKind, RootKindOrStr};
 use tenex_rag::RagStore;
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -43,21 +46,26 @@ impl RagSearchTool {
     async fn call_llm(&self, system: &str, user: String) -> anyhow::Result<String> {
         use rig::client::Nothing;
 
-        let result = match self.resolved.provider.as_str() {
+        let history: Vec<Message> = Vec::new();
+
+        let (text, usage) = match self.resolved.provider.as_str() {
             "openrouter" => {
                 let key = self
                     .resolved
                     .api_key
                     .as_deref()
                     .ok_or_else(|| anyhow::anyhow!("no OpenRouter API key"))?;
-                let agent = openrouter::Client::new(key)?
+                let resp = openrouter::Client::new(key)?
                     .agent(&self.resolved.model)
                     .preamble(system)
-                    .build();
-                agent
-                    .prompt(user)
+                    .build()
+                    .completion(user.clone(), history.clone())
                     .await
                     .map_err(|e| anyhow::anyhow!("{e:?}"))?
+                    .send()
+                    .await
+                    .map_err(|e| anyhow::anyhow!("{e:?}"))?;
+                (assistant_text(&resp.choice), resp.usage)
             }
             "openai" => {
                 let key = self
@@ -65,31 +73,37 @@ impl RagSearchTool {
                     .api_key
                     .as_deref()
                     .ok_or_else(|| anyhow::anyhow!("no OpenAI API key"))?;
-                let agent = openai::CompletionsClient::builder()
+                let resp = openai::CompletionsClient::builder()
                     .api_key(key)
                     .build()?
                     .agent(&self.resolved.model)
                     .preamble(system)
-                    .build();
-                agent
-                    .prompt(user)
+                    .build()
+                    .completion(user.clone(), history.clone())
                     .await
                     .map_err(|e| anyhow::anyhow!("{e:?}"))?
+                    .send()
+                    .await
+                    .map_err(|e| anyhow::anyhow!("{e:?}"))?;
+                (assistant_text(&resp.choice), resp.usage)
             }
             "ollama" => {
                 let mut builder = ollama::Client::builder().api_key(Nothing);
                 if let Some(url) = self.resolved.base_url.as_deref() {
                     builder = builder.base_url(url);
                 }
-                let agent = builder
+                let resp = builder
                     .build()?
                     .agent(&self.resolved.model)
                     .preamble(system)
-                    .build();
-                agent
-                    .prompt(user)
+                    .build()
+                    .completion(user.clone(), history.clone())
                     .await
                     .map_err(|e| anyhow::anyhow!("{e:?}"))?
+                    .send()
+                    .await
+                    .map_err(|e| anyhow::anyhow!("{e:?}"))?;
+                (assistant_text(&resp.choice), resp.usage)
             }
             _ => {
                 let key = self
@@ -97,18 +111,35 @@ impl RagSearchTool {
                     .api_key
                     .as_deref()
                     .ok_or_else(|| anyhow::anyhow!("no Anthropic API key"))?;
-                let agent = anthropic::Client::new(key)?
+                let resp = anthropic::Client::new(key)?
                     .agent(&self.resolved.model)
                     .preamble(system)
-                    .build();
-                agent
-                    .prompt(user)
+                    .build()
+                    .completion(user.clone(), history.clone())
                     .await
                     .map_err(|e| anyhow::anyhow!("{e:?}"))?
+                    .send()
+                    .await
+                    .map_err(|e| anyhow::anyhow!("{e:?}"))?;
+                (assistant_text(&resp.choice), resp.usage)
             }
         };
 
-        Ok(result)
+        record_llm_call(RecordLlmCall {
+            root_kind: RootKindOrStr::Known(RootKind::RagQuery),
+            provider: self.resolved.provider.clone(),
+            provider_model_id: self.resolved.model.clone(),
+            operation: "rag_search".into(),
+            agent_pubkey: Some(self.agent_pubkey.clone()),
+            project_id: Some(self.project_id.clone()),
+            user_message: Some(user),
+            assistant_response: Some(text.clone()),
+            usage: usage_from_rig(&usage),
+            ..Default::default()
+        })
+        .await;
+
+        Ok(text)
     }
 }
 

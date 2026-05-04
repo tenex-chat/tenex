@@ -1,9 +1,12 @@
 use crate::config::ResolvedModel;
+use crate::llm_accounting::{assistant_text, usage_from_rig};
+use rig::client::CompletionClient;
+use rig::completion::{Completion, Message};
 use rig::providers::{anthropic, ollama, openai, openrouter};
-use rig::{client::CompletionClient, completion::Prompt};
 use std::cmp::Reverse;
 use std::collections::HashMap;
 use std::time::Duration;
+use tenex_accounting::{record_llm_call, RecordLlmCall, RootKind};
 use tenex_rag::store::VectorStore;
 use tenex_rag::{RagStore, SearchResult};
 use tracing::{info_span, warn, Instrument, Span};
@@ -12,6 +15,15 @@ const SCORE_THRESHOLD: f32 = 0.65;
 const MAX_RESULTS: usize = 5;
 const WORD_COUNT_THRESHOLD: usize = 20;
 const LLM_TIMEOUT_SECS: u64 = 5;
+
+/// Identifying context attached to every LLM accounting record produced
+/// during a context-discovery pass.
+#[derive(Debug, Clone)]
+pub struct DiscoveryAccountingCtx {
+    pub agent_pubkey: String,
+    pub project_id: String,
+    pub conversation_id: Option<String>,
+}
 
 /// Perform a proactive RAG search with optional LLM query planner and reranker.
 ///
@@ -33,6 +45,7 @@ pub async fn discover_context<S: VectorStore>(
     rag_store: &RagStore<S>,
     collections: &[&str],
     resolved: &ResolvedModel,
+    accounting: &DiscoveryAccountingCtx,
 ) -> Vec<SearchResult> {
     let parent = Span::current();
     let word_count = query.split_whitespace().count();
@@ -42,7 +55,7 @@ pub async fn discover_context<S: VectorStore>(
 
     // Step 1: Determine search queries (planner or raw query as fallback).
     let queries = if use_planner {
-        plan_queries(query, resolved).await
+        plan_queries(query, resolved, accounting).await
     } else {
         vec![query.to_string()]
     };
@@ -114,7 +127,7 @@ pub async fn discover_context<S: VectorStore>(
     let reranker_used = filtered.len() > 3;
     parent.record("reranker.used", reranker_used);
     if reranker_used {
-        filtered = rerank_results(query, filtered, resolved).await;
+        filtered = rerank_results(query, filtered, resolved, accounting).await;
     }
 
     filtered.truncate(MAX_RESULTS);
@@ -146,7 +159,11 @@ pub async fn discover_context<S: VectorStore>(
 
 /// Ask the LLM to produce 2-3 focused search queries as a JSON array.
 /// Falls back to `[query]` on any error or timeout.
-async fn plan_queries(query: &str, resolved: &ResolvedModel) -> Vec<String> {
+async fn plan_queries(
+    query: &str,
+    resolved: &ResolvedModel,
+    accounting: &DiscoveryAccountingCtx,
+) -> Vec<String> {
     let system = "You generate focused search queries for a vector database. \
         Given a user message, output a JSON array of 2-3 short, specific search queries \
         that would retrieve the most relevant stored knowledge. \
@@ -168,7 +185,7 @@ async fn plan_queries(query: &str, resolved: &ResolvedModel) -> Vec<String> {
     async {
         let result = tokio::time::timeout(
             Duration::from_secs(LLM_TIMEOUT_SECS),
-            call_llm(resolved, system, user),
+            call_llm(resolved, system, user, "context_discovery.plan", accounting),
         )
         .await;
 
@@ -212,6 +229,7 @@ async fn rerank_results(
     query: &str,
     results: Vec<SearchResult>,
     resolved: &ResolvedModel,
+    accounting: &DiscoveryAccountingCtx,
 ) -> Vec<SearchResult> {
     let system = "You are a relevance judge. Given a user query and retrieved documents, \
         score each document 0-10 for relevance to the query. \
@@ -243,7 +261,13 @@ async fn rerank_results(
     async {
         let result = tokio::time::timeout(
             Duration::from_secs(LLM_TIMEOUT_SECS),
-            call_llm(resolved, system, user),
+            call_llm(
+                resolved,
+                system,
+                user,
+                "context_discovery.rerank",
+                accounting,
+            ),
         )
         .await;
 
@@ -326,71 +350,107 @@ fn strip_json_fences(text: &str) -> &str {
     }
 }
 
-/// Make a single completion call using the agent's resolved model.
-async fn call_llm(resolved: &ResolvedModel, system: &str, user: String) -> anyhow::Result<String> {
+/// Make a single completion call using the agent's resolved model and
+/// record it via `tenex-accounting`.
+async fn call_llm(
+    resolved: &ResolvedModel,
+    system: &str,
+    user: String,
+    operation: &str,
+    accounting: &DiscoveryAccountingCtx,
+) -> anyhow::Result<String> {
     use rig::client::Nothing;
 
-    let result = match resolved.provider.as_str() {
+    let history: Vec<Message> = Vec::new();
+
+    let (text, usage) = match resolved.provider.as_str() {
         "openrouter" => {
             let key = resolved
                 .api_key
                 .as_deref()
                 .ok_or_else(|| anyhow::anyhow!("no OpenRouter API key"))?;
-            let agent = openrouter::Client::new(key)?
+            let resp = openrouter::Client::new(key)?
                 .agent(&resolved.model)
                 .preamble(system)
-                .build();
-            agent
-                .prompt(user)
+                .build()
+                .completion(user.clone(), history.clone())
                 .await
                 .map_err(|e| anyhow::anyhow!("{e:?}"))?
+                .send()
+                .await
+                .map_err(|e| anyhow::anyhow!("{e:?}"))?;
+            (assistant_text(&resp.choice), resp.usage)
         }
         "openai" => {
             let key = resolved
                 .api_key
                 .as_deref()
                 .ok_or_else(|| anyhow::anyhow!("no OpenAI API key"))?;
-            let agent = openai::CompletionsClient::builder()
+            let resp = openai::CompletionsClient::builder()
                 .api_key(key)
                 .build()?
                 .agent(&resolved.model)
                 .preamble(system)
-                .build();
-            agent
-                .prompt(user)
+                .build()
+                .completion(user.clone(), history.clone())
                 .await
                 .map_err(|e| anyhow::anyhow!("{e:?}"))?
+                .send()
+                .await
+                .map_err(|e| anyhow::anyhow!("{e:?}"))?;
+            (assistant_text(&resp.choice), resp.usage)
         }
         "ollama" => {
             let mut builder = ollama::Client::builder().api_key(Nothing);
             if let Some(url) = resolved.base_url.as_deref() {
                 builder = builder.base_url(url);
             }
-            let agent = builder
+            let resp = builder
                 .build()?
                 .agent(&resolved.model)
                 .preamble(system)
-                .build();
-            agent
-                .prompt(user)
+                .build()
+                .completion(user.clone(), history.clone())
                 .await
                 .map_err(|e| anyhow::anyhow!("{e:?}"))?
+                .send()
+                .await
+                .map_err(|e| anyhow::anyhow!("{e:?}"))?;
+            (assistant_text(&resp.choice), resp.usage)
         }
         _ => {
             let key = resolved
                 .api_key
                 .as_deref()
                 .ok_or_else(|| anyhow::anyhow!("no Anthropic API key"))?;
-            let agent = anthropic::Client::new(key)?
+            let resp = anthropic::Client::new(key)?
                 .agent(&resolved.model)
                 .preamble(system)
-                .build();
-            agent
-                .prompt(user)
+                .build()
+                .completion(user.clone(), history.clone())
                 .await
                 .map_err(|e| anyhow::anyhow!("{e:?}"))?
+                .send()
+                .await
+                .map_err(|e| anyhow::anyhow!("{e:?}"))?;
+            (assistant_text(&resp.choice), resp.usage)
         }
     };
 
-    Ok(result)
+    record_llm_call(RecordLlmCall {
+        root_kind: RootKind::RagQuery.into(),
+        provider: resolved.provider.clone(),
+        provider_model_id: resolved.model.clone(),
+        operation: operation.into(),
+        agent_pubkey: Some(accounting.agent_pubkey.clone()),
+        project_id: Some(accounting.project_id.clone()),
+        conversation_id: accounting.conversation_id.clone(),
+        user_message: Some(user),
+        assistant_response: Some(text.clone()),
+        usage: usage_from_rig(&usage),
+        ..Default::default()
+    })
+    .await;
+
+    Ok(text)
 }

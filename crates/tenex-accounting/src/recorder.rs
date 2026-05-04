@@ -35,6 +35,7 @@ pub enum RootKind {
     McpSubscriptionCallback,
     RagQuery,
     Summarization,
+    Firewall,
     Smoke,
 }
 
@@ -48,6 +49,7 @@ impl RootKind {
             Self::McpSubscriptionCallback => "mcp_subscription_callback",
             Self::RagQuery => "rag_query",
             Self::Summarization => "summarization",
+            Self::Firewall => "firewall",
             Self::Smoke => "smoke",
         }
     }

@@ -223,7 +223,15 @@ async fn process_inner(
         return Ok(None);
     }
 
-    let summary = summarize::summarize(&cfg.llm, &content.transcript).await?;
+    let summary = summarize::summarize(
+        &cfg.llm,
+        &content.transcript,
+        summarize::SummarizeContext {
+            conversation_id: Some(conversation_id.to_string()),
+            project_id: Some(project.d_tag.clone()),
+        },
+    )
+    .await?;
 
     let update = MetadataUpdate {
         title: non_empty(&summary.title),

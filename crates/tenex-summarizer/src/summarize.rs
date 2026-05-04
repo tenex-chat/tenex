@@ -3,9 +3,11 @@
 
 use anyhow::{anyhow, Context, Result};
 use rig::client::{CompletionClient, Nothing};
+use rig::completion::Usage;
 use rig::providers::{anthropic, ollama, openai, openrouter};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use tenex_accounting::{flush, record_llm_call, LlmUsage, RecordLlmCall, RootKind};
 
 use crate::categories;
 use crate::config::LlmSelection;
@@ -24,7 +26,19 @@ pub struct Summary {
     pub categories: Vec<String>,
 }
 
-pub async fn summarize(llm: &LlmSelection, transcript: &str) -> Result<Summary> {
+/// Caller-supplied context for accounting. None of the fields are
+/// required by the LLM call itself.
+#[derive(Debug, Clone, Default)]
+pub struct SummarizeContext {
+    pub conversation_id: Option<String>,
+    pub project_id: Option<String>,
+}
+
+pub async fn summarize(
+    llm: &LlmSelection,
+    transcript: &str,
+    ctx: SummarizeContext,
+) -> Result<Summary> {
     let existing = categories::top(10).unwrap_or_default();
     let category_list_text = if existing.is_empty() {
         "No existing categories yet. Create new ones as needed.".to_string()
@@ -39,7 +53,7 @@ pub async fn summarize(llm: &LlmSelection, transcript: &str) -> Result<Summary> 
         "Please generate a title, summary, and status information for this conversation:\n\n{transcript}"
     );
 
-    match llm.provider.as_str() {
+    let (summary, usage) = match llm.provider.as_str() {
         "anthropic" => {
             let key = llm
                 .api_key
@@ -50,10 +64,11 @@ pub async fn summarize(llm: &LlmSelection, transcript: &str) -> Result<Summary> 
                 .extractor::<Summary>(&llm.model)
                 .preamble(&preamble)
                 .build();
-            extractor
-                .extract(user.as_str())
+            let resp = extractor
+                .extract_with_usage(user.as_str())
                 .await
-                .map_err(|e| anyhow!("anthropic extraction failed: {e}"))
+                .map_err(|e| anyhow!("anthropic extraction failed: {e}"))?;
+            (resp.data, resp.usage)
         }
         "openrouter" => {
             let key = llm
@@ -65,10 +80,11 @@ pub async fn summarize(llm: &LlmSelection, transcript: &str) -> Result<Summary> 
                 .extractor::<Summary>(&llm.model)
                 .preamble(&preamble)
                 .build();
-            extractor
-                .extract(user.as_str())
+            let resp = extractor
+                .extract_with_usage(user.as_str())
                 .await
-                .map_err(|e| anyhow!("openrouter extraction failed: {e}"))
+                .map_err(|e| anyhow!("openrouter extraction failed: {e}"))?;
+            (resp.data, resp.usage)
         }
         "openai" => {
             let key = llm
@@ -80,10 +96,11 @@ pub async fn summarize(llm: &LlmSelection, transcript: &str) -> Result<Summary> 
                 .extractor::<Summary>(&llm.model)
                 .preamble(&preamble)
                 .build();
-            extractor
-                .extract(user.as_str())
+            let resp = extractor
+                .extract_with_usage(user.as_str())
                 .await
-                .map_err(|e| anyhow!("openai extraction failed: {e}"))
+                .map_err(|e| anyhow!("openai extraction failed: {e}"))?;
+            (resp.data, resp.usage)
         }
         "ollama" => {
             let mut builder = ollama::Client::builder().api_key(Nothing);
@@ -95,12 +112,41 @@ pub async fn summarize(llm: &LlmSelection, transcript: &str) -> Result<Summary> 
                 .extractor::<Summary>(&llm.model)
                 .preamble(&preamble)
                 .build();
-            extractor
-                .extract(user.as_str())
+            let resp = extractor
+                .extract_with_usage(user.as_str())
                 .await
-                .map_err(|e| anyhow!("ollama extraction failed: {e}"))
+                .map_err(|e| anyhow!("ollama extraction failed: {e}"))?;
+            (resp.data, resp.usage)
         }
-        other => Err(anyhow!("unsupported LLM provider: {other}")),
+        other => return Err(anyhow!("unsupported LLM provider: {other}")),
+    };
+
+    record_llm_call(RecordLlmCall {
+        root_kind: RootKind::Summarization.into(),
+        provider: llm.provider.clone(),
+        provider_model_id: llm.model.clone(),
+        operation: "summarize".into(),
+        conversation_id: ctx.conversation_id,
+        project_id: ctx.project_id,
+        user_message: Some(user),
+        assistant_response: serde_json::to_string(&summary).ok(),
+        usage: usage_from_rig(&usage),
+        ..Default::default()
+    })
+    .await;
+    flush().await;
+
+    Ok(summary)
+}
+
+fn usage_from_rig(u: &Usage) -> LlmUsage {
+    LlmUsage {
+        input_tokens: u.input_tokens,
+        output_tokens: u.output_tokens,
+        cached_input_tokens: u.cached_input_tokens,
+        cache_creation_input_tokens: u.cache_creation_input_tokens,
+        reasoning_tokens: 0,
+        total_tokens: Some(u.total_tokens),
     }
 }
 

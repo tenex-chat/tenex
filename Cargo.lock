@@ -3183,6 +3183,7 @@ dependencies = [
  "sha2",
  "tenex-accounting",
  "tenex-agent-registry",
+ "tenex-backend-keys",
  "tenex-conversations",
  "tenex-firewall",
  "tenex-identity",
@@ -3284,6 +3285,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "tenex-backend-keys"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "indexmap",
+ "nostr-sdk",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "tenex-context"
 version = "0.1.0"
 dependencies = [
@@ -3331,6 +3344,7 @@ dependencies = [
  "sha2",
  "tempfile",
  "tenex-accounting",
+ "tenex-backend-keys",
  "tenex-identity",
  "tenex-protocol",
  "tenex-rag",
@@ -3350,6 +3364,7 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
+ "tenex-accounting",
  "tenex-llm-config",
  "thiserror 2.0.18",
  "tokio",
@@ -3370,6 +3385,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+ "tenex-backend-keys",
  "tenex-telemetry",
  "thiserror 2.0.18",
  "tokio",
@@ -3516,6 +3532,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+ "tenex-accounting",
  "tenex-conversations",
  "tenex-llm-config",
  "tenex-telemetry",

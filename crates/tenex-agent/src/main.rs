@@ -1,8 +1,8 @@
 #[macro_use]
 mod main_macro;
 
-mod accounting;
 mod agent_bootstrap;
+mod llm_accounting;
 mod agent_loop_hook;
 mod cassette;
 mod cassette_client;

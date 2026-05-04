@@ -19,9 +19,11 @@ use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
 use rig::client::{CompletionClient, Nothing};
+use rig::completion::Usage;
 use rig::providers::{anthropic, ollama, openai, openrouter};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use tenex_accounting::{flush, record_llm_call, LlmUsage, RecordLlmCall, RootKind};
 use tenex_llm_config::key_health::KeyHealthTracker;
 use tenex_llm_config::resolver::ConfigStore;
 use tenex_llm_config::{ResolvedConfig, StandardConfig};
@@ -103,7 +105,7 @@ async fn run(base_dir: &Path, project: ProjectContext<'_>, content: &str) -> Res
     let preamble = preamble(project);
     let user = format!("External user message (raw):\n```\n{}\n```", content.trim());
 
-    let verdict: FirewallVerdict = match resolved.provider.as_str() {
+    let (verdict, usage): (FirewallVerdict, Usage) = match resolved.provider.as_str() {
         "anthropic" => extract_anthropic(&resolved, &preamble, &user).await?,
         "openrouter" => extract_openrouter(&resolved, &preamble, &user).await?,
         "openai" => extract_openai(&resolved, &preamble, &user).await?,
@@ -111,12 +113,37 @@ async fn run(base_dir: &Path, project: ProjectContext<'_>, content: &str) -> Res
         other => return Err(anyhow!("unsupported firewall provider: {other}")),
     };
 
+    record_llm_call(RecordLlmCall {
+        root_kind: RootKind::Firewall.into(),
+        provider: resolved.provider.clone(),
+        provider_model_id: resolved.model.clone(),
+        operation: "firewall".into(),
+        triggering_pubkey: None,
+        user_message: Some(user),
+        assistant_response: Some(serde_json::to_string(&verdict).unwrap_or_default()),
+        usage: usage_from_rig(&usage),
+        ..Default::default()
+    })
+    .await;
+    flush().await;
+
     if verdict.safe {
         Ok(Verdict::Safe)
     } else {
         Ok(Verdict::Unsafe {
             reason: verdict.reason,
         })
+    }
+}
+
+fn usage_from_rig(u: &Usage) -> LlmUsage {
+    LlmUsage {
+        input_tokens: u.input_tokens,
+        output_tokens: u.output_tokens,
+        cached_input_tokens: u.cached_input_tokens,
+        cache_creation_input_tokens: u.cache_creation_input_tokens,
+        reasoning_tokens: 0,
+        total_tokens: Some(u.total_tokens),
     }
 }
 
@@ -152,58 +179,61 @@ async fn extract_anthropic(
     resolved: &StandardConfig,
     preamble: &str,
     user: &str,
-) -> Result<FirewallVerdict> {
+) -> Result<(FirewallVerdict, Usage)> {
     let key = first_api_key(resolved)?;
     let client = anthropic::Client::new(&key)?;
     let extractor = client
         .extractor::<FirewallVerdict>(&resolved.model)
         .preamble(preamble)
         .build();
-    tokio::time::timeout(REQUEST_TIMEOUT, extractor.extract(user))
+    let resp = tokio::time::timeout(REQUEST_TIMEOUT, extractor.extract_with_usage(user))
         .await
         .map_err(|_| anyhow!("anthropic firewall timed out"))?
-        .map_err(|e| anyhow!("anthropic extraction failed: {e}"))
+        .map_err(|e| anyhow!("anthropic extraction failed: {e}"))?;
+    Ok((resp.data, resp.usage))
 }
 
 async fn extract_openrouter(
     resolved: &StandardConfig,
     preamble: &str,
     user: &str,
-) -> Result<FirewallVerdict> {
+) -> Result<(FirewallVerdict, Usage)> {
     let key = first_api_key(resolved)?;
     let client = openrouter::Client::new(&key)?;
     let extractor = client
         .extractor::<FirewallVerdict>(&resolved.model)
         .preamble(preamble)
         .build();
-    tokio::time::timeout(REQUEST_TIMEOUT, extractor.extract(user))
+    let resp = tokio::time::timeout(REQUEST_TIMEOUT, extractor.extract_with_usage(user))
         .await
         .map_err(|_| anyhow!("openrouter firewall timed out"))?
-        .map_err(|e| anyhow!("openrouter extraction failed: {e}"))
+        .map_err(|e| anyhow!("openrouter extraction failed: {e}"))?;
+    Ok((resp.data, resp.usage))
 }
 
 async fn extract_openai(
     resolved: &StandardConfig,
     preamble: &str,
     user: &str,
-) -> Result<FirewallVerdict> {
+) -> Result<(FirewallVerdict, Usage)> {
     let key = first_api_key(resolved)?;
     let client = openai::CompletionsClient::builder().api_key(&key).build()?;
     let extractor = client
         .extractor::<FirewallVerdict>(&resolved.model)
         .preamble(preamble)
         .build();
-    tokio::time::timeout(REQUEST_TIMEOUT, extractor.extract(user))
+    let resp = tokio::time::timeout(REQUEST_TIMEOUT, extractor.extract_with_usage(user))
         .await
         .map_err(|_| anyhow!("openai firewall timed out"))?
-        .map_err(|e| anyhow!("openai extraction failed: {e}"))
+        .map_err(|e| anyhow!("openai extraction failed: {e}"))?;
+    Ok((resp.data, resp.usage))
 }
 
 async fn extract_ollama(
     resolved: &StandardConfig,
     preamble: &str,
     user: &str,
-) -> Result<FirewallVerdict> {
+) -> Result<(FirewallVerdict, Usage)> {
     let mut builder = ollama::Client::builder().api_key(Nothing);
     if let Some(url) = &resolved.base_url {
         builder = builder.base_url(url);
@@ -213,10 +243,11 @@ async fn extract_ollama(
         .extractor::<FirewallVerdict>(&resolved.model)
         .preamble(preamble)
         .build();
-    tokio::time::timeout(REQUEST_TIMEOUT, extractor.extract(user))
+    let resp = tokio::time::timeout(REQUEST_TIMEOUT, extractor.extract_with_usage(user))
         .await
         .map_err(|_| anyhow!("ollama firewall timed out"))?
-        .map_err(|e| anyhow!("ollama extraction failed: {e}"))
+        .map_err(|e| anyhow!("ollama extraction failed: {e}"))?;
+    Ok((resp.data, resp.usage))
 }
 
 fn first_api_key(resolved: &StandardConfig) -> Result<String> {

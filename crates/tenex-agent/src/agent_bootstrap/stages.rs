@@ -77,6 +77,7 @@ pub(super) async fn project_history(
     conv_store: Option<&ConversationStore>,
     conversation_id: &str,
     pubkey_hex: &str,
+    project_id: &str,
     system_prompt: &str,
     resolved: &ResolvedModel,
     base_dir: &std::path::Path,
@@ -95,7 +96,12 @@ pub(super) async fn project_history(
     };
     let tool_defs: Vec<ToolDef> = Vec::new();
     let summarizer: Option<Arc<dyn tenex_context::CompactionSummarizer>> = Some(Arc::new(
-        compaction::LlmCompactionSummarizer::new(Arc::new(resolved.clone())),
+        compaction::LlmCompactionSummarizer::new(
+            Arc::new(resolved.clone()),
+            pubkey_hex.to_string(),
+            conversation_id.to_string(),
+            Some(project_id.to_string()),
+        ),
     ));
     let name_resolver = identity_resolver::IdentityServiceResolver::new(base_dir);
     match tenex_context::project_with_excluded_event(
@@ -356,6 +362,7 @@ pub(super) async fn proactive_context_block(
     envelope_content: &str,
     project_id: &str,
     agent_pubkey: &str,
+    conversation_id: &str,
     resolved: &ResolvedModel,
 ) -> Option<String> {
     use tracing::{info_span, Instrument};
@@ -395,8 +402,19 @@ pub(super) async fn proactive_context_block(
         };
 
         let refs: Vec<&str> = collections.iter().map(|s| s.as_str()).collect();
-        let relevant =
-            context_discovery::discover_context(envelope_content, store, &refs, resolved).await;
+        let accounting = context_discovery::DiscoveryAccountingCtx {
+            agent_pubkey: agent_pubkey.to_string(),
+            project_id: project_id.to_string(),
+            conversation_id: Some(conversation_id.to_string()),
+        };
+        let relevant = context_discovery::discover_context(
+            envelope_content,
+            store,
+            &refs,
+            resolved,
+            &accounting,
+        )
+        .await;
 
         if relevant.is_empty() {
             tracing::Span::current().record("outcome", "empty_results");

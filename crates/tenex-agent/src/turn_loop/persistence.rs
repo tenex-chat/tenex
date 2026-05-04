@@ -4,13 +4,13 @@
 //! database does not abort an in-flight agent turn — the rig response has
 //! already been emitted by the time these run.
 
+use tenex_accounting::{flush as flush_accounting, record_llm_call, LlmUsage, RecordLlmCall, RootKind};
 use tenex_context::{
     BreakpointHint, BreakpointKind, CacheObservation, Message as CtxMessage,
     ToolCall as CtxToolCall, TurnRecord,
 };
 use tenex_conversations::{AgentContextState, ConversationStore, NewToolMessage};
 
-use crate::accounting;
 use crate::agent_bootstrap::AgentBootstrap;
 use crate::tools::recording::ToolCallRecord;
 use crate::tools::TodoItem;
@@ -150,24 +150,27 @@ pub(super) async fn record_turn_outcome(
     {
         eprintln!("[tenex-agent] Failed to record turn: {e}");
     }
-    accounting::record_turn(
-        &boot.resolved.provider,
-        &boot.resolved.model,
-        "stream",
-        Some(boot.pubkey_hex.clone()),
-        Some(boot.agent_slug.clone()),
-        Some(boot.conversation_id.clone()),
-        Some(boot.project_id.clone()),
-        Some(current_message.to_string()),
-        Some(response.to_string()),
-        stream_usage.input_tokens,
-        stream_usage.output_tokens,
-        stream_usage.cached_input_tokens,
-        stream_usage.cache_creation_input_tokens,
-        stream_usage.cached_input_tokens,
-        0,
-        Some(stream_usage.total_tokens),
-        None,
-    )
+    record_llm_call(RecordLlmCall {
+        root_kind: RootKind::UserMessage.into(),
+        provider: boot.resolved.provider.clone(),
+        provider_model_id: boot.resolved.model.clone(),
+        operation: "stream".into(),
+        agent_pubkey: Some(boot.pubkey_hex.clone()),
+        agent_slug: Some(boot.agent_slug.clone()),
+        conversation_id: Some(boot.conversation_id.clone()),
+        project_id: Some(boot.project_id.clone()),
+        user_message: Some(current_message.to_string()),
+        assistant_response: Some(response.to_string()),
+        usage: LlmUsage {
+            input_tokens: stream_usage.input_tokens,
+            output_tokens: stream_usage.output_tokens,
+            cached_input_tokens: stream_usage.cached_input_tokens,
+            cache_creation_input_tokens: stream_usage.cache_creation_input_tokens,
+            reasoning_tokens: 0,
+            total_tokens: Some(stream_usage.total_tokens),
+        },
+        ..Default::default()
+    })
     .await;
+    flush_accounting().await;
 }

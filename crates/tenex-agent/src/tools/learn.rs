@@ -1,11 +1,14 @@
 use crate::config::ResolvedModel;
 use crate::emit::EmitState;
+use crate::llm_accounting::{assistant_text, usage_from_rig};
+use rig::completion::{Completion, Message};
 use rig::providers::{anthropic, ollama, openai, openrouter};
-use rig::{client::CompletionClient, completion::Prompt, completion::ToolDefinition, tool::Tool};
+use rig::{client::CompletionClient, completion::ToolDefinition, tool::Tool};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::path::PathBuf;
 use std::sync::Arc;
+use tenex_accounting::{record_llm_call, RecordLlmCall, RootKindOrStr};
 use tenex_protocol::{Intent, LessonIntent};
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -39,20 +42,25 @@ impl LearnTool {
     async fn call_llm(&self, prompt: String) -> anyhow::Result<String> {
         use rig::client::Nothing;
 
-        let result = match self.resolved.provider.as_str() {
+        let history: Vec<Message> = Vec::new();
+
+        let (text, usage) = match self.resolved.provider.as_str() {
             "openrouter" => {
                 let key = self
                     .resolved
                     .api_key
                     .as_deref()
                     .ok_or_else(|| anyhow::anyhow!("no OpenRouter API key"))?;
-                let agent = openrouter::Client::new(key)?
+                let resp = openrouter::Client::new(key)?
                     .agent(&self.resolved.model)
-                    .build();
-                agent
-                    .prompt(prompt)
+                    .build()
+                    .completion(prompt.clone(), history.clone())
                     .await
                     .map_err(|e| anyhow::anyhow!("{e:?}"))?
+                    .send()
+                    .await
+                    .map_err(|e| anyhow::anyhow!("{e:?}"))?;
+                (assistant_text(&resp.choice), resp.usage)
             }
             "openai" => {
                 let key = self
@@ -60,26 +68,35 @@ impl LearnTool {
                     .api_key
                     .as_deref()
                     .ok_or_else(|| anyhow::anyhow!("no OpenAI API key"))?;
-                let agent = openai::CompletionsClient::builder()
+                let resp = openai::CompletionsClient::builder()
                     .api_key(key)
                     .build()?
                     .agent(&self.resolved.model)
-                    .build();
-                agent
-                    .prompt(prompt)
+                    .build()
+                    .completion(prompt.clone(), history.clone())
                     .await
                     .map_err(|e| anyhow::anyhow!("{e:?}"))?
+                    .send()
+                    .await
+                    .map_err(|e| anyhow::anyhow!("{e:?}"))?;
+                (assistant_text(&resp.choice), resp.usage)
             }
             "ollama" => {
                 let mut builder = ollama::Client::builder().api_key(Nothing);
                 if let Some(url) = self.resolved.base_url.as_deref() {
                     builder = builder.base_url(url);
                 }
-                let agent = builder.build()?.agent(&self.resolved.model).build();
-                agent
-                    .prompt(prompt)
+                let resp = builder
+                    .build()?
+                    .agent(&self.resolved.model)
+                    .build()
+                    .completion(prompt.clone(), history.clone())
                     .await
                     .map_err(|e| anyhow::anyhow!("{e:?}"))?
+                    .send()
+                    .await
+                    .map_err(|e| anyhow::anyhow!("{e:?}"))?;
+                (assistant_text(&resp.choice), resp.usage)
             }
             _ => {
                 let key = self
@@ -87,17 +104,32 @@ impl LearnTool {
                     .api_key
                     .as_deref()
                     .ok_or_else(|| anyhow::anyhow!("no Anthropic API key"))?;
-                let agent = anthropic::Client::new(key)?
+                let resp = anthropic::Client::new(key)?
                     .agent(&self.resolved.model)
-                    .build();
-                agent
-                    .prompt(prompt)
+                    .build()
+                    .completion(prompt.clone(), history.clone())
                     .await
                     .map_err(|e| anyhow::anyhow!("{e:?}"))?
+                    .send()
+                    .await
+                    .map_err(|e| anyhow::anyhow!("{e:?}"))?;
+                (assistant_text(&resp.choice), resp.usage)
             }
         };
 
-        Ok(result)
+        record_llm_call(RecordLlmCall {
+            root_kind: RootKindOrStr::Other("learn".into()),
+            provider: self.resolved.provider.clone(),
+            provider_model_id: self.resolved.model.clone(),
+            operation: "learn".into(),
+            user_message: Some(prompt),
+            assistant_response: Some(text.clone()),
+            usage: usage_from_rig(&usage),
+            ..Default::default()
+        })
+        .await;
+
+        Ok(text)
     }
 
     async fn update_index(

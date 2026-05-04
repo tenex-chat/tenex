@@ -10,6 +10,7 @@ path = "src/lib.rs"
 
 [dependencies]
 tenex-llm-config = { path = "../tenex-llm-config" }
+tenex-accounting = { path = "../tenex-accounting" }
 tokio = { version = "1.40", features = ["time"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

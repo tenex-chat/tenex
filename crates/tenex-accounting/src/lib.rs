@@ -31,6 +31,7 @@ pub mod query;
 pub mod recorder;
 pub mod schema;
 pub mod server;
+pub mod simple;
 
 mod agent_labels;
 
@@ -44,6 +45,7 @@ pub use recorder::{
     RecordedMessage, Recorder, RecorderError, RootKind, RootKindOrStr, SpanKind, ToolCallFinish,
     ToolCallSpan, ToolCallStart, TraceHandle, TraceRoot,
 };
+pub use simple::{flush, record_llm_call, recorder, LlmUsage, RecordLlmCall};
 
 /// Default home for the hot DB: `<HOME>/.tenex/data/accounting/hot.db`.
 pub fn default_db_path() -> std::path::PathBuf {

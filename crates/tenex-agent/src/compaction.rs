@@ -5,12 +5,14 @@
 //! messages being compacted out of the context window.
 
 use crate::config::ResolvedModel;
+use crate::llm_accounting::{assistant_text, usage_from_rig};
 use async_trait::async_trait;
 use rig::client::CompletionClient;
-use rig::completion::Prompt;
+use rig::completion::{Completion, Message};
 use rig::providers::{anthropic, ollama, openai, openrouter};
 use std::sync::Arc;
-use tenex_context::{CompactionSummarizer, Message};
+use tenex_accounting::{record_llm_call, RecordLlmCall, RootKindOrStr};
+use tenex_context::{CompactionSummarizer, Message as CtxMessage};
 
 const SYSTEM_PROMPT: &str = "\
 Compress prior TENEX execution context into a high-signal continuation summary for future work. \
@@ -28,13 +30,13 @@ Do not claim tests passed unless the transcript proves it. \
 Summarize only from the provided transcript.";
 
 /// Build a plain-text transcript of the messages to be summarized.
-fn build_transcript(messages: &[Message]) -> String {
+fn build_transcript(messages: &[CtxMessage]) -> String {
     messages
         .iter()
         .filter_map(|m| match m {
-            Message::System { .. } => None,
-            Message::User { content } => Some(format!("[user]\n{content}")),
-            Message::Assistant {
+            CtxMessage::System { .. } => None,
+            CtxMessage::User { content } => Some(format!("[user]\n{content}")),
+            CtxMessage::Assistant {
                 content,
                 tool_calls,
             } => {
@@ -49,7 +51,7 @@ fn build_transcript(messages: &[Message]) -> String {
                 }
                 Some(parts.join("\n"))
             }
-            Message::ToolResult {
+            CtxMessage::ToolResult {
                 tool_call_id,
                 tool_name,
                 content,
@@ -64,32 +66,50 @@ fn build_transcript(messages: &[Message]) -> String {
 
 pub struct LlmCompactionSummarizer {
     resolved: Arc<ResolvedModel>,
+    agent_pubkey: String,
+    conversation_id: String,
+    project_id: Option<String>,
 }
 
 impl LlmCompactionSummarizer {
-    pub fn new(resolved: Arc<ResolvedModel>) -> Self {
-        Self { resolved }
+    pub fn new(
+        resolved: Arc<ResolvedModel>,
+        agent_pubkey: String,
+        conversation_id: String,
+        project_id: Option<String>,
+    ) -> Self {
+        Self {
+            resolved,
+            agent_pubkey,
+            conversation_id,
+            project_id,
+        }
     }
 
     async fn call_llm(&self, user_prompt: String) -> anyhow::Result<String> {
         use rig::client::Nothing;
 
-        let result = match self.resolved.provider.as_str() {
+        let history: Vec<Message> = Vec::new();
+
+        let (text, usage) = match self.resolved.provider.as_str() {
             "openrouter" => {
                 let key = self
                     .resolved
                     .api_key
                     .as_deref()
                     .ok_or_else(|| anyhow::anyhow!("no OpenRouter API key"))?;
-                let agent = openrouter::Client::new(key)?
+                let resp = openrouter::Client::new(key)?
                     .agent(&self.resolved.model)
                     .preamble(SYSTEM_PROMPT)
                     .max_tokens(1400)
-                    .build();
-                agent
-                    .prompt(user_prompt)
+                    .build()
+                    .completion(user_prompt.clone(), history.clone())
                     .await
                     .map_err(|e| anyhow::anyhow!("{e:?}"))?
+                    .send()
+                    .await
+                    .map_err(|e| anyhow::anyhow!("{e:?}"))?;
+                (assistant_text(&resp.choice), resp.usage)
             }
             "openai" => {
                 let key = self
@@ -97,33 +117,39 @@ impl LlmCompactionSummarizer {
                     .api_key
                     .as_deref()
                     .ok_or_else(|| anyhow::anyhow!("no OpenAI API key"))?;
-                let agent = openai::CompletionsClient::builder()
+                let resp = openai::CompletionsClient::builder()
                     .api_key(key)
                     .build()?
                     .agent(&self.resolved.model)
                     .preamble(SYSTEM_PROMPT)
                     .max_tokens(1400)
-                    .build();
-                agent
-                    .prompt(user_prompt)
+                    .build()
+                    .completion(user_prompt.clone(), history.clone())
                     .await
                     .map_err(|e| anyhow::anyhow!("{e:?}"))?
+                    .send()
+                    .await
+                    .map_err(|e| anyhow::anyhow!("{e:?}"))?;
+                (assistant_text(&resp.choice), resp.usage)
             }
             "ollama" => {
                 let mut builder = ollama::Client::builder().api_key(Nothing);
                 if let Some(url) = self.resolved.base_url.as_deref() {
                     builder = builder.base_url(url);
                 }
-                let agent = builder
+                let resp = builder
                     .build()?
                     .agent(&self.resolved.model)
                     .preamble(SYSTEM_PROMPT)
                     .max_tokens(1400)
-                    .build();
-                agent
-                    .prompt(user_prompt)
+                    .build()
+                    .completion(user_prompt.clone(), history.clone())
                     .await
                     .map_err(|e| anyhow::anyhow!("{e:?}"))?
+                    .send()
+                    .await
+                    .map_err(|e| anyhow::anyhow!("{e:?}"))?;
+                (assistant_text(&resp.choice), resp.usage)
             }
             _ => {
                 let key = self
@@ -131,25 +157,43 @@ impl LlmCompactionSummarizer {
                     .api_key
                     .as_deref()
                     .ok_or_else(|| anyhow::anyhow!("no Anthropic API key"))?;
-                let agent = anthropic::Client::new(key)?
+                let resp = anthropic::Client::new(key)?
                     .agent(&self.resolved.model)
                     .preamble(SYSTEM_PROMPT)
                     .max_tokens(1400)
-                    .build();
-                agent
-                    .prompt(user_prompt)
+                    .build()
+                    .completion(user_prompt.clone(), history.clone())
                     .await
                     .map_err(|e| anyhow::anyhow!("{e:?}"))?
+                    .send()
+                    .await
+                    .map_err(|e| anyhow::anyhow!("{e:?}"))?;
+                (assistant_text(&resp.choice), resp.usage)
             }
         };
 
-        Ok(result)
+        record_llm_call(RecordLlmCall {
+            root_kind: RootKindOrStr::Other("compaction".into()),
+            provider: self.resolved.provider.clone(),
+            provider_model_id: self.resolved.model.clone(),
+            operation: "compaction".into(),
+            agent_pubkey: Some(self.agent_pubkey.clone()),
+            conversation_id: Some(self.conversation_id.clone()),
+            project_id: self.project_id.clone(),
+            user_message: Some(user_prompt),
+            assistant_response: Some(text.clone()),
+            usage: usage_from_rig(&usage),
+            ..Default::default()
+        })
+        .await;
+
+        Ok(text)
     }
 }
 
 #[async_trait]
 impl CompactionSummarizer for LlmCompactionSummarizer {
-    async fn summarize(&self, messages: &[Message]) -> anyhow::Result<String> {
+    async fn summarize(&self, messages: &[CtxMessage]) -> anyhow::Result<String> {
         let transcript = build_transcript(messages);
         if transcript.trim().is_empty() {
             anyhow::bail!("no transcript content to summarize");
