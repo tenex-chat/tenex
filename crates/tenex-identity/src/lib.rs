@@ -128,7 +128,6 @@ async fn run_daemon_async() -> AnyResult<()> {
     fs::set_permissions(&socket_path, fs::Permissions::from_mode(0o600))
         .with_context(|| format!("chmod 600 {}", socket_path.display()))?;
 
-    eprintln!("[identity] listening on {}", socket_path.display());
     client.connect().await;
     server::serve(listener, cache, client).await;
     Ok(())
