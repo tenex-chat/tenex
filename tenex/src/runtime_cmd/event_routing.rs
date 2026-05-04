@@ -26,7 +26,7 @@ use tracing::warn;
 use tenex_project::{models::ProjectAgent, Agent};
 
 use super::agent_subprocess::DispatchJob;
-use super::dispatch_pipeline::accept_dispatch;
+use super::dispatch_pipeline::{accept_dispatch, persist_user_message};
 use super::runtime_state_store::{
     delegation_route_for_completion, register_delegation_route_if_needed,
 };
@@ -92,6 +92,7 @@ pub(super) async fn dispatch_project_agent_target(
     }
 
     let (agent, conv_id, completion_recipient_pubkey) = select_dispatch_target(&shared, event)?;
+    persist_user_message(&shared.store, event, &conv_id)?;
     let agent_json = shared
         .base_dir
         .join("agents")
