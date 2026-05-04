@@ -3,56 +3,11 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use nostr_sdk::{Event, Keys};
-use tenex_project::{Agent, ProjectMetadata};
+use tenex_project::ProjectMetadata;
 
 use super::project_status::{build_project_status_event, project_scoped_skill_ids};
 
 const OWNER_PK: &str = "c506be742732723deaaf8260d2b43d75d33420c601c05a9e1fa3b7986cc1b957";
-const AGENT_PK: &str = "0eb926fe0fb742ed7970f6bcd3c009287d72ddb4b2cf2e0ec8480b5780325eb9";
-const AGENT_PK_B: &str = "1f1a2b3c4d5e6f7081928374a5b6c7d8e9f0011223344556677889900aabbccd";
-
-fn agent_with_skills(slug: &str, pubkey: &str, skills: &[&str], mcps: &[&str]) -> Agent {
-    let mut default = serde_json::Map::new();
-    default.insert(
-        "skills".into(),
-        serde_json::Value::Array(
-            skills
-                .iter()
-                .map(|s| serde_json::Value::String((*s).to_string()))
-                .collect(),
-        ),
-    );
-    let default_config_json = Some(serde_json::Value::Object(default).to_string());
-
-    let mcp_servers_json = if mcps.is_empty() {
-        None
-    } else {
-        let mut m = serde_json::Map::new();
-        for name in mcps {
-            m.insert((*name).into(), serde_json::json!({}));
-        }
-        Some(serde_json::Value::Object(m).to_string())
-    };
-
-    Agent {
-        pubkey: pubkey.into(),
-        slug: slug.into(),
-        name: slug.into(),
-        role: None,
-        description: None,
-        instructions: None,
-        use_criteria: None,
-        category: None,
-        signer_ref: None,
-        event_id: None,
-        status: None,
-        default_config_json,
-        telegram_config_json: None,
-        mcp_servers_json,
-        is_local: true,
-        backend_name: None,
-    }
-}
 
 fn project_meta() -> ProjectMetadata {
     ProjectMetadata {
@@ -113,48 +68,33 @@ fn project_scoped_skill_ids_partitions_by_directory_presence() {
 }
 
 #[test]
-fn build_event_emits_universe_and_assignment_tags() {
+fn build_event_emits_one_skill_tag_per_universe_entry() {
     let tmp = unique_temp("universe");
 
-    // Both alpha and beta live in the flat per-project skills dir — visible
-    // to every agent.
     write_skill_dir(&tmp, "alpha", true);
     write_skill_dir(&tmp, "beta", true);
 
-    // A enables alpha. B enables nothing.
-    let agent_a = agent_with_skills("agent-a", AGENT_PK, &["alpha"], &[]);
-    let agent_b = agent_with_skills("agent-b", AGENT_PK_B, &[], &[]);
-
     let keys = Keys::generate();
-    let event =
-        build_project_status_event(&keys, &project_meta(), &tmp, &tmp, &[agent_a, agent_b], &[]).unwrap();
+    let event = build_project_status_event(&keys, &project_meta(), &tmp, &tmp, &[]).unwrap();
 
     let all = tags(&event);
 
-    // Universe tags for both alpha and beta.
+    // Bare ['skill', <id>] tag for each universe entry.
     assert!(
         all.iter()
             .any(|t| t.len() == 2 && t[0] == "skill" && t[1] == "alpha"),
-        "expected bare ['skill', 'alpha']; got {all:?}",
+        "expected ['skill', 'alpha']; got {all:?}",
     );
     assert!(
         all.iter()
             .any(|t| t.len() == 2 && t[0] == "skill" && t[1] == "beta"),
-        "expected bare ['skill', 'beta']; got {all:?}",
+        "expected ['skill', 'beta']; got {all:?}",
     );
 
-    // Assignment tag for alpha → agent-a.
+    // Never any assignment-form skill tag — agent assignments live on kind:0.
     assert!(
-        all.iter()
-            .any(|t| t.len() == 3 && t[0] == "skill" && t[1] == "alpha" && t[2] == "agent-a"),
-        "expected ['skill', 'alpha', 'agent-a']; got {all:?}",
-    );
-
-    // No assignment tag for beta — neither agent enabled it.
-    assert!(
-        !all.iter()
-            .any(|t| t.len() >= 3 && t[0] == "skill" && t[1] == "beta"),
-        "beta should have universe tag only; got {all:?}",
+        !all.iter().any(|t| t[0] == "skill" && t.len() > 2),
+        "24010 must not emit assignment-form skill tags; got {all:?}",
     );
 
     // No agent, model, mcp, or tool tags ever.
@@ -168,54 +108,21 @@ fn build_event_emits_universe_and_assignment_tags() {
 }
 
 #[test]
-fn build_event_emits_universe_tag_for_inactive_project_scoped_skill() {
-    let tmp = unique_temp("inactive");
-
-    // gamma exists in the flat per-project dir, but no agent enables it.
+fn build_event_emits_skill_tags_independent_of_agent_state() {
+    // No agents are passed in — assignments are sourced from kind:0, not 24010.
+    // The universe tag must still appear for any on-disk skill.
+    let tmp = unique_temp("nocaps");
     write_skill_dir(&tmp, "gamma", true);
-    let agent_a = agent_with_skills("agent-a", AGENT_PK, &[], &[]);
 
     let keys = Keys::generate();
-    let event =
-        build_project_status_event(&keys, &project_meta(), &tmp, &tmp, &[agent_a], &[]).unwrap();
+    let event = build_project_status_event(&keys, &project_meta(), &tmp, &tmp, &[]).unwrap();
 
     let all = tags(&event);
-
-    // Universe tag for gamma exists.
     assert!(
         all.iter()
             .any(|t| t.len() == 2 && t[0] == "skill" && t[1] == "gamma"),
-        "expected bare ['skill', 'gamma']; got {all:?}",
+        "expected ['skill', 'gamma']; got {all:?}",
     );
-
-    // No assignment tag for gamma.
-    assert!(
-        !all.iter()
-            .any(|t| t.len() >= 3 && t[0] == "skill" && t[1] == "gamma"),
-        "gamma should have no assignment tag; got {all:?}",
-    );
-}
-
-#[test]
-fn build_event_emits_no_model_or_mcp_tags() {
-    let tmp = unique_temp("nocaps");
-    let keys = Keys::generate();
-    let event = build_project_status_event(
-        &keys,
-        &project_meta(),
-        &tmp,
-        &tmp,
-        &[agent_with_skills(
-            "worker",
-            AGENT_PK,
-            &["any-skill"],
-            &["github", "linear"],
-        )],
-        &[],
-    )
-    .unwrap();
-
-    let all = tags(&event);
     for capability in ["agent", "model", "mcp", "tool"] {
         assert!(
             !all.iter()
@@ -224,4 +131,3 @@ fn build_event_emits_no_model_or_mcp_tags() {
         );
     }
 }
-

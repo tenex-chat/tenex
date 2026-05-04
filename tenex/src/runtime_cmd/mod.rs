@@ -273,7 +273,6 @@ pub async fn run(args: RuntimeArgs) -> Result<()> {
     let client_status = client.clone();
     let keys_status = backend_keys.clone();
     let meta_status = meta.clone();
-    let agent_snapshot_status = agent_snapshot_state.clone();
     let whitelist_status = cfg.whitelisted_pubkeys.clone();
     let base_dir_status = base_dir.clone();
     let project_dir_status = resolve_project_working_dir(&base_dir, &meta.d_tag)
@@ -282,13 +281,11 @@ pub async fn run(args: RuntimeArgs) -> Result<()> {
         let mut interval = tokio::time::interval(Duration::from_secs(30));
         loop {
             interval.tick().await;
-            let snapshot = agent_snapshot_status.read().unwrap().clone();
             match project_status::build_project_status_event(
                 &keys_status,
                 &meta_status,
                 &project_dir_status,
                 &base_dir_status,
-                &snapshot.agents,
                 &whitelist_status,
             ) {
                 Ok(event) => {

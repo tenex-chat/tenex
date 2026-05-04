@@ -381,13 +381,11 @@ pub(super) async fn startup_publish_missing_agent_configs(shared: &RuntimeShared
 }
 
 pub(super) async fn publish_project_status_now(shared: &RuntimeShared, meta: &ProjectMetadata) {
-    let snapshot = shared.agent_snapshot();
     match project_status::build_project_status_event(
         &shared.backend_keys,
         meta,
         &shared.project_dir,
         &shared.base_dir,
-        &snapshot.agents,
         &shared.whitelisted_pubkeys,
     ) {
         Ok(event) => {
