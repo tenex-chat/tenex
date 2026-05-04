@@ -19,12 +19,18 @@
 //! source — including the singular/plural toggles
 //! (`agent`/`agents`, `project`/`projects`).
 //!
-//! Delete functions take `Option<&Keys>` — Nostr membership sync is skipped
-//! when no keys are available. This lets users delete agents locally without
-//! providing their nsec (the kind:31933 project event is left on the relay
-//! unchanged, which is correct when moving an agent to another machine).
-//! Assign and merge still require keys because those operations always
-//! produce Nostr state that needs to be authoritative.
+//! Delete and merge functions take `Option<&Keys>` — Nostr membership sync
+//! is skipped when no keys are available. This lets users manage local
+//! agent storage without providing their nsec (the kind:31933 project
+//! event is left on the relay unchanged, which is correct when moving an
+//! agent to another machine; merging is local cleanup that the daemon's
+//! normal sync flow can reconcile later).
+//!
+//! Assign-to-projects is the one operation that requires keys: it is the
+//! user *intentionally* changing memberships, so silently skipping the
+//! relay publish would mean the assignment didn't take effect for any
+//! other client. The call site loads keys via `try_resolve_owner_signer`
+//! and aborts with a clear message if none are configured — no prompt.
 
 use anyhow::{anyhow, Result};
 use nostr_sdk::Keys;
@@ -34,7 +40,7 @@ use crate::agent_cmd::manager_logic::{
     pick_merge_survivor, ManagedAgent,
 };
 use crate::agent_cmd::provisioning::{delete_stored_agent, DeleteOptions};
-use crate::nostr_pub::owner_signer::resolve_owner_signer;
+use crate::nostr_pub::owner_signer::try_resolve_owner_signer;
 use crate::nostr_pub::project_mutation::sync_many_project_memberships;
 use crate::store::project_members::list_assignable_project_dtags;
 use crate::tui::custom_prompts::agent_select_prompt::{
@@ -123,7 +129,7 @@ pub async fn bulk_delete_agents(
 /// to [`merge_agents`] with `confirm = true`.
 pub async fn bulk_merge_agents(
     base_dir: &std::path::Path,
-    keys: &Keys,
+    keys: Option<&Keys>,
     agents: &[ManagedAgent],
     selected_pubkeys: &[String],
 ) -> Result<()> {
@@ -159,12 +165,15 @@ pub async fn bulk_merge_agents(
 /// 7. Delete each non-survivor — `publish_inventory` is set to `true`
 ///    only on the **last** deletion to avoid spamming the relay
 ///    (matches TS `:567-571`).
-/// 8. Re-publish all affected project events.
+/// 8. If `keys` is `Some`, re-publish all affected project events. When
+///    `None`, the merge completes locally and a hint is emitted noting
+///    that the relay copy is now stale (the daemon's sync flow will
+///    reconcile, or the user can re-run with `$TENEX_NSEC` set).
 /// 9. If `confirm`: success line `"Merged N agents into <slug>"` plus a
 ///    `"Projects: <csv>"` context line.
 pub async fn merge_agents(
     base_dir: &std::path::Path,
-    keys: &Keys,
+    keys: Option<&Keys>,
     agents: &[ManagedAgent],
     confirm: bool,
 ) -> Result<()> {
@@ -217,7 +226,14 @@ pub async fn merge_agents(
         .await?;
     }
 
-    sync_many_project_memberships(base_dir, keys, &merged_project_ids).await?;
+    if let Some(keys) = keys {
+        sync_many_project_memberships(base_dir, keys, &merged_project_ids).await?;
+    } else if !merged_project_ids.is_empty() {
+        display::blank();
+        display::hint(
+            "Merged locally. Set $TENEX_NSEC to publish updated project memberships to the relay.",
+        );
+    }
 
     if confirm {
         display::blank();
@@ -427,7 +443,7 @@ pub struct AutoMergeOutcome {
 /// session-scope flag in.
 pub async fn offer_auto_merge_for_duplicate_slugs(
     base_dir: &std::path::Path,
-    owner_keys: &mut Option<Keys>,
+    keys: Option<&Keys>,
     agents: Vec<ManagedAgent>,
     caller_dismissed: bool,
 ) -> Result<AutoMergeOutcome> {
@@ -482,9 +498,8 @@ pub async fn offer_auto_merge_for_duplicate_slugs(
         .map(|g| g.iter().map(|a| (*a).clone()).collect())
         .collect();
     let group_count = owned_groups.len();
-    let keys = ensure_owner_signer(owner_keys, base_dir)?;
     for group in &owned_groups {
-        merge_agents(base_dir, &keys, group, false).await?;
+        merge_agents(base_dir, keys, group, false).await?;
     }
 
     display::blank();
@@ -520,7 +535,7 @@ pub async fn offer_auto_merge_for_duplicate_slugs(
 ///    - `delete` → [`confirm_and_delete`], return
 pub async fn show_agent_detail(
     base_dir: &std::path::Path,
-    owner_keys: &mut Option<Keys>,
+    owner_keys: Option<&Keys>,
     pubkey: &str,
     page_size: usize,
 ) -> Result<()> {
@@ -564,14 +579,22 @@ pub async fn show_agent_detail(
         match action.as_str() {
             CHOICE_BACK => return Ok(()),
             CHOICE_ASSIGN => {
-                let keys = ensure_owner_signer(owner_keys, base_dir)?;
+                let Some(keys) = owner_keys else {
+                    display::blank();
+                    display::hint(
+                        "Assigning agents to projects publishes a kind:31933 event. \
+                         Set $TENEX_NSEC or populate \"ownerNsec\" in the TENEX config, \
+                         then re-run.",
+                    );
+                    continue;
+                };
                 let snapshot = entry.clone();
-                assign_agent_to_projects(base_dir, &keys, Some(&snapshot), page_size).await?;
+                assign_agent_to_projects(base_dir, keys, Some(&snapshot), page_size).await?;
                 continue;
             }
             CHOICE_DELETE => {
                 let snapshot = entry.clone();
-                confirm_and_delete(base_dir, owner_keys.as_ref(), Some(&snapshot)).await?;
+                confirm_and_delete(base_dir, owner_keys, Some(&snapshot)).await?;
                 return Ok(());
             }
             other => {
@@ -602,29 +625,34 @@ pub async fn show_agent_detail(
 ///    - `delete:<pubkey>` → [`confirm_and_delete`], loop (TS supports
 ///      this even though the live menu doesn't currently emit it)
 ///
-/// Owner signer is resolved lazily on the first mutating action so that a
-/// session that just wants to read can skip the nsec prompt. The
-/// `duplicate_merge_dismissed` flag is session-scope: once the user
+/// Owner signer is resolved once via `try_resolve_owner_signer` (env var
+/// or TENEX config — never an interactive prompt). When it returns
+/// `None`, every action in this menu degrades cleanly: read and delete
+/// are local-only by design; merge/auto-merge complete locally and emit
+/// a hint that the relay copy is stale; assign-to-projects refuses with
+/// a clear "configure your nsec" message because that operation has no
+/// meaningful local-only behavior.
+///
+/// The `duplicate_merge_dismissed` flag is session-scope: once the user
 /// declines the auto-merge suggestion, we stop offering it for the rest
 /// of the session.
 pub async fn show_main_menu(base_dir: &std::path::Path) -> Result<()> {
     use crate::tui::theme::chalk_dim;
 
-    let mut owner_keys: Option<Keys> = None;
+    let owner_keys: Option<Keys> = try_resolve_owner_signer(base_dir)?;
     let mut duplicate_merge_dismissed = false;
     let page_size = get_agent_list_height();
 
     loop {
         let mut agents = load_agents(base_dir)?;
 
-        // Auto-merge pass — may need the signer (because mergeAgents calls
-        // syncManyProjectMemberships). The signer is resolved inside the
-        // helper only if the user accepts the merge prompt, so users who
-        // just want to read or locally delete never see an nsec prompt.
+        // Auto-merge pass — local cleanup; the relay republish runs only
+        // when an owner signer was resolved up-front. With no signer the
+        // merge still proceeds locally and `merge_agents` emits a hint.
         if !duplicate_merge_dismissed && !find_duplicate_slug_groups(&agents).is_empty() {
             let outcome = offer_auto_merge_for_duplicate_slugs(
                 base_dir,
-                &mut owner_keys,
+                owner_keys.as_ref(),
                 agents,
                 duplicate_merge_dismissed,
             )
@@ -678,13 +706,18 @@ pub async fn show_main_menu(base_dir: &std::path::Path) -> Result<()> {
                 continue;
             }
             "merge-selected" => {
-                let keys = ensure_owner_signer(&mut owner_keys, base_dir)?;
-                bulk_merge_agents(base_dir, &keys, &agents, &result.selected_pubkeys).await?;
+                bulk_merge_agents(
+                    base_dir,
+                    owner_keys.as_ref(),
+                    &agents,
+                    &result.selected_pubkeys,
+                )
+                .await?;
                 continue;
             }
             other if other.starts_with("agent:") => {
                 let pubkey = &other["agent:".len()..];
-                show_agent_detail(base_dir, &mut owner_keys, pubkey, page_size).await?;
+                show_agent_detail(base_dir, owner_keys.as_ref(), pubkey, page_size).await?;
                 continue;
             }
             other if other.starts_with("delete:") => {
@@ -698,15 +731,6 @@ pub async fn show_main_menu(base_dir: &std::path::Path) -> Result<()> {
             }
         }
     }
-}
-
-/// Resolve the owner signer once per session, then return cached keys.
-/// Mirrors `AgentManager.getOwnerSigner` (`AgentManager.ts:252-257`).
-fn ensure_owner_signer(cache: &mut Option<Keys>, base_dir: &std::path::Path) -> Result<Keys> {
-    if cache.is_none() {
-        *cache = Some(resolve_owner_signer(base_dir)?);
-    }
-    Ok(cache.clone().expect("just populated"))
 }
 
 /// Union of every agent's `projects` field, deduped while preserving
@@ -829,7 +853,7 @@ mod tests {
         let a = agent("alpha", vec![]);
         let result = bulk_merge_agents(
             &base,
-            &keys,
+            Some(&keys),
             std::slice::from_ref(&a),
             std::slice::from_ref(&a.pubkey),
         )
@@ -846,7 +870,7 @@ mod tests {
         let b = agent("beta", vec![]);
         let result = bulk_merge_agents(
             &base,
-            &keys,
+            Some(&keys),
             &[a.clone(), b],
             std::slice::from_ref(&a.pubkey),
         )
@@ -863,7 +887,7 @@ mod tests {
         let base = unique_temp();
         let keys = Keys::generate();
         let a = agent("alpha", vec![]);
-        let result = merge_agents(&base, &keys, &[a], false).await;
+        let result = merge_agents(&base, Some(&keys), &[a], false).await;
         assert!(result.is_ok());
         std::fs::remove_dir_all(&base).ok();
     }
@@ -883,23 +907,20 @@ mod tests {
     #[tokio::test]
     async fn offer_auto_merge_short_circuits_when_caller_dismissed() {
         // Even with duplicates present, a previously-dismissed flag means
-        // we never prompt — return the input unchanged. The empty cache
-        // proves the signer was never resolved.
+        // we never prompt — return the input unchanged.
         let base = unique_temp();
-        let mut owner_keys: Option<Keys> = None;
         let dup1 = agent("dupe", vec!["P1"]);
         let dup2 = agent("dupe", vec!["P2"]);
         let agents = vec![dup1, dup2];
         let outcome = offer_auto_merge_for_duplicate_slugs(
             &base,
-            &mut owner_keys,
+            None,
             agents.clone(),
             true, // caller_dismissed
         )
         .await
         .unwrap();
         assert!(outcome.dismissed);
-        assert!(owner_keys.is_none(), "signer must not be resolved on the dismissed short-circuit");
         assert_eq!(outcome.agents.len(), agents.len());
         std::fs::remove_dir_all(&base).ok();
     }
@@ -907,15 +928,12 @@ mod tests {
     #[tokio::test]
     async fn offer_auto_merge_no_duplicates_returns_unchanged() {
         let base = unique_temp();
-        let mut owner_keys: Option<Keys> = None;
         let a = agent("alpha", vec![]);
         let b = agent("beta", vec![]);
-        let outcome =
-            offer_auto_merge_for_duplicate_slugs(&base, &mut owner_keys, vec![a, b], false)
-                .await
-                .unwrap();
+        let outcome = offer_auto_merge_for_duplicate_slugs(&base, None, vec![a, b], false)
+            .await
+            .unwrap();
         assert!(!outcome.dismissed);
-        assert!(owner_keys.is_none(), "signer must not be resolved when no duplicates exist");
         assert_eq!(outcome.agents.len(), 2);
         std::fs::remove_dir_all(&base).ok();
     }

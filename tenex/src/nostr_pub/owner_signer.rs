@@ -26,6 +26,31 @@ fn build_signer(nsec: &str) -> Result<Keys> {
     Keys::parse(nsec.trim()).map_err(|e| anyhow!("Could not load owner nsec: {e}"))
 }
 
+/// Non-prompting resolution: env var, then TENEX config, then `Ok(None)`.
+///
+/// Used by callers (notably the agent manager) where local-only operation
+/// is valid and an interactive nsec prompt would be a UX regression. If
+/// the configured value is malformed, the parse error is surfaced rather
+/// than silently dropped — that's a misconfiguration, not "no signer".
+pub fn try_resolve_owner_signer(base_dir: &std::path::Path) -> Result<Option<Keys>> {
+    if let Ok(env) = std::env::var(ENV_VAR) {
+        let trimmed = env.trim();
+        if !trimmed.is_empty() {
+            return build_signer(trimmed).map(Some);
+        }
+    }
+
+    let doc = TenexConfigDoc::load(base_dir)?;
+    if let Some(configured) = doc.owner_nsec() {
+        let trimmed = configured.trim();
+        if !trimmed.is_empty() {
+            return build_signer(trimmed).map(Some);
+        }
+    }
+
+    Ok(None)
+}
+
 /// Resolve the project owner's nsec and return signing keys.
 ///
 /// Errors with the verbatim TS string `"Owner nsec required: set
