@@ -61,6 +61,7 @@ pub(crate) struct ToolSet {
     pub(crate) agent_nsec: String,
     pub(crate) agent_home: PathBuf,
     pub(crate) resolved_model: Arc<ResolvedModel>,
+    pub(crate) summarization_model: Arc<ResolvedModel>,
     pub(crate) project_d_tag: String,
     pub(crate) agent_slug: String,
     pub(crate) project_id: String,
@@ -275,7 +276,7 @@ impl ToolSet {
             &recorder,
             Box::new(ConversationGetTool::new(
                 self.conv_db_path.clone(),
-                self.resolved_model.clone(),
+                self.summarization_model.clone(),
             )),
         );
         self.push_tool(

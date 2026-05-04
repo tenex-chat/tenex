@@ -171,6 +171,22 @@ pub(crate) async fn build(
         "[tenex-agent] provider: {} | model: {}",
         resolved.provider, resolved.model
     );
+    let summarization_model =
+        Arc::new(match ResolvedModel::resolve_role(&base_dir, "summarization") {
+            Ok(model) => {
+                eprintln!(
+                    "[tenex-agent] summarization model: {} | {}",
+                    model.provider, model.model
+                );
+                model
+            }
+            Err(e) => {
+                eprintln!(
+                    "[tenex-agent] summarization role unavailable ({e}); using agent's resolved model"
+                );
+                resolved.clone()
+            }
+        });
     let trigger_pubkey_hex = match &envelope.principal {
         PrincipalRef::Nostr { pubkey, .. } => pubkey.to_hex(),
     };
@@ -428,6 +444,7 @@ pub(crate) async fn build(
         agent_nsec: agent_config.nsec.clone(),
         agent_home: agent_home.clone(),
         resolved_model: Arc::new(resolved.clone()),
+        summarization_model: summarization_model.clone(),
         project_d_tag: project_meta.d_tag.clone(),
         agent_slug: agent_slug.clone(),
         project_id: project_id.clone(),

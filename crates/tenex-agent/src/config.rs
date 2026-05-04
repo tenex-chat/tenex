@@ -1,9 +1,9 @@
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use serde::Deserialize;
 use std::fs;
 use std::path::Path;
 use tenex_llm_config::key_health::KeyHealthTracker;
-use tenex_llm_config::resolver::ConfigStore;
+use tenex_llm_config::resolver::{resolved_config_default_standard, ConfigStore};
 use tenex_llm_config::StandardConfig;
 use tenex_telegram::config::TelegramAgentConfig;
 
@@ -64,6 +64,26 @@ impl ResolvedModel {
         let store = ConfigStore::load(base_dir)?;
         let config = store.resolve_model_reference(raw_model, &KeyHealthTracker::new())?;
         Ok(Self::from_standard(config))
+    }
+
+    /// Resolve a named role from `llms.json`, falling back to the `default`
+    /// role when the requested role isn't assigned. Mirrors the pattern in
+    /// `tenex-summarizer::config::LlmSelection::resolve`.
+    pub fn resolve_role(base_dir: &Path, role: &str) -> Result<Self> {
+        let store = ConfigStore::load(base_dir)?;
+        let key_health = KeyHealthTracker::new();
+        let resolved_role = if store.llms.roles.contains_key(role) {
+            role
+        } else if store.llms.roles.contains_key("default") {
+            "default"
+        } else {
+            return Err(anyhow!(
+                "llms.json has neither `{role}` nor `default` role"
+            ));
+        };
+        let standard =
+            resolved_config_default_standard(store.resolve_role(resolved_role, &key_health)?)?;
+        Ok(Self::from_standard(standard))
     }
 
     fn from_standard(config: StandardConfig) -> Self {
