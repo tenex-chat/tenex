@@ -427,7 +427,7 @@ pub struct AutoMergeOutcome {
 /// session-scope flag in.
 pub async fn offer_auto_merge_for_duplicate_slugs(
     base_dir: &std::path::Path,
-    keys: &Keys,
+    owner_keys: &mut Option<Keys>,
     agents: Vec<ManagedAgent>,
     caller_dismissed: bool,
 ) -> Result<AutoMergeOutcome> {
@@ -482,8 +482,9 @@ pub async fn offer_auto_merge_for_duplicate_slugs(
         .map(|g| g.iter().map(|a| (*a).clone()).collect())
         .collect();
     let group_count = owned_groups.len();
+    let keys = ensure_owner_signer(owner_keys, base_dir)?;
     for group in &owned_groups {
-        merge_agents(base_dir, keys, group, false).await?;
+        merge_agents(base_dir, &keys, group, false).await?;
     }
 
     display::blank();
@@ -617,13 +618,13 @@ pub async fn show_main_menu(base_dir: &std::path::Path) -> Result<()> {
         let mut agents = load_agents(base_dir)?;
 
         // Auto-merge pass — may need the signer (because mergeAgents calls
-        // syncManyProjectMemberships). Resolve lazily here only if a
-        // duplicate group is actually present.
+        // syncManyProjectMemberships). The signer is resolved inside the
+        // helper only if the user accepts the merge prompt, so users who
+        // just want to read or locally delete never see an nsec prompt.
         if !duplicate_merge_dismissed && !find_duplicate_slug_groups(&agents).is_empty() {
-            let keys = ensure_owner_signer(&mut owner_keys, base_dir)?;
             let outcome = offer_auto_merge_for_duplicate_slugs(
                 base_dir,
-                &keys,
+                &mut owner_keys,
                 agents,
                 duplicate_merge_dismissed,
             )
@@ -882,21 +883,23 @@ mod tests {
     #[tokio::test]
     async fn offer_auto_merge_short_circuits_when_caller_dismissed() {
         // Even with duplicates present, a previously-dismissed flag means
-        // we never prompt — return the input unchanged.
+        // we never prompt — return the input unchanged. The empty cache
+        // proves the signer was never resolved.
         let base = unique_temp();
-        let keys = Keys::generate();
+        let mut owner_keys: Option<Keys> = None;
         let dup1 = agent("dupe", vec!["P1"]);
         let dup2 = agent("dupe", vec!["P2"]);
         let agents = vec![dup1, dup2];
         let outcome = offer_auto_merge_for_duplicate_slugs(
             &base,
-            &keys,
+            &mut owner_keys,
             agents.clone(),
             true, // caller_dismissed
         )
         .await
         .unwrap();
         assert!(outcome.dismissed);
+        assert!(owner_keys.is_none(), "signer must not be resolved on the dismissed short-circuit");
         assert_eq!(outcome.agents.len(), agents.len());
         std::fs::remove_dir_all(&base).ok();
     }
@@ -904,13 +907,15 @@ mod tests {
     #[tokio::test]
     async fn offer_auto_merge_no_duplicates_returns_unchanged() {
         let base = unique_temp();
-        let keys = Keys::generate();
+        let mut owner_keys: Option<Keys> = None;
         let a = agent("alpha", vec![]);
         let b = agent("beta", vec![]);
-        let outcome = offer_auto_merge_for_duplicate_slugs(&base, &keys, vec![a, b], false)
-            .await
-            .unwrap();
+        let outcome =
+            offer_auto_merge_for_duplicate_slugs(&base, &mut owner_keys, vec![a, b], false)
+                .await
+                .unwrap();
         assert!(!outcome.dismissed);
+        assert!(owner_keys.is_none(), "signer must not be resolved when no duplicates exist");
         assert_eq!(outcome.agents.len(), 2);
         std::fs::remove_dir_all(&base).ok();
     }
