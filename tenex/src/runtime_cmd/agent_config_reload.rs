@@ -358,16 +358,16 @@ pub(super) async fn startup_publish_missing_agent_configs(shared: &RuntimeShared
         }
     };
 
-    let needing = agent_config_publish::agents_needing_publish(
-        &snapshot.agents,
-        &shared.base_dir,
-        &existing,
-    );
+    let needing =
+        agent_config_publish::agents_needing_publish(&snapshot.agents, &shared.base_dir, &existing);
     if needing.is_empty() {
         info!("startup: every agent already has a fresh 34011 on relays");
         return;
     }
-    info!(count = needing.len(), "startup: publishing missing/stale 34011 events");
+    info!(
+        count = needing.len(),
+        "startup: publishing missing/stale 34011 events"
+    );
     for pubkey in needing {
         agent_config_publish::publish_one(
             &pubkey,
@@ -387,7 +387,6 @@ pub(super) async fn publish_project_status_now(shared: &RuntimeShared, meta: &Pr
         meta,
         &shared.project_dir,
         &snapshot.agents,
-        &snapshot.project_agents,
         &shared.whitelisted_pubkeys,
     ) {
         Ok(event) => {

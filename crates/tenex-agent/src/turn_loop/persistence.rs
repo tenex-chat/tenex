@@ -99,7 +99,7 @@ pub(super) fn record_tool_messages(
 
 /// Record this turn's assistant + tool messages into the conversation store
 /// and run the accounting hook.
-pub(super) fn record_turn_outcome(
+pub(super) async fn record_turn_outcome(
     boot: &AgentBootstrap,
     store: &ConversationStore,
     current_message: &str,
@@ -116,25 +116,6 @@ pub(super) fn record_turn_outcome(
         })
         .collect();
     let hit_tokens = stream_usage.cached_input_tokens;
-    accounting::record_turn(
-        &boot.resolved.provider,
-        &boot.resolved.model,
-        "stream",
-        Some(boot.pubkey_hex.clone()),
-        Some(boot.agent_slug.clone()),
-        Some(boot.conversation_id.clone()),
-        Some(boot.project_id.clone()),
-        Some(current_message.to_string()),
-        Some(response.to_string()),
-        stream_usage.input_tokens,
-        stream_usage.output_tokens,
-        stream_usage.cached_input_tokens,
-        stream_usage.cache_creation_input_tokens,
-        stream_usage.cached_input_tokens,
-        0,
-        Some(stream_usage.total_tokens),
-        None,
-    );
     let messages_visible = vec![
         CtxMessage::User {
             content: current_message.to_string(),
@@ -169,4 +150,24 @@ pub(super) fn record_turn_outcome(
     {
         eprintln!("[tenex-agent] Failed to record turn: {e}");
     }
+    accounting::record_turn(
+        &boot.resolved.provider,
+        &boot.resolved.model,
+        "stream",
+        Some(boot.pubkey_hex.clone()),
+        Some(boot.agent_slug.clone()),
+        Some(boot.conversation_id.clone()),
+        Some(boot.project_id.clone()),
+        Some(current_message.to_string()),
+        Some(response.to_string()),
+        stream_usage.input_tokens,
+        stream_usage.output_tokens,
+        stream_usage.cached_input_tokens,
+        stream_usage.cache_creation_input_tokens,
+        stream_usage.cached_input_tokens,
+        0,
+        Some(stream_usage.total_tokens),
+        None,
+    )
+    .await;
 }

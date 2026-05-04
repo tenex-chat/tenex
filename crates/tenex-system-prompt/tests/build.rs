@@ -18,6 +18,7 @@ fn minimal_input<'a>(home: &'a HomeDirectoryInfo<'a>) -> BuildSystemPromptInput<
         pubkey_hex: "abcdef0123456789",
         category_str: None,
         category: None,
+        global_system_prompt: None,
         instructions: None,
         working_dir: "/home/u/proj",
         project_base_path: None,
@@ -48,6 +49,18 @@ fn contains_identity_fragment() {
 }
 
 #[test]
+fn includes_global_system_prompt_when_present() {
+    let home = minimal_home();
+    let out = build_system_prompt(BuildSystemPromptInput {
+        global_system_prompt: Some("Use repository conventions first."),
+        ..minimal_input(&home)
+    });
+    assert!(out.contains("<global-system-prompt>"));
+    assert!(out.contains("Use repository conventions first."));
+    assert!(out.contains("</global-system-prompt>"));
+}
+
+#[test]
 fn contains_todo_guidance() {
     let home = minimal_home();
     let out = build_system_prompt(minimal_input(&home));
@@ -71,6 +84,7 @@ fn identical_inputs_produce_byte_identical_output() {
         pubkey_hex: "11112222333344445555",
         category_str: Some("worker"),
         category: None,
+        global_system_prompt: None,
         instructions: Some("hold steady"),
         working_dir: "/x",
         project_base_path: None,
@@ -94,6 +108,7 @@ fn identical_inputs_produce_byte_identical_output() {
         pubkey_hex: "11112222333344445555",
         category_str: Some("worker"),
         category: None,
+        global_system_prompt: None,
         instructions: Some("hold steady"),
         working_dir: "/x",
         project_base_path: None,
@@ -124,6 +139,7 @@ fn orchestrator_category_skips_env_vars() {
         pubkey_hex: "abcdef0123456789",
         category_str: Some("orchestrator"),
         category: Some(AgentCategory::Orchestrator),
+        global_system_prompt: None,
         instructions: None,
         working_dir: "/home/u/proj",
         project_base_path: None,
@@ -154,6 +170,7 @@ fn includes_root_agents_md_when_supplied() {
         pubkey_hex: "abcdef0123456789",
         category_str: None,
         category: None,
+        global_system_prompt: None,
         instructions: None,
         working_dir: "/home/u/proj/.worktrees/feature",
         project_base_path: None,
@@ -183,6 +200,7 @@ fn project_context_renders_project_base_relative_cwd() {
         pubkey_hex: "abcdef0123456789",
         category_str: None,
         category: None,
+        global_system_prompt: None,
         instructions: None,
         working_dir: "/home/u/proj/src",
         project_base_path: Some("/home/u/proj"),
@@ -213,6 +231,7 @@ fn project_context_renders_exact_root_as_project_base() {
         pubkey_hex: "abcdef0123456789",
         category_str: None,
         category: None,
+        global_system_prompt: None,
         instructions: None,
         working_dir: "/home/u/proj",
         project_base_path: Some("/home/u/proj"),
@@ -246,6 +265,7 @@ fn project_context_does_not_rewrite_sibling_path() {
         pubkey_hex: "abcdef0123456789",
         category_str: None,
         category: None,
+        global_system_prompt: None,
         instructions: None,
         working_dir: "/home/u/other-proj",
         project_base_path: Some("/home/u/proj"),
@@ -276,6 +296,7 @@ fn project_context_renders_project_id_and_conversation_id() {
         pubkey_hex: "abcdef0123456789",
         category_str: None,
         category: None,
+        global_system_prompt: None,
         instructions: None,
         working_dir: "/home/u/proj",
         project_base_path: None,
@@ -314,6 +335,7 @@ fn project_context_renders_telegram_channel_bindings() {
         pubkey_hex: "abcdef0123456789",
         category_str: None,
         category: None,
+        global_system_prompt: None,
         instructions: None,
         working_dir: "/home/u/proj",
         project_base_path: None,

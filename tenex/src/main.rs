@@ -76,10 +76,7 @@ async fn main() -> Result<()> {
     let telemetry = {
         let (kind, service_name) = match &cli.command {
             Command::Daemon(_) => (tenex_telemetry::TelemetryKind::Daemon, "tenex-daemon"),
-            Command::Runtime(_) => (
-                tenex_telemetry::TelemetryKind::Subprocess,
-                "tenex-runtime",
-            ),
+            Command::Runtime(_) => (tenex_telemetry::TelemetryKind::Subprocess, "tenex-runtime"),
             _ => (tenex_telemetry::TelemetryKind::Cli, "tenex-cli"),
         };
         tenex_telemetry::init(tenex_telemetry::TelemetryInit {

@@ -129,6 +129,7 @@ impl Tool for AskTool {
                     request: prompt,
                     branch: None,
                     followup_of: None,
+                    extra_tags: Vec::new(),
                 }],
             };
 

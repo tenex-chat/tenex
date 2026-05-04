@@ -7,4 +7,4 @@ pub mod store;
 
 pub use config::EmbedConfig;
 pub use rag::{RagStore, SearchResult};
-pub use store::{ChunkMeta, VectorMatch, VectorStore};
+pub use store::{ChunkMeta, SearchFilter, VectorMatch, VectorStore};

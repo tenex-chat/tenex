@@ -6,7 +6,7 @@ use sha2::{Digest, Sha256};
 use crate::config::EmbedConfig;
 use crate::embed::EmbeddingClient;
 use crate::sqlite_store::SqliteStore;
-use crate::store::{ChunkMeta, VectorMatch, VectorStore};
+use crate::store::{ChunkMeta, SearchFilter, VectorMatch, VectorStore};
 
 #[derive(Debug, Clone)]
 pub struct SearchResult {
@@ -108,6 +108,21 @@ impl<S: VectorStore> RagStore<S> {
     ) -> Result<Vec<SearchResult>> {
         let vector = self.embed.embed(query).await?;
         let matches = self.store.search(&vector, collections, limit).await?;
+        Ok(matches.into_iter().map(SearchResult::from).collect())
+    }
+
+    pub async fn search_filtered(
+        &self,
+        query: &str,
+        collections: &[&str],
+        limit: usize,
+        filter: &SearchFilter,
+    ) -> Result<Vec<SearchResult>> {
+        let vector = self.embed.embed(query).await?;
+        let matches = self
+            .store
+            .search_filtered(&vector, collections, limit, filter)
+            .await?;
         Ok(matches.into_iter().map(SearchResult::from).collect())
     }
 

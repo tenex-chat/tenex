@@ -254,7 +254,8 @@ async fn exercise_openrouter(trace: &tenex_accounting::TraceHandle, key: &str) -
 
 async fn exercise_ollama(trace: &tenex_accounting::TraceHandle, host: &str) -> Result<()> {
     // Pick a small model that's likely loaded; let user override.
-    let model = std::env::var("OLLAMA_MODEL").unwrap_or_else(|_| "llama3.1:8b".to_string());
+    let model =
+        std::env::var("OLLAMA_MODEL").unwrap_or_else(|_| "deepseek-v4-flash:cloud".to_string());
     let http = reqwest::Client::new();
     // Reachability check first.
     let ping = http

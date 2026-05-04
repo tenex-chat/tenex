@@ -28,6 +28,7 @@ fn test_ctx() -> EncodingContext {
         execution_time_ms: Some(1500),
         llm_runtime_ms: Some(1200),
         llm_runtime_total_ms: None,
+        completion_project_a_tags: Vec::new(),
         branch: None,
         team: None,
     }
@@ -65,6 +66,23 @@ fn completion_has_status_and_p_tag() {
     assert!(tags
         .iter()
         .any(|t| t[0] == "llm-total-tokens" && t[1] == "150"));
+}
+
+#[test]
+fn completion_includes_additional_project_a_tags() {
+    let mut ctx = test_ctx();
+    let source_project = format!("31933:{}:source", Keys::generate().public_key().to_hex());
+    ctx.completion_project_a_tags = vec![source_project.clone()];
+    let intent = CompletionIntent {
+        content: "done".into(),
+        usage: None,
+        metadata: None,
+    };
+    let builders = NostrEncoder::encode(&Intent::Completion(intent), &ctx).expect("encode");
+    let tags = signed_tags(builders.into_iter().next().unwrap());
+    let expected = vec!["a".to_string(), source_project];
+
+    assert!(tags.iter().any(|tag| tag == &expected));
 }
 
 #[test]
@@ -161,6 +179,7 @@ fn delegation_omits_e_root_and_prepends_label() {
             request: "Please review".into(),
             branch: None,
             followup_of: None,
+            extra_tags: Vec::new(),
         }],
     };
     let builders = NostrEncoder::encode(&Intent::Delegation(intent), &ctx).expect("encode");
@@ -177,6 +196,32 @@ fn delegation_omits_e_root_and_prepends_label() {
     assert!(tags.iter().any(|t| t[0] == "p"));
     assert!(tags.iter().any(|t| t[0] == "delegation"));
     assert_eq!(event.content, "@architect: Please review");
+}
+
+#[test]
+fn delegation_includes_extra_routing_tags() {
+    let ctx = test_ctx();
+    let recipient_keys = Keys::generate();
+    let source_project = format!("31933:{}:source", Keys::generate().public_key().to_hex());
+    let intent = DelegationIntent {
+        items: vec![crate::intent::DelegationRequest {
+            recipient: PrincipalRef::Nostr {
+                pubkey: recipient_keys.public_key(),
+                kind: PrincipalKind::Agent,
+                display_name: None,
+            },
+            recipient_label: "@worker".into(),
+            request: "Please review".into(),
+            branch: None,
+            followup_of: None,
+            extra_tags: vec![vec!["a".to_string(), source_project.clone()]],
+        }],
+    };
+    let builders = NostrEncoder::encode(&Intent::Delegation(intent), &ctx).expect("encode");
+    let tags = signed_tags(builders.into_iter().next().unwrap());
+    let expected = vec!["a".to_string(), source_project];
+
+    assert!(tags.iter().any(|tag| tag == &expected));
 }
 
 #[test]
@@ -199,6 +244,7 @@ fn delegation_followup_uses_delegation_as_root() {
             followup_of: Some(MessageRef::Nostr {
                 event_id: delegation_id,
             }),
+            extra_tags: Vec::new(),
         }],
     };
     let builders = NostrEncoder::encode(&Intent::Delegation(intent), &ctx).expect("encode");
@@ -337,6 +383,7 @@ fn self_delegation_keeps_p_tag_when_recipient_equals_signer() {
             request: "Reply with done.".into(),
             branch: None,
             followup_of: None,
+            extra_tags: Vec::new(),
         }],
     };
     let builders = NostrEncoder::encode(&Intent::Delegation(intent), &ctx).expect("encode");

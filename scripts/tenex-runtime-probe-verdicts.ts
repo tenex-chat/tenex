@@ -549,15 +549,6 @@ function evaluateProjectMembershipReload(
     requestRecords: MockRequestRecord[],
     context: EvaluateContext
 ): Verdict[] {
-    const statusEvents = events.filter((event) => event.kind === 24010);
-    const statusWithBoth = statusEvents.find((event) => {
-        const slugs = statusAgentSlugs(event);
-        return slugs.includes("pm") && slugs.includes("worker");
-    });
-    const statusWithoutWorker = statusEvents.find((event) => {
-        const slugs = statusAgentSlugs(event);
-        return slugs.includes("pm") && !slugs.includes("worker");
-    });
     const pmCompletion = events.find(
         (event) =>
             event.kind === 1 &&
@@ -600,11 +591,6 @@ function evaluateProjectMembershipReload(
             detail: "Expected pm/agent1 completion before adding agent2.",
         },
         {
-            name: "Project status reflected added agent2",
-            ok: Boolean(statusWithBoth),
-            detail: "Expected a 24010 status with pm and worker agent tags.",
-        },
-        {
             name: "Added agent2 received direct p-tagged request",
             ok: Boolean(workerCompletion),
             detail: "Expected worker/agent2 completion after 31933 add.",
@@ -613,11 +599,6 @@ function evaluateProjectMembershipReload(
             name: "Agent prompt used project workspace cwd",
             ok: Boolean(workerCwdRecord),
             detail: `Expected worker prompt to contain cwd: ${context.workspaceDir ?? "<workspace>"}.`,
-        },
-        {
-            name: "Project status reflected removed agent2",
-            ok: Boolean(statusWithoutWorker),
-            detail: "Expected a 24010 status with pm and without worker after 31933 removal.",
         },
         {
             name: "Removed agent2 direct request was not dispatched",
@@ -639,14 +620,10 @@ function evaluateAgentConfigUpdate(events: Event[], context: EvaluateContext): V
             event.pubkey !== context.workerPubkey &&
             event.tags.some((tag) => tag[0] === "p" && tag[1] === context.workerPubkey)
     );
-    const statusEvents = events.filter((event) => event.kind === 24010);
-    const updatedStatus = statusEvents.find((event) =>
-        event.tags.some(
-            (tag) =>
-                tag[0] === "model" &&
-                tag[1] === agentConfigUpdateModelName &&
-                tag.slice(2).includes("worker")
-        )
+    const updatedConfig = findAgentConfigWithModel(
+        events,
+        context.workerPubkey,
+        agentConfigUpdateModelName
     );
 
     return [
@@ -656,18 +633,11 @@ function evaluateAgentConfigUpdate(events: Event[], context: EvaluateContext): V
             detail: "Expected a 24020 event p-tagged to worker.",
         },
         {
-            name: "Project status reflected updated model",
-            ok: Boolean(updatedStatus),
-            detail: `Expected a 24010 model tag for ${agentConfigUpdateModelName} containing worker.`,
+            name: "Agent config reflected updated model",
+            ok: Boolean(updatedConfig),
+            detail: `Expected a 34011 from worker advertising model ${agentConfigUpdateModelName}.`,
         },
     ];
-}
-
-function statusAgentSlugs(event: Event): string[] {
-    return event.tags
-        .filter((tag) => tag[0] === "agent")
-        .map((tag) => tag[2])
-        .filter((slug): slug is string => typeof slug === "string");
 }
 
 function repliesTo(event: Event, parentId: string): boolean {
@@ -675,22 +645,29 @@ function repliesTo(event: Event, parentId: string): boolean {
 }
 
 function evaluateProjectStatusModelTag(events: Event[], context: EvaluateContext): Verdict {
-    const statusEvents = events.filter((event) => event.kind === 24010);
-    const modelTags = statusEvents
-        .flatMap((event) => event.tags)
-        .filter((tag) => tag[0] === "model" && tag[1] === context.modelName);
-    const expectedAgents = ["pm", "worker"];
-    const modelTag = modelTags.find((tag) =>
-        expectedAgents.every((agent) => tag.slice(2).includes(agent))
-    );
+    const pmConfig = findAgentConfigWithModel(events, context.pmPubkey, context.modelName);
+    const workerConfig = findAgentConfigWithModel(events, context.workerPubkey, context.modelName);
 
     return {
-        name: "Project status publishes model access",
-        ok: Boolean(modelTag),
+        name: "Agent configs publish model access",
+        ok: Boolean(pmConfig) && Boolean(workerConfig),
         detail:
-            `Expected kind:24010 model tag for ${context.modelName} with pm and worker; ` +
-            `saw ${modelTags.length > 0 ? modelTags.map((tag) => JSON.stringify(tag)).join(", ") : "<none>"}.`,
+            `Expected kind:34011 from both pm and worker advertising model ${context.modelName}; ` +
+            `pm=${pmConfig ? "ok" : "missing"}, worker=${workerConfig ? "ok" : "missing"}.`,
     };
+}
+
+function findAgentConfigWithModel(
+    events: Event[],
+    pubkey: string,
+    modelName: string
+): Event | undefined {
+    return events.find(
+        (event) =>
+            event.kind === 34011 &&
+            event.pubkey === pubkey &&
+            event.tags.some((tag) => tag[0] === "model" && tag[1] === modelName)
+    );
 }
 
 function evaluateAgentModelAccess(
@@ -699,20 +676,18 @@ function evaluateAgentModelAccess(
     slug: string,
     modelName: string
 ): Verdict {
-    const statusEvents = events.filter((event) => event.kind === 24010);
-    const modelTags = statusEvents
+    const config = findAgentConfigWithModel(events, pubkey, modelName);
+    const seenModels = events
+        .filter((event) => event.kind === 34011 && event.pubkey === pubkey)
         .flatMap((event) => event.tags)
-        .filter((tag) => tag[0] === "model" && tag[1] === modelName);
-    const modelTag = modelTags.find(
-        (tag) => tag.slice(2).includes(slug) || tag.slice(2).includes(pubkey)
-    );
+        .filter((tag) => tag[0] === "model");
 
     return {
-        name: `Project status publishes ${slug} model access`,
-        ok: Boolean(modelTag),
+        name: `Agent config publishes ${slug} model access`,
+        ok: Boolean(config),
         detail:
-            `Expected kind:24010 model tag for ${modelName} containing ${slug}; ` +
-            `saw ${modelTags.length > 0 ? modelTags.map((tag) => JSON.stringify(tag)).join(", ") : "<none>"}.`,
+            `Expected kind:34011 from ${slug} (${pubkey}) advertising model ${modelName}; ` +
+            `saw ${seenModels.length > 0 ? seenModels.map((tag) => JSON.stringify(tag)).join(", ") : "<none>"}.`,
     };
 }
 
@@ -1017,26 +992,20 @@ function evaluateCrossProjectDelegation(events: Event[], context: EvaluateContex
             ok: Boolean(workerCompletion),
             detail: "Expected worker kind:1 from project B containing a color word.",
         },
-        // Return leg: project B's runtime never registers a DelegationRoute for
-        // the cross-project send because `fresh_delegation_target` rejects
-        // authors not in the local project agent set
-        // (tenex/src/runtime_cmd/mod.rs:1690). Without the route, worker B's
-        // completion has no way back to PM A's runtime. Until cross-project
-        // route registration is implemented, these two verdicts are expected
-        // to fail and serve as a regression alarm if/when it is fixed.
+        // Return leg: source project A registers a route for the outbound
+        // external child delegation, and the worker completion carries project
+        // A's a-tag so PM A can be re-invoked in the parent conversation.
         {
             name: "Store recorded cross-project worker completion in parent conversation",
             ok: Boolean(storedWorkerCompletion),
-            pending: true,
-            detail: "Cross-project completion routing is not yet wired: project B's runtime does not register a DelegationRoute for senders outside its agent set, so the worker reply never reaches project A.",
+            detail: "Expected the worker's project-B completion to be stored in project A's parent conversation.",
         },
         {
             name: "PM reported cross-project worker color in parent conversation",
             ok: Boolean(pmReport && workerColor && extractColorChoice(messageText(pmReport)) === workerColor),
-            pending: true,
             detail: pmReport
                 ? `PM color ${extractColorChoice(messageText(pmReport)) ?? "<none>"} did not match worker color ${workerColor ?? "<none>"}.`
-                : "Cross-project completion routing is not yet wired: PM A is never re-invoked because the route never registered (see runtime_cmd/mod.rs:1686 fresh_delegation_target).",
+                : "Expected PM A to be re-invoked after the cross-project worker completion.",
         },
         ...evaluateCacheBreakpoints(context),
     ];

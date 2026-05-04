@@ -123,8 +123,14 @@ impl Tool for HtmlPublishTool {
         };
 
         let sha_hex = sha256_hex(&bytes);
-        let url = blossom_upload(&self.blossom_url, &self.keys, &bytes, &sha_hex, content_type)
-            .await?;
+        let url = blossom_upload(
+            &self.blossom_url,
+            &self.keys,
+            &bytes,
+            &sha_hex,
+            content_type,
+        )
+        .await?;
 
         let ral = self.state.meta.lock().unwrap().ral;
         let ctx = self.state.build_ctx(ral);
@@ -187,9 +193,7 @@ fn expand_env_vars(input: &str) -> String {
             // $NAME — terminated by anything that's not [A-Za-z0-9_]
             let start = i + 1;
             let mut end = start;
-            while end < bytes.len()
-                && (bytes[end].is_ascii_alphanumeric() || bytes[end] == b'_')
-            {
+            while end < bytes.len() && (bytes[end].is_ascii_alphanumeric() || bytes[end] == b'_') {
                 end += 1;
             }
             if end > start {
@@ -220,8 +224,7 @@ fn zip_directory(root: &Path) -> Result<Vec<u8>, HtmlPublishError> {
     let buf: Vec<u8> = Vec::new();
     let cursor = Cursor::new(buf);
     let mut writer = zip::ZipWriter::new(cursor);
-    let options =
-        SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+    let options = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
 
     let mut stack: Vec<PathBuf> = vec![root.to_path_buf()];
     while let Some(dir) = stack.pop() {
@@ -235,9 +238,9 @@ fn zip_directory(root: &Path) -> Result<Vec<u8>, HtmlPublishError> {
                 stack.push(path);
                 continue;
             }
-            let rel = path.strip_prefix(root).map_err(|e| {
-                HtmlPublishError(format!("strip_prefix {}: {e}", path.display()))
-            })?;
+            let rel = path
+                .strip_prefix(root)
+                .map_err(|e| HtmlPublishError(format!("strip_prefix {}: {e}", path.display())))?;
             let rel_str = rel.to_string_lossy().replace('\\', "/");
             writer
                 .start_file(rel_str, options)
@@ -306,9 +309,7 @@ async fn blossom_upload(
     body.get("url")
         .and_then(|v| v.as_str())
         .map(str::to_owned)
-        .ok_or_else(|| {
-            HtmlPublishError(format!("blossom response missing 'url' field: {body}"))
-        })
+        .ok_or_else(|| HtmlPublishError(format!("blossom response missing 'url' field: {body}")))
 }
 
 fn parse_tag<I, S>(parts: I) -> Result<Tag, HtmlPublishError>

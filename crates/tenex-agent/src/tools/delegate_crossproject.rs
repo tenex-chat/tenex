@@ -130,6 +130,13 @@ impl Tool for DelegateCrossProjectTool {
 
         let ral = self.state.meta.lock().unwrap().ral;
         let source_ctx = self.state.build_ctx(ral);
+        let source_project_addr = self.state.project.coordinate();
+        let target_project_addr = target_project.coordinate();
+        let extra_tags = if source_project_addr != target_project_addr {
+            vec![vec!["a".to_string(), source_project_addr]]
+        } else {
+            Vec::new()
+        };
         let target_ctx = self.state.build_ctx_with_project(ral, target_project);
 
         let intent = DelegationIntent {
@@ -139,6 +146,7 @@ impl Tool for DelegateCrossProjectTool {
                 request: args.request.clone(),
                 branch: args.branch.clone(),
                 followup_of: None,
+                extra_tags,
             }],
         };
 

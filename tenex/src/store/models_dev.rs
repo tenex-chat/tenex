@@ -318,7 +318,7 @@ pub fn default_model_for_provider(provider: &str) -> &'static str {
         "openrouter" => "openai/gpt-4",
         "anthropic" => "claude-3-5-sonnet-latest",
         "openai" => "gpt-4",
-        "ollama" => "llama3.1:8b",
+        "ollama" => "deepseek-v4-flash:cloud",
         "codex" => "gpt-5.1-codex-max",
         "claude-code" => "",
         _ => "",
@@ -904,7 +904,10 @@ mod tests {
             "claude-3-5-sonnet-latest"
         );
         assert_eq!(default_model_for_provider("openai"), "gpt-4");
-        assert_eq!(default_model_for_provider("ollama"), "llama3.1:8b");
+        assert_eq!(
+            default_model_for_provider("ollama"),
+            "deepseek-v4-flash:cloud"
+        );
         assert_eq!(default_model_for_provider("codex"), "gpt-5.1-codex-max");
         assert_eq!(default_model_for_provider("claude-code"), "");
     }

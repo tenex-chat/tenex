@@ -37,6 +37,7 @@ pub struct EmitState {
     /// Git branch this agent is running on. Forwarded to all outbound events
     /// via `EncodingContext.branch` → `forward_branch_team`.
     pub current_branch: Option<String>,
+    pub completion_project_a_tags: Vec<String>,
     pub meta: Arc<Mutex<AgentMeta>>,
     pending_external_work: Arc<AtomicBool>,
 }
@@ -52,6 +53,7 @@ pub struct EmitStateArgs {
     pub team: Option<String>,
     /// Git branch this agent is running on. Forwarded to all outbound events.
     pub current_branch: Option<String>,
+    pub completion_project_a_tags: Vec<String>,
 }
 
 impl EmitState {
@@ -66,6 +68,7 @@ impl EmitState {
             model: args.model,
             team: args.team,
             current_branch: args.current_branch,
+            completion_project_a_tags: args.completion_project_a_tags,
             meta: Arc::new(Mutex::new(AgentMeta::new())),
             pending_external_work: Arc::new(AtomicBool::new(false)),
         }
@@ -103,6 +106,7 @@ impl EmitState {
             execution_time_ms: None,
             llm_runtime_ms: None,
             llm_runtime_total_ms: None,
+            completion_project_a_tags: self.completion_project_a_tags.clone(),
             branch: self.current_branch.clone(),
             team,
         }

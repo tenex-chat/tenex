@@ -79,6 +79,7 @@ fn build_tools(context: &AcpMcpContext) -> Result<Vec<Box<dyn ToolDyn>>> {
         model: context.model.clone(),
         team: context.team.clone(),
         current_branch: None,
+        completion_project_a_tags: Vec::new(),
     }));
 
     let project = tenex_project::Project::open(&context.project_id, &context.base_dir)

@@ -32,6 +32,11 @@ pub struct VectorMatch {
     pub meta_json: Option<serde_json::Value>,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SearchFilter {
+    pub project_id: Option<String>,
+}
+
 #[async_trait]
 pub trait VectorStore: Send + Sync {
     async fn upsert(
@@ -49,6 +54,14 @@ pub trait VectorStore: Send + Sync {
         vector: &[f32],
         collections: &[&str],
         limit: usize,
+    ) -> anyhow::Result<Vec<VectorMatch>>;
+
+    async fn search_filtered(
+        &self,
+        vector: &[f32],
+        collections: &[&str],
+        limit: usize,
+        filter: &SearchFilter,
     ) -> anyhow::Result<Vec<VectorMatch>>;
 
     async fn list_collections(&self) -> anyhow::Result<Vec<String>>;

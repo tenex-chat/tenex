@@ -1,5 +1,5 @@
 use super::*;
-use crate::store::ChunkMeta;
+use crate::store::{ChunkMeta, SearchFilter};
 use tempfile::NamedTempFile;
 
 fn temp_store() -> (SqliteStore, NamedTempFile) {
@@ -138,6 +138,64 @@ async fn search_limit_is_respected() {
     }
     let results = store.search(&v, &["col"], 3).await.unwrap();
     assert_eq!(results.len(), 3);
+}
+
+#[tokio::test]
+async fn search_filtered_respects_project_id_metadata() {
+    let (store, _f) = temp_store();
+    let v = unit_vec(4, 0);
+    let meta_a = ChunkMeta {
+        meta_json: Some(serde_json::json!({
+            "project_id": "alpha",
+            "project_ids": ["alpha"]
+        })),
+        ..ChunkMeta::default()
+    };
+    let meta_b = ChunkMeta {
+        meta_json: Some(serde_json::json!({
+            "project_ids": ["beta", "gamma"]
+        })),
+        ..ChunkMeta::default()
+    };
+    store
+        .upsert("a", "conversations", "alpha doc", None, &v, &meta_a)
+        .await
+        .unwrap();
+    store
+        .upsert("b", "conversations", "beta doc", None, &v, &meta_b)
+        .await
+        .unwrap();
+    store
+        .upsert(
+            "legacy",
+            "conversations",
+            "legacy doc",
+            None,
+            &v,
+            &empty_meta(),
+        )
+        .await
+        .unwrap();
+
+    let beta = store
+        .search_filtered(
+            &v,
+            &["conversations"],
+            10,
+            &SearchFilter {
+                project_id: Some("beta".to_string()),
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(beta.len(), 1);
+    assert_eq!(beta[0].id, "b");
+
+    let all = store
+        .search_filtered(&v, &["conversations"], 10, &SearchFilter::default())
+        .await
+        .unwrap();
+    assert_eq!(all.len(), 3);
 }
 
 #[tokio::test]

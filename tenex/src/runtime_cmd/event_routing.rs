@@ -79,6 +79,8 @@ pub(super) async fn dispatch_project_agent_target(
     parent_job: Option<&DispatchJob>,
 ) -> Result<()> {
     let agent_pubkeys = shared.agent_pubkeys();
+    register_delegation_route_if_needed(&shared.store, event, &agent_pubkeys, parent_job)?;
+
     if !event_matches_project_scope(event, &shared.project_addr) {
         return Ok(());
     }
@@ -88,8 +90,6 @@ pub(super) async fn dispatch_project_agent_target(
     if !mark_seen(&shared.seen, event.id) {
         return Ok(());
     }
-
-    register_delegation_route_if_needed(&shared.store, event, &agent_pubkeys, parent_job)?;
 
     let (agent, conv_id, completion_recipient_pubkey) = select_dispatch_target(&shared, event)?;
     let agent_json = shared

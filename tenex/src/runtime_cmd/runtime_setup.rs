@@ -18,10 +18,7 @@ use tracing::warn;
 use super::{RuntimeAgentSnapshot, RuntimeFilters, RuntimeSubscriptionIds, PROJECT_KIND};
 use crate::store::tenex_config::TenexConfigDoc;
 
-pub(super) fn resolve_project_working_dir(
-    base_dir: &Path,
-    project_dtag: &str,
-) -> Result<PathBuf> {
+pub(super) fn resolve_project_working_dir(base_dir: &Path, project_dtag: &str) -> Result<PathBuf> {
     let config = TenexConfigDoc::load(base_dir)?;
     let projects_base = config
         .projects_base()

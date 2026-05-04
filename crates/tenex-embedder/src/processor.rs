@@ -47,6 +47,7 @@ impl Processor {
         &self,
         conversation_id: &str,
         events: &[Event],
+        project_ids: &[String],
         resolver: &dyn IdentityResolver,
         target: &EmbedTarget<'_>,
     ) -> Result<ConversationPassResult> {
@@ -138,8 +139,15 @@ impl Processor {
                 self.pacer.await_slot().await;
                 let title = chunk_title(conversation_id, chunk);
                 let body = render_chunk_body(conversation_id, chunk);
+                let primary_project_id = if project_ids.len() == 1 {
+                    Some(project_ids[0].clone())
+                } else {
+                    None
+                };
                 let meta = json!({
                     "conversation_id": conversation_id,
+                    "project_id": primary_project_id,
+                    "project_ids": project_ids,
                     "content_hash": want_hash,
                     "chunk_index": chunk.chunk_index,
                     "seq_start": chunk.seq_start,

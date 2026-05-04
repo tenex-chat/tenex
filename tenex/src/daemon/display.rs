@@ -8,22 +8,46 @@ fn tty() -> bool {
 }
 
 fn green() -> &'static str {
-    if tty() { "\x1b[32m" } else { "" }
+    if tty() {
+        "\x1b[32m"
+    } else {
+        ""
+    }
 }
 fn red() -> &'static str {
-    if tty() { "\x1b[31m" } else { "" }
+    if tty() {
+        "\x1b[31m"
+    } else {
+        ""
+    }
 }
 fn cyan() -> &'static str {
-    if tty() { "\x1b[36m" } else { "" }
+    if tty() {
+        "\x1b[36m"
+    } else {
+        ""
+    }
 }
 fn dim() -> &'static str {
-    if tty() { "\x1b[2m" } else { "" }
+    if tty() {
+        "\x1b[2m"
+    } else {
+        ""
+    }
 }
 fn bold() -> &'static str {
-    if tty() { "\x1b[1m" } else { "" }
+    if tty() {
+        "\x1b[1m"
+    } else {
+        ""
+    }
 }
 fn reset() -> &'static str {
-    if tty() { "\x1b[0m" } else { "" }
+    if tty() {
+        "\x1b[0m"
+    } else {
+        ""
+    }
 }
 
 fn strip_prefix(key: &str) -> &str {
@@ -94,9 +118,5 @@ pub fn watching(relay_count: usize) {
 }
 
 pub fn project_booted(d_tag: &str) {
-    println!(
-        "  {cyan}▶{reset}  {d_tag}",
-        cyan = cyan(),
-        reset = reset(),
-    );
+    println!("  {cyan}▶{reset}  {d_tag}", cyan = cyan(), reset = reset(),);
 }

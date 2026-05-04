@@ -272,7 +272,7 @@ fn select_model_text_input(provider: &str) -> Result<Option<(String, String)>> {
     let default = default_model_for_provider(provider);
     let help = match provider {
         "openrouter" => "e.g. openai/gpt-4o, anthropic/claude-sonnet-4-6",
-        "ollama" => "e.g. llama3.1:8b, mistral:latest",
+        "ollama" => "e.g. deepseek-v4-flash:cloud, mistral:latest",
         _ => "e.g. provider-model-id",
     };
     let prompt = prompts::input("Model ID:").with_help_message(help);

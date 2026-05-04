@@ -270,7 +270,6 @@ pub async fn run(args: RuntimeArgs) -> Result<()> {
                 &meta_status,
                 &project_dir_status,
                 &snapshot.agents,
-                &snapshot.project_agents,
                 &whitelist_status,
             ) {
                 Ok(event) => {
@@ -437,5 +436,3 @@ pub async fn run(args: RuntimeArgs) -> Result<()> {
     client.disconnect().await;
     Ok(())
 }
-
-

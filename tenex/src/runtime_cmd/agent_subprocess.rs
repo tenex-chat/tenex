@@ -527,11 +527,7 @@ pub(super) fn consumed_message_event_ids(
         .unwrap_or_default()
 }
 
-async fn handle_agent_runtime_signal(
-    shared: Arc<RuntimeShared>,
-    key: &DispatchKey,
-    event: &Event,
-) {
+async fn handle_agent_runtime_signal(shared: Arc<RuntimeShared>, key: &DispatchKey, event: &Event) {
     if event.kind == Kind::Custom(24135) {
         let mut coordinator = shared.coordinator.lock().unwrap();
         coordinator.mark_driver_busy(key);

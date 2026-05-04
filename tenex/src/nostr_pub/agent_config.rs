@@ -217,14 +217,11 @@ pub async fn build_agent_config_event(
 
     // d-tag: NIP-33 addressability. Slug is human-readable and unique per
     // backend; the event's pubkey field already identifies the agent.
-    tags.push(
-        Tag::parse(["d", agent.slug.as_str()]).map_err(|e| anyhow!("d tag: {e}"))?,
-    );
+    tags.push(Tag::parse(["d", agent.slug.as_str()]).map_err(|e| anyhow!("d tag: {e}"))?);
 
     // ["p", <backend_pubkey_hex>]
     tags.push(
-        Tag::parse(["p", backend_pubkey.to_hex().as_str()])
-            .map_err(|e| anyhow!("p tag: {e}"))?,
+        Tag::parse(["p", backend_pubkey.to_hex().as_str()]).map_err(|e| anyhow!("p tag: {e}"))?,
     );
 
     // Models — sorted by config slug; "active" marker on the agent's selection.
@@ -275,8 +272,7 @@ mod tests {
 
     use super::*;
 
-    const BACKEND_PK_HEX: &str =
-        "c506be742732723deaaf8260d2b43d75d33420c601c05a9e1fa3b7986cc1b957";
+    const BACKEND_PK_HEX: &str = "c506be742732723deaaf8260d2b43d75d33420c601c05a9e1fa3b7986cc1b957";
 
     fn unique_temp(label: &str) -> PathBuf {
         static COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -307,7 +303,11 @@ mod tests {
         doc
     }
 
-    fn agent_with_signer(slug: &str, default_cfg: serde_json::Value, mcps: serde_json::Value) -> (Agent, Keys) {
+    fn agent_with_signer(
+        slug: &str,
+        default_cfg: serde_json::Value,
+        mcps: serde_json::Value,
+    ) -> (Agent, Keys) {
         let keys = Keys::generate();
         let nsec_bech32 = keys.secret_key().to_bech32().unwrap();
         let signer_ref = format!("nsec:{nsec_bech32}");

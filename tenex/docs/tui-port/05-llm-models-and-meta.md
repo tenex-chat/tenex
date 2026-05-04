@@ -149,7 +149,7 @@ The picker returns `{ id, name }` so that `addConfiguration` can use the human n
 openrouter   → "openai/gpt-4"
 anthropic    → "claude-3-5-sonnet-latest"
 openai       → "gpt-4"
-ollama       → "llama3.1:8b"
+ollama       → "deepseek-v4-flash:cloud"
 codex        → "gpt-5.1-codex-max"
 claude-code  → ""
 ```

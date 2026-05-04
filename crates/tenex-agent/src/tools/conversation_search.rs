@@ -3,7 +3,7 @@ use std::sync::Arc;
 use rig::{completion::ToolDefinition, tool::Tool};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use tenex_rag::RagStore;
+use tenex_rag::{RagStore, SearchFilter};
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct ConversationSearchArgs {
@@ -22,11 +22,15 @@ pub struct ConversationSearchError(String);
 pub struct ConversationSearchTool {
     /// Shared global RAG store (None if embedding not configured).
     store: Option<Arc<RagStore>>,
+    current_project_id: String,
 }
 
 impl ConversationSearchTool {
-    pub fn new(store: Option<Arc<RagStore>>) -> Self {
-        Self { store }
+    pub fn new(store: Option<Arc<RagStore>>, current_project_id: String) -> Self {
+        Self {
+            store,
+            current_project_id,
+        }
     }
 }
 
@@ -81,18 +85,18 @@ impl Tool for ConversationSearchTool {
 
         let limit = args.limit.unwrap_or(10) as usize;
 
-        // The embedder now writes to a single global ~/.tenex/embeddings.db.
-        // The legacy per-project routing (and the explicit `ALL` mode) is
-        // collapsed here — the store is shared. The `project_id` arg is
-        // accepted for back-compat but ignored; future work may filter by
-        // project via chunk meta_json.
         let store = match &self.store {
             Some(s) => s,
             None => return Ok(no_embed_msg.to_string()),
         };
 
+        let project_filter =
+            effective_project_filter(args.project_id.as_deref(), self.current_project_id.as_str());
+        let filter = SearchFilter {
+            project_id: project_filter,
+        };
         let results = store
-            .search(&args.query, &["conversations"], limit)
+            .search_filtered(&args.query, &["conversations"], limit, &filter)
             .await
             .map_err(|e| ConversationSearchError(format!("search failed: {e}")))?;
 
@@ -107,11 +111,50 @@ impl Tool for ConversationSearchTool {
                 content: r.content,
                 title: r.title,
                 id: r.id,
-                project_id: None,
+                project_id: project_id_from_meta(r.meta_json.as_ref()),
             })
             .collect();
 
         serde_json::to_string_pretty(&output)
             .map_err(|e| ConversationSearchError(format!("serialize results: {e}")))
+    }
+}
+
+fn effective_project_filter(requested: Option<&str>, current_project_id: &str) -> Option<String> {
+    match requested.map(str::trim).filter(|value| !value.is_empty()) {
+        Some(value) if value.eq_ignore_ascii_case("ALL") => None,
+        Some(value) => Some(normalize_project_id(value)),
+        None => Some(current_project_id.to_string()),
+    }
+}
+
+fn normalize_project_id(value: &str) -> String {
+    value
+        .strip_prefix("31933:")
+        .and_then(|rest| rest.split(':').nth(1))
+        .unwrap_or(value)
+        .to_string()
+}
+
+fn project_id_from_meta(meta: Option<&serde_json::Value>) -> Option<String> {
+    let meta = meta?;
+    if let Some(project_id) = meta
+        .get("project_id")
+        .and_then(serde_json::Value::as_str)
+        .filter(|value| !value.is_empty())
+    {
+        return Some(project_id.to_string());
+    }
+    let ids: Vec<&str> = meta
+        .get("project_ids")
+        .and_then(serde_json::Value::as_array)?
+        .iter()
+        .filter_map(serde_json::Value::as_str)
+        .filter(|value| !value.is_empty())
+        .collect();
+    match ids.as_slice() {
+        [one] => Some((*one).to_string()),
+        [] => None,
+        _ => Some(ids.join(",")),
     }
 }

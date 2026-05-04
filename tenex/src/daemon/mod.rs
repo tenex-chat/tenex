@@ -106,7 +106,14 @@ pub async fn run(args: DaemonArgs) -> Result<()> {
     if !args.boot.is_empty() {
         info!(prefixes = ?args.boot, "queued --boot prefixes; awaiting matching project discovery");
     }
-    let mut nostr_handle = nostr::run(cfg, base_dir.clone(), backend_keys, supervisor.clone(), args.boot).await?;
+    let mut nostr_handle = nostr::run(
+        cfg,
+        base_dir.clone(),
+        backend_keys,
+        supervisor.clone(),
+        args.boot,
+    )
+    .await?;
 
     // Publish the backend heartbeat (kind:24012) and installed-agent inventory
     // (kind:24011) immediately and then every 30 seconds so Nostr clients see
@@ -119,10 +126,8 @@ pub async fn run(args: DaemonArgs) -> Result<()> {
             loop {
                 interval.tick().await;
                 if let Err(e) =
-                    crate::nostr_pub::backend_heartbeat::publish_backend_heartbeat(
-                        &base_dir_clone,
-                    )
-                    .await
+                    crate::nostr_pub::backend_heartbeat::publish_backend_heartbeat(&base_dir_clone)
+                        .await
                 {
                     tracing::warn!(error = %e, "24012 heartbeat publish failed");
                 }

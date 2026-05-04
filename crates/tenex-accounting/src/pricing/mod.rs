@@ -327,23 +327,13 @@ pub static CATALOG: &[ModelEntry] = &[
     // ─────────── Ollama (local — zero direct $) ───────────
     ModelEntry {
         provider: "ollama",
-        model_family: "llama3.1",
-        provider_model_id: "llama3.1:8b",
+        model_family: "deepseek-v4-flash",
+        provider_model_id: "deepseek-v4-flash:cloud",
         pricing: ZERO,
-        context_window: Some(131_000),
+        context_window: Some(64_000),
         supports_caching: false,
         supports_reasoning: false,
-        shadow_reference: Some("openrouter/meta-llama/llama-3.1-70b-instruct"),
-    },
-    ModelEntry {
-        provider: "ollama",
-        model_family: "llama3.1-70b",
-        provider_model_id: "llama3.1:70b",
-        pricing: ZERO,
-        context_window: Some(131_000),
-        supports_caching: false,
-        supports_reasoning: false,
-        shadow_reference: Some("openrouter/meta-llama/llama-3.1-70b-instruct"),
+        shadow_reference: Some("openrouter/deepseek/deepseek-chat"),
     },
     ModelEntry {
         provider: "ollama",
@@ -385,7 +375,7 @@ mod tests {
 
     #[test]
     fn shadow_reference_resolves() {
-        let r = shadow_reference_for("ollama", "llama3.1:70b").unwrap();
+        let r = shadow_reference_for("ollama", "deepseek-v4-flash:cloud").unwrap();
         assert_eq!(r.provider, "openrouter");
     }
 

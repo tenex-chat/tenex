@@ -243,15 +243,17 @@ pub(crate) async fn run_turn_loop(boot: &mut AgentBootstrap) -> Result<()> {
         let recorded_calls = recorder.take_records();
 
         if let Some(ref store) = boot.conv_store {
-            let final_todos = boot.todos.lock().unwrap();
-            let final_skills = boot.self_applied_skills.lock().unwrap();
-            persistence::save_context_state(
-                store,
-                &boot.conversation_id,
-                &boot.pubkey_hex,
-                &final_todos,
-                &final_skills,
-            );
+            {
+                let final_todos = boot.todos.lock().unwrap();
+                let final_skills = boot.self_applied_skills.lock().unwrap();
+                persistence::save_context_state(
+                    store,
+                    &boot.conversation_id,
+                    &boot.pubkey_hex,
+                    &final_todos,
+                    &final_skills,
+                );
+            }
             persistence::record_tool_messages(
                 store,
                 &boot.conversation_id,
@@ -265,7 +267,8 @@ pub(crate) async fn run_turn_loop(boot: &mut AgentBootstrap) -> Result<()> {
                 final_response.response(),
                 &recorded_calls,
                 &final_response.usage(),
-            );
+            )
+            .await;
         }
 
         eprintln!("[tenex-agent] Agent completed.");

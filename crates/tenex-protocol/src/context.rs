@@ -31,6 +31,10 @@ pub struct EncodingContext {
     pub llm_runtime_ms: Option<u64>,
     /// Completion-only: total accumulated runtime for this RAL.
     pub llm_runtime_total_ms: Option<u64>,
+    /// Completion-only project `a` tags that should be added in addition to
+    /// `project`. Used when a delegated child conversation must notify a
+    /// parent runtime in another project.
+    pub completion_project_a_tags: Vec<String>,
     pub branch: Option<String>,
     pub team: Option<String>,
 }

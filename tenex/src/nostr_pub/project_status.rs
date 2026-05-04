@@ -10,7 +10,6 @@
 //! content = ""
 //! tags    = ["a", "31933:<owner_pk>:<d_tag>"]
 //!         + ["p", <owner_pk>] (+ ["p", <whitelisted_pk>]..., deduped)
-//!         + ["agent", <pk>, <slug>]  or  ["agent", <pk>, <slug>, "pm"]
 //!         + ["skill", <id>]                              (universe — project-scoped only)
 //!         + ["skill", <id>, <slug_1>, <slug_2>, ...]     (assignments — agents that enabled it)
 //! ```
@@ -21,8 +20,9 @@
 //! from each agent's `default_config_json["skills"]`. All other skill scopes
 //! (built-in, agent-home, user-global) live on the per-agent kind:34011 events.
 //!
-//! Model and MCP tags are NOT emitted on 24010 — those capabilities live
-//! entirely on the per-agent kind:34011 events.
+//! Agent, model, and MCP tags are NOT emitted on 24010 — the available agents
+//! on a backend are published on kind:24011 (`TenexInstalledAgentList`), and
+//! per-agent model/MCP capabilities live on the per-agent kind:34011 events.
 //!
 //! tool/branch/scheduled-task tags are not emitted — they require
 //! infrastructure (tool registry, git, scheduler storage) not yet available
@@ -37,7 +37,7 @@ use anyhow::{anyhow, Result};
 use nostr_sdk::{Event, EventBuilder, Keys, Kind, Tag, TagKind};
 use serde_json::Value;
 
-use tenex_project::{models::ProjectAgent, Agent, ProjectMetadata};
+use tenex_project::{Agent, ProjectMetadata};
 
 const KIND: u16 = 24010;
 
@@ -96,7 +96,6 @@ pub fn build_project_status_event(
     meta: &ProjectMetadata,
     project_path: &Path,
     agents: &[Agent],
-    project_agents: &[ProjectAgent],
     whitelisted_pubkeys: &[String],
 ) -> Result<Event> {
     let owner_pk = meta
@@ -104,11 +103,6 @@ pub fn build_project_status_event(
         .as_deref()
         .ok_or_else(|| anyhow!("project metadata has no owner_pubkey"))?;
     let project_ref = format!("31933:{}:{}", owner_pk, meta.d_tag);
-
-    let pm_pubkey: Option<&str> = project_agents
-        .iter()
-        .find(|pa| pa.is_pm)
-        .map(|pa| pa.agent_pubkey.as_str());
 
     let mut tags: Vec<Tag> = Vec::new();
 
@@ -120,15 +114,6 @@ pub fn build_project_status_event(
         if seen.insert(pk) {
             tags.push(Tag::parse(["p", pk]).map_err(|e| anyhow!("p tag: {e}"))?);
         }
-    }
-
-    for agent in agents {
-        let is_pm = pm_pubkey == Some(agent.pubkey.as_str());
-        let mut vals = vec![agent.pubkey.clone(), agent.slug.clone()];
-        if is_pm {
-            vals.push("pm".to_string());
-        }
-        tags.push(Tag::custom(TagKind::Custom("agent".into()), vals));
     }
 
     // ─── Project-scoped skill emission ────────────────────────────────────────
@@ -153,7 +138,10 @@ pub fn build_project_status_event(
 
     // Pass 2: emit tags grouped by skill ID, sorted ascending.
     for id in &universe {
-        tags.push(Tag::custom(TagKind::Custom("skill".into()), vec![id.clone()]));
+        tags.push(Tag::custom(
+            TagKind::Custom("skill".into()),
+            vec![id.clone()],
+        ));
         if let Some(slugs) = assignments.get(id) {
             if !slugs.is_empty() {
                 let mut vals = vec![id.clone()];

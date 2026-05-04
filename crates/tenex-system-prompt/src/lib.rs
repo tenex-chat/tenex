@@ -30,6 +30,7 @@ pub struct BuildSystemPromptInput<'a> {
     pub pubkey_hex: &'a str,
     pub category_str: Option<&'a str>,
     pub category: Option<AgentCategory>,
+    pub global_system_prompt: Option<&'a str>,
     pub instructions: Option<&'a str>,
     pub working_dir: &'a str,
     /// Absolute path to the project's root directory (used to render
@@ -69,6 +70,7 @@ pub fn build_system_prompt(input: BuildSystemPromptInput<'_>) -> String {
         pubkey_hex,
         category_str,
         category,
+        global_system_prompt,
         instructions,
         working_dir,
         project_base_path,
@@ -98,6 +100,15 @@ pub fn build_system_prompt(input: BuildSystemPromptInput<'_>) -> String {
             .map(|c| format!("Your category: {c}\n"))
             .unwrap_or_default(),
     ));
+
+    if let Some(prompt) = global_system_prompt {
+        let prompt = prompt.trim();
+        if !prompt.is_empty() {
+            parts.push(format!(
+                "<global-system-prompt>\n{prompt}\n</global-system-prompt>"
+            ));
+        }
+    }
 
     // Fragment 02: Home directory
     parts.push(render_home_directory(home));
@@ -350,6 +361,7 @@ mod tests {
             pubkey_hex: "deadbeefdeadbeef",
             category_str: None,
             category: None,
+            global_system_prompt: None,
             instructions: None,
             working_dir: "/repo/src",
             project_base_path: Some("/repo"),

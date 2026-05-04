@@ -190,8 +190,7 @@ enum FmtStyle {
 }
 
 fn init_daemon_inner() -> TelemetryGuard {
-    let filter =
-        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("warn"));
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("warn"));
     let fmt_layer = tracing_subscriber::fmt::layer()
         .compact()
         .without_time()
@@ -225,8 +224,8 @@ fn init_export_inner(cfg: TelemetryInit, style: FmtStyle) -> TelemetryGuard {
     }
 
     let endpoint = std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT").unwrap_or(config.endpoint);
-    let export_timeout = parse_duration_env("OTEL_EXPORTER_OTLP_TIMEOUT")
-        .unwrap_or(DEFAULT_EXPORT_TIMEOUT);
+    let export_timeout =
+        parse_duration_env("OTEL_EXPORTER_OTLP_TIMEOUT").unwrap_or(DEFAULT_EXPORT_TIMEOUT);
     let exporter = opentelemetry_otlp::SpanExporter::builder()
         .with_http()
         .with_endpoint(endpoint)

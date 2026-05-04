@@ -127,7 +127,7 @@ Defaults derive from each provider's `METADATA` declaration. `requiresApiKey` co
 | `openrouter` | `OpenRouter (300+ models)` | standard | `openai/gpt-4` | true | (SDK default `https://openrouter.ai/api/v1`) | API key (`Bearer <key>`); SDK adds `X-Title: TENEX` and `HTTP-Referer: https://tenex.chat/` headers |
 | `anthropic` | `Anthropic (Claude)` | standard | `claude-sonnet-4-20250514` | true | (SDK default) | API key (`x-api-key: <key>`) **or** OAuth setup-token: keys starting `sk-ant-oat` switch to `authToken` mode with `anthropic-beta: claude-code-20250219,oauth-2025-04-20,fine-grained-tool-streaming-2025-05-14`, `anthropic-dangerous-direct-browser-access: true`, `x-app: cli` |
 | `openai` | `OpenAI (GPT)` | standard | `gpt-4` | true | (SDK default `https://api.openai.com/v1`) | API key |
-| `ollama` | `Ollama (Local models)` | standard | `llama3.1:8b` | false | `http://127.0.0.1:11434/api` (library default when `apiKey === "local"` or empty); otherwise the user-entered URL is used as base, with `/api` appended if missing | None — the `apiKey` field stores the **base URL**, not a key |
+| `ollama` | `Ollama (Local models)` | standard | `deepseek-v4-flash:cloud` | false | `http://127.0.0.1:11434/api` (library default when `apiKey === "local"` or empty); otherwise the user-entered URL is used as base, with `/api` appended if missing | None — the `apiKey` field stores the **base URL**, not a key |
 | `codex` | `Codex` | agent | `gpt-5.1-codex-max` | false | n/a (uses local `codex` CLI app-server) | None — `apiKey` is the literal string `"none"` |
 | `claude-code` | `Claude Code (Agents)` | agent | `claude-sonnet-4-20250514` | false | n/a (subprocess to `claude` CLI) | None — `apiKey` is the literal string `"none"` |
 

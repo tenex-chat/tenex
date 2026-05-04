@@ -187,6 +187,7 @@ impl Tool for DelegateFollowupTool {
                 request: args.message.clone(),
                 branch: None,
                 followup_of: Some(MessageRef::Nostr { event_id }),
+                extra_tags: Vec::new(),
             }],
         };
 

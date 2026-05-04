@@ -159,7 +159,10 @@ async fn plan_queries(query: &str, resolved: &ResolvedModel) -> Vec<String> {
             }
             Err(_) => {
                 Span::current().record("fallback.reason", "timeout");
-                warn!(timeout_secs = LLM_TIMEOUT_SECS, "rag.plan: LLM call timed out");
+                warn!(
+                    timeout_secs = LLM_TIMEOUT_SECS,
+                    "rag.plan: LLM call timed out"
+                );
                 vec![query.to_string()]
             }
         }
@@ -232,7 +235,10 @@ async fn rerank_results(
             }
             Err(_) => {
                 Span::current().record("fallback.reason", "timeout");
-                warn!(timeout_secs = LLM_TIMEOUT_SECS, "rag.rerank: LLM call timed out");
+                warn!(
+                    timeout_secs = LLM_TIMEOUT_SECS,
+                    "rag.rerank: LLM call timed out"
+                );
                 results
             }
         }

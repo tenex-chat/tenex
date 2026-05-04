@@ -131,6 +131,7 @@ impl Tool for DelegateTool {
                 request: args.prompt.clone(),
                 branch: args.branch.clone(),
                 followup_of: None,
+                extra_tags: Vec::new(),
             }],
         };
 

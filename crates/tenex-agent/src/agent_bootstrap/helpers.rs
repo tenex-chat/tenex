@@ -293,4 +293,3 @@ pub(super) fn compose_user_message(
     }
     msg
 }
-

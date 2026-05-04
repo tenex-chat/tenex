@@ -95,3 +95,25 @@ impl ResolvedModel {
         }
     }
 }
+
+pub(crate) fn read_global_system_prompt(base_dir: &Path) -> Option<String> {
+    let path = base_dir.join("config.json");
+    let bytes = std::fs::read(&path).ok()?;
+    let raw: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
+    let block = raw
+        .get("globalSystemPrompt")
+        .and_then(|value| value.as_object())?;
+    if block
+        .get("enabled")
+        .and_then(serde_json::Value::as_bool)
+        .is_some_and(|enabled| !enabled)
+    {
+        return None;
+    }
+    block
+        .get("content")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|content| !content.is_empty())
+        .map(str::to_string)
+}

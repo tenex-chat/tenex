@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use rusqlite::Connection;
 
 use crate::schema;
-use crate::store::{ChunkMeta, VectorMatch, VectorStore};
+use crate::store::{ChunkMeta, SearchFilter, VectorMatch, VectorStore};
 
 pub struct SqliteStore {
     conn: Mutex<Connection>,
@@ -103,6 +103,17 @@ impl VectorStore for SqliteStore {
         collections: &[&str],
         limit: usize,
     ) -> Result<Vec<VectorMatch>> {
+        self.search_filtered(query_vector, collections, limit, &SearchFilter::default())
+            .await
+    }
+
+    async fn search_filtered(
+        &self,
+        query_vector: &[f32],
+        collections: &[&str],
+        limit: usize,
+        filter: &SearchFilter,
+    ) -> Result<Vec<VectorMatch>> {
         let placeholders: Vec<String> = (1..=collections.len()).map(|i| format!("?{i}")).collect();
         let sql = format!(
             "SELECT id, collection, content, title, vector_blob,
@@ -173,11 +184,14 @@ impl VectorStore for SqliteStore {
                     chunk_index,
                     meta_json_str,
                 )| {
-                    let doc_vec = bytes_to_floats(&blob);
-                    let score = cosine_similarity(query_vector, &doc_vec)?;
                     let meta_json = meta_json_str
                         .as_deref()
                         .and_then(|s| serde_json::from_str(s).ok());
+                    if !meta_matches_filter(meta_json.as_ref(), filter) {
+                        return None;
+                    }
+                    let doc_vec = bytes_to_floats(&blob);
+                    let score = cosine_similarity(query_vector, &doc_vec)?;
                     Some(VectorMatch {
                         id,
                         collection,
@@ -332,6 +346,31 @@ impl VectorStore for SqliteStore {
             .collect();
         Ok(out)
     }
+}
+
+fn meta_matches_filter(meta_json: Option<&serde_json::Value>, filter: &SearchFilter) -> bool {
+    let Some(project_id) = filter.project_id.as_deref().filter(|id| !id.is_empty()) else {
+        return true;
+    };
+    let Some(meta) = meta_json else {
+        return false;
+    };
+
+    if meta
+        .get("project_id")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|value| value == project_id)
+    {
+        return true;
+    }
+
+    meta.get("project_ids")
+        .and_then(serde_json::Value::as_array)
+        .is_some_and(|values| {
+            values
+                .iter()
+                .any(|value| value.as_str() == Some(project_id))
+        })
 }
 
 fn floats_to_bytes(v: &[f32]) -> Vec<u8> {

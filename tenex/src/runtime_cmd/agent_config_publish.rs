@@ -53,9 +53,7 @@ pub(super) fn agent_pubkey_from_path(path: &Path) -> Option<String> {
     if path.extension().and_then(|e| e.to_str()) != Some("json") {
         return None;
     }
-    path.file_stem()
-        .and_then(|s| s.to_str())
-        .map(str::to_owned)
+    path.file_stem().and_then(|s| s.to_str()).map(str::to_owned)
 }
 
 /// Decide which agents need a fresh 34011 published.
@@ -94,7 +92,10 @@ pub(super) fn agents_needing_publish(
 fn file_mtime_secs(path: &Path) -> Option<u64> {
     let meta = std::fs::metadata(path).ok()?;
     let modified = meta.modified().ok()?;
-    modified.duration_since(SystemTime::UNIX_EPOCH).ok().map(|d| d.as_secs())
+    modified
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .ok()
+        .map(|d| d.as_secs())
 }
 
 /// Fold a stream of 34011 events into a `pubkey → newest_created_at` map.
@@ -280,7 +281,10 @@ mod tests {
         existing.insert(a.pubkey.clone(), mtime + 60);
 
         let needing = agents_needing_publish(&agents, &base_dir, &existing);
-        assert!(needing.is_empty(), "fresh remote event should suppress publish");
+        assert!(
+            needing.is_empty(),
+            "fresh remote event should suppress publish"
+        );
 
         fs::remove_dir_all(&base_dir).ok();
     }

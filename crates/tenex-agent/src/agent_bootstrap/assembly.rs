@@ -38,6 +38,7 @@ pub(super) struct SystemPromptInputs<'a> {
     pub worktrees: &'a [tenex_project::WorktreeInfo],
     pub category_str: Option<&'a str>,
     pub category: Option<tenex_supervision::types::AgentCategory>,
+    pub global_system_prompt: Option<&'a str>,
 }
 
 /// Render the system prompt by forwarding all overlays to
@@ -48,6 +49,7 @@ pub(super) fn compose_system_prompt(inputs: SystemPromptInputs<'_>) -> String {
         pubkey_hex: inputs.pubkey_hex,
         category_str: inputs.category_str,
         category: inputs.category,
+        global_system_prompt: inputs.global_system_prompt,
         instructions: inputs.agent_config.instructions.as_deref(),
         working_dir: inputs.working_dir,
         project_base_path: Some(inputs.project_base_path),
@@ -82,6 +84,15 @@ pub(super) struct EmitStateInputs<'a> {
 /// Resolves the optional `TENEX_COMPLETION_RECIPIENT_PUBKEY` override and
 /// formats the model string used in emitted events.
 pub(super) fn assemble_emit_state(inputs: EmitStateInputs<'_>) -> Arc<EmitState> {
+    let current_project_addr = inputs.project_ref.coordinate();
+    let completion_project_a_tags: Vec<String> = inputs
+        .envelope
+        .metadata
+        .project_a_tags
+        .iter()
+        .filter(|addr| *addr != &current_project_addr)
+        .cloned()
+        .collect();
     let conversation_root = nostr::EventId::from_hex(inputs.conversation_id)
         .ok()
         .map(|root_event_id| ConversationRef::Nostr { root_event_id });
@@ -103,6 +114,7 @@ pub(super) fn assemble_emit_state(inputs: EmitStateInputs<'_>) -> Arc<EmitState>
         model: format!("{}:{}", inputs.provider, inputs.model),
         team: inputs.envelope.metadata.team.clone(),
         current_branch: inputs.current_branch.map(str::to_string),
+        completion_project_a_tags,
     }))
 }
 

@@ -1152,9 +1152,8 @@ async function runCrossProjectDelegationProbe(context: ScenarioContext): Promise
     );
 
     // Send leg, second hop: project B's runtime dispatches to worker B, which
-    // emits a color reply. This still happens on the relay even though the
-    // reply has no path back to project A.
-    await context.waitForObservedEvent(
+    // emits a color reply.
+    const workerCompletion = await context.waitForObservedEvent(
         context.events,
         (event) =>
             event.kind === 1 &&
@@ -1163,12 +1162,29 @@ async function runCrossProjectDelegationProbe(context: ScenarioContext): Promise
         timeoutMs,
         "cross-project worker color completion"
     );
+    const workerColor = extractColorChoice(workerCompletion.content);
 
-    // Return leg is unimplemented: project B does not register a DelegationRoute
-    // for cross-project senders, so worker B's reply never wakes PM A. Wait a
-    // short window so the verdict layer can confirm the absence rather than
-    // race; do not block on the message arriving.
-    await context.delay(2_000);
+    await waitForStoredMessage(
+        context.conversationDbPath,
+        userEvent.id,
+        (message) =>
+            message.authorPubkey === context.workerPubkey &&
+            includesColorChoice(messageText(message)),
+        timeoutMs,
+        "cross-project worker completion in parent conversation store",
+        context.delay
+    );
+    await waitForStoredMessage(
+        context.conversationDbPath,
+        userEvent.id,
+        (message) =>
+            message.authorPubkey === context.pmPubkey &&
+            workerColor !== null &&
+            extractColorChoice(messageText(message)) === workerColor,
+        timeoutMs,
+        "PM cross-project color report in parent conversation store",
+        context.delay
+    );
 }
 
 function hasEventTag(event: Event, name: string, value: string): boolean {
@@ -1432,9 +1448,6 @@ async function runAgentConfigReloadProbe(context: ScenarioContext): Promise<void
 
 async function runAgentConfigUpdateProbe(context: ScenarioContext): Promise<void> {
     const timeoutMs = Number(process.env.TENEX_PROBE_WAIT_MS ?? 12_000);
-    const statusBefore = new Set(
-        context.events.filter((event) => event.kind === 24010).map((event) => event.id)
-    );
     const updateEvent = context.sign(
         {
             kind: 24020,
@@ -1456,16 +1469,13 @@ async function runAgentConfigUpdateProbe(context: ScenarioContext): Promise<void
     await context.waitForObservedEvent(
         context.events,
         (event) =>
-            event.kind === 24010 &&
-            !statusBefore.has(event.id) &&
+            event.kind === 34011 &&
+            event.pubkey === context.workerPubkey &&
             event.tags.some(
-                (tag) =>
-                    tag[0] === "model" &&
-                    tag[1] === agentConfigUpdateModelName &&
-                    tag.slice(2).includes("worker")
+                (tag) => tag[0] === "model" && tag[1] === agentConfigUpdateModelName
             ),
         timeoutMs,
-        "24010 status after agent config update"
+        "34011 worker config after agent config update"
     );
 
     const workerAgentPath = path.join(context.agentsDir, `${context.workerPubkey}.json`);
@@ -1513,11 +1523,7 @@ async function runProjectMembershipReloadProbe(context: ScenarioContext): Promis
     await context.publishProjectEvent([context.pmPubkey, context.workerPubkey], context.now() + 1);
     await context.waitForObservedEvent(
         context.events,
-        (event) =>
-            event.kind === 24010 &&
-            !beforeAddStatus.has(event.id) &&
-            statusAgentSlugs(event).includes("pm") &&
-            statusAgentSlugs(event).includes("worker"),
+        (event) => event.kind === 24010 && !beforeAddStatus.has(event.id),
         timeoutMs,
         "project status after adding agent2"
     );
@@ -1561,11 +1567,7 @@ async function runProjectMembershipReloadProbe(context: ScenarioContext): Promis
     await context.publishProjectEvent([context.pmPubkey], context.now() + 3);
     await context.waitForObservedEvent(
         context.events,
-        (event) =>
-            event.kind === 24010 &&
-            !beforeRemoveStatus.has(event.id) &&
-            statusAgentSlugs(event).includes("pm") &&
-            !statusAgentSlugs(event).includes("worker"),
+        (event) => event.kind === 24010 && !beforeRemoveStatus.has(event.id),
         timeoutMs,
         "project status after removing agent2"
     );
@@ -1614,13 +1616,6 @@ async function runProjectMembershipReloadProbe(context: ScenarioContext): Promis
     if (scopedRepliesAfter !== scopedRepliesBefore) {
         throw new Error("removed agent2 project-scoped p-tagged event was still dispatched");
     }
-}
-
-function statusAgentSlugs(event: Event): string[] {
-    return event.tags
-        .filter((tag) => tag[0] === "agent")
-        .map((tag) => tag[2])
-        .filter((slug): slug is string => typeof slug === "string");
 }
 
 function repliesTo(event: Event, parentId: string): boolean {

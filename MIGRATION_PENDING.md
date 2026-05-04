@@ -40,14 +40,14 @@ Organized by functional area. Items marked ✅ are already at parity; items mark
 - ✅ Delegation chain nesting (child conversations nested under parent by `rustRuntime.delegation.parent_conversation_id`)
 
 #### `conversation_search`
-- [ ] `project_id` filtering — the tool accepts the parameter but searches the global embeddings database today; filtering requires chunk/project metadata in `meta_json`
+- ✅ `project_id` filtering — conversation chunks carry `project_id`/`project_ids` metadata; the tool defaults to the current project and supports `project_id="ALL"`
 
 ---
 
 ## 2. System Prompt Fragments
 
 ### 2.1 Fragment Status
-- [ ] **Fragment 00 — Global System Prompt**: `tenex config system-prompt` can persist the global prompt, but the Rust agent does not yet inject it into `build_system_prompt`
+- ✅ **Fragment 00 — Global System Prompt**: `tenex config system-prompt` content is injected into `build_system_prompt` when enabled
 - [ ] **Fragment 05 — Delegation Chain**: multi-agent workflow hierarchy visualization for active turn
 - [ ] **Fragment 18 — No-Response Guidance**: Telegram silent-completion mode instructions
 - 🚫 **Fragment 20 — Voice Mode**: TTS-specific formatting guidance — won't port (voice mode is not implemented in the Rust stack)
@@ -172,7 +172,7 @@ The Rust `tenex` runtime (`tenex/src/runtime_cmd/`) already implements core orch
 - 🚫 Delegation completion debouncing (`DELEGATION_COMPLETION_DEBOUNCE_MS = 2500`) — won't port (process-per-project isolation in Rust makes in-process debouncing unnecessary)
 - [ ] Deferred completions for nested delegation trees
 - ✅ `delegate_followup` prefix resolution and canonicalization — accepts original delegation IDs, unique 10-character prefixes, and previous followup event IDs
-- [ ] Cross-project delegation completion return routing — the target runtime can execute the delegated task, but return routing to the source project is still pending because route registration is local-project-agent scoped
+- ✅ Cross-project delegation completion return routing — source runtimes register routes for outbound external child delegations, and returned completions carry the source project `a` tag
 - [ ] Implicit kill-wake path (synthetic envelopes for delegation kills)
 
 ### 8.3 Agent Config Update (kind:24020)
@@ -194,7 +194,7 @@ Rust uses `rig` for the live provider protocol path; `tenex-llm-config` remains 
 - 🚫 Claude Code agent provider with built-in tool routing — won't port (covered by ACP integration)
 
 ### 9.2 Request Pipeline
-- [ ] **Message sanitizer middleware** — strips trailing assistant messages and empty-content messages before every API call to prevent provider rejections; Rust context projection has no equivalent validation
+- ✅ **Message sanitizer middleware** — provider requests are sanitized before every Rig API call, dropping empty text messages and trailing assistant messages while preserving tool-call structure
 - ✅ **Multimodal preparation** — URL-fetch + base64 encoding of images from markdown `![](url)` and bare HTTPS URLs; images prepended to multipart user message for vision-capable providers (anthropic, openai, openrouter); Ollama vision model detection not ported (Ollama passes text only)
 - ✅ **Prompt cache breakpoint emission** — Anthropic prompt caching validated end-to-end with rig 0.35's `with_prompt_caching()`. The OAuth path additionally requires a multi-block system prompt where the first block is the Claude Code preamble; the `OAuthMiddleware` injects this block on the wire so rig's single-string `preamble` continues to work and its `cache_control` marker on the agent's system block stays intact. Verified: `cache_creation_input_tokens=1557` on a cold-cache write and `cache_read_input_tokens=1549` on the immediate replay (`cargo run -p tenex-agent --bin anthropic_cache_probe`).
 

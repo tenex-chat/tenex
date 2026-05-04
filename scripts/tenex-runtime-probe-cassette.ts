@@ -54,7 +54,7 @@ export function parseProbeLlmOptions(args: string[]): ProbeLlmOptions {
         ollamaModel:
             flagValue(args, "ollama-model") ??
             process.env.TENEX_PROBE_OLLAMA_MODEL ??
-            "llama3.1",
+            "deepseek-v4-flash:cloud",
         ollamaBaseUrl:
             flagValue(args, "ollama-base-url") ??
             process.env.TENEX_PROBE_OLLAMA_BASE_URL ??

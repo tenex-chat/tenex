@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 import { spawn, type ChildProcessByStdio } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import type { Readable } from "node:stream";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -100,6 +100,10 @@ const requestRecordPath = path.join(runDir, "mock-requests.jsonl");
 const cassetteRecordPath = llm.recordCassettePath
     ? path.resolve(llm.recordCassettePath)
     : path.join(runDir, "llm-cassette.jsonl");
+const accountingDbPath = path.resolve(
+    process.env.TENEX_PROBE_ACCOUNTING_DB ??
+        path.join(homedir(), ".tenex", "data", "accounting", "runtime-probes.db")
+);
 const llmModelName =
     llm.mode === "ollama"
         ? "probe-real"
@@ -117,6 +121,7 @@ mkdirSync(relayDir, { recursive: true });
 mkdirSync(projectDir, { recursive: true });
 mkdirSync(agentsDir, { recursive: true });
 mkdirSync(workspaceDir, { recursive: true });
+mkdirSync(path.dirname(accountingDbPath), { recursive: true });
 for (let index = 1; index <= 10; index += 1) {
     writeFileSync(path.join(workspaceDir, `file-${index}.txt`), `content-file-${index}\n`);
 }
@@ -381,6 +386,7 @@ console.log(`scenario: ${scenarioName}`);
 console.log(`llm    : ${describeLlm(llm)}`);
 console.log(`baseDir : ${baseDir}`);
 console.log(`relay   : ${relayUrl}`);
+console.log(`accounting: ${accountingDbPath}`);
 if (llm.mode === "ollama" || llm.mode === "anthropic" || llm.recordCassettePath) {
     console.log(`cassette record: ${cassetteRecordPath}`);
 }
@@ -403,7 +409,7 @@ const pool = new SimplePool();
 await pool.ensureRelay(relayUrl);
 const sub = pool.subscribeMany(
     [relayUrl],
-    { kinds: [1, 24010, 24020, 24133, 24135, 31933], since: startTime },
+    { kinds: [1, 24010, 24020, 24133, 24135, 31933, 34011], since: startTime },
     { onevent: (event) => events.push(event) }
 );
 
@@ -488,7 +494,7 @@ let mergedEvents = events;
 try {
     const storedEvents = await pool.querySync(
         [relayUrl],
-        { kinds: [1, 24010, 24020, 24133, 24135, 31933], since: startTime },
+        { kinds: [1, 24010, 24020, 24133, 24135, 31933, 34011], since: startTime },
         { maxWait: 2_000 }
     );
     mergedEvents = mergeEvents(events, storedEvents);
@@ -647,6 +653,7 @@ function probeEnv(): NodeJS.ProcessEnv {
         ...process.env,
         HOME: runDir,
         TENEX_BASE_DIR: baseDir,
+        TENEX_ACCOUNTING_DB: accountingDbPath,
         RUST_LOG: process.env.RUST_LOG ?? "info,nostr_sdk=warn,nostr_relay_pool=warn",
     };
 }

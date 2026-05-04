@@ -278,8 +278,9 @@ pub async fn run(opts: BackfillOptions) -> Result<()> {
     let mut total_chunks = 0usize;
     for conv_id in &conv_ids {
         let events = acc.events_for(conv_id);
+        let project_ids = project_ids_for_events(events, &scope.projects);
         match processor
-            .process_conversation(conv_id, events, &resolver, &target)
+            .process_conversation(conv_id, events, &project_ids, &resolver, &target)
             .await
         {
             Ok(res) => total_chunks += res.chunks_embedded,
@@ -301,6 +302,28 @@ pub async fn run(opts: BackfillOptions) -> Result<()> {
         "backfill complete"
     );
     Ok(())
+}
+
+fn project_ids_for_events(
+    events: &[nostr::Event],
+    projects: &[scope::OwnedProject],
+) -> Vec<String> {
+    let mut project_ids = std::collections::BTreeSet::new();
+    for event in events {
+        for tag in event.tags.iter() {
+            let parts = tag.as_slice();
+            if parts.first().map(String::as_str) != Some("a") {
+                continue;
+            }
+            let Some(coord) = parts.get(1) else {
+                continue;
+            };
+            if let Some(project) = projects.iter().find(|project| project.a_tag == *coord) {
+                project_ids.insert(project.d_tag.clone());
+            }
+        }
+    }
+    project_ids.into_iter().collect()
 }
 
 fn relays_from_config(base: &std::path::Path) -> Vec<String> {

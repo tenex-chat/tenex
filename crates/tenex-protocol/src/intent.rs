@@ -61,6 +61,8 @@ pub struct DelegationRequest {
     /// When set, the outbound event carries an e-tag referencing this message,
     /// turning the delegation into a followup rather than a fresh conversation.
     pub followup_of: Option<MessageRef>,
+    /// Extra raw Nostr tags for fresh delegation routing metadata.
+    pub extra_tags: Vec<Vec<String>>,
 }
 
 /// Delegate work to one or more other agents. Each request becomes a separate

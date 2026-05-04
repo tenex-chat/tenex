@@ -22,10 +22,10 @@ use rusqlite::Connection;
 pub const SCHEMA_VERSION: i32 = 1;
 
 const PRAGMAS: &str = r#"
+PRAGMA busy_timeout = 5000;
 PRAGMA journal_mode = WAL;
 PRAGMA synchronous = NORMAL;
 PRAGMA foreign_keys = ON;
-PRAGMA busy_timeout = 5000;
 PRAGMA temp_store = MEMORY;
 "#;
 
@@ -237,6 +237,8 @@ pub fn open_with_migrations(path: &std::path::Path) -> Result<Connection> {
         std::fs::create_dir_all(parent).context("create accounting db directory")?;
     }
     let conn = Connection::open(path).context("open sqlite db")?;
+    conn.busy_timeout(std::time::Duration::from_millis(5_000))
+        .context("set sqlite busy timeout")?;
     conn.execute_batch(PRAGMAS).context("apply pragmas")?;
     apply_migrations(&conn)?;
     Ok(conn)
@@ -262,7 +264,7 @@ fn apply_migrations(conn: &Connection) -> Result<()> {
         conn.execute_batch(SCHEMA_V1).context("apply schema v1")?;
         let now = now_ms();
         conn.execute(
-            "INSERT INTO schema_version(version, applied_at_ms) VALUES (1, ?1)",
+            "INSERT OR IGNORE INTO schema_version(version, applied_at_ms) VALUES (1, ?1)",
             [now],
         )?;
     }

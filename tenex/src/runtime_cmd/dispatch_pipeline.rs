@@ -94,9 +94,15 @@ pub(super) async fn handle_relay_event(
         }
     }
 
-    process_relay_event_inner(shared, event, reload_context, base_dir, &event_received_span)
-        .instrument(event_received_span.clone())
-        .await;
+    process_relay_event_inner(
+        shared,
+        event,
+        reload_context,
+        base_dir,
+        &event_received_span,
+    )
+    .instrument(event_received_span.clone())
+    .await;
 }
 
 async fn process_relay_event_inner(
@@ -112,9 +118,7 @@ async fn process_relay_event_inner(
     }
     if event.kind == Kind::Custom(PROJECT_KIND) {
         event_received_span.record("outcome", "project_definition_update");
-        if let Err(e) =
-            handle_project_definition_update(shared, reload_context, &event).await
-        {
+        if let Err(e) = handle_project_definition_update(shared, reload_context, &event).await {
             tenex_telemetry::record_current_error(&e);
             warn!(event_id = %event.id.to_hex()[..8], error = %e, "project definition update failed");
         }
@@ -205,8 +209,7 @@ async fn process_relay_event_inner(
         return;
     }
 
-    if let Err(e) =
-        register_delegation_route_if_needed(&shared.store, &event, &agent_pubkeys, None)
+    if let Err(e) = register_delegation_route_if_needed(&shared.store, &event, &agent_pubkeys, None)
     {
         warn!(event_id = short, error = %e, "failed to register delegation route");
     }
@@ -509,10 +512,7 @@ pub(super) async fn accept_dispatch(
     Ok(())
 }
 
-pub(super) async fn handle_stop_command(
-    shared: Arc<RuntimeShared>,
-    event: &Event,
-) -> Result<()> {
+pub(super) async fn handle_stop_command(shared: Arc<RuntimeShared>, event: &Event) -> Result<()> {
     let conversation_ids = e_tag_event_ids(event);
     let agent_pubkeys = p_tag_pubkeys(event);
     if conversation_ids.is_empty() || agent_pubkeys.is_empty() {

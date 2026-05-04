@@ -90,6 +90,7 @@ where
         &self,
         request: CompletionRequest,
     ) -> Result<CompletionResponse<Self::Response>, CompletionError> {
+        let request = crate::provider_request_sanitizer::sanitize_completion_request(request);
         let turn = self.recorder.as_ref().map(CassetteRecorder::next_turn);
         let request_debug = request_debug(&request);
         let input_messages = serde_json::to_string(&request.chat_history).unwrap_or_default();
@@ -143,6 +144,7 @@ where
         &self,
         request: CompletionRequest,
     ) -> Result<StreamingCompletionResponse<Self::StreamingResponse>, CompletionError> {
+        let request = crate::provider_request_sanitizer::sanitize_completion_request(request);
         let turn = self.recorder.as_ref().map(CassetteRecorder::next_turn);
         let request_debug = request_debug(&request);
         let input_messages = serde_json::to_string(&request.chat_history).unwrap_or_default();

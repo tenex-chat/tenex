@@ -279,6 +279,7 @@ pub(crate) async fn build(
     let resolved_category_enum = resolved_category_string
         .as_deref()
         .and_then(|s| s.parse::<tenex_supervision::types::AgentCategory>().ok());
+    let global_system_prompt = config::read_global_system_prompt(&base_dir);
 
     // Build system prompt
     let mut system_prompt = assembly::compose_system_prompt(assembly::SystemPromptInputs {
@@ -300,6 +301,7 @@ pub(crate) async fn build(
         worktrees: &git_worktrees,
         category_str: resolved_category_string.as_deref(),
         category: resolved_category_enum,
+        global_system_prompt: global_system_prompt.as_deref(),
     });
 
     // Load persisted todos and inject them as a system reminder into the user message.

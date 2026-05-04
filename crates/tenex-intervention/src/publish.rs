@@ -77,6 +77,7 @@ impl Publisher {
             execution_time_ms: None,
             llm_runtime_ms: None,
             llm_runtime_total_ms: None,
+            completion_project_a_tags: Vec::new(),
             branch: None,
             team: None,
         };

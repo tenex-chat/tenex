@@ -280,6 +280,7 @@ async fn run(
     let resolved_category_enum = resolved_category_string
         .as_deref()
         .and_then(|s| s.parse::<tenex_supervision::types::AgentCategory>().ok());
+    let global_system_prompt = config::read_global_system_prompt(&base_dir);
 
     let system_prompt =
         tenex_system_prompt::build_system_prompt(tenex_system_prompt::BuildSystemPromptInput {
@@ -287,6 +288,7 @@ async fn run(
             pubkey_hex: &pubkey_hex,
             category_str: resolved_category_string.as_deref(),
             category: resolved_category_enum,
+            global_system_prompt: global_system_prompt.as_deref(),
             instructions: agent_config.instructions.as_deref(),
             working_dir: &working_dir,
             project_base_path: Some(&working_dir),
@@ -390,6 +392,14 @@ async fn run(
             }
         }
     }
+    let current_project_addr = project_ref.coordinate();
+    let completion_project_a_tags: Vec<String> = envelope
+        .metadata
+        .project_a_tags
+        .iter()
+        .filter(|addr| *addr != &current_project_addr)
+        .cloned()
+        .collect();
     let stream_ctx = EncodingContext {
         project: project_ref.clone(),
         conversation_root: conversation_root.clone(),
@@ -402,6 +412,7 @@ async fn run(
         execution_time_ms: None,
         llm_runtime_ms: None,
         llm_runtime_total_ms: None,
+        completion_project_a_tags: completion_project_a_tags.clone(),
         branch: current_branch.clone(),
         team: envelope.metadata.team.clone(),
     };
@@ -504,6 +515,7 @@ async fn run(
         execution_time_ms: None,
         llm_runtime_ms: None,
         llm_runtime_total_ms: None,
+        completion_project_a_tags,
         branch: current_branch,
         team: envelope.metadata.team.clone(),
     };

@@ -103,7 +103,10 @@ fn project_scoped_skill_ids_partitions_by_directory_presence() {
 
     let ids = project_scoped_skill_ids(&tmp);
     assert!(ids.contains("alpha"), "alpha should be present: {ids:?}");
-    assert!(!ids.contains("beta"), "beta should be filtered out: {ids:?}");
+    assert!(
+        !ids.contains("beta"),
+        "beta should be filtered out: {ids:?}"
+    );
     assert_eq!(ids.len(), 1, "only alpha should be present: {ids:?}");
 }
 
@@ -121,34 +124,27 @@ fn build_event_emits_universe_and_assignment_tags() {
     let agent_b = agent_with_skills("agent-b", AGENT_PK_B, &[], &[]);
 
     let keys = Keys::generate();
-    let event = build_project_status_event(
-        &keys,
-        &project_meta(),
-        &tmp,
-        &[agent_a, agent_b],
-        &[],
-        &[],
-    )
-    .unwrap();
+    let event =
+        build_project_status_event(&keys, &project_meta(), &tmp, &[agent_a, agent_b], &[]).unwrap();
 
     let all = tags(&event);
 
     // Universe tags for both alpha and beta.
     assert!(
-        all.iter().any(|t| t.len() == 2 && t[0] == "skill" && t[1] == "alpha"),
+        all.iter()
+            .any(|t| t.len() == 2 && t[0] == "skill" && t[1] == "alpha"),
         "expected bare ['skill', 'alpha']; got {all:?}",
     );
     assert!(
-        all.iter().any(|t| t.len() == 2 && t[0] == "skill" && t[1] == "beta"),
+        all.iter()
+            .any(|t| t.len() == 2 && t[0] == "skill" && t[1] == "beta"),
         "expected bare ['skill', 'beta']; got {all:?}",
     );
 
     // Assignment tag for alpha → agent-a.
     assert!(
-        all.iter().any(|t| t.len() == 3
-            && t[0] == "skill"
-            && t[1] == "alpha"
-            && t[2] == "agent-a"),
+        all.iter()
+            .any(|t| t.len() == 3 && t[0] == "skill" && t[1] == "alpha" && t[2] == "agent-a"),
         "expected ['skill', 'alpha', 'agent-a']; got {all:?}",
     );
 
@@ -159,8 +155,8 @@ fn build_event_emits_universe_and_assignment_tags() {
         "beta should have universe tag only; got {all:?}",
     );
 
-    // No model, mcp, or tool tags ever.
-    for capability in ["model", "mcp", "tool"] {
+    // No agent, model, mcp, or tool tags ever.
+    for capability in ["agent", "model", "mcp", "tool"] {
         assert!(
             !all.iter()
                 .any(|t| t.first().map(String::as_str) == Some(capability)),
@@ -179,13 +175,14 @@ fn build_event_emits_universe_tag_for_inactive_project_scoped_skill() {
 
     let keys = Keys::generate();
     let event =
-        build_project_status_event(&keys, &project_meta(), &tmp, &[agent_a], &[], &[]).unwrap();
+        build_project_status_event(&keys, &project_meta(), &tmp, &[agent_a], &[]).unwrap();
 
     let all = tags(&event);
 
     // Universe tag for gamma exists.
     assert!(
-        all.iter().any(|t| t.len() == 2 && t[0] == "skill" && t[1] == "gamma"),
+        all.iter()
+            .any(|t| t.len() == 2 && t[0] == "skill" && t[1] == "gamma"),
         "expected bare ['skill', 'gamma']; got {all:?}",
     );
 
@@ -212,12 +209,11 @@ fn build_event_emits_no_model_or_mcp_tags() {
             &["github", "linear"],
         )],
         &[],
-        &[],
     )
     .unwrap();
 
     let all = tags(&event);
-    for capability in ["model", "mcp", "tool"] {
+    for capability in ["agent", "model", "mcp", "tool"] {
         assert!(
             !all.iter()
                 .any(|t| t.first().map(String::as_str) == Some(capability)),
@@ -232,28 +228,3 @@ fn build_event_emits_no_model_or_mcp_tags() {
     );
 }
 
-#[test]
-fn build_event_keeps_agent_and_pm_tags() {
-    let tmp = unique_temp("pmtag");
-    let keys = Keys::generate();
-    let agent = agent_with_skills("worker", AGENT_PK, &[], &[]);
-    let pm = tenex_project::models::ProjectAgent {
-        agent_pubkey: AGENT_PK.into(),
-        is_pm: true,
-    };
-
-    let event =
-        build_project_status_event(&keys, &project_meta(), &tmp, &[agent], &[pm], &[]).unwrap();
-
-    let all = tags(&event);
-    assert!(
-        all.iter().any(|t| {
-            t.len() >= 4
-                && t[0] == "agent"
-                && t[1] == AGENT_PK
-                && t[2] == "worker"
-                && t[3] == "pm"
-        }),
-        "expected agent+pm tag; got {all:?}",
-    );
-}

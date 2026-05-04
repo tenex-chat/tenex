@@ -48,7 +48,11 @@ pub(super) fn register_delegation_route_if_needed(
     agent_pubkeys: &HashSet<String>,
     parent_job: Option<&DispatchJob>,
 ) -> Result<Option<DelegationRoute>> {
-    let Some(child_agent_pubkey) = fresh_delegation_target(event, agent_pubkeys) else {
+    let allow_external_child =
+        parent_job.is_some_and(|job| event.pubkey.to_hex() == job.agent.pubkey);
+    let Some(child_agent_pubkey) =
+        fresh_delegation_target(event, agent_pubkeys, allow_external_child)
+    else {
         return Ok(None);
     };
 
@@ -100,7 +104,11 @@ pub(super) fn register_delegation_route_if_needed(
     Ok(Some(route))
 }
 
-fn fresh_delegation_target(event: &Event, agent_pubkeys: &HashSet<String>) -> Option<String> {
+fn fresh_delegation_target(
+    event: &Event,
+    agent_pubkeys: &HashSet<String>,
+    allow_external_child: bool,
+) -> Option<String> {
     if event.kind != Kind::TextNote {
         return None;
     }
@@ -116,9 +124,14 @@ fn fresh_delegation_target(event: &Event, agent_pubkeys: &HashSet<String>) -> Op
     {
         return None;
     }
-    p_tag_pubkeys(event)
-        .into_iter()
-        .find(|pubkey| agent_pubkeys.contains(pubkey))
+    let targets = p_tag_pubkeys(event);
+    if allow_external_child {
+        targets.into_iter().next()
+    } else {
+        targets
+            .into_iter()
+            .find(|pubkey| agent_pubkeys.contains(pubkey))
+    }
 }
 
 pub(super) fn delegation_route_for_completion(
@@ -197,7 +210,10 @@ pub(super) fn conversation_trace_root(
 }
 
 fn trace_root_from_runtime_state(state: &Value) -> Option<tenex_telemetry::TraceCarrier> {
-    let root = state.get("rustRuntime")?.get("telemetry")?.get("trace_root")?;
+    let root = state
+        .get("rustRuntime")?
+        .get("telemetry")?
+        .get("trace_root")?;
     let traceparent = root.get("traceparent")?.as_str()?.to_string();
     let tracestate = root
         .get("tracestate")
@@ -298,7 +314,9 @@ fn runtime_state_driver_busy(state: &Value, key: &DispatchKey) -> bool {
     let stale = driver
         .get("acquiredAt")
         .and_then(serde_json::Value::as_i64)
-        .is_some_and(|ts| super::runtime_setup::now_ms().saturating_sub(ts) > DRIVER_STALE_AFTER_MS);
+        .is_some_and(|ts| {
+            super::runtime_setup::now_ms().saturating_sub(ts) > DRIVER_STALE_AFTER_MS
+        });
 
     same_agent && same_conversation && !stale
 }
@@ -587,5 +605,63 @@ mod tests {
             super::super::event_routing::conversation_id_from_event(&followup),
             delegation.id.to_hex()
         );
+    }
+
+    #[test]
+    fn local_parent_delegation_registers_external_child_route() {
+        use std::collections::HashSet;
+        use std::sync::Mutex;
+
+        let store = Arc::new(Mutex::new(ConversationStore::open_in_memory().unwrap()));
+        let user_keys = Keys::generate();
+        let parent_keys = Keys::generate();
+        let external_child_keys = Keys::generate();
+        let parent_pubkey = parent_keys.public_key().to_hex();
+        let external_child_pubkey = external_child_keys.public_key().to_hex();
+        let parent_conversation_id =
+            signed_event_from(&user_keys, Kind::TextNote, "root task", Vec::new())
+                .id
+                .to_hex();
+        let parent_trigger = signed_event_from(
+            &user_keys,
+            Kind::TextNote,
+            "delegate cross-project",
+            vec![tag(&["e", &parent_conversation_id, "", "root"])],
+        );
+        let parent_job = DispatchJob {
+            event: parent_trigger,
+            agent: agent(&parent_pubkey),
+            conv_id: parent_conversation_id.clone(),
+            agent_json: PathBuf::from("agent.json"),
+            allow_driver_preempt: false,
+            completion_recipient_pubkey: None,
+            is_external: false,
+            response_tee: None,
+            trace_carrier: None,
+        };
+        let delegation = signed_event_from(
+            &parent_keys,
+            Kind::TextNote,
+            "@remote choose a color",
+            vec![
+                tag(&["p", &external_child_pubkey]),
+                tag(&["delegation", &parent_conversation_id]),
+            ],
+        );
+        let agent_pubkeys = HashSet::from([parent_pubkey.clone()]);
+
+        let route = register_delegation_route_if_needed(
+            &store,
+            &delegation,
+            &agent_pubkeys,
+            Some(&parent_job),
+        )
+        .unwrap()
+        .expect("route registered");
+
+        assert_eq!(route.parent_agent_pubkey, parent_pubkey);
+        assert_eq!(route.parent_conversation_id, parent_conversation_id);
+        assert_eq!(route.child_agent_pubkey, external_child_pubkey);
+        assert_eq!(route.child_conversation_id, delegation.id.to_hex());
     }
 }

@@ -94,6 +94,7 @@ fn encode_completion(
         builder = add_llm_metadata_tags(builder, md)?;
     }
     builder = add_standard_tags(builder, ctx)?;
+    builder = add_completion_project_tags(builder, ctx)?;
     builder = forward_branch_team(builder, ctx)?;
     Ok(builder)
 }
@@ -148,6 +149,10 @@ fn encode_delegation(
                 builder = builder.tag(tag(["branch", branch])?);
             }
 
+            for parts in &d.extra_tags {
+                builder = builder.tag(tag(parts.iter().map(String::as_str))?);
+            }
+
             builder = add_standard_tags(builder, ctx)?;
 
             // TS: forwardTagPair only when delegation has no explicit branch.
@@ -192,6 +197,19 @@ fn encode_ask(intent: &AskIntent, ctx: &EncodingContext) -> Result<EventBuilder,
     builder = builder.tag(tag(["intent", "ask"])?);
     builder = add_standard_tags(builder, ctx)?;
     builder = forward_branch_team(builder, ctx)?;
+    Ok(builder)
+}
+
+fn add_completion_project_tags(
+    mut builder: EventBuilder,
+    ctx: &EncodingContext,
+) -> Result<EventBuilder, EncodeError> {
+    let primary = ctx.project.coordinate();
+    for addr in &ctx.completion_project_a_tags {
+        if addr != &primary && addr.starts_with("31933:") {
+            builder = builder.tag(tag(["a", addr.as_str()])?);
+        }
+    }
     Ok(builder)
 }
 

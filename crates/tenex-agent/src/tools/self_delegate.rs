@@ -76,6 +76,7 @@ impl Tool for SelfDelegateTool {
                 request: args.request.clone(),
                 branch: args.branch.clone(),
                 followup_of: None,
+                extra_tags: Vec::new(),
             }],
         };
 
