@@ -77,7 +77,10 @@ pub async fn run(
     let mut boot_authors = discovery_authors.clone();
     push_unique_pubkey(&mut boot_authors, backend_keys.public_key());
 
-    let client = Client::new(backend_keys);
+    let client = Client::builder()
+        .signer(backend_keys)
+        .opts(ClientOptions::new().automatic_authentication(true))
+        .build();
     for relay in &cfg.relays {
         if let Err(e) = client.add_relay(relay.as_str()).await {
             warn!(relay, error = %e, "add_relay failed");

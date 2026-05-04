@@ -61,8 +61,8 @@ pub async fn run(args: DaemonArgs) -> Result<()> {
     display::header(&base_dir, cfg.relays.len());
 
     let _lock = lockfile::Lockfile::acquire(&base_dir).context("acquiring daemon lockfile")?;
-    let backend_keys = crate::nostr_pub::backend_signer::ensure_backend_keys(&base_dir)
-        .context("loading daemon signer")?;
+    let backend_keys =
+        tenex_backend_keys::ensure(&base_dir).context("loading daemon signer")?;
 
     let supervisor = supervisor::Supervisor::new(default_boot_argv(), base_dir.clone());
 

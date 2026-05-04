@@ -32,9 +32,13 @@ pub struct Relay {
 }
 
 impl Relay {
-    /// Build a relay reader connected to every URL in `relays`.
-    pub async fn connect(relays: Vec<String>) -> Result<Self> {
-        let client = Client::default();
+    /// Build a relay reader connected to every URL in `relays`. The provided
+    /// signer authenticates to NIP-42 auth-required relays automatically.
+    pub async fn connect(relays: Vec<String>, signer: Keys) -> Result<Self> {
+        let client = Client::builder()
+            .signer(signer)
+            .opts(ClientOptions::new().automatic_authentication(true))
+            .build();
         for url in &relays {
             client
                 .add_relay(url.as_str())

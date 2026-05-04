@@ -6,7 +6,7 @@ use inquire::Select;
 use nostr::Filter;
 use nostr::Kind;
 use nostr_sdk::nips::nip19::{FromBech32, Nip19};
-use nostr_sdk::Client;
+use nostr_sdk::{Client, ClientOptions};
 use serde_json::Value;
 
 use crate::store::providers::ProvidersDoc;
@@ -58,9 +58,11 @@ pub async fn run(base_dir: &std::path::Path, nevent: &str) -> Result<()> {
     }
 
     // 3. Connect to relays
-    let keys = crate::nostr_pub::backend_signer::ensure_backend_keys(base_dir)
-        .context("loading relay signer")?;
-    let client = Client::new(keys);
+    let keys = tenex_backend_keys::ensure(base_dir).context("loading relay signer")?;
+    let client = Client::builder()
+        .signer(keys)
+        .opts(ClientOptions::new().automatic_authentication(true))
+        .build();
     for relay in &relays {
         client
             .add_relay(relay.as_str())

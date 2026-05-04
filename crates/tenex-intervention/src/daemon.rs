@@ -605,7 +605,10 @@ fn save_state_filtered(
 
 async fn build_nostr_client(cfg: &Config) -> Result<Client> {
     let keys = Keys::parse(&cfg.backend_secret_key).context("parse backend secret key")?;
-    let client = Client::new(keys);
+    let client = Client::builder()
+        .signer(keys)
+        .opts(ClientOptions::new().automatic_authentication(true))
+        .build();
     for relay in &cfg.relays {
         client
             .add_relay(relay.as_str())

@@ -14,11 +14,11 @@
 //!            sorted first by slug, then by pubkey
 //! ```
 //!
-//! Signed with the backend signer
-//! (`config.tenexPrivateKey` → see [`crate::nostr_pub::backend_signer`]).
+//! Signed with the backend signer (`config.tenexPrivateKey`,
+//! see [`tenex_backend_keys::ensure`]).
 
 use anyhow::{anyhow, Context, Result};
-use nostr_sdk::{Client, Event, EventBuilder, Keys, Kind, Tag, TagKind};
+use nostr_sdk::{Client, ClientOptions, Event, EventBuilder, Keys, Kind, Tag, TagKind};
 
 use crate::store::tenex_config::TenexConfigDoc;
 use tenex_agent_registry::{derive_agent_pubkey_from_nsec, AgentStorage};
@@ -124,11 +124,14 @@ pub async fn publish_installed_agents_inventory(base_dir: &std::path::Path) -> R
     let whitelisted = doc.whitelisted_pubkeys();
     let relays = resolve_relays(&doc);
 
-    let keys = crate::nostr_pub::backend_signer::ensure_backend_keys(base_dir)?;
+    let keys = tenex_backend_keys::ensure(base_dir)?;
     let agents = collect_inventory_entries(base_dir)?;
     let event = build_inventory_event(&keys, &whitelisted, &agents)?;
 
-    let client = Client::new(keys);
+    let client = Client::builder()
+        .signer(keys)
+        .opts(ClientOptions::new().automatic_authentication(true))
+        .build();
     for relay in &relays {
         client
             .add_relay(relay.as_str())

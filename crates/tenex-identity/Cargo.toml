@@ -24,6 +24,7 @@ thiserror = "2"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tenex-telemetry = { path = "../tenex-telemetry" }
+tenex-backend-keys = { path = "../tenex-backend-keys" }
 dirs-next = "2"
 libc = "0.2"
 nix = { version = "0.27", features = ["process", "fs"] }

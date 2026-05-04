@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use nostr::event::{EventBuilder, Tag};
 use nostr::key::Keys;
 use nostr::Kind;
-use nostr_sdk::Client;
+use nostr_sdk::{Client, ClientOptions};
 
 use crate::source::ProjectEvent;
 use crate::summarize::Summary;
@@ -19,7 +19,10 @@ pub struct Publisher {
 impl Publisher {
     pub async fn new(secret_key: &str, relays: &[String]) -> Result<Self> {
         let keys = Keys::parse(secret_key).context("parse backend secret key")?;
-        let client = Client::new(keys.clone());
+        let client = Client::builder()
+            .signer(keys.clone())
+            .opts(ClientOptions::new().automatic_authentication(true))
+            .build();
         for relay in relays {
             client
                 .add_relay(relay.as_str())

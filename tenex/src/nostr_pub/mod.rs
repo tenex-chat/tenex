@@ -8,7 +8,8 @@
 //! These helpers run from short-lived CLI commands (`tenex agent delete`,
 //! the interactive manager, etc.), where we want to:
 //!
-//! 1. Load (or generate-and-persist) the backend signer.
+//! 1. Load (or generate-and-persist) the backend signer
+//!    via [`tenex_backend_keys::ensure`].
 //! 2. Build a single event.
 //! 3. Connect → publish → drop.
 //!
@@ -17,7 +18,6 @@
 
 pub mod agent_config;
 pub mod backend_heartbeat;
-pub mod backend_signer;
 pub mod installed_agents;
 pub mod operations_status;
 pub mod owner_signer;

@@ -14,7 +14,10 @@ pub struct Publisher {
 impl Publisher {
     pub async fn new(secret_key: &str, relays: &[String]) -> Result<Self> {
         let keys = Keys::parse(secret_key).context("parse backend secret key")?;
-        let client = Client::new(keys.clone());
+        let client = Client::builder()
+            .signer(keys.clone())
+            .opts(ClientOptions::new().automatic_authentication(true))
+            .build();
         for relay in relays {
             client
                 .add_relay(relay.as_str())

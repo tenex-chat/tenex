@@ -1,0 +1,19 @@
+[package]
+name = "tenex-backend-keys"
+version = "0.1.0"
+edition = "2021"
+description = "Load-or-generate the TENEX backend signer (`tenexPrivateKey` in `~/.tenex/config.json`)."
+
+[lib]
+name = "tenex_backend_keys"
+path = "src/lib.rs"
+
+[dependencies]
+anyhow = "1"
+indexmap = { version = "2", features = ["serde"] }
+nostr-sdk = "0.44"
+serde = "1"
+serde_json = { version = "1", features = ["preserve_order"] }
+
+[dev-dependencies]
+tempfile = "3"

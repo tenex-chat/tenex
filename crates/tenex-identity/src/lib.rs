@@ -40,7 +40,7 @@ use std::os::unix::io::AsRawFd;
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context, Result as AnyResult};
-use nostr_sdk::{Client, Keys};
+use nostr_sdk::{Client, ClientOptions};
 use serde::Deserialize;
 
 const DEFAULT_RELAYS: &[&str] = &["wss://relay.tenex.chat"];
@@ -104,10 +104,12 @@ async fn run_daemon_async() -> AnyResult<()> {
     );
 
     let config = load_config();
-    let client = match config.tenex_private_key.as_deref() {
-        Some(secret) => Client::new(Keys::parse(secret).context("parse tenexPrivateKey")?),
-        None => Client::default(),
-    };
+    let keys = tenex_backend_keys::ensure(&base_dir)
+        .context("ensure backend signer for identity daemon")?;
+    let client = Client::builder()
+        .signer(keys)
+        .opts(ClientOptions::new().automatic_authentication(true))
+        .build();
     for relay in &resolve_relays(&config) {
         client
             .add_relay(relay.as_str())
@@ -151,8 +153,6 @@ fn try_lock(fd: i32) -> AnyResult<bool> {
 struct TenexConfig {
     #[serde(default)]
     relays: Vec<String>,
-    #[serde(default, rename = "tenexPrivateKey")]
-    tenex_private_key: Option<String>,
 }
 
 fn load_config() -> TenexConfig {

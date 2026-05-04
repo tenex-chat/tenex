@@ -48,7 +48,7 @@ use tenex_mcp::ProjectMcpRuntime;
 use tenex_project::{models::ProjectAgent, Agent, Project};
 
 use crate::daemon::config;
-use crate::nostr_pub::{backend_signer, project_status};
+use crate::nostr_pub::project_status;
 use crate::store::resolve_base_dir;
 
 pub(super) const PROJECT_KIND: u16 = 31933;
@@ -210,10 +210,13 @@ pub async fn run(args: RuntimeArgs) -> Result<()> {
     }
 
     let backend_keys =
-        backend_signer::ensure_backend_keys(&base_dir).context("loading runtime relay signer")?;
+        tenex_backend_keys::ensure(&base_dir).context("loading runtime relay signer")?;
     let trusted_authors = trusted_runtime_authors(&user_authors, backend_keys.public_key());
     let trusted_author_pubkeys = pubkey_hex_set(&trusted_authors);
-    let client = Client::new(backend_keys.clone());
+    let client = Client::builder()
+        .signer(backend_keys.clone())
+        .opts(ClientOptions::new().automatic_authentication(true))
+        .build();
     for relay in &cfg.relays {
         if let Err(e) = client.add_relay(relay.as_str()).await {
             warn!(relay, error = %e, "add_relay failed");

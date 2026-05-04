@@ -20,6 +20,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tenex-telemetry = { path = "../tenex-telemetry" }
 tenex-identity = { path = "../tenex-identity" }
+tenex-backend-keys = { path = "../tenex-backend-keys" }
 tenex-protocol = { path = "../tenex-protocol" }
 tenex-rag = { path = "../tenex-rag" }
 nostr = "0.44"

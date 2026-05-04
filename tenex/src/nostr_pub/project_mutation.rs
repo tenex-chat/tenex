@@ -14,7 +14,7 @@
 //! NDK fetch — same shortcut already in use elsewhere in the Rust port.
 
 use anyhow::Result;
-use nostr_sdk::{Client, EventBuilder, Keys, Kind, Tag};
+use nostr_sdk::{Client, ClientOptions, EventBuilder, Keys, Kind, Tag};
 use serde_json::Value;
 
 use crate::store::project_members::{is_deleted_project_event, read_persisted_project_event};
@@ -145,7 +145,10 @@ pub async fn publish_project_mutation(
         doc.relays()
     };
 
-    let client = Client::new(keys.clone());
+    let client = Client::builder()
+        .signer(keys.clone())
+        .opts(ClientOptions::new().automatic_authentication(true))
+        .build();
     for relay in &relays {
         if let Err(e) = client.add_relay(relay.as_str()).await {
             // Best-effort — single-relay failure shouldn't abort the whole

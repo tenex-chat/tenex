@@ -117,7 +117,9 @@ pub async fn run(opts: BackfillOptions) -> Result<()> {
         info!("reset: cursors + state wiped");
     }
 
-    let relay_client = Relay::connect(relays.clone()).await?;
+    let backend_keys = tenex_backend_keys::ensure(&base)
+        .context("ensure backend signer for relay auth")?;
+    let relay_client = Relay::connect(relays.clone(), backend_keys).await?;
     let floor = opts.since_secs.unwrap_or(0).max(0);
 
     // ---- Phase 1: walk back, accumulate ----

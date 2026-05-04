@@ -9,10 +9,10 @@
 //! tags     = ["p", <whitelisted_pubkey>] for each whitelisted_pubkey
 //! ```
 //!
-//! Signed with the backend signer (see [`crate::nostr_pub::backend_signer`]).
+//! Signed with the backend signer (see [`tenex_backend_keys::ensure`]).
 
 use anyhow::{anyhow, Context, Result};
-use nostr_sdk::{Client, Event, EventBuilder, Keys, Kind, Tag};
+use nostr_sdk::{Client, ClientOptions, Event, EventBuilder, Keys, Kind, Tag};
 use tenex_protocol::nostr::kinds::BACKEND_HEARTBEAT;
 
 use crate::store::tenex_config::TenexConfigDoc;
@@ -46,10 +46,13 @@ pub async fn publish_backend_heartbeat(base_dir: &std::path::Path) -> Result<()>
     let whitelisted = doc.whitelisted_pubkeys();
     let relays = resolve_relays(&doc);
 
-    let keys = crate::nostr_pub::backend_signer::ensure_backend_keys(base_dir)?;
+    let keys = tenex_backend_keys::ensure(base_dir)?;
     let event = build_heartbeat_event(&keys, &whitelisted)?;
 
-    let client = Client::new(keys);
+    let client = Client::builder()
+        .signer(keys)
+        .opts(ClientOptions::new().automatic_authentication(true))
+        .build();
     for relay in &relays {
         client
             .add_relay(relay.as_str())
