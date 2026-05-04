@@ -272,6 +272,7 @@ pub async fn run(args: RuntimeArgs) -> Result<()> {
     let meta_status = meta.clone();
     let agent_snapshot_status = agent_snapshot_state.clone();
     let whitelist_status = cfg.whitelisted_pubkeys.clone();
+    let base_dir_status = base_dir.clone();
     let project_dir_status = resolve_project_working_dir(&base_dir, &meta.d_tag)
         .with_context(|| format!("resolving project working directory for '{}'", meta.d_tag))?;
     tokio::spawn(async move {
@@ -283,6 +284,7 @@ pub async fn run(args: RuntimeArgs) -> Result<()> {
                 &keys_status,
                 &meta_status,
                 &project_dir_status,
+                &base_dir_status,
                 &snapshot.agents,
                 &whitelist_status,
             ) {

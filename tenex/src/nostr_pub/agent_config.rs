@@ -1,16 +1,20 @@
-//! kind:34011 `TenexAgentConfig` — per-agent capability announcement.
+//! kind:0 agent profile — identity and capability announcement, signed by the
+//! agent itself.
 //!
 //! Parallel to `project_status.rs`, but signed by the *agent* (not the
-//! backend). Announces the set of models / skills / MCP servers that are
-//! reachable to one specific agent, and which one(s) are currently active.
+//! backend). Combines the standard Nostr kind:0 profile fields with
+//! TENEX-specific capability tags so a single replaceable event carries both
+//! the agent's human-readable identity and its full runtime configuration.
 //!
-//! Event shape (NIP-33 addressable, kind 34011):
+//! Event shape:
 //!
 //! ```text
-//! kind    = 34011
-//! content = ""
-//! tags    = ["d", "<agent_slug>"]
+//! kind    = 0
+//! content = JSON { "name": "<agent_name>", "about": "<description>" }
+//! tags    = ["slug", "<agent_slug>"]
+//!         + ["use-criteria", "<text>"]                    # when set
 //!         + ["p", "<backend_pubkey_hex>"]
+//!         + ["backend", "<name>"]                        # when set
 //!         + ["model", "<slug>"]                           # available
 //!           or ["model", "<slug>", "active"]              # selected
 //!         + ["skill", "<id>"]                             # available
@@ -32,16 +36,15 @@
 //! considered active (there is no notion of an MCP being "available but not
 //! enabled" today — registering an MCP server *is* enabling it).
 //!
-//! Tags within each kind are sorted by their primary identifier for
+//! Tags within each group are sorted by their primary identifier for
 //! deterministic event content (same convention as `project_status.rs`).
 
 use std::collections::{BTreeSet, HashSet};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use anyhow::{anyhow, Result};
 use nostr_sdk::{Event, EventBuilder, Kind, PublicKey, Tag, TagKind};
-use serde_json::Value;
-use tenex_protocol::nostr::kinds::AGENT_CONFIG;
+use serde_json::{json, Value};
 
 use crate::store::llms::LlmsDoc;
 use tenex_project::{signer::signer_for, Agent};
@@ -62,62 +65,27 @@ fn short_pubkey(pubkey: &str) -> &str {
     }
 }
 
-/// Lookup directories for *globally* reachable skills — mirrors the canonical
-/// layout in `tenex_agent::skills::lookup_dirs`, but **excludes** the
-/// project-shared source (`{project_path}/.agents/skills/`). Project-shared
-/// skills belong on kind:24010, not on the per-agent kind:34011.
-///
-/// Sources, in precedence order:
-/// 1. Built-in (`{base_dir}/skills/built-in`)
-/// 2. Agent home (`{base_dir}/home/<short_pubkey>/skills`)
-/// 3. User-global (`~/.agents/skills`)
-///
-/// We replicate the directory list here rather than depending on
-/// `tenex-agent` because that crate is binary-only (no `lib.rs`) and pulling
-/// it in as a library dep would require restructuring it. The list is
-/// stable enough that drift risk is acceptable.
-fn global_skill_dirs(agent_pubkey: &str, base_dir: &Path) -> Vec<PathBuf> {
-    let short = short_pubkey(agent_pubkey);
-    let mut dirs: Vec<PathBuf> = Vec::new();
-
-    // 1. Built-in (shipped with the TENEX installation)
-    let builtin = base_dir.join("skills").join("built-in");
-    if builtin.exists() {
-        dirs.push(builtin);
-    }
-
-    // 2. Agent home skills
-    dirs.push(base_dir.join("home").join(short).join("skills"));
-
-    // 3. User-global shared skills
-    if let Some(home) = dirs_next::home_dir() {
-        dirs.push(home.join(".agents").join("skills"));
-    }
-
-    dirs
-}
-
-/// Enumerate skill IDs across the global (non-project) skill dirs.
-/// First-seen wins (matches the precedence used by the runtime skill loader).
-fn list_global_skill_ids(agent_pubkey: &str, base_dir: &Path) -> Vec<String> {
+/// Enumerate skill IDs installed in the agent's own home directory
+/// (`{base_dir}/home/<short_pubkey>/skills`). These are the only skills
+/// advertised on the agent's kind:0 profile — shared skills (built-in,
+/// user-global) and project-scoped skills are advertised on kind:24010.
+fn list_agent_skill_ids(agent_pubkey: &str, base_dir: &Path) -> Vec<String> {
+    let dir = base_dir
+        .join("home")
+        .join(short_pubkey(agent_pubkey))
+        .join("skills");
     let mut seen: BTreeSet<String> = BTreeSet::new();
-    for dir in global_skill_dirs(agent_pubkey, base_dir) {
-        let entries = match std::fs::read_dir(&dir) {
-            Ok(e) => e,
-            Err(_) => continue,
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if !path.is_dir() {
-                continue;
-            }
-            // A skill directory is one that contains a SKILL.md file.
-            if !path.join("SKILL.md").exists() {
-                continue;
-            }
-            if let Some(id) = path.file_name().and_then(|n| n.to_str()) {
-                seen.insert(id.to_string());
-            }
+    let entries = match std::fs::read_dir(&dir) {
+        Ok(e) => e,
+        Err(_) => return Vec::new(),
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() || !path.join("SKILL.md").exists() {
+            continue;
+        }
+        if let Some(id) = path.file_name().and_then(|n| n.to_str()) {
+            seen.insert(id.to_string());
         }
     }
     seen.into_iter().collect()
@@ -164,21 +132,20 @@ fn mcp_server_slugs(agent: &Agent) -> Vec<String> {
     slugs
 }
 
-/// Build (and sign) a kind:34011 event for one agent.
+/// Build (and sign) a kind:0 profile event for one agent.
 ///
 /// - `agent`            — the agent being announced.
 /// - `backend_pubkey`   — the backend that runs this agent (emitted as `p`).
 /// - `base_dir`         — TENEX base dir (`~/.tenex`); used to find skills.
 /// - `llms`             — the project's LLM doc (provides the model universe).
-///
-/// Skills emitted are the *global* (non-project) sources only: built-in,
-/// agent-home, and user-global. Project-scoped skills belong on the per-
-/// project kind:24010 event, not here.
+/// - `backend_name`     — optional human-readable backend name (emitted as
+///                        `["backend", "<name>"]` when present).
 pub async fn build_agent_config_event(
     agent: &Agent,
     backend_pubkey: &PublicKey,
     base_dir: &Path,
     llms: &LlmsDoc,
+    backend_name: Option<&str>,
 ) -> Result<Event> {
     let signer = signer_for(agent).map_err(|e| anyhow!("resolve signer for agent: {e}"))?;
     let signer_pubkey = signer
@@ -186,7 +153,7 @@ pub async fn build_agent_config_event(
         .await
         .map_err(|e| anyhow!("resolve agent signer pubkey: {e}"))?;
 
-    // Pubkey safety check: refuse to publish a 34011 for a key the project's
+    // Pubkey safety check: refuse to publish a kind:0 for a key the project's
     // agent set does not actually own. If `signer_for` resolved to a different
     // key (mis-edited `signer_ref`, swapped bunker URI, etc.), the event would
     // still be cryptographically valid but would announce capabilities under a
@@ -203,7 +170,7 @@ pub async fn build_agent_config_event(
     let mut active = parse_active_config(agent);
     // Active-model fallback: when the agent has no explicit `model` in its
     // `default_config_json`, the runtime falls back to the project's
-    // `LlmsDoc::default_config()`. Mirror that here so the published 34011
+    // `LlmsDoc::default_config()`. Mirror that here so the published kind:0
     // marks the right model as `active` instead of leaving the agent's row
     // model-less in the TUI.
     if active.model.is_none() {
@@ -215,14 +182,30 @@ pub async fn build_agent_config_event(
     }
     let mut tags: Vec<Tag> = Vec::new();
 
-    // d-tag: NIP-33 addressability. Slug is human-readable and unique per
-    // backend; the event's pubkey field already identifies the agent.
-    tags.push(Tag::parse(["d", agent.slug.as_str()]).map_err(|e| anyhow!("d tag: {e}"))?);
+    // ["slug", <agent_slug>] — stable machine identifier, also present in
+    // the content JSON as the `name` field.
+    tags.push(Tag::parse(["slug", agent.slug.as_str()]).map_err(|e| anyhow!("slug tag: {e}"))?);
+
+    // ["use-criteria", <text>] — optional; tells callers when to delegate.
+    if let Some(criteria) = agent.use_criteria.as_deref().filter(|s| !s.is_empty()) {
+        tags.push(
+            Tag::parse(["use-criteria", criteria])
+                .map_err(|e| anyhow!("use-criteria tag: {e}"))?,
+        );
+    }
 
     // ["p", <backend_pubkey_hex>]
     tags.push(
         Tag::parse(["p", backend_pubkey.to_hex().as_str()]).map_err(|e| anyhow!("p tag: {e}"))?,
     );
+
+    // ["backend", <name>] — optional; present when the operator has configured
+    // a human-readable backend profile name in config.json.
+    if let Some(name) = backend_name {
+        tags.push(
+            Tag::parse(["backend", name]).map_err(|e| anyhow!("backend tag: {e}"))?,
+        );
+    }
 
     // Models — sorted by config slug; "active" marker on the agent's selection.
     let mut model_names = llms.config_names();
@@ -235,8 +218,8 @@ pub async fn build_agent_config_event(
         tags.push(Tag::custom(TagKind::Custom("model".into()), vals));
     }
 
-    // Skills — sorted by id; "active" marker on those enabled in default_config.
-    for id in list_global_skill_ids(&signer_pubkey, base_dir) {
+    // Skills — agent-home only, sorted by id; "active" on those in default_config.
+    for id in list_agent_skill_ids(&signer_pubkey, base_dir) {
         let mut vals = vec![id.clone()];
         if active.skills.contains(&id) {
             vals.push("active".to_string());
@@ -252,10 +235,18 @@ pub async fn build_agent_config_event(
         ));
     }
 
+    // Build kind:0 content: slug as `name` (standard Nostr identity field),
+    // description as `about` when present.
+    let mut content_map = json!({ "name": agent.slug });
+    if let Some(about) = agent.description.as_deref().filter(|s| !s.is_empty()) {
+        content_map["about"] = json!(about);
+    }
+    let content = content_map.to_string();
+
     let event = signer
-        .sign(EventBuilder::new(Kind::Custom(AGENT_CONFIG), "").tags(tags))
+        .sign(EventBuilder::new(Kind::Metadata, content).tags(tags))
         .await
-        .map_err(|e| anyhow!("sign agent config event: {e}"))?;
+        .map_err(|e| anyhow!("sign agent profile event: {e}"))?;
 
     Ok(event)
 }
@@ -350,11 +341,11 @@ mod tests {
     async fn build_event_emits_expected_tags_with_active_markers() {
         // Two global skills: one in agent-home (source 2), one in user-global
         // (source 3). Plus a project-shared skill on disk that MUST NOT appear
-        // on 34011 (it belongs on 24010).
+        // on kind:0 (it belongs on 24010).
         let base_dir = unique_temp("base");
         let project_path = unique_temp("proj");
 
-        // Project-scoped skill that must be excluded from 34011.
+        // Project-scoped skill that must be excluded from kind:0.
         let project_skills = project_path.join(".agents").join("skills");
         fs::create_dir_all(&project_skills).unwrap();
         write_skill(&project_skills, "project-only");
@@ -383,19 +374,22 @@ mod tests {
 
         let backend_pk = nostr_sdk::PublicKey::from_hex(BACKEND_PK_HEX).unwrap();
 
-        let event = build_agent_config_event(&agent, &backend_pk, &base_dir, &llms)
+        let event = build_agent_config_event(&agent, &backend_pk, &base_dir, &llms, None)
             .await
             .expect("event built");
 
-        // kind:34011
-        assert_eq!(u16::from(event.kind), 34011);
-        // d-tag = agent slug
-        let d_tags = extract(&event, "d");
-        assert_eq!(d_tags, vec![vec!["d", "worker"]]);
-        // event signer pubkey is the agent's pubkey (no separate agent tag)
+        // kind:0
+        assert_eq!(u16::from(event.kind), 0);
+        // slug tag = agent slug
+        let slug_tags = extract(&event, "slug");
+        assert_eq!(slug_tags, vec![vec!["slug", "worker"]]);
+        // content JSON contains name = slug
+        let content: serde_json::Value = serde_json::from_str(&event.content).unwrap();
+        assert_eq!(content["name"], "worker");
+        // No d-tag (not a NIP-33 event)
+        assert!(extract(&event, "d").is_empty());
+        // event signer pubkey is the agent's pubkey
         assert_eq!(event.pubkey.to_hex(), agent.pubkey);
-        // No `agent` tag — slug is the d-tag, pubkey is the signer.
-        assert!(extract(&event, "agent").is_empty());
         // p-tag = backend pubkey
         let p_tags = extract(&event, "p");
         assert_eq!(p_tags, vec![vec!["p", BACKEND_PK_HEX]]);
@@ -411,7 +405,7 @@ mod tests {
         assert!(s_tags.contains(&vec!["skill", "home-only", "active"]));
         assert!(
             !s_tags.iter().any(|t| t.get(1) == Some(&"project-only")),
-            "project-scoped skill must not appear on 34011: {s_tags:?}",
+            "project-scoped skill must not appear on kind:0 profile: {s_tags:?}",
         );
 
         // mcp tag: github active
@@ -426,7 +420,7 @@ mod tests {
     }
 
     /// Explicit guard: a skill placed under `{project}/.agents/skills/foo/SKILL.md`
-    /// must NOT be advertised on 34011 (project-scoped → belongs on 24010).
+    /// must NOT be advertised on the kind:0 profile (project-scoped → belongs on 24010).
     /// We use a unique skill id so a real `~/.agents/skills/` populated on the
     /// dev machine cannot accidentally satisfy the assertion.
     #[tokio::test]
@@ -457,13 +451,13 @@ mod tests {
         );
         let backend_pk = nostr_sdk::PublicKey::from_hex(BACKEND_PK_HEX).unwrap();
 
-        let event = build_agent_config_event(&agent, &backend_pk, &base_dir, &llms)
+        let event = build_agent_config_event(&agent, &backend_pk, &base_dir, &llms, None)
             .await
             .expect("event built");
         let s_tags = extract(&event, "skill");
         assert!(
             !s_tags.iter().any(|t| t.get(1) == Some(&skill_id.as_str())),
-            "project-shared skill {skill_id:?} must not appear on 34011; got {s_tags:?}",
+            "project-shared skill {skill_id:?} must not appear on kind:0 profile; got {s_tags:?}",
         );
 
         fs::remove_dir_all(&base_dir).ok();
@@ -472,8 +466,8 @@ mod tests {
 
     /// Codex finding #5: when an agent has no explicit `model` in its
     /// `default_config_json`, the runtime falls back to `LlmsDoc::default_config()`.
-    /// The published 34011 must mark THAT model as `active`, not leave the
-    /// agent's row model-less in the TUI.
+    /// The published kind:0 profile must mark THAT model as `active`, not leave
+    /// the agent's row model-less in the TUI.
     #[tokio::test]
     async fn build_event_marks_llms_default_model_active_when_agent_has_no_model() {
         let base_dir = unique_temp("base-fallback");
@@ -495,7 +489,7 @@ mod tests {
         );
 
         let backend_pk = nostr_sdk::PublicKey::from_hex(BACKEND_PK_HEX).unwrap();
-        let event = build_agent_config_event(&agent, &backend_pk, &base_dir, &llms)
+        let event = build_agent_config_event(&agent, &backend_pk, &base_dir, &llms, None)
             .await
             .expect("event built");
 
@@ -511,10 +505,10 @@ mod tests {
         fs::remove_dir_all(&project_path).ok();
     }
 
-    /// Codex finding #4: signer must own the agent's pubkey. A swapped
-    /// `signer_ref` (or bunker URI pointing at a different account) would
-    /// otherwise produce a cryptographically valid 34011 announcing
-    /// capabilities for a key the project doesn't actually manage.
+    /// Signer must own the agent's pubkey. A swapped `signer_ref` (or bunker
+    /// URI pointing at a different account) would otherwise produce a
+    /// cryptographically valid kind:0 announcing capabilities for a key the
+    /// project doesn't actually manage.
     #[tokio::test]
     async fn build_event_rejects_signer_with_mismatched_pubkey() {
         let base_dir = unique_temp("base-mismatch");
@@ -545,7 +539,7 @@ mod tests {
         assert_ne!(agent.pubkey, other.public_key().to_hex());
 
         let backend_pk = nostr_sdk::PublicKey::from_hex(BACKEND_PK_HEX).unwrap();
-        let err = build_agent_config_event(&agent, &backend_pk, &base_dir, &llms)
+        let err = build_agent_config_event(&agent, &backend_pk, &base_dir, &llms, None)
             .await
             .expect_err("mismatch must fail");
         let msg = err.to_string();
@@ -553,7 +547,7 @@ mod tests {
 
         // And the matching-pubkey path still succeeds.
         agent.pubkey = other.public_key().to_hex();
-        build_agent_config_event(&agent, &backend_pk, &base_dir, &llms)
+        build_agent_config_event(&agent, &backend_pk, &base_dir, &llms, None)
             .await
             .expect("matching pubkey should succeed");
 

@@ -73,6 +73,7 @@ async fn handle_client(
                                 lud16: None,
                                 slug: None,
                                 use_criteria: None,
+                                backend_name: None,
                                 event_id: None,
                                 created_at: None,
                                 fetched_at: crate::cache::now_secs(),

@@ -1,5 +1,5 @@
 //! Project-definition and per-agent config-update handlers, plus the
-//! kind:34011 republish helpers tied to those reload paths.
+//! kind:0 profile republish helpers tied to those reload paths.
 //!
 //! All entry points expect a [`RuntimeReloadContext`] that the relay loop
 //! builds once at startup and keeps alive for the lifetime of the runtime —
@@ -69,11 +69,10 @@ pub(super) async fn reload_agent_snapshot(
     )
     .await?;
     publish_project_status_now(shared, ctx.meta).await;
-    // Bulk reload: republish 34011 for every agent. Individual change
+    // Bulk reload: republish kind:0 for every agent. Individual change
     // attribution isn't available here (an agent may have been added,
     // removed, or had its config rewritten), so the safe play is to keep
-    // every per-agent capability event in lock-step with the post-reload
-    // snapshot.
+    // every per-agent profile in lock-step with the post-reload snapshot.
     republish_all_agent_configs(shared).await;
 
     let added = new_pubkeys.difference(&old_pubkeys).count();
@@ -187,8 +186,8 @@ async fn reload_project_membership_snapshot(
         .context("reloaded project metadata is missing")?;
     publish_project_status_now(shared, &project_meta).await;
     // Project membership reload (project definition event re-ingested).
-    // The agent set may have shifted; mirror the per-agent 34011s so the
-    // TUI's union-render stays consistent.
+    // The agent set may have shifted; mirror the per-agent kind:0 profiles
+    // so the TUI's union-render stays consistent.
     republish_all_agent_configs(shared).await;
 
     let added = new_pubkeys.difference(&old_pubkeys).count();
@@ -281,7 +280,7 @@ async fn load_agent_snapshot_after_change(
     )
 }
 
-/// Build + send a 34011 for a single agent (looked up in the current
+/// Build + send a kind:0 profile for a single agent (looked up in the current
 /// snapshot). Bound to `RuntimeShared` so call sites stay one-liners; all
 /// failure modes are logged inside `agent_config_publish::publish_one`.
 pub(super) async fn republish_agent_config(shared: &RuntimeShared, agent_pubkey: &str) {
@@ -292,11 +291,12 @@ pub(super) async fn republish_agent_config(shared: &RuntimeShared, agent_pubkey:
         &shared.backend_keys.public_key(),
         &shared.base_dir,
         &shared.client,
+        shared.backend_name.as_deref(),
     )
     .await;
 }
 
-/// Republish 34011 for **every** agent in the current snapshot. Used after
+/// Republish kind:0 for **every** agent in the current snapshot. Used after
 /// a bulk reload (`reload_agent_snapshot`) where individual change
 /// attribution is unavailable — keeps the relay-side view consistent with
 /// the post-reload truth.
@@ -309,14 +309,15 @@ async fn republish_all_agent_configs(shared: &RuntimeShared) {
             &shared.backend_keys.public_key(),
             &shared.base_dir,
             &shared.client,
+            shared.backend_name.as_deref(),
         )
         .await;
     }
 }
 
-/// Startup-only: REQ kind:34011 for every managed agent's pubkey, wait up
-/// to 5s for EOSE (or just take whatever is buffered if the relay times
-/// out), then publish a fresh 34011 for any agent that's missing or whose
+/// Startup-only: REQ kind:0 for every managed agent's pubkey, wait up to
+/// 5s for EOSE (or just take whatever is buffered if the relay times out),
+/// then publish a fresh profile for any agent that's missing or whose
 /// remote `created_at` is older than the local config-file mtime.
 ///
 /// Failures during the REQ are logged and treated as "relay silent" —
@@ -347,12 +348,12 @@ pub(super) async fn startup_publish_missing_agent_configs(shared: &RuntimeShared
                 let collected: Vec<_> = events.into_iter().collect();
                 info!(
                     count = collected.len(),
-                    "startup: fetched existing 34011 events"
+                    "startup: fetched existing kind:0 agent profiles"
                 );
                 agent_config_publish::fold_existing_agent_configs(&collected)
             }
             Err(error) => {
-                warn!(error = %error, "startup: 34011 fetch failed; treating all agents as missing");
+                warn!(error = %error, "startup: kind:0 fetch failed; treating all agents as missing");
                 std::collections::HashMap::new()
             }
         }
@@ -361,12 +362,12 @@ pub(super) async fn startup_publish_missing_agent_configs(shared: &RuntimeShared
     let needing =
         agent_config_publish::agents_needing_publish(&snapshot.agents, &shared.base_dir, &existing);
     if needing.is_empty() {
-        info!("startup: every agent already has a fresh 34011 on relays");
+        info!("startup: every agent already has a fresh kind:0 profile on relays");
         return;
     }
     info!(
         count = needing.len(),
-        "startup: publishing missing/stale 34011 events"
+        "startup: publishing missing/stale kind:0 agent profiles"
     );
     for pubkey in needing {
         agent_config_publish::publish_one(
@@ -375,6 +376,7 @@ pub(super) async fn startup_publish_missing_agent_configs(shared: &RuntimeShared
             &shared.backend_keys.public_key(),
             &shared.base_dir,
             &shared.client,
+            shared.backend_name.as_deref(),
         )
         .await;
     }
@@ -386,6 +388,7 @@ pub(super) async fn publish_project_status_now(shared: &RuntimeShared, meta: &Pr
         &shared.backend_keys,
         meta,
         &shared.project_dir,
+        &shared.base_dir,
         &snapshot.agents,
         &shared.whitelisted_pubkeys,
     ) {

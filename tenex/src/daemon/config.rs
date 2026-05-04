@@ -23,6 +23,10 @@ pub struct Config {
     /// false. Controls whether external-author kind:1 events that match
     /// a project's `#a` tag are eligible for firewall + dispatch.
     pub route_unauthorized_authors: bool,
+    /// Human-readable name for this backend instance (`backendName` in
+    /// config.json). Emitted as `["backend", "<name>"]` on kind:0 agent
+    /// profiles so clients can distinguish multi-backend setups.
+    pub backend_name: Option<String>,
 }
 
 /// Load `<base_dir>/config.json` and apply daemon-startup invariants.
@@ -48,5 +52,6 @@ pub fn load(base_dir: &Path) -> Result<Config> {
         whitelisted_pubkeys,
         relays,
         route_unauthorized_authors: doc.route_unauthorized_authors(),
+        backend_name: doc.backend_name(),
     })
 }

@@ -126,7 +126,7 @@ fn build_event_emits_universe_and_assignment_tags() {
 
     let keys = Keys::generate();
     let event =
-        build_project_status_event(&keys, &project_meta(), &tmp, &[agent_a, agent_b], &[]).unwrap();
+        build_project_status_event(&keys, &project_meta(), &tmp, &tmp, &[agent_a, agent_b], &[]).unwrap();
 
     let all = tags(&event);
 
@@ -176,7 +176,7 @@ fn build_event_emits_universe_tag_for_inactive_project_scoped_skill() {
 
     let keys = Keys::generate();
     let event =
-        build_project_status_event(&keys, &project_meta(), &tmp, &[agent_a], &[]).unwrap();
+        build_project_status_event(&keys, &project_meta(), &tmp, &tmp, &[agent_a], &[]).unwrap();
 
     let all = tags(&event);
 
@@ -203,6 +203,7 @@ fn build_event_emits_no_model_or_mcp_tags() {
         &keys,
         &project_meta(),
         &tmp,
+        &tmp,
         &[agent_with_skills(
             "worker",
             AGENT_PK,
@@ -221,11 +222,5 @@ fn build_event_emits_no_model_or_mcp_tags() {
             "24010 must not emit {capability} tags; got {all:?}",
         );
     }
-    // No project dir set up → no skill tags either.
-    assert!(
-        !all.iter()
-            .any(|t| t.first().map(String::as_str) == Some("skill")),
-        "no project-scoped skills on disk → no skill tags; got {all:?}",
-    );
 }
 

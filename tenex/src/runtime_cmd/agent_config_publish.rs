@@ -1,15 +1,14 @@
-//! Publish helpers for kind:34011 `TenexAgentConfig` events.
+//! Publish helpers for per-agent kind:0 profile events.
 //!
-//! The runtime owns three triggers for republishing per-agent capability
-//! announcements:
+//! The runtime owns three triggers for republishing per-agent profiles:
 //!
 //! 1. **Startup** — REQ all agent pubkeys, diff against fs mtimes, fill gaps.
 //! 2. **fs-watcher reload** — when `{base_dir}/agents/<pk>.json` mutates.
 //! 3. **agent add/remove** — bundled with `publish_project_status_now()`.
 //!
-//! There is intentionally **no** periodic re-publish: 34011 is replaceable
-//! (NIP-33) and only changes when an agent's config does. Re-publishing on a
-//! timer would just churn relay state for no value.
+//! There is intentionally **no** periodic re-publish: kind:0 is replaceable
+//! and only changes when an agent's config does. Re-publishing on a timer
+//! would just churn relay state for no value.
 //!
 //! Private to `runtime_cmd::mod` — the wrapper there fans these out from the
 //! `RuntimeShared` context. Pure decision logic
@@ -17,11 +16,11 @@
 //! [`fold_existing_agent_configs`]) is testable without spinning up a relay
 //! or a live `Client`.
 //!
-//! Diff policy ("stale 34011 detection", per plan Open Q #2): if any 34011
-//! exists for an agent and its `created_at` is `>=` the agent config file's
-//! mtime, do nothing; otherwise (no event, or event older than the file)
-//! publish a fresh one. On mtime read failure we fail-open and republish —
-//! a redundant publish is cheaper than a silently stale view.
+//! Diff policy: if any kind:0 exists for an agent and its `created_at` is
+//! `>=` the agent config file's mtime, do nothing; otherwise (no event, or
+//! event older than the file) publish a fresh one. On mtime read failure we
+//! fail-open and republish — a redundant publish is cheaper than a silently
+//! stale view.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -30,7 +29,6 @@ use std::time::{Duration, SystemTime};
 use anyhow::{Context, Result};
 use nostr_sdk::{Event, Filter, Kind, PublicKey};
 use tenex_project::Agent;
-use tenex_protocol::nostr::kinds::AGENT_CONFIG;
 use tracing::{info, warn};
 
 use crate::nostr_pub::agent_config::build_agent_config_event;
@@ -38,7 +36,7 @@ use crate::store::llms::LlmsDoc;
 
 /// 5-second cap on the startup REQ. A slow or silent relay must not block
 /// the runtime from coming up — on timeout we treat every agent as missing
-/// and publish a fresh 34011.
+/// and publish a fresh kind:0.
 pub(super) const STARTUP_FETCH_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Path of the agent's on-disk config file.
@@ -56,14 +54,14 @@ pub(super) fn agent_pubkey_from_path(path: &Path) -> Option<String> {
     path.file_stem().and_then(|s| s.to_str()).map(str::to_owned)
 }
 
-/// Decide which agents need a fresh 34011 published.
+/// Decide which agents need a fresh kind:0 profile published.
 ///
 /// `existing` maps agent pubkey → most-recent received `created_at` (unix
-/// seconds) for that agent's 34011 event on relays. Absent entries mean no
-/// 34011 was received for that agent.
+/// seconds) for that agent's kind:0 event on relays. Absent entries mean no
+/// kind:0 was received for that agent.
 ///
 /// An agent is republished when:
-/// - no 34011 exists for it on relays, **or**
+/// - no kind:0 exists for it on relays, **or**
 /// - the most recent one is older than the agent's config file mtime, **or**
 /// - the file mtime cannot be read (fail-open: prefer a redundant publish
 ///   over a silently stale view).
@@ -98,10 +96,10 @@ fn file_mtime_secs(path: &Path) -> Option<u64> {
         .map(|d| d.as_secs())
 }
 
-/// Fold a stream of 34011 events into a `pubkey → newest_created_at` map.
+/// Fold a stream of kind:0 events into a `pubkey → newest_created_at` map.
 ///
 /// Multiple events per author are reduced to the highest `created_at`. The
-/// caller has already constrained the filter to `kind=34011, authors=...`,
+/// caller has already constrained the filter to `kind=0, authors=...`,
 /// so we trust the input and don't re-validate.
 pub(super) fn fold_existing_agent_configs(events: &[Event]) -> HashMap<String, u64> {
     let mut out: HashMap<String, u64> = HashMap::new();
@@ -119,28 +117,29 @@ pub(super) fn fold_existing_agent_configs(events: &[Event]) -> HashMap<String, u
     out
 }
 
-/// Build the relay filter for the startup REQ over kind:34011.
+/// Build the relay filter for the startup REQ over kind:0 (agent profiles).
 pub(super) fn startup_filter(authors: &[PublicKey]) -> Filter {
     Filter::new()
-        .kind(Kind::Custom(AGENT_CONFIG))
+        .kind(Kind::Metadata)
         .authors(authors.to_vec())
 }
 
-/// Build (and sign) the 34011 event for one agent. Side-effect free —
+/// Build (and sign) the kind:0 profile for one agent. Side-effect free —
 /// caller is responsible for sending. Loads `llms.json` fresh on each call
 /// so an mid-runtime LLM-config edit is reflected immediately.
 pub(super) async fn build_event_for(
     agent: &Agent,
     backend_pubkey: &PublicKey,
     base_dir: &Path,
+    backend_name: Option<&str>,
 ) -> Result<Event> {
     let llms = LlmsDoc::load(base_dir).context("loading llms.json for agent config publish")?;
-    build_agent_config_event(agent, backend_pubkey, base_dir, &llms)
+    build_agent_config_event(agent, backend_pubkey, base_dir, &llms, backend_name)
         .await
-        .with_context(|| format!("building 34011 for agent {}", agent.slug))
+        .with_context(|| format!("building kind:0 for agent {}", agent.slug))
 }
 
-/// Build + send one 34011 via the live relay client. Failures are logged
+/// Build + send one kind:0 profile via the live relay client. Failures are logged
 /// (warn) and swallowed — publish failures must not poison higher-level
 /// reload paths.
 pub(super) async fn publish_one(
@@ -149,17 +148,18 @@ pub(super) async fn publish_one(
     backend_pubkey: &PublicKey,
     base_dir: &Path,
     client: &nostr_sdk::Client,
+    backend_name: Option<&str>,
 ) {
     let Some(agent) = agents.iter().find(|a| a.pubkey == agent_pubkey) else {
-        warn!(agent_pubkey, "skip 34011 publish: agent not in snapshot");
+        warn!(agent_pubkey, "skip kind:0 publish: agent not in snapshot");
         return;
     };
-    match build_event_for(agent, backend_pubkey, base_dir).await {
+    match build_event_for(agent, backend_pubkey, base_dir, backend_name).await {
         Ok(event) => match client.send_event(&event).await {
-            Ok(_) => info!(agent = %agent.slug, "published 34011 agent config"),
-            Err(error) => warn!(agent = %agent.slug, error = %error, "34011 publish failed"),
+            Ok(_) => info!(agent = %agent.slug, "published kind:0 agent profile"),
+            Err(error) => warn!(agent = %agent.slug, error = %error, "kind:0 publish failed"),
         },
-        Err(error) => warn!(agent = %agent.slug, error = %error, "34011 build failed"),
+        Err(error) => warn!(agent = %agent.slug, error = %error, "kind:0 build failed"),
     }
 }
 
@@ -219,8 +219,8 @@ mod tests {
         fs::write(&path, b"{}").unwrap();
     }
 
-    fn make_34011(keys: &Keys, created_at: u64) -> Event {
-        EventBuilder::new(Kind::Custom(AGENT_CONFIG), "")
+    fn make_kind0(keys: &Keys, created_at: u64) -> Event {
+        EventBuilder::new(Kind::Metadata, r#"{"name":"test"}"#)
             .custom_created_at(nostr_sdk::Timestamp::from(created_at))
             .sign_with_keys(keys)
             .unwrap()
@@ -244,9 +244,9 @@ mod tests {
         let (_, keys_a) = agent_with_keys("a");
         let (_, keys_b) = agent_with_keys("b");
         let events = vec![
-            make_34011(&keys_a, 100),
-            make_34011(&keys_a, 200), // newer for A — must win
-            make_34011(&keys_b, 50),
+            make_kind0(&keys_a, 100),
+            make_kind0(&keys_a, 200), // newer for A — must win
+            make_kind0(&keys_b, 50),
         ];
         let folded = fold_existing_agent_configs(&events);
         assert_eq!(folded.get(&keys_a.public_key().to_hex()), Some(&200));
@@ -278,7 +278,7 @@ mod tests {
 
         let mtime = file_mtime_secs(&agent_config_path(&base_dir, &a.pubkey)).unwrap();
         let mut existing = HashMap::new();
-        // Pretend the relay's 34011 is 60 seconds newer than the file mtime.
+        // Pretend the relay's kind:0 is 60 seconds newer than the file mtime.
         existing.insert(a.pubkey.clone(), mtime + 60);
 
         let needing = agents_needing_publish(&agents, &base_dir, &existing);
@@ -314,11 +314,11 @@ mod tests {
 
     /// build_event_for is the per-agent build step that publish_one invokes
     /// before sending. Verifying it directly proves the event has the right
-    /// kind + d-tag + p-tag without needing a live relay client. (publish_one
+    /// kind + slug tag + p-tag without needing a live relay client. (publish_one
     /// itself is a thin wrapper: lookup → this function → client.send_event,
     /// with errors logged not propagated.)
     #[tokio::test]
-    async fn build_event_for_emits_expected_kind_d_tag_and_p_tag() {
+    async fn build_event_for_emits_expected_kind_slug_tag_and_p_tag() {
         let base_dir = unique_temp("publish");
         // Minimal llms.json so build_agent_config_event can load it.
         fs::write(
@@ -333,23 +333,23 @@ mod tests {
         let backend_keys = Keys::generate();
         let backend_pk = backend_keys.public_key();
 
-        let event = build_event_for(&agent, &backend_pk, &base_dir)
+        let event = build_event_for(&agent, &backend_pk, &base_dir, None)
             .await
             .expect("build succeeds");
 
-        assert_eq!(u16::from(event.kind), AGENT_CONFIG);
+        assert_eq!(u16::from(event.kind), 0);
 
-        let d_tag_value = event
+        let slug_tag_value = event
             .tags
             .iter()
             .find_map(|t| {
                 let s = t.as_slice();
-                (s.first().map(String::as_str) == Some("d"))
+                (s.first().map(String::as_str) == Some("slug"))
                     .then(|| s.get(1).cloned())
                     .flatten()
             })
-            .expect("d tag present");
-        assert_eq!(d_tag_value, agent.slug, "d-tag = agent slug");
+            .expect("slug tag present");
+        assert_eq!(slug_tag_value, agent.slug, "slug tag = agent slug");
 
         let p_tag_value = event
             .tags

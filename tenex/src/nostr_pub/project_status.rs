@@ -10,19 +10,20 @@
 //! content = ""
 //! tags    = ["a", "31933:<owner_pk>:<d_tag>"]
 //!         + ["p", <owner_pk>] (+ ["p", <whitelisted_pk>]..., deduped)
-//!         + ["skill", <id>]                              (universe — project-scoped only)
+//!         + ["skill", <id>]                              (universe)
 //!         + ["skill", <id>, <slug_1>, <slug_2>, ...]     (assignments — agents that enabled it)
 //! ```
 //!
-//! Skills emitted here are **only** project-scoped — the flat per-project
-//! source `{project_path}/.agents/skills/<id>/SKILL.md`. The skill universe
-//! is shared across all agents in the project; per-agent assignments come
-//! from each agent's `default_config_json["skills"]`. All other skill scopes
-//! (built-in, agent-home, user-global) live on the per-agent kind:34011 events.
+//! Skills emitted here are the **shared** skill universe available to every
+//! agent in the project:
+//! - Project-scoped: `{project_path}/.agents/skills/<id>/SKILL.md`
+//! - Built-in: `{base_dir}/skills/built-in/<id>/SKILL.md`
+//! - User-global: `~/.agents/skills/<id>/SKILL.md`
 //!
-//! Agent, model, and MCP tags are NOT emitted on 24010 — the available agents
-//! on a backend are published on kind:24011 (`TenexInstalledAgentList`), and
-//! per-agent model/MCP capabilities live on the per-agent kind:34011 events.
+//! Per-agent assignments come from each agent's `default_config_json["skills"]`.
+//! Agent-home skills (installed per-agent) live exclusively on the agent's
+//! kind:0 profile. Agent, model, and MCP tags are NOT emitted here — the
+//! available agents are on kind:24011, per-agent capabilities on kind:0.
 //!
 //! tool/branch/scheduled-task tags are not emitted — they require
 //! infrastructure (tool registry, git, scheduler storage) not yet available
@@ -41,31 +42,47 @@ use tenex_project::{Agent, ProjectMetadata};
 
 const KIND: u16 = 24010;
 
-/// Return the set of project-scoped skill IDs available in this project.
-///
-/// Reads `{project_path}/.agents/skills/` (flat, shared across all agents in
-/// the project) and includes every subdirectory that contains a `SKILL.md`
-/// file. Returns an empty set if the directory does not exist (does not panic).
-pub fn project_scoped_skill_ids(project_path: &Path) -> HashSet<String> {
-    let dir = project_path.join(".agents").join("skills");
-
+/// Enumerate skill IDs in a directory: every immediate subdirectory that
+/// contains a `SKILL.md` file. Returns an empty set if `dir` does not exist.
+fn skill_ids_in_dir(dir: &Path) -> HashSet<String> {
     let mut out = HashSet::new();
-    let entries = match std::fs::read_dir(&dir) {
+    let entries = match std::fs::read_dir(dir) {
         Ok(e) => e,
         Err(_) => return out,
     };
     for entry in entries.flatten() {
         let path = entry.path();
-        if !path.is_dir() {
-            continue;
-        }
-        if !path.join("SKILL.md").exists() {
+        if !path.is_dir() || !path.join("SKILL.md").exists() {
             continue;
         }
         if let Some(id) = path.file_name().and_then(|n| n.to_str()) {
             out.insert(id.to_string());
         }
     }
+    out
+}
+
+/// Return the set of project-scoped skill IDs (`{project_path}/.agents/skills/`).
+pub fn project_scoped_skill_ids(project_path: &Path) -> HashSet<String> {
+    skill_ids_in_dir(&project_path.join(".agents").join("skills"))
+}
+
+/// Return skill IDs from all shared (non-agent-home) sources:
+/// built-in (`{base_dir}/skills/built-in`), user-global (`~/.agents/skills`),
+/// and project-scoped (`{project_path}/.agents/skills/`).
+fn shared_skill_ids(project_path: &Path, base_dir: &Path) -> HashSet<String> {
+    let mut out = project_scoped_skill_ids(project_path);
+
+    for id in skill_ids_in_dir(&base_dir.join("skills").join("built-in")) {
+        out.insert(id);
+    }
+
+    if let Some(home) = dirs_next::home_dir() {
+        for id in skill_ids_in_dir(&home.join(".agents").join("skills")) {
+            out.insert(id);
+        }
+    }
+
     out
 }
 
@@ -95,6 +112,7 @@ pub fn build_project_status_event(
     keys: &Keys,
     meta: &ProjectMetadata,
     project_path: &Path,
+    base_dir: &Path,
     agents: &[Agent],
     whitelisted_pubkeys: &[String],
 ) -> Result<Event> {
@@ -116,13 +134,13 @@ pub fn build_project_status_event(
         }
     }
 
-    // ─── Project-scoped skill emission ────────────────────────────────────────
+    // ─── Shared skill emission ────────────────────────────────────────────────
     //
-    // The skill universe is a single set per project (flat directory, shared
-    // across all agents). Per-agent assignments come from each agent's
+    // The skill universe is the union of project-scoped, built-in, and
+    // user-global skill sources. Per-agent assignments come from each agent's
     // `default_config_json["skills"]`; an agent "owns" an assignment iff the
-    // skill is present in the project universe AND listed in its config.
-    let on_disk: HashSet<String> = project_scoped_skill_ids(project_path);
+    // skill is present in the shared universe AND listed in its config.
+    let on_disk: HashSet<String> = shared_skill_ids(project_path, base_dir);
     let universe: BTreeSet<String> = on_disk.iter().cloned().collect();
     let mut assignments: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
 
