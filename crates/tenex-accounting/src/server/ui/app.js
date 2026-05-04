@@ -42,12 +42,17 @@ async function api(path) {
   return r.json();
 }
 
+// Active filter for the Traces view. Set via openTracesForService(); cleared
+// when the user clicks the chip or switches away from the Traces tab.
+let traceServiceFilter = null;
+
 async function refreshAll() {
   const view = $$(".view.active")[0]?.id?.replace("view-", "") || "pulse";
   switch (view) {
     case "pulse": return loadPulse();
     case "traces": return loadTraces();
     case "cost": return loadCost();
+    case "services": return loadServices();
     case "models": return loadModels();
     case "agents": return loadAgents();
     case "embeddings": return loadEmbeddings();
@@ -103,11 +108,21 @@ async function loadPulse() {
 
 // ---- Traces ----
 async function loadTraces() {
-  const w = windowSecs();
-  const traces = await api("/api/traces" + (w ? "?" + w : ""));
-  $("#trace-list").innerHTML = traces
-    .map(
-      (t) => `<div class="trace-row" data-trace-id="${t.trace_id}" onclick="openTrace('${t.trace_id}')">
+  const params = [];
+  const w = $("#window").value;
+  if (w) params.push(`since_secs=${w}`);
+  if (traceServiceFilter) params.push(`root_kind=${encodeURIComponent(traceServiceFilter)}`);
+  const qs = params.length ? "?" + params.join("&") : "";
+  const traces = await api("/api/traces" + qs);
+  const chip = traceServiceFilter
+    ? `<div class="filter-chip">service: <strong>${traceServiceFilter}</strong>
+        <a href="javascript:void(0)" onclick="clearTraceFilter()">✕</a></div>`
+    : "";
+  $("#trace-list").innerHTML =
+    chip +
+    traces
+      .map(
+        (t) => `<div class="trace-row" data-trace-id="${t.trace_id}" onclick="openTrace('${t.trace_id}')">
       <div>
         <div><strong>${t.label ?? t.root_kind}</strong></div>
         <div class="meta">${fmt.ts(t.started_at_ms)} · ${t.outcome}</div>
@@ -118,9 +133,20 @@ async function loadTraces() {
         <div class="meta">${fmt.ms(t.wall_duration_ms)}</div>
       </div>
     </div>`
-    )
-    .join("");
+      )
+      .join("");
 }
+
+window.clearTraceFilter = function () {
+  traceServiceFilter = null;
+  loadTraces();
+};
+
+window.openTracesForService = function (service) {
+  traceServiceFilter = service;
+  switchView("traces");
+  loadTraces();
+};
 
 window.openTrace = async function (traceId) {
   // Switch to traces view, mark active.
@@ -264,6 +290,45 @@ async function loadCost() {
     </tr>`).join("")}</tbody></table>`;
 }
 
+async function loadServices() {
+  const w = windowSecs();
+  const rows = await api("/api/cost/by-service" + (w ? "?" + w : ""));
+  const total = rows.reduce((s, r) => s + r.cost_usd, 0) || 0.0000001;
+  $("#services-table").innerHTML = `<table>
+    <thead><tr>
+      <th>service</th>
+      <th class="num">traces</th>
+      <th class="num">llm</th>
+      <th class="num">tool</th>
+      <th class="num">emb</th>
+      <th class="num">in tok</th>
+      <th class="num">out tok</th>
+      <th class="num">cache r</th>
+      <th class="num">cost</th>
+      <th class="num">% of total</th>
+      <th class="num">avg dur</th>
+      <th class="num">err</th>
+    </tr></thead>
+    <tbody>${rows
+      .map(
+        (r) => `<tr class="clickable" onclick="openTracesForService('${r.service}')">
+        <td><strong>${r.service}</strong></td>
+        <td class="num">${fmt.int(r.traces)}</td>
+        <td class="num">${fmt.int(r.llm_calls)}</td>
+        <td class="num">${fmt.int(r.tool_calls)}</td>
+        <td class="num">${fmt.int(r.embeddings)}</td>
+        <td class="num">${fmt.int(r.input_tokens)}</td>
+        <td class="num">${fmt.int(r.output_tokens)}</td>
+        <td class="num">${fmt.int(r.cache_read_tokens)}</td>
+        <td class="num cost">${fmt.cost(r.cost_usd)}</td>
+        <td class="num">${((r.cost_usd / total) * 100).toFixed(1)}%</td>
+        <td class="num">${r.avg_duration_ms != null ? fmt.ms(Math.round(r.avg_duration_ms)) : "—"}</td>
+        <td class="num">${r.errored > 0 ? `<span class="status-error">${fmt.int(r.errored)}</span>` : "0"}</td>
+      </tr>`
+      )
+      .join("")}</tbody></table>`;
+}
+
 async function loadModels() {
   const w = windowSecs();
   const rows = await api("/api/cost/by-model" + (w ? "?" + w : ""));
@@ -312,6 +377,7 @@ async function loadEmbeddings() {
 }
 
 function switchView(name) {
+  if (name !== "traces") traceServiceFilter = null;
   $$(".view").forEach((v) => v.classList.toggle("active", v.id === "view-" + name));
   $$("nav button").forEach((b) => b.classList.toggle("active", b.dataset.view === name));
 }

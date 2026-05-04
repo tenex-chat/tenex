@@ -59,8 +59,8 @@ mod agent_labels;
 
 pub use query::{
     AgentCostRow, EmbeddingSummary, LlmCallSummary, ModelCostRow, Overview, ProviderCostRow,
-    QueryService, RecentLlmCall, SpanDetail, SpanMessage, ToolCallSummary, TraceDetail,
-    TraceFilter, TraceSummary,
+    QueryService, RecentLlmCall, ServiceCostRow, SpanDetail, SpanMessage, ToolCallSummary,
+    TraceDetail, TraceFilter, TraceSummary,
 };
 pub use recorder::{
     EmbeddingFinish, EmbeddingSpan, EmbeddingStart, LlmCallFinish, LlmCallSpan, LlmCallStart,

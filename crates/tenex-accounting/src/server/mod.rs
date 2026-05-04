@@ -43,6 +43,7 @@ pub async fn serve(addr: SocketAddr, query: QueryService) -> Result<()> {
         .route("/api/cost/by-provider", get(cost_by_provider))
         .route("/api/cost/by-model", get(cost_by_model))
         .route("/api/cost/by-agent", get(cost_by_agent))
+        .route("/api/cost/by-service", get(cost_by_service))
         .route("/api/embeddings/summary", get(embedding_summary))
         .route("/api/llm-calls/recent", get(recent_llm_calls))
         .route("/api/health", get(health))
@@ -103,6 +104,7 @@ struct TracesQuery {
     project_id: Option<String>,
     conversation_id: Option<String>,
     outcome: Option<String>,
+    root_kind: Option<String>,
     limit: Option<i64>,
 }
 
@@ -116,6 +118,7 @@ async fn list_traces(
         project_id: q.project_id,
         conversation_id: q.conversation_id,
         outcome: q.outcome,
+        root_kind: q.root_kind,
         limit: q.limit,
     };
     Ok(axum::Json(state.query.list_traces(f)?))
@@ -157,6 +160,13 @@ async fn cost_by_agent(
     Query(w): Query<WindowQuery>,
 ) -> ApiResult<axum::Json<Vec<crate::query::AgentCostRow>>> {
     Ok(axum::Json(state.query.cost_by_agent(w.since_ms())?))
+}
+
+async fn cost_by_service(
+    State(state): State<AppState>,
+    Query(w): Query<WindowQuery>,
+) -> ApiResult<axum::Json<Vec<crate::query::ServiceCostRow>>> {
+    Ok(axum::Json(state.query.cost_by_service(w.since_ms())?))
 }
 
 async fn embedding_summary(

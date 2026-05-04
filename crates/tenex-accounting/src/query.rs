@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::agent_labels::AgentLabels;
 
 mod agent_cost;
+mod service_cost;
 
 #[derive(Clone)]
 pub struct QueryService {
@@ -73,6 +74,10 @@ impl QueryService {
         if let Some(o) = filter.outcome {
             sql.push_str(" AND outcome = ?");
             args.push(o.into());
+        }
+        if let Some(rk) = filter.root_kind {
+            sql.push_str(" AND root_kind = ?");
+            args.push(rk.into());
         }
         sql.push_str(" ORDER BY started_at_ms DESC LIMIT ?");
         args.push((filter.limit.unwrap_or(100) as i64).into());
@@ -466,6 +471,7 @@ pub struct TraceFilter {
     pub project_id: Option<String>,
     pub conversation_id: Option<String>,
     pub outcome: Option<String>,
+    pub root_kind: Option<String>,
     pub limit: Option<i64>,
 }
 
@@ -679,6 +685,22 @@ pub struct ModelCostRow {
     pub avg_latency_ms: Option<f64>,
     pub avg_output_tps: Option<f64>,
     pub avg_ttft_ms: Option<f64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ServiceCostRow {
+    pub service: String,
+    pub traces: i64,
+    pub llm_calls: i64,
+    pub tool_calls: i64,
+    pub embeddings: i64,
+    pub input_tokens: i64,
+    pub output_tokens: i64,
+    pub cache_read_tokens: i64,
+    pub cache_write_tokens: i64,
+    pub cost_usd: f64,
+    pub avg_duration_ms: Option<f64>,
+    pub errored: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

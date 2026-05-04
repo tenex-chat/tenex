@@ -13,6 +13,7 @@
       <button data-view="pulse" class="active">Pulse</button>
       <button data-view="traces">Traces</button>
       <button data-view="cost">Cost</button>
+      <button data-view="services">Services</button>
       <button data-view="models">Models</button>
       <button data-view="agents">Agents</button>
       <button data-view="embeddings">Embeddings</button>
@@ -80,6 +81,12 @@
       <div id="cost-by-model"></div>
       <h2>Cost by agent</h2>
       <div id="cost-by-agent"></div>
+    </section>
+
+    <section id="view-services" class="view">
+      <h2>Cost by service</h2>
+      <p class="muted small">A "service" is the kind of work that initiated a trace — agent turns, summarization, firewall, embeddings backfill, etc. Click a row to see its traces.</p>
+      <div id="services-table"></div>
     </section>
 
     <section id="view-models" class="view">

@@ -108,6 +108,23 @@ td.provider { color: #58a6ff; }
 .trace-row .meta { color: #8b949e; font-size: .8em; }
 .trace-row .right { text-align: right; }
 
+.filter-chip {
+  padding: .35rem .6rem;
+  margin-bottom: .5rem;
+  background: #1f6feb22;
+  border: 1px solid #1f6feb55;
+  border-radius: .3rem;
+  font-size: .85em;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.filter-chip a { color: #8b949e; text-decoration: none; padding: 0 .35rem; }
+.filter-chip a:hover { color: #f85149; }
+
+tr.clickable { cursor: pointer; }
+tr.clickable:hover { background: #1f6feb22; }
+
 .span-tree { font-size: .85rem; }
 .span-tree details { margin: .15rem 0; }
 .span-tree summary { cursor: pointer; padding: .25rem .35rem; border-radius: .2rem; }
