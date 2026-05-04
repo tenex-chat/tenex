@@ -47,6 +47,10 @@ pub async fn discover_context<S: VectorStore>(
         vec![query.to_string()]
     };
     parent.record("queries.count", queries.len() as i64);
+    parent.record(
+        "queries.list",
+        serde_json::to_string(&queries).unwrap_or_default().as_str(),
+    );
 
     // Step 2: Search with each query and deduplicate by document ID.
     let mut by_id: HashMap<String, SearchResult> = HashMap::new();
@@ -54,8 +58,10 @@ pub async fn discover_context<S: VectorStore>(
     let search_span = info_span!(
         "rag.search",
         queries.count = queries.len() as i64,
+        queries.list = serde_json::to_string(&queries).unwrap_or_default().as_str(),
         results.raw = tracing::field::Empty,
         results.deduped = tracing::field::Empty,
+        results.ids = tracing::field::Empty,
     );
     async {
         for q in &queries {
@@ -80,6 +86,11 @@ pub async fn discover_context<S: VectorStore>(
         let s = Span::current();
         s.record("results.raw", raw_count as i64);
         s.record("results.deduped", by_id.len() as i64);
+        let ids: Vec<&str> = by_id.keys().map(|k| k.as_str()).collect();
+        s.record(
+            "results.ids",
+            serde_json::to_string(&ids).unwrap_or_default().as_str(),
+        );
     }
     .instrument(search_span)
     .await;
@@ -112,6 +123,23 @@ pub async fn discover_context<S: VectorStore>(
     if let Some(top) = filtered.first().map(|r| r.score) {
         parent.record("top_score", top as f64);
     }
+    let result_summaries: Vec<serde_json::Value> = filtered
+        .iter()
+        .map(|r| {
+            serde_json::json!({
+                "id": r.id,
+                "score": r.score,
+                "collection": r.collection,
+                "title": r.title,
+            })
+        })
+        .collect();
+    parent.record(
+        "results",
+        serde_json::to_string(&result_summaries)
+            .unwrap_or_default()
+            .as_str(),
+    );
 
     filtered
 }
@@ -134,6 +162,7 @@ async fn plan_queries(query: &str, resolved: &ResolvedModel) -> Vec<String> {
         gen_ai.request.model = resolved.model.as_str(),
         gen_ai.operation.name = "chat",
         timeout.secs = LLM_TIMEOUT_SECS as i64,
+        queries.generated = tracing::field::Empty,
         fallback.reason = tracing::field::Empty,
     );
     async {
@@ -145,7 +174,13 @@ async fn plan_queries(query: &str, resolved: &ResolvedModel) -> Vec<String> {
 
         match result {
             Ok(Ok(text)) => match parse_query_array(&text) {
-                Some(qs) => qs,
+                Some(qs) => {
+                    Span::current().record(
+                        "queries.generated",
+                        serde_json::to_string(&qs).unwrap_or_default().as_str(),
+                    );
+                    qs
+                }
                 None => {
                     Span::current().record("fallback.reason", "parse_error");
                     warn!(text = %text, "rag.plan: failed to parse query array");

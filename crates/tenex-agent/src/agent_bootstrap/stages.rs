@@ -371,10 +371,12 @@ pub(super) async fn proactive_context_block(
         query.word_count = tracing::field::Empty,
         planner.used = tracing::field::Empty,
         queries.count = tracing::field::Empty,
+        queries.list = tracing::field::Empty,
         raw_count = tracing::field::Empty,
         deduped_count = tracing::field::Empty,
         filtered_count = tracing::field::Empty,
         returned_count = tracing::field::Empty,
+        results = tracing::field::Empty,
         top_score = tracing::field::Empty,
         reranker.used = tracing::field::Empty,
     );
