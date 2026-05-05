@@ -66,7 +66,8 @@ impl RuntimeCtx<'_> {
 pub async fn run(
     cfg: Config,
     base_dir: PathBuf,
-    backend_keys: Keys,
+    client: Client,
+    backend_pubkey: PublicKey,
     supervisor: Supervisor,
     pending_boot_prefixes: Vec<String>,
     skipped_projects: Arc<SkippedProjects>,
@@ -88,19 +89,8 @@ pub async fn run(
     }
 
     let mut boot_authors = discovery_authors.clone();
-    let backend_pubkey = backend_keys.public_key();
     push_unique_pubkey(&mut boot_authors, backend_pubkey);
 
-    let client = Client::builder()
-        .signer(backend_keys)
-        .opts(ClientOptions::new().automatic_authentication(true))
-        .build();
-    for relay in &cfg.relays {
-        if let Err(e) = client.add_relay(relay.as_str()).await {
-            warn!(relay, error = %e, "add_relay failed");
-        }
-    }
-    client.connect().await;
     display::watching(cfg.relays.len());
 
     let discovery_filter = Filter::new()

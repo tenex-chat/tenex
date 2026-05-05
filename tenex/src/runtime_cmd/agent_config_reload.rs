@@ -289,6 +289,7 @@ pub(super) async fn republish_agent_config(shared: &RuntimeShared, agent_pubkey:
         &shared.backend_keys.public_key(),
         &shared.base_dir,
         &shared.client,
+        &shared.kind0_throttle,
         shared.backend_name.as_deref(),
     )
     .await;
@@ -307,6 +308,7 @@ async fn republish_all_agent_configs(shared: &RuntimeShared) {
             &shared.backend_keys.public_key(),
             &shared.base_dir,
             &shared.client,
+            &shared.kind0_throttle,
             shared.backend_name.as_deref(),
         )
         .await;
@@ -314,9 +316,11 @@ async fn republish_all_agent_configs(shared: &RuntimeShared) {
 }
 
 /// Startup-only: REQ kind:0 for every managed agent's pubkey, wait up to
-/// 5s for EOSE (or just take whatever is buffered if the relay times out),
-/// then publish a fresh profile for any agent that's missing or whose
-/// remote `created_at` is older than the local config-file mtime.
+/// 5s for EOSE (or take whatever is buffered if the relay times out), then
+/// for each agent build the candidate kind:0 and compare its canonical
+/// `(tags, content)` against the relay's stored event. Skip when they
+/// match — the agent's announced state is already in sync. Otherwise
+/// publish via the runtime's [`Kind0Throttle`].
 ///
 /// Failures during the REQ are logged and treated as "relay silent" —
 /// every agent then gets a publish, which is the safe direction.
@@ -357,23 +361,57 @@ pub(super) async fn startup_publish_missing_agent_configs(shared: &RuntimeShared
         }
     };
 
-    let needing =
-        agent_config_publish::agents_needing_publish(&snapshot.agents, &shared.base_dir, &existing);
-    if needing.is_empty() {
-        info!("startup: every agent already has a fresh kind:0 profile on relays");
+    let mut to_publish: Vec<String> = Vec::new();
+    let mut already_in_sync: usize = 0;
+    let backend_pubkey = shared.backend_keys.public_key();
+    for agent in &snapshot.agents {
+        let candidate = match agent_config_publish::build_event_for(
+            agent,
+            &backend_pubkey,
+            &shared.base_dir,
+            shared.backend_name.as_deref(),
+        )
+        .await
+        {
+            Ok(ev) => ev,
+            Err(error) => {
+                warn!(agent = %agent.slug, error = %error, "startup: kind:0 build failed; will retry on next reload");
+                continue;
+            }
+        };
+        let in_sync = existing
+            .get(&agent.pubkey)
+            .map(|relay_event| {
+                agent_config_publish::canonical_payload_equal(&candidate, relay_event)
+            })
+            .unwrap_or(false);
+        if in_sync {
+            already_in_sync += 1;
+        } else {
+            to_publish.push(agent.pubkey.clone());
+        }
+    }
+
+    if to_publish.is_empty() {
+        info!(
+            in_sync = already_in_sync,
+            "startup: every agent's kind:0 profile already in sync"
+        );
         return;
     }
     info!(
-        count = needing.len(),
-        "startup: publishing missing/stale kind:0 agent profiles"
+        count = to_publish.len(),
+        in_sync = already_in_sync,
+        "startup: publishing missing/changed kind:0 agent profiles"
     );
-    for pubkey in needing {
+    for pubkey in to_publish {
         agent_config_publish::publish_one(
             &pubkey,
             &snapshot.agents,
-            &shared.backend_keys.public_key(),
+            &backend_pubkey,
             &shared.base_dir,
             &shared.client,
+            &shared.kind0_throttle,
             shared.backend_name.as_deref(),
         )
         .await;

@@ -279,25 +279,24 @@ pub async fn build_agent_config_event(
     Ok(event)
 }
 
-/// Build and publish kind:0 profiles for every agent in the local registry.
+/// Build and publish kind:0 profiles for every agent in the local registry,
+/// reusing the daemon's shared `Client` and routing through the kind:0
+/// throttle so a freshly-booted backend with N agents trickles its
+/// announcements to the relay at &le; 2/second instead of bursting.
 ///
-/// Called at daemon startup. Each event is signed by the agent's own key;
-/// backend keys are used only for relay authentication. Best-effort: individual
-/// build or publish failures are logged as warnings and do not fail the call.
-pub async fn publish_all_agent_profiles(base_dir: &Path) -> Result<()> {
-    use anyhow::Context;
-    use nostr_sdk::{Client, ClientOptions};
-    use tenex_agent_registry::{agent_file_path, derive_agent_pubkey_from_nsec, read_agent_projection_file, AgentStorage};
+/// Each event is signed by the agent's own key; the shared `Client` is used
+/// only as the transport. Best-effort: individual build or publish failures
+/// are logged as warnings and do not fail the call.
+pub async fn publish_all_agent_profiles(
+    client: &nostr_sdk::Client,
+    throttle: &crate::nostr_pub::kind0_throttle::Kind0Throttle,
+    base_dir: &Path,
+) -> Result<()> {
+    use tenex_agent_registry::{
+        agent_file_path, derive_agent_pubkey_from_nsec, read_agent_projection_file, AgentStorage,
+    };
 
     let tenex_cfg = crate::store::tenex_config::TenexConfigDoc::load(base_dir)?;
-    let relays = {
-        let configured = tenex_cfg.relays();
-        if configured.is_empty() {
-            vec!["wss://relay.tenex.chat".to_string()]
-        } else {
-            configured
-        }
-    };
     let backend_name = tenex_cfg.backend_name();
 
     let backend_keys = tenex_backend_keys::ensure(base_dir)?;
@@ -312,7 +311,6 @@ pub async fn publish_all_agent_profiles(base_dir: &Path) -> Result<()> {
         return Ok(());
     }
 
-    let mut events: Vec<Event> = Vec::new();
     for (_file_pubkey, agent_doc) in &stored {
         let Some(nsec) = agent_doc.nsec() else {
             continue;
@@ -351,35 +349,26 @@ pub async fn publish_all_agent_profiles(base_dir: &Path) -> Result<()> {
             is_local,
             backend_name: None,
         };
-        match build_agent_config_event(&agent, &backend_pubkey, base_dir, &llms, backend_name.as_deref()).await {
-            Ok(event) => events.push(event),
-            Err(e) => tracing::warn!(agent = %agent.slug, error = %e, "kind:0 build failed; skipping"),
+        let event = match build_agent_config_event(
+            &agent,
+            &backend_pubkey,
+            base_dir,
+            &llms,
+            backend_name.as_deref(),
+        )
+        .await
+        {
+            Ok(e) => e,
+            Err(e) => {
+                tracing::warn!(agent = %agent.slug, error = %e, "kind:0 build failed; skipping");
+                continue;
+            }
+        };
+        if let Err(e) = throttle.publish(client, event).await {
+            tracing::warn!(agent = %agent.slug, error = %e, "kind:0 publish failed");
         }
     }
 
-    if events.is_empty() {
-        return Ok(());
-    }
-
-    let client = Client::builder()
-        .signer(backend_keys)
-        .opts(ClientOptions::new().automatic_authentication(true))
-        .build();
-    for relay in &relays {
-        client
-            .add_relay(relay.as_str())
-            .await
-            .with_context(|| format!("add_relay {relay}"))?;
-    }
-    client.connect().await;
-
-    for event in &events {
-        if let Err(e) = client.send_event(event).await {
-            tracing::warn!(error = %e, "kind:0 publish failed");
-        }
-    }
-
-    client.disconnect().await;
     Ok(())
 }
 

@@ -11,8 +11,10 @@
 //!
 //! Signed with the backend signer (see [`tenex_backend_keys::ensure`]).
 
-use anyhow::{anyhow, Context, Result};
-use nostr_sdk::{Client, ClientOptions, Event, EventBuilder, Keys, Kind, Tag};
+use std::path::Path;
+
+use anyhow::{anyhow, Result};
+use nostr_sdk::{Client, Event, EventBuilder, Keys, Kind, Tag};
 use tenex_protocol::nostr::kinds::BACKEND_HEARTBEAT;
 
 use crate::store::tenex_config::TenexConfigDoc;
@@ -32,39 +34,15 @@ pub fn build_heartbeat_event(keys: &Keys, whitelisted_pubkeys: &[String]) -> Res
     Ok(event)
 }
 
-fn resolve_relays(doc: &TenexConfigDoc) -> Vec<String> {
-    let configured = doc.relays();
-    if configured.is_empty() {
-        vec!["wss://relay.tenex.chat".to_string()]
-    } else {
-        configured
-    }
-}
-
-pub async fn publish_backend_heartbeat(base_dir: &std::path::Path) -> Result<()> {
+pub async fn publish_backend_heartbeat(client: &Client, base_dir: &Path) -> Result<()> {
     let doc = TenexConfigDoc::load(base_dir)?;
     let whitelisted = doc.whitelisted_pubkeys();
-    let relays = resolve_relays(&doc);
-
     let keys = tenex_backend_keys::ensure(base_dir)?;
     let event = build_heartbeat_event(&keys, &whitelisted)?;
-
-    let client = Client::builder()
-        .signer(keys)
-        .opts(ClientOptions::new().automatic_authentication(true))
-        .build();
-    for relay in &relays {
-        client
-            .add_relay(relay.as_str())
-            .await
-            .with_context(|| format!("add_relay {relay}"))?;
-    }
-    client.connect().await;
     client
         .send_event(&event)
         .await
-        .map_err(|e| anyhow!("send_event: {e}"))?;
-    client.disconnect().await;
+        .map_err(|e| anyhow!("send heartbeat: {e}"))?;
     Ok(())
 }
 

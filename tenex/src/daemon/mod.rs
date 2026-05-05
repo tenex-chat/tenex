@@ -19,7 +19,10 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use clap::Parser;
-use tracing::{error, info, Instrument};
+use nostr_sdk::{Client, ClientOptions};
+use tracing::{error, info, warn, Instrument};
+
+use crate::nostr_pub::kind0_throttle::Kind0Throttle;
 
 const COMPANION_DAEMONS: [&str; 4] = [
     "tenex-summarizer",
@@ -130,10 +133,32 @@ pub async fn run(args: DaemonArgs) -> Result<()> {
     if !args.boot.is_empty() {
         info!(prefixes = ?args.boot, "queued --boot prefixes; awaiting matching project discovery");
     }
+
+    // One shared `Client` for the entire daemon process: the ingest
+    // subscriptions in `nostr::run` and every outbound publish task below
+    // run on the same connection, so we don't burn a fresh ws handshake on
+    // each 30s heartbeat.
+    let client = Client::builder()
+        .signer(backend_keys.clone())
+        .opts(ClientOptions::new().automatic_authentication(true))
+        .build();
+    for relay in &cfg.relays {
+        if let Err(e) = client.add_relay(relay.as_str()).await {
+            warn!(relay, error = %e, "add_relay failed");
+        }
+    }
+    client.connect().await;
+
+    // Process-local kind:0 publish gate: dedupes equivalent payloads and
+    // rate-limits to &le; 2/s. Shared across the backend kind:0, the
+    // per-agent kind:0 batch, and any future kind:0 publishers.
+    let kind0_throttle = Arc::new(Kind0Throttle::default());
+
     let mut nostr_handle = nostr::run(
         cfg,
         base_dir.clone(),
-        backend_keys,
+        client.clone(),
+        backend_keys.public_key(),
         supervisor.clone(),
         args.boot,
         skipped_projects,
@@ -144,9 +169,15 @@ pub async fn run(args: DaemonArgs) -> Result<()> {
     // resolve its identity after a restart.
     {
         let base_dir_clone = base_dir.clone();
+        let client_clone = client.clone();
+        let throttle_clone = Arc::clone(&kind0_throttle);
         tokio::spawn(async move {
-            if let Err(e) =
-                crate::nostr_pub::backend_profile::publish_backend_profile(&base_dir_clone).await
+            if let Err(e) = crate::nostr_pub::backend_profile::publish_backend_profile(
+                &client_clone,
+                &throttle_clone,
+                &base_dir_clone,
+            )
+            .await
             {
                 tracing::warn!(error = %e, "startup kind:0 backend profile publish failed");
             }
@@ -158,9 +189,15 @@ pub async fn run(args: DaemonArgs) -> Result<()> {
     // restart, without waiting for the next per-project runtime boot.
     {
         let base_dir_clone = base_dir.clone();
+        let client_clone = client.clone();
+        let throttle_clone = Arc::clone(&kind0_throttle);
         tokio::spawn(async move {
-            if let Err(e) =
-                crate::nostr_pub::agent_config::publish_all_agent_profiles(&base_dir_clone).await
+            if let Err(e) = crate::nostr_pub::agent_config::publish_all_agent_profiles(
+                &client_clone,
+                &throttle_clone,
+                &base_dir_clone,
+            )
+            .await
             {
                 tracing::warn!(error = %e, "startup kind:0 agent profile republish failed");
             }
@@ -173,18 +210,23 @@ pub async fn run(args: DaemonArgs) -> Result<()> {
     // this installation.
     {
         let base_dir_clone = base_dir.clone();
+        let client_clone = client.clone();
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(std::time::Duration::from_secs(30));
             loop {
                 interval.tick().await;
                 if let Err(e) =
-                    crate::nostr_pub::backend_heartbeat::publish_backend_heartbeat(&base_dir_clone)
-                        .await
+                    crate::nostr_pub::backend_heartbeat::publish_backend_heartbeat(
+                        &client_clone,
+                        &base_dir_clone,
+                    )
+                    .await
                 {
                     tracing::warn!(error = %e, "24012 heartbeat publish failed");
                 }
                 if let Err(e) =
-                    crate::nostr_pub::installed_agents::publish_installed_agents_inventory(
+                    crate::nostr_pub::installed_agents::publish_installed_agents_inventory_with_client(
+                        &client_clone,
                         &base_dir_clone,
                     )
                     .await

@@ -48,6 +48,7 @@ use tenex_mcp::ProjectMcpRuntime;
 use tenex_project::{models::ProjectAgent, Agent, Project};
 
 use crate::daemon::config;
+use crate::nostr_pub::kind0_throttle::Kind0Throttle;
 use crate::nostr_pub::project_status;
 use crate::store::resolve_base_dir;
 
@@ -94,6 +95,11 @@ struct RuntimeShared {
     coordinator: Arc<Mutex<DispatchCoordinator>>,
     control: Arc<RuntimeControlState>,
     seen: Arc<Mutex<HashSet<EventId>>>,
+    /// Process-local kind:0 publish gate — dedupes equivalent payloads and
+    /// caps the publish rate. All per-agent kind:0 republishes (startup
+    /// catch-up, fs-watcher reload, agent add/remove) route through it so
+    /// reload storms can't trigger relay 429s.
+    kind0_throttle: Arc<Kind0Throttle>,
 }
 
 impl RuntimeShared {
@@ -343,6 +349,7 @@ pub async fn run(args: RuntimeArgs) -> Result<()> {
         coordinator,
         control: control.clone(),
         seen: Arc::new(Mutex::new(HashSet::new())),
+        kind0_throttle: Arc::new(Kind0Throttle::default()),
     });
     shared
         .mcp_subscriptions

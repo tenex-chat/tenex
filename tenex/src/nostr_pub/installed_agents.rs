@@ -141,6 +141,11 @@ fn resolve_relays(doc: &TenexConfigDoc) -> Vec<String> {
 /// Best-effort by design — TS catches the publish error and logs a warning
 /// (`AgentProvisioningService.ts:28-32`), continuing on. We mirror that:
 /// errors during publish surface but are not fatal in callers that catch.
+///
+/// Used by short-lived CLI commands (`tenex agent install`, `tenex onboard`,
+/// etc.). The long-running daemon goes through
+/// [`publish_installed_agents_inventory_with_client`] instead, reusing a
+/// shared `Client` to avoid burning a fresh ws handshake every 30 seconds.
 pub async fn publish_installed_agents_inventory(base_dir: &std::path::Path) -> Result<()> {
     let doc = TenexConfigDoc::load(base_dir)?;
     let whitelisted = doc.whitelisted_pubkeys();
@@ -167,6 +172,29 @@ pub async fn publish_installed_agents_inventory(base_dir: &std::path::Path) -> R
         .await
         .map_err(|e| anyhow!("send_event: {e}"))?;
     client.disconnect().await;
+    Ok(())
+}
+
+/// Same as [`publish_installed_agents_inventory`] but reuses the caller's
+/// `Client` — used by the daemon's heartbeat loop, where the inventory is
+/// republished every 30s for the lifetime of the process and a fresh
+/// `Client` per call would mean a fresh ws handshake per call.
+pub async fn publish_installed_agents_inventory_with_client(
+    client: &Client,
+    base_dir: &std::path::Path,
+) -> Result<()> {
+    let doc = TenexConfigDoc::load(base_dir)?;
+    let whitelisted = doc.whitelisted_pubkeys();
+
+    let keys = tenex_backend_keys::ensure(base_dir)?;
+    let agents = collect_inventory_entries(base_dir)?;
+    let available_models = collect_available_models(base_dir)?;
+    let event = build_inventory_event(&keys, &whitelisted, &agents, &available_models)?;
+
+    client
+        .send_event(&event)
+        .await
+        .map_err(|e| anyhow!("send inventory: {e}"))?;
     Ok(())
 }
 

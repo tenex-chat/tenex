@@ -12,10 +12,13 @@
 //! the string `"TENEX"` is used as a generic fallback so the backend always
 //! has a human-readable identity on Nostr.
 
-use anyhow::{anyhow, Context, Result};
-use nostr_sdk::{Client, ClientOptions, Event, EventBuilder, Keys, Kind};
+use std::path::Path;
+
+use anyhow::{anyhow, Result};
+use nostr_sdk::{Client, Event, EventBuilder, Keys, Kind};
 use serde_json::json;
 
+use crate::nostr_pub::kind0_throttle::Kind0Throttle;
 use crate::store::tenex_config::TenexConfigDoc;
 
 pub fn build_backend_profile_event(keys: &Keys, backend_name: Option<&str>) -> Result<Event> {
@@ -27,39 +30,19 @@ pub fn build_backend_profile_event(keys: &Keys, backend_name: Option<&str>) -> R
     Ok(event)
 }
 
-fn resolve_relays(doc: &TenexConfigDoc) -> Vec<String> {
-    let configured = doc.relays();
-    if configured.is_empty() {
-        vec!["wss://relay.tenex.chat".to_string()]
-    } else {
-        configured
-    }
-}
-
-pub async fn publish_backend_profile(base_dir: &std::path::Path) -> Result<()> {
+pub async fn publish_backend_profile(
+    client: &Client,
+    throttle: &Kind0Throttle,
+    base_dir: &Path,
+) -> Result<()> {
     let doc = TenexConfigDoc::load(base_dir)?;
-    let relays = resolve_relays(&doc);
     let backend_name = doc.backend_name();
-
     let keys = tenex_backend_keys::ensure(base_dir)?;
     let event = build_backend_profile_event(&keys, backend_name.as_deref())?;
-
-    let client = Client::builder()
-        .signer(keys)
-        .opts(ClientOptions::new().automatic_authentication(true))
-        .build();
-    for relay in &relays {
-        client
-            .add_relay(relay.as_str())
-            .await
-            .with_context(|| format!("add_relay {relay}"))?;
-    }
-    client.connect().await;
-    client
-        .send_event(&event)
+    throttle
+        .publish(client, event)
         .await
-        .map_err(|e| anyhow!("send_event: {e}"))?;
-    client.disconnect().await;
+        .map_err(|e| anyhow!("send backend profile: {e}"))?;
     Ok(())
 }
 

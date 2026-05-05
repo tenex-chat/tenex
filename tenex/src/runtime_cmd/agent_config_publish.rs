@@ -2,7 +2,7 @@
 //!
 //! The runtime owns three triggers for republishing per-agent profiles:
 //!
-//! 1. **Startup** — REQ all agent pubkeys, diff against fs mtimes, fill gaps.
+//! 1. **Startup** — REQ all agent pubkeys, compare canonical content, fill gaps.
 //! 2. **fs-watcher reload** — when `{base_dir}/agents/<pk>.json` mutates.
 //! 3. **agent add/remove** — bundled with `publish_project_status_now()`.
 //!
@@ -12,19 +12,19 @@
 //!
 //! Private to `runtime_cmd::mod` — the wrapper there fans these out from the
 //! `RuntimeShared` context. Pure decision logic
-//! ([`agents_needing_publish`], [`agent_pubkey_from_path`],
+//! ([`canonical_payload_equal`], [`agent_pubkey_from_path`],
 //! [`fold_existing_agent_configs`]) is testable without spinning up a relay
 //! or a live `Client`.
 //!
-//! Diff policy: if any kind:0 exists for an agent and its `created_at` is
-//! `>=` the agent config file's mtime, do nothing; otherwise (no event, or
-//! event older than the file) publish a fresh one. On mtime read failure we
-//! fail-open and republish — a redundant publish is cheaper than a silently
-//! stale view.
+//! Diff policy: at startup we build the candidate kind:0 for each agent and
+//! compare its canonical (tags, content) against the relay's most recent
+//! event for that pubkey. If they match exactly, the agent's view is already
+//! in sync and we skip the publish. Otherwise (no relay event, or content
+//! differs) we publish via the runtime's [`Kind0Throttle`].
 
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
-use std::time::{Duration, SystemTime};
+use std::path::Path;
+use std::time::Duration;
 
 use anyhow::{Context, Result};
 use nostr_sdk::{Event, Filter, Kind, PublicKey};
@@ -32,6 +32,7 @@ use tenex_project::Agent;
 use tracing::{info, warn};
 
 use crate::nostr_pub::agent_config::build_agent_config_event;
+use crate::nostr_pub::kind0_throttle::Kind0Throttle;
 use crate::store::llms::LlmsDoc;
 
 /// 5-second cap on the startup REQ. A slow or silent relay must not block
@@ -39,14 +40,9 @@ use crate::store::llms::LlmsDoc;
 /// and publish a fresh kind:0.
 pub(super) const STARTUP_FETCH_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// Path of the agent's on-disk config file.
-pub(super) fn agent_config_path(base_dir: &Path, agent_pubkey: &str) -> PathBuf {
-    base_dir.join("agents").join(format!("{agent_pubkey}.json"))
-}
-
-/// Inverse of [`agent_config_path`]: extract the agent pubkey from a path
-/// fired by the fs watcher (`<base_dir>/agents/<pubkey>.json`). Returns
-/// `None` if the path doesn't match the convention (e.g. tmpfile, swp file).
+/// Extract the agent pubkey from a path fired by the fs watcher
+/// (`<base_dir>/agents/<pubkey>.json`). Returns `None` if the path doesn't
+/// match the convention (e.g. tmpfile, swp file).
 pub(super) fn agent_pubkey_from_path(path: &Path) -> Option<String> {
     if path.extension().and_then(|e| e.to_str()) != Some("json") {
         return None;
@@ -54,65 +50,41 @@ pub(super) fn agent_pubkey_from_path(path: &Path) -> Option<String> {
     path.file_stem().and_then(|s| s.to_str()).map(str::to_owned)
 }
 
-/// Decide which agents need a fresh kind:0 profile published.
-///
-/// `existing` maps agent pubkey → most-recent received `created_at` (unix
-/// seconds) for that agent's kind:0 event on relays. Absent entries mean no
-/// kind:0 was received for that agent.
-///
-/// An agent is republished when:
-/// - no kind:0 exists for it on relays, **or**
-/// - the most recent one is older than the agent's config file mtime, **or**
-/// - the file mtime cannot be read (fail-open: prefer a redundant publish
-///   over a silently stale view).
-pub(super) fn agents_needing_publish(
-    agents: &[Agent],
-    base_dir: &Path,
-    existing: &HashMap<String, u64>,
-) -> Vec<String> {
-    let mut out = Vec::new();
-    for agent in agents {
-        let path = agent_config_path(base_dir, &agent.pubkey);
-        let needs = match (existing.get(&agent.pubkey), file_mtime_secs(&path)) {
-            (None, _) => true,
-            (Some(_), None) => true,
-            (Some(remote_ts), Some(file_ts)) => *remote_ts < file_ts,
-        };
-        if needs {
-            out.push(agent.pubkey.clone());
+/// Two kind:0 events carry equivalent state when their canonical
+/// `(tags, content)` projection matches. `created_at`, `id`, and `sig`
+/// are deliberately excluded — only the meaningful payload counts, so a
+/// republish that would only change the timestamp is suppressed.
+pub(super) fn canonical_payload_equal(a: &Event, b: &Event) -> bool {
+    if a.content != b.content {
+        return false;
+    }
+    if a.tags.len() != b.tags.len() {
+        return false;
+    }
+    for (ta, tb) in a.tags.iter().zip(b.tags.iter()) {
+        if ta.as_slice() != tb.as_slice() {
+            return false;
         }
     }
-    out
+    true
 }
 
-/// File mtime in unix seconds. `None` if the file is absent or its mtime
-/// can't be expressed as a unix timestamp.
-fn file_mtime_secs(path: &Path) -> Option<u64> {
-    let meta = std::fs::metadata(path).ok()?;
-    let modified = meta.modified().ok()?;
-    modified
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .ok()
-        .map(|d| d.as_secs())
-}
-
-/// Fold a stream of kind:0 events into a `pubkey → newest_created_at` map.
+/// Fold a stream of kind:0 events into a `pubkey → newest_event` map.
 ///
-/// Multiple events per author are reduced to the highest `created_at`. The
-/// caller has already constrained the filter to `kind=0, authors=...`,
-/// so we trust the input and don't re-validate.
-pub(super) fn fold_existing_agent_configs(events: &[Event]) -> HashMap<String, u64> {
-    let mut out: HashMap<String, u64> = HashMap::new();
+/// Multiple events per author are reduced to the one with the highest
+/// `created_at`. The caller has already constrained the filter to
+/// `kind=0, authors=...`, so we trust the input and don't re-validate.
+pub(super) fn fold_existing_agent_configs(events: &[Event]) -> HashMap<String, Event> {
+    let mut out: HashMap<String, Event> = HashMap::new();
     for ev in events {
-        let ts = ev.created_at.as_secs();
         let pk = ev.pubkey.to_hex();
         out.entry(pk)
             .and_modify(|existing| {
-                if ts > *existing {
-                    *existing = ts;
+                if ev.created_at > existing.created_at {
+                    *existing = ev.clone();
                 }
             })
-            .or_insert(ts);
+            .or_insert_with(|| ev.clone());
     }
     out
 }
@@ -139,38 +111,49 @@ pub(super) async fn build_event_for(
         .with_context(|| format!("building kind:0 for agent {}", agent.slug))
 }
 
-/// Build + send one kind:0 profile via the live relay client. Failures are logged
-/// (warn) and swallowed — publish failures must not poison higher-level
-/// reload paths.
+/// Build + send one kind:0 profile via the runtime's shared client and
+/// kind:0 throttle. Failures are logged (warn) and swallowed — publish
+/// failures must not poison higher-level reload paths.
 pub(super) async fn publish_one(
     agent_pubkey: &str,
     agents: &[Agent],
     backend_pubkey: &PublicKey,
     base_dir: &Path,
     client: &nostr_sdk::Client,
+    throttle: &Kind0Throttle,
     backend_name: Option<&str>,
 ) {
     let Some(agent) = agents.iter().find(|a| a.pubkey == agent_pubkey) else {
         warn!(agent_pubkey, "skip kind:0 publish: agent not in snapshot");
         return;
     };
-    match build_event_for(agent, backend_pubkey, base_dir, backend_name).await {
-        Ok(event) => match client.send_event(&event).await {
-            Ok(_) => info!(agent = %agent.slug, "published kind:0 agent profile"),
-            Err(error) => warn!(agent = %agent.slug, error = %error, "kind:0 publish failed"),
-        },
-        Err(error) => warn!(agent = %agent.slug, error = %error, "kind:0 build failed"),
+    let event = match build_event_for(agent, backend_pubkey, base_dir, backend_name).await {
+        Ok(e) => e,
+        Err(error) => {
+            warn!(agent = %agent.slug, error = %error, "kind:0 build failed");
+            return;
+        }
+    };
+    use crate::nostr_pub::kind0_throttle::PublishOutcome;
+    match throttle.publish(client, event).await {
+        Ok(PublishOutcome::Sent) => {
+            info!(agent = %agent.slug, "published kind:0 agent profile")
+        }
+        Ok(PublishOutcome::SkippedDuplicate) => {
+            info!(agent = %agent.slug, "kind:0 agent profile unchanged; skipped publish")
+        }
+        Err(error) => warn!(agent = %agent.slug, error = %error, "kind:0 publish failed"),
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
     use std::fs;
+    use std::path::PathBuf;
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    use nostr_sdk::{EventBuilder, Keys, ToBech32};
+    use nostr_sdk::{EventBuilder, Keys, Tag, ToBech32};
     use tenex_project::Agent;
 
     use super::*;
@@ -214,14 +197,9 @@ mod tests {
         (agent, keys)
     }
 
-    fn write_agent_config_file(base_dir: &Path, agent: &Agent) {
-        let path = agent_config_path(base_dir, &agent.pubkey);
-        fs::create_dir_all(path.parent().unwrap()).unwrap();
-        fs::write(&path, b"{}").unwrap();
-    }
-
-    fn make_kind0(keys: &Keys, created_at: u64) -> Event {
-        EventBuilder::new(Kind::Metadata, r#"{"name":"test"}"#)
+    fn make_kind0(keys: &Keys, content: &str, created_at: u64, tags: Vec<Tag>) -> Event {
+        EventBuilder::new(Kind::Metadata, content)
+            .tags(tags)
             .custom_created_at(nostr_sdk::Timestamp::from(created_at))
             .sign_with_keys(keys)
             .unwrap()
@@ -245,72 +223,45 @@ mod tests {
         let (_, keys_a) = agent_with_keys("a");
         let (_, keys_b) = agent_with_keys("b");
         let events = vec![
-            make_kind0(&keys_a, 100),
-            make_kind0(&keys_a, 200), // newer for A — must win
-            make_kind0(&keys_b, 50),
+            make_kind0(&keys_a, r#"{"name":"a"}"#, 100, vec![]),
+            make_kind0(&keys_a, r#"{"name":"a-new"}"#, 200, vec![]), // newer for A
+            make_kind0(&keys_b, r#"{"name":"b"}"#, 50, vec![]),
         ];
         let folded = fold_existing_agent_configs(&events);
-        assert_eq!(folded.get(&keys_a.public_key().to_hex()), Some(&200));
-        assert_eq!(folded.get(&keys_b.public_key().to_hex()), Some(&50));
+        let a = folded.get(&keys_a.public_key().to_hex()).expect("A present");
+        assert_eq!(a.created_at.as_secs(), 200);
+        assert_eq!(a.content, r#"{"name":"a-new"}"#);
+        let b = folded.get(&keys_b.public_key().to_hex()).expect("B present");
+        assert_eq!(b.created_at.as_secs(), 50);
     }
 
     #[test]
-    fn agents_needing_publish_returns_all_when_relay_silent() {
-        let base_dir = unique_temp("silent");
-        let (a, _) = agent_with_keys("a");
-        let (b, _) = agent_with_keys("b");
-        write_agent_config_file(&base_dir, &a);
-        write_agent_config_file(&base_dir, &b);
-        let agents = vec![a.clone(), b.clone()];
-
-        let needing = agents_needing_publish(&agents, &base_dir, &HashMap::new());
-        let set: std::collections::HashSet<_> = needing.into_iter().collect();
-        assert_eq!(set, std::collections::HashSet::from([a.pubkey, b.pubkey]));
-
-        fs::remove_dir_all(&base_dir).ok();
+    fn canonical_payload_equal_ignores_created_at() {
+        let (_, keys) = agent_with_keys("a");
+        let a = make_kind0(&keys, r#"{"name":"a"}"#, 100, vec![]);
+        let b = make_kind0(&keys, r#"{"name":"a"}"#, 999, vec![]);
+        assert!(canonical_payload_equal(&a, &b));
     }
 
     #[test]
-    fn agents_needing_publish_skips_when_relay_event_is_fresh() {
-        let base_dir = unique_temp("fresh");
-        let (a, _) = agent_with_keys("a");
-        write_agent_config_file(&base_dir, &a);
-        let agents = vec![a.clone()];
+    fn canonical_payload_equal_detects_content_diff() {
+        let (_, keys) = agent_with_keys("a");
+        let a = make_kind0(&keys, r#"{"name":"a"}"#, 100, vec![]);
+        let b = make_kind0(&keys, r#"{"name":"b"}"#, 100, vec![]);
+        assert!(!canonical_payload_equal(&a, &b));
+    }
 
-        let mtime = file_mtime_secs(&agent_config_path(&base_dir, &a.pubkey)).unwrap();
-        let mut existing = HashMap::new();
-        // Pretend the relay's kind:0 is 60 seconds newer than the file mtime.
-        existing.insert(a.pubkey.clone(), mtime + 60);
-
-        let needing = agents_needing_publish(&agents, &base_dir, &existing);
-        assert!(
-            needing.is_empty(),
-            "fresh remote event should suppress publish"
+    #[test]
+    fn canonical_payload_equal_detects_tag_diff() {
+        let (_, keys) = agent_with_keys("a");
+        let a = make_kind0(&keys, r#"{"name":"a"}"#, 100, vec![]);
+        let b = make_kind0(
+            &keys,
+            r#"{"name":"a"}"#,
+            100,
+            vec![Tag::parse(["slug", "x"]).unwrap()],
         );
-
-        fs::remove_dir_all(&base_dir).ok();
-    }
-
-    #[test]
-    fn agents_needing_publish_picks_only_stale_when_mixed() {
-        // The "stale relay" scenario: two agents, one fresh, one stale.
-        let base_dir = unique_temp("mixed");
-        let (a, _) = agent_with_keys("fresh");
-        let (b, _) = agent_with_keys("stale");
-        write_agent_config_file(&base_dir, &a);
-        write_agent_config_file(&base_dir, &b);
-        let agents = vec![a.clone(), b.clone()];
-
-        let mtime_a = file_mtime_secs(&agent_config_path(&base_dir, &a.pubkey)).unwrap();
-        let mtime_b = file_mtime_secs(&agent_config_path(&base_dir, &b.pubkey)).unwrap();
-        let mut existing = HashMap::new();
-        existing.insert(a.pubkey.clone(), mtime_a + 60); // newer than file
-        existing.insert(b.pubkey.clone(), mtime_b.saturating_sub(60)); // stale
-
-        let needing = agents_needing_publish(&agents, &base_dir, &existing);
-        assert_eq!(needing, vec![b.pubkey]);
-
-        fs::remove_dir_all(&base_dir).ok();
+        assert!(!canonical_payload_equal(&a, &b));
     }
 
     /// build_event_for is the per-agent build step that publish_one invokes
@@ -329,7 +280,6 @@ mod tests {
         .unwrap();
 
         let (agent, _keys) = agent_with_keys("worker");
-        write_agent_config_file(&base_dir, &agent);
 
         let backend_keys = Keys::generate();
         let backend_pk = backend_keys.public_key();
