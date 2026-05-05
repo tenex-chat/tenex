@@ -24,6 +24,7 @@ fn make_view(pubkey: &str, fetched_at: i64) -> IdentityView {
         lud16: None,
         slug: None,
         use_criteria: None,
+        backend_name: None,
         event_id: Some("abc123".to_string()),
         created_at: Some(1_700_000_000),
         fetched_at,
@@ -82,6 +83,32 @@ fn stale_row_returns_none_from_get_cached() {
 }
 
 #[test]
+fn upsert_round_trips_tenex_extension_fields() {
+    // Guards against silent column drift in the cache SQL: the kind:0 metadata
+    // (display_name/name/nip05/...) and the TENEX-agent extension fields
+    // (slug, use_criteria, backend_name) must all survive a full
+    // upsert → get_cached round-trip. A column missing from either the INSERT
+    // or SELECT lists, or a positional mismatch in row_to_view, would corrupt
+    // these values silently — only a behavioral test catches it.
+    let tmp = TempDir::new().unwrap();
+    let path = tmp.path().join("identity-cache.db");
+    let cache = IdentityCache::open(&path).unwrap();
+
+    let pk = "0000000000000000000000000000000000000000000000000000000000000004";
+    let mut view = make_view(pk, now_secs());
+    view.slug = Some("alice-bot".to_string());
+    view.use_criteria = Some("delegate when X".to_string());
+    view.backend_name = Some("backend-prod-1".to_string());
+
+    cache.upsert(&view).unwrap();
+
+    let fetched = cache.get_cached(pk).unwrap().expect("should be present");
+    assert_eq!(fetched.slug.as_deref(), Some("alice-bot"));
+    assert_eq!(fetched.use_criteria.as_deref(), Some("delegate when X"));
+    assert_eq!(fetched.backend_name.as_deref(), Some("backend-prod-1"));
+}
+
+#[test]
 fn upsert_overwrites_existing_row() {
     let tmp = TempDir::new().unwrap();
     let path = tmp.path().join("identity-cache.db");
@@ -114,6 +141,7 @@ fn best_name_priority() {
         lud16: None,
         slug: None,
         use_criteria: None,
+        backend_name: None,
         event_id: None,
         created_at: None,
         fetched_at: now_secs(),
