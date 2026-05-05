@@ -19,7 +19,10 @@
 //! - `codex`:       hardcoded model list + effort select (no IPC yet).
 //! - `anthropic`, `openai`: models.dev disk-cache picker; text-input when
 //!   the cache is absent or returns no models for that provider.
-//! - `openrouter`, `ollama`, others: text-input with provider-specific help.
+//! - `ollama`: live `GET <base>/api/tags` picker against the configured
+//!   Ollama host, with a "Custom model…" entry that drops to text input.
+//!   Falls through to text input when the host is unreachable.
+//! - `openrouter`, others: text-input with provider-specific help.
 
 use std::path::Path;
 
@@ -265,8 +268,151 @@ fn select_models_dev_model(provider: &str, base_dir: &Path) -> Result<Option<(St
     }
 }
 
-/// Prompt for a model ID via free-text input (used for openrouter, ollama,
-/// and any provider that doesn't have a structured picker).
+/// Resolve the Ollama base URL using the same priority as
+/// `tenex-llm-config::resolver::resolve_base_url` for the `ollama` provider:
+/// `OLLAMA_API_BASE_URL` env → `providers.json` `baseUrl` → URL stored in
+/// `apiKey` (legacy auto-detect shape) → `http://localhost:11434`.
+fn resolve_ollama_base_url(providers_doc: &ProvidersDoc) -> String {
+    if let Ok(v) = std::env::var("OLLAMA_API_BASE_URL") {
+        if !v.is_empty() {
+            return v;
+        }
+    }
+    if let Some(entry) = providers_doc.get("ollama") {
+        if let Some(b) = entry.raw().get("baseUrl").and_then(Value::as_str) {
+            if !b.is_empty() && b != "none" && b != "local" {
+                return b.to_owned();
+            }
+        }
+        if let Some(k) = entry.api_keys().into_iter().next() {
+            if k.starts_with("http://") || k.starts_with("https://") {
+                return k;
+            }
+        }
+    }
+    "http://localhost:11434".to_owned()
+}
+
+#[derive(serde::Deserialize)]
+struct OllamaTagsResponse {
+    #[serde(default)]
+    models: Vec<OllamaTag>,
+}
+
+#[derive(serde::Deserialize)]
+struct OllamaTag {
+    name: String,
+    #[serde(default)]
+    size: Option<u64>,
+    #[serde(default)]
+    details: Option<OllamaTagDetails>,
+}
+
+#[derive(serde::Deserialize)]
+struct OllamaTagDetails {
+    #[serde(default)]
+    parameter_size: Option<String>,
+    #[serde(default)]
+    quantization_level: Option<String>,
+}
+
+fn fetch_ollama_models(base_url: &str) -> Result<Vec<OllamaTag>> {
+    let url = format!("{}/api/tags", base_url.trim_end_matches('/'));
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+        .map_err(|e| anyhow!("http client: {e}"))?;
+    let resp = client
+        .get(&url)
+        .send()
+        .map_err(|e| anyhow!("{e}"))?
+        .error_for_status()
+        .map_err(|e| anyhow!("{e}"))?;
+    let body: OllamaTagsResponse = resp.json().map_err(|e| anyhow!("decode /api/tags: {e}"))?;
+    Ok(body.models)
+}
+
+fn format_ollama_label(tag: &OllamaTag) -> String {
+    let dim = |s: &str| crate::tui::theme::chalk_dim(s);
+    let mut meta_parts: Vec<String> = Vec::new();
+    if let Some(d) = tag.details.as_ref() {
+        if let Some(p) = d.parameter_size.as_deref().filter(|s| !s.is_empty()) {
+            meta_parts.push(p.to_owned());
+        }
+        if let Some(q) = d.quantization_level.as_deref().filter(|s| !s.is_empty()) {
+            meta_parts.push(q.to_owned());
+        }
+    }
+    if let Some(bytes) = tag.size {
+        meta_parts.push(human_size(bytes));
+    }
+    if meta_parts.is_empty() {
+        tag.name.clone()
+    } else {
+        format!("{} {}", tag.name, dim(&format!("— {}", meta_parts.join(", "))))
+    }
+}
+
+fn human_size(bytes: u64) -> String {
+    const KB: f64 = 1024.0;
+    const MB: f64 = 1024.0 * KB;
+    const GB: f64 = 1024.0 * MB;
+    let b = bytes as f64;
+    if b >= GB {
+        format!("{:.1} GB", b / GB)
+    } else if b >= MB {
+        format!("{:.0} MB", b / MB)
+    } else if b >= KB {
+        format!("{:.0} KB", b / KB)
+    } else {
+        format!("{bytes} B")
+    }
+}
+
+/// Live picker against `<ollama_base>/api/tags`. Falls back to text input
+/// when the host is unreachable, returns no models, or the user picks
+/// the appended "Custom model…" entry.
+fn select_ollama_model(providers_doc: &ProvidersDoc) -> Result<Option<(String, String)>> {
+    const CUSTOM_SENTINEL: &str = "\0custom";
+    let base_url = resolve_ollama_base_url(providers_doc);
+    match fetch_ollama_models(&base_url) {
+        Ok(models) if !models.is_empty() => {
+            let mut choices: Vec<ModelChoice> = models
+                .iter()
+                .map(|t| ModelChoice {
+                    id: t.name.clone(),
+                    label: format_ollama_label(t),
+                })
+                .collect();
+            choices.push(ModelChoice {
+                id: CUSTOM_SENTINEL.to_owned(),
+                label: "Custom model…".to_owned(),
+            });
+            let prompt_msg = format!("Select Ollama model ({base_url}):");
+            match prompts::select(&prompt_msg, choices).prompt() {
+                Ok(c) if c.id == CUSTOM_SENTINEL => select_model_text_input("ollama"),
+                Ok(c) => Ok(Some((c.id.clone(), c.id))),
+                Err(InquireError::OperationCanceled | InquireError::OperationInterrupted) => {
+                    Ok(None)
+                }
+                Err(e) => Err(anyhow!("model select: {e}")),
+            }
+        }
+        Ok(_) => {
+            display::hint(&format!(
+                "Ollama at {base_url} returned no models. Pull one with `ollama pull <name>` first."
+            ));
+            select_model_text_input("ollama")
+        }
+        Err(e) => {
+            display::hint(&format!("Could not reach Ollama at {base_url}: {e}"));
+            select_model_text_input("ollama")
+        }
+    }
+}
+
+/// Prompt for a model ID via free-text input (used for openrouter, ollama
+/// fallback, and any provider that doesn't have a structured picker).
 fn select_model_text_input(provider: &str) -> Result<Option<(String, String)>> {
     use crate::store::models_dev::default_model_for_provider;
     let default = default_model_for_provider(provider);
@@ -335,6 +481,10 @@ pub fn run(base_dir: &Path) -> Result<()> {
             None => return Ok(()),
         },
         "anthropic" | "openai" => match select_models_dev_model(&provider, base_dir)? {
+            Some((id, disp)) => (id, disp, None),
+            None => return Ok(()),
+        },
+        "ollama" => match select_ollama_model(&providers_doc)? {
             Some((id, disp)) => (id, disp, None),
             None => return Ok(()),
         },
