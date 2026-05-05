@@ -88,10 +88,9 @@ Learn more: https://skills.sh/vercel-labs/agent-skills/react-best-practices
 
 Before running `npx skills add`, ask which scope the user wants. The four user-installable scopes and full rationale are in [`references/creating-skills.md`](references/creating-skills.md). Quick summary:
 
-- **Just me, this project** → `$PROJECT_BASE/.agents/<your-short-pubkey>/skills`
-- **Just me, all projects** → `$AGENT_HOME/skills`
-- **Everyone on this project** → `$PROJECT_BASE/.agents/skills`
-- **Every agent on this machine** → `$HOME/.agents/skills` (rarely the right choice — confirm explicitly)
+- **Just me, all projects** (Agent) → `$AGENT_HOME/skills`
+- **Everyone on this project** (Project) → `$PROJECT_BASE/.agents/skills`
+- **Every agent on this machine** (Shared) → `$HOME/.agents/skills` (rarely the right choice — confirm explicitly)
 
 > Never install to `$TENEX_BASE_DIR/skills/built-in` — that scope is reserved for skills shipped with TENEX itself.
 

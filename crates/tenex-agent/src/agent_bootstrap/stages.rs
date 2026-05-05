@@ -188,6 +188,10 @@ pub(super) struct SkillContextInputs<'a> {
     pub conversation_id: &'a str,
     pub agent_default_skills: Option<Vec<String>>,
     pub envelope_skills: Vec<String>,
+    /// Static category from agent config — used to auto-enable category-scoped
+    /// skills (e.g. `workflows` for orchestrators/principals) without waiting
+    /// for the async fallback resolver.
+    pub agent_category: Option<tenex_supervision::types::AgentCategory>,
 }
 
 /// Outputs of [`build_skill_context`].
@@ -231,6 +235,18 @@ pub(super) fn build_skill_context(inputs: SkillContextInputs<'_>) -> SkillContex
         if !all_skill_ids.contains(id) {
             all_skill_ids.push(id.clone());
         }
+    }
+
+    // Category-scoped auto-enable: orchestrators and principals always get the
+    // `workflows` skill so they can write down and dispatch the multi-step
+    // procedures their base prompts describe, without re-deriving them each turn.
+    if matches!(
+        inputs.agent_category,
+        Some(tenex_supervision::types::AgentCategory::Orchestrator)
+            | Some(tenex_supervision::types::AgentCategory::Principal)
+    ) && !all_skill_ids.iter().any(|id| id == "workflows")
+    {
+        all_skill_ids.push("workflows".to_string());
     }
 
     let preloaded_skills = crate::skills::fetch_skills(&all_skill_ids, &skill_ctx);

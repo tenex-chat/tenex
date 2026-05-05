@@ -44,3 +44,4 @@ tenex-agent-registry = { path = "../crates/tenex-agent-registry" }
 tenex-protocol = { path = "../crates/tenex-protocol" }
 tenex-firewall = { path = "../crates/tenex-firewall" }
 tenex-backend-keys = { path = "../crates/tenex-backend-keys" }
+tenex-builtin-skills = { path = "../crates/tenex-builtin-skills" }

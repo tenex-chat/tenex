@@ -72,6 +72,8 @@ pub async fn run(args: DaemonArgs) -> Result<()> {
     let backend_keys =
         tenex_backend_keys::ensure(&base_dir).context("loading daemon signer")?;
 
+    tenex_builtin_skills::ensure(&base_dir).context("installing built-in skills")?;
+
     let supervisor = supervisor::Supervisor::new(default_boot_argv(), base_dir.clone());
 
     // Bootstrap the identity daemon. Runtime code relies on this service for
@@ -122,6 +124,20 @@ pub async fn run(args: DaemonArgs) -> Result<()> {
         args.boot,
     )
     .await?;
+
+    // Republish kind:0 profiles for all locally-managed agents at startup so
+    // Nostr clients always see up-to-date agent identities after a daemon
+    // restart, without waiting for the next per-project runtime boot.
+    {
+        let base_dir_clone = base_dir.clone();
+        tokio::spawn(async move {
+            if let Err(e) =
+                crate::nostr_pub::agent_config::publish_all_agent_profiles(&base_dir_clone).await
+            {
+                tracing::warn!(error = %e, "startup kind:0 agent profile republish failed");
+            }
+        });
+    }
 
     // Publish the backend heartbeat (kind:24012) and installed-agent inventory
     // (kind:24011) immediately and then every 30 seconds so Nostr clients see

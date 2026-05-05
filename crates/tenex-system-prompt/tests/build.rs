@@ -30,6 +30,7 @@ fn minimal_input<'a>(home: &'a HomeDirectoryInfo<'a>) -> BuildSystemPromptInput<
         teams_fragment: "",
         home,
         preloaded_skills_block: None,
+        workflows_fragment: None,
         telegram_channel_bindings: &[],
         telegram_chat_context: None,
 
@@ -96,6 +97,7 @@ fn identical_inputs_produce_byte_identical_output() {
         teams_fragment: "",
         home: &home_a,
         preloaded_skills_block: None,
+        workflows_fragment: None,
         telegram_channel_bindings: &[],
         telegram_chat_context: None,
 
@@ -120,6 +122,7 @@ fn identical_inputs_produce_byte_identical_output() {
         teams_fragment: "",
         home: &home_b,
         preloaded_skills_block: None,
+        workflows_fragment: None,
         telegram_channel_bindings: &[],
         telegram_chat_context: None,
 
@@ -151,6 +154,7 @@ fn orchestrator_category_skips_env_vars() {
         teams_fragment: "",
         home: &home,
         preloaded_skills_block: None,
+        workflows_fragment: None,
         telegram_channel_bindings: &[],
         telegram_chat_context: None,
 
@@ -182,6 +186,7 @@ fn includes_root_agents_md_when_supplied() {
         teams_fragment: "",
         home: &home,
         preloaded_skills_block: None,
+        workflows_fragment: None,
         telegram_channel_bindings: &[],
         telegram_chat_context: None,
 
@@ -212,6 +217,7 @@ fn project_context_renders_project_base_relative_cwd() {
         teams_fragment: "",
         home: &home,
         preloaded_skills_block: None,
+        workflows_fragment: None,
         telegram_channel_bindings: &[],
         telegram_chat_context: None,
 
@@ -243,6 +249,7 @@ fn project_context_renders_exact_root_as_project_base() {
         teams_fragment: "",
         home: &home,
         preloaded_skills_block: None,
+        workflows_fragment: None,
         telegram_channel_bindings: &[],
         telegram_chat_context: None,
 
@@ -277,6 +284,7 @@ fn project_context_does_not_rewrite_sibling_path() {
         teams_fragment: "",
         home: &home,
         preloaded_skills_block: None,
+        workflows_fragment: None,
         telegram_channel_bindings: &[],
         telegram_chat_context: None,
 
@@ -308,6 +316,7 @@ fn project_context_renders_project_id_and_conversation_id() {
         teams_fragment: "",
         home: &home,
         preloaded_skills_block: None,
+        workflows_fragment: None,
         telegram_channel_bindings: &[],
         telegram_chat_context: None,
 
@@ -347,6 +356,7 @@ fn project_context_renders_telegram_channel_bindings() {
         teams_fragment: "",
         home: &home,
         preloaded_skills_block: None,
+        workflows_fragment: None,
         telegram_channel_bindings: &bindings,
         telegram_chat_context: None,
 

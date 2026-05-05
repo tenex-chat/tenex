@@ -18,6 +18,7 @@ use super::change_model::ChangeModelTool;
 use super::conversation_get::ConversationGetTool;
 use super::conversation_list::ConversationListTool;
 use super::conversation_search::ConversationSearchTool;
+use super::create_workflow::CreateWorkflowTool;
 use super::delegate::DelegateTool;
 use super::delegate_crossproject::DelegateCrossProjectTool;
 use super::delegate_followup::DelegateFollowupTool;
@@ -38,6 +39,7 @@ use super::rag_add_documents::RagAddDocumentsTool;
 use super::rag_search::RagSearchTool;
 use super::recording::{RecordingTool, ToolRecorder};
 use super::report_publish::ReportPublishTool;
+use super::run_workflow::RunWorkflowTool;
 use super::schedule_task::ScheduleTaskTool;
 use super::self_delegate::SelfDelegateTool;
 use super::send_message::SendMessageTool;
@@ -396,6 +398,28 @@ impl ToolSet {
                 &mut tools,
                 &recorder,
                 Box::new(AgentsWriteTool::new(self.base_dir.clone())),
+            );
+        }
+
+        if self.granted_tools.contains("create_workflow") {
+            self.push_tool(
+                &mut tools,
+                &recorder,
+                Box::new(CreateWorkflowTool::new(self.agent_home.clone())),
+            );
+        }
+
+        if self.granted_tools.contains("run_workflow") {
+            self.push_tool(
+                &mut tools,
+                &recorder,
+                Box::new(RunWorkflowTool::new(
+                    self.agent_home.clone(),
+                    self.summarization_model.clone(),
+                    self.todos.clone(),
+                    self.agent_pubkey.clone(),
+                    self.conversation_id.clone(),
+                )),
             );
         }
 

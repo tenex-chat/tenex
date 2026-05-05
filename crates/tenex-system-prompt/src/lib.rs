@@ -46,6 +46,10 @@ pub struct BuildSystemPromptInput<'a> {
     pub teams_fragment: &'a str,
     pub home: &'a HomeDirectoryInfo<'a>,
     pub preloaded_skills_block: Option<&'a str>,
+    /// Pre-rendered `<available-workflows>` block listing the agent's
+    /// authored workflows (`$AGENT_HOME/workflows/*.yaml`). `None` when the
+    /// agent has no workflow files.
+    pub workflows_fragment: Option<&'a str>,
     /// Telegram channel bindings for this agent in the current project.
     pub telegram_channel_bindings: &'a [TelegramChannelBinding],
     /// Telegram chat context for Fragment 33. `None` when the triggering event
@@ -82,6 +86,7 @@ pub fn build_system_prompt(input: BuildSystemPromptInput<'_>) -> String {
         teams_fragment,
         home,
         preloaded_skills_block,
+        workflows_fragment,
         telegram_channel_bindings,
         telegram_chat_context,
         scheduled_tasks,
@@ -136,6 +141,11 @@ into your behavior naturally, but never surface the reminder itself in your resp
 
     // Preloaded skills (from agent config default.skills + self_applied_skills)
     if let Some(block) = preloaded_skills_block {
+        parts.push(block.to_string());
+    }
+
+    // Available workflows authored by this agent.
+    if let Some(block) = workflows_fragment {
         parts.push(block.to_string());
     }
 
@@ -387,6 +397,7 @@ mod tests {
             teams_fragment: "",
             home: home_info,
             preloaded_skills_block: None,
+            workflows_fragment: None,
             telegram_channel_bindings: &[],
             telegram_chat_context: None,
             scheduled_tasks: &[],

@@ -1,0 +1,12 @@
+[package]
+name = "tenex-builtin-skills"
+version = "0.1.0"
+edition = "2021"
+description = "Embeds TENEX built-in skills and installs them into the base directory at daemon startup."
+
+[lib]
+name = "tenex_builtin_skills"
+path = "src/lib.rs"
+
+[dependencies]
+anyhow = "1"

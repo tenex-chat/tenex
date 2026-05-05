@@ -35,7 +35,7 @@ use crate::shell_task_reminder::render_active_shell_tasks_reminder;
 use crate::tools::{
     self, RagAddDocumentsTool, RagSearchTool, SkillListTool, SkillsSetTool, TodoItem, ToolSet,
 };
-use crate::{escalation, home, stdio_home};
+use crate::{escalation, home, stdio_home, workflows};
 
 /// All state assembled by [`build`] that the turn loop subsequently reads or
 /// mutates. Loop-local working values (`current_message`, accumulated
@@ -238,6 +238,9 @@ pub(crate) async fn build(
         injected_files: &injected_files,
     };
 
+    let agent_workflows = workflows::list_workflows(&agent_home);
+    let workflows_fragment = workflows::render_workflows_fragment(&agent_workflows);
+
     // Resolve skill context: persisted self-applied skills, always-on config
     // skills, preloaded-skills system-prompt block, and skill-granted tools.
     let stages::SkillContextOutputs {
@@ -255,6 +258,10 @@ pub(crate) async fn build(
         conversation_id: &conversation_id,
         agent_default_skills: agent_config.default.as_ref().and_then(|d| d.skills.clone()),
         envelope_skills: envelope.metadata.skills.clone(),
+        agent_category: agent_config
+            .category
+            .as_deref()
+            .and_then(|s| s.parse().ok()),
     });
 
     // Shared self-applied skills state (pre-seeded from persistence; updated by skills_set tool).
@@ -295,6 +302,7 @@ pub(crate) async fn build(
         home: &home_info,
         root_agents_md: root_agents_md.as_deref(),
         preloaded_skills_block: preloaded_skills_block.as_deref(),
+        workflows_fragment: workflows_fragment.as_deref(),
         telegram_channel_bindings: &telegram_channel_bindings,
         telegram_chat_context,
         scheduled_tasks: &scheduled_tasks_for_prompt,

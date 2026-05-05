@@ -140,6 +140,117 @@ pub fn format_todos_reminder(todos: &[TodoItem]) -> String {
     lines.join("\n")
 }
 
+/// Apply a `todo_write` invocation to the shared todo list. Encapsulates
+/// validation (skip_reason, duplicate IDs, removal protection) and the
+/// preservation of `created_at` / `description` for items that already
+/// existed. Used by both the `todo_write` tool and `run_workflow`, which
+/// activates a freshly-generated checklist with the same semantics.
+pub fn apply_todo_write(
+    todos: &Arc<Mutex<Vec<TodoItem>>>,
+    args: TodoWriteArgs,
+) -> Result<String, TodoError> {
+    let force = args.force.unwrap_or(false);
+    let now = now_ms();
+
+    // Validate skip_reason presence
+    for item in &args.todos {
+        if item.status == TodoStatus::Skipped && item.skip_reason.is_none() {
+            return Ok(format!(
+                "Error: skip_reason is required when status='skipped' (item: {:?})",
+                item.id.as_deref().unwrap_or(&item.title)
+            ));
+        }
+    }
+
+    // Validate no duplicate IDs in input
+    let mut seen_ids = std::collections::HashSet::new();
+    for item in &args.todos {
+        let id = item
+            .id
+            .clone()
+            .unwrap_or_else(|| slug_from_title(&item.title));
+        if !seen_ids.insert(id.clone()) {
+            return Ok(format!("Error: duplicate id '{id}' in input"));
+        }
+    }
+
+    let mut todos = todos
+        .lock()
+        .map_err(|_| TodoError("Failed to acquire todo lock".to_string()))?;
+
+    // Safety check: detect removals
+    if !force {
+        let new_ids: std::collections::HashSet<String> = args
+            .todos
+            .iter()
+            .map(|t| t.id.clone().unwrap_or_else(|| slug_from_title(&t.title)))
+            .collect();
+        let missing: Vec<&str> = todos
+            .iter()
+            .filter(|t| !new_ids.contains(&t.id))
+            .map(|t| t.id.as_str())
+            .collect();
+        if !missing.is_empty() {
+            return Ok(format!(
+                "Error: {} existing item(s) would be removed: {}. Use force=true to allow.",
+                missing.len(),
+                missing.join(", ")
+            ));
+        }
+    }
+
+    // Build new list, preserving created_at/description from existing items
+    let new_todos: Vec<TodoItem> = args
+        .todos
+        .into_iter()
+        .map(|item| {
+            let id = item.id.unwrap_or_else(|| slug_from_title(&item.title));
+            let existing = todos.iter().find(|t| t.id == id);
+            let created_at = existing.map_or(now, |e| e.created_at);
+            let description = item
+                .description
+                .or_else(|| existing.map(|e| e.description.clone()))
+                .unwrap_or_default();
+            let status_changed = existing.is_none_or(|e| e.status != item.status);
+            let updated_at = if status_changed {
+                now
+            } else {
+                existing.map_or(now, |e| e.updated_at)
+            };
+            TodoItem {
+                id,
+                title: item.title,
+                description,
+                status: item.status,
+                skip_reason: item.skip_reason,
+                created_at,
+                updated_at,
+            }
+        })
+        .collect();
+
+    let count = new_todos.len();
+    *todos = new_todos;
+
+    let summary: Vec<String> = todos
+        .iter()
+        .map(|t| {
+            let status_icon = match t.status {
+                TodoStatus::Pending => "○",
+                TodoStatus::InProgress => "◉",
+                TodoStatus::Done => "✓",
+                TodoStatus::Skipped => "⊘",
+            };
+            format!("{status_icon} [{}] {}", t.id, t.title)
+        })
+        .collect();
+
+    Ok(format!(
+        "Todo list updated ({count} items):\n{}",
+        summary.join("\n")
+    ))
+}
+
 impl Tool for TodoWriteTool {
     const NAME: &'static str = "todo_write";
     type Error = TodoError;
@@ -186,106 +297,6 @@ impl Tool for TodoWriteTool {
     }
 
     async fn call(&self, args: TodoWriteArgs) -> Result<Self::Output, TodoError> {
-        let force = args.force.unwrap_or(false);
-        let now = now_ms();
-
-        // Validate skip_reason presence
-        for item in &args.todos {
-            if item.status == TodoStatus::Skipped && item.skip_reason.is_none() {
-                return Ok(format!(
-                    "Error: skip_reason is required when status='skipped' (item: {:?})",
-                    item.id.as_deref().unwrap_or(&item.title)
-                ));
-            }
-        }
-
-        // Validate no duplicate IDs in input
-        let mut seen_ids = std::collections::HashSet::new();
-        for item in &args.todos {
-            let id = item
-                .id
-                .clone()
-                .unwrap_or_else(|| slug_from_title(&item.title));
-            if !seen_ids.insert(id.clone()) {
-                return Ok(format!("Error: duplicate id '{id}' in input"));
-            }
-        }
-
-        let mut todos = self
-            .todos
-            .lock()
-            .map_err(|_| TodoError("Failed to acquire todo lock".to_string()))?;
-
-        // Safety check: detect removals
-        if !force {
-            let new_ids: std::collections::HashSet<String> = args
-                .todos
-                .iter()
-                .map(|t| t.id.clone().unwrap_or_else(|| slug_from_title(&t.title)))
-                .collect();
-            let missing: Vec<&str> = todos
-                .iter()
-                .filter(|t| !new_ids.contains(&t.id))
-                .map(|t| t.id.as_str())
-                .collect();
-            if !missing.is_empty() {
-                return Ok(format!(
-                    "Error: {} existing item(s) would be removed: {}. Use force=true to allow.",
-                    missing.len(),
-                    missing.join(", ")
-                ));
-            }
-        }
-
-        // Build new list, preserving created_at/description from existing items
-        let new_todos: Vec<TodoItem> = args
-            .todos
-            .into_iter()
-            .map(|item| {
-                let id = item.id.unwrap_or_else(|| slug_from_title(&item.title));
-                let existing = todos.iter().find(|t| t.id == id);
-                let created_at = existing.map_or(now, |e| e.created_at);
-                let description = item
-                    .description
-                    .or_else(|| existing.map(|e| e.description.clone()))
-                    .unwrap_or_default();
-                let status_changed = existing.is_none_or(|e| e.status != item.status);
-                let updated_at = if status_changed {
-                    now
-                } else {
-                    existing.map_or(now, |e| e.updated_at)
-                };
-                TodoItem {
-                    id,
-                    title: item.title,
-                    description,
-                    status: item.status,
-                    skip_reason: item.skip_reason,
-                    created_at,
-                    updated_at,
-                }
-            })
-            .collect();
-
-        let count = new_todos.len();
-        *todos = new_todos;
-
-        let summary: Vec<String> = todos
-            .iter()
-            .map(|t| {
-                let status_icon = match t.status {
-                    TodoStatus::Pending => "○",
-                    TodoStatus::InProgress => "◉",
-                    TodoStatus::Done => "✓",
-                    TodoStatus::Skipped => "⊘",
-                };
-                format!("{status_icon} [{}] {}", t.id, t.title)
-            })
-            .collect();
-
-        Ok(format!(
-            "Todo list updated ({count} items):\n{}",
-            summary.join("\n")
-        ))
+        apply_todo_write(&self.todos, args)
     }
 }

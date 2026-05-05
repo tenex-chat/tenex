@@ -32,6 +32,7 @@ mod skills;
 mod stdio_home;
 mod tools;
 mod turn_loop;
+mod workflows;
 
 use anyhow::{Context, Result};
 use tracing::{info_span, Instrument};
