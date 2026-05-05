@@ -17,9 +17,6 @@
 //! `should_persist_agent_message` is a **routing** filter (does this
 //! event belong to *this* conversation I'm running?) and is not lifted
 //! — it has different semantics.
-//!
-//! Lifted from `tenex/src/runtime_cmd/mod.rs:2131`. Keep this module
-//! and that file in sync if either rule changes.
 
 use nostr::event::Event;
 use nostr::{Alphabet, SingleLetterTag, TagKind};
@@ -179,6 +176,23 @@ mod tests {
             .sign_with_keys(&k)
             .unwrap();
         assert_eq!(conversation_id_from_event(&event), root_id);
+    }
+
+    #[test]
+    fn conversation_id_ignores_reply_marker_when_no_root_or_unmarked() {
+        // NIP-10 "reply"-marked e-tags identify the parent message in a
+        // threaded reply, NOT the conversation root. If the only e-tag is
+        // reply-marked, we have no signal about the conversation root, so
+        // the function must fall back to the event's own id rather than
+        // misinterpret the reply parent as the root.
+        let k = keys();
+        let parent_id = "0000000000000000000000000000000000000000000000000000000000000099";
+        let reply_tag = Tag::parse(["e", parent_id, "", "reply"]).unwrap();
+        let event = EventBuilder::new(nostr::Kind::TextNote, "hi")
+            .tag(reply_tag)
+            .sign_with_keys(&k)
+            .unwrap();
+        assert_eq!(conversation_id_from_event(&event), event.id.to_hex());
     }
 
     #[test]

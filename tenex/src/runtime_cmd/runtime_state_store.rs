@@ -24,9 +24,9 @@ use tenex_conversations::{AgentContextState, ConversationStore, MessageQuery};
 
 use super::agent_subprocess::DispatchJob;
 use super::dispatch_coordinator::DispatchKey;
-use super::event_routing::{
-    conversation_id_from_event, has_any_tag, is_completion_event, p_tag_pubkeys,
-};
+use tenex_protocol::event_filter::conversation_id_from_event;
+
+use super::event_routing::{has_any_tag, is_completion_event, p_tag_pubkeys};
 
 pub(super) const DRIVER_STALE_AFTER_MS: i64 = 10 * 60 * 1000;
 
@@ -605,7 +605,7 @@ mod tests {
         .unwrap()
         .is_none());
         assert_eq!(
-            super::super::event_routing::conversation_id_from_event(&followup),
+            tenex_protocol::event_filter::conversation_id_from_event(&followup),
             delegation.id.to_hex()
         );
     }

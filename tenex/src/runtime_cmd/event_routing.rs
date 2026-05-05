@@ -2,10 +2,13 @@
 //!
 //! Two layers live here:
 //!
-//! 1. **Pure tag predicates** — `conversation_id_from_event`, `has_tag`,
-//!    `p_tag_pubkeys`, `targets_project_agent`,
-//!    `event_matches_project_scope`, `select_agent`, etc. These reason about
-//!    a single `Event`'s tags with no I/O.
+//! 1. **Pure tag predicates** — `has_tag`, `p_tag_pubkeys`,
+//!    `targets_project_agent`, `event_matches_project_scope`,
+//!    `select_agent`, etc. These reason about a single `Event`'s tags
+//!    with no I/O. The conversation-root predicate
+//!    [`tenex_protocol::event_filter::conversation_id_from_event`] lives
+//!    in the protocol crate so the embedder and the runtime share one
+//!    implementation.
 //! 2. **Dispatch-target resolution** — `select_dispatch_target` (used from
 //!    the relay loop, transport bridge, and external-author firewall path)
 //!    and `dispatch_project_agent_target` (used by `run_agent` to follow
@@ -21,6 +24,7 @@ use anyhow::{Context, Result};
 use nostr_sdk::prelude::*;
 use opentelemetry::baggage::BaggageExt;
 use opentelemetry::{Context as OtelContext, KeyValue};
+use tenex_protocol::event_filter::conversation_id_from_event;
 use tracing::warn;
 
 use tenex_project::{models::ProjectAgent, Agent};
@@ -257,33 +261,6 @@ pub(super) fn select_agent<'a>(
         "no agent matched #p tags {:?} and no PM agent configured",
         p_tags
     )
-}
-
-pub(super) fn conversation_id_from_event(event: &Event) -> String {
-    let e_kind = TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::E));
-    let mut first_unmarked: Option<String> = None;
-
-    for tag in event.tags.iter() {
-        if tag.kind() != e_kind {
-            continue;
-        }
-        let parts = tag.as_slice();
-        // parts[0]="e", parts[1]=event-id, parts[2]=relay, parts[3]=marker
-        let Some(event_id) = parts.get(1) else {
-            continue;
-        };
-        let marker = parts.get(3).map(|s| s.as_str());
-        match marker {
-            Some("root") => return event_id.clone(),
-            None | Some("") if first_unmarked.is_none() => {
-                first_unmarked = Some(event_id.clone());
-            }
-            None | Some("") => {}
-            _ => {}
-        }
-    }
-
-    first_unmarked.unwrap_or_else(|| event.id.to_hex())
 }
 
 #[cfg(test)]

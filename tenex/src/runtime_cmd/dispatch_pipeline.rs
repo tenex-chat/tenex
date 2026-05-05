@@ -34,9 +34,11 @@ use super::agent_config_reload::{
 };
 use super::agent_subprocess::{spawn_dispatch_job, DispatchJob};
 use super::dispatch_coordinator::DispatchKey;
+use tenex_protocol::event_filter::conversation_id_from_event;
+
 use super::event_routing::{
-    conversation_id_from_event, e_tag_event_ids, event_matches_project_scope, mark_seen,
-    p_tag_pubkeys, select_dispatch_target, targets_project_agent,
+    e_tag_event_ids, event_matches_project_scope, mark_seen, p_tag_pubkeys,
+    select_dispatch_target, targets_project_agent,
 };
 use super::runtime_state_store::{
     conversation_trace_root, is_agent_blocked, persisted_driver_busy,
