@@ -149,6 +149,10 @@ fn encode_delegation(
                 builder = builder.tag(tag(["branch", branch])?);
             }
 
+            if let Some(commit) = d.commit.as_deref() {
+                builder = builder.tag(tag(["commit", commit])?);
+            }
+
             for parts in &d.extra_tags {
                 builder = builder.tag(tag(parts.iter().map(String::as_str))?);
             }

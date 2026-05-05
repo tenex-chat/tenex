@@ -145,6 +145,7 @@ impl Tool for DelegateCrossProjectTool {
                 recipient_label: format!("@{}", args.recipient),
                 request: args.request.clone(),
                 branch: args.branch.clone(),
+                commit: None,
                 followup_of: None,
                 extra_tags,
             }],

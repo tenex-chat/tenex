@@ -179,8 +179,11 @@ async fn run(
         .unwrap_or_else(|| {
             std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
         });
-    let (resolved_working_dir, current_branch) =
-        tenex_project::resolve_working_dir(&project_root, envelope.metadata.branch.as_deref());
+    let (resolved_working_dir, current_branch) = tenex_project::resolve_working_dir(
+        &project_root,
+        envelope.metadata.branch.as_deref(),
+        envelope.metadata.commit.as_deref(),
+    );
     let working_dir = resolved_working_dir.display().to_string();
     let root_agents_md = project_instructions::read_root_agents_md(&project_root);
 
@@ -334,6 +337,7 @@ async fn run(
         team: envelope.metadata.team.clone(),
         stdout_sink: stdout_sink.clone(),
         pending_external_work: pending_external_work.clone(),
+        project_root: project_root.clone(),
     })
     .await?;
 

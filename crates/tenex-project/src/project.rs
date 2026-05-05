@@ -117,6 +117,26 @@ impl Project {
         Ok(agents)
     }
 
+    /// True iff at least one project member has a local agent JSON projection
+    /// that carries a `signer_ref` — i.e. an agent this backend can actually
+    /// run. A readable projection without `signer_ref` describes a remote
+    /// agent whose kind:0 we cache; tenex-agent cannot spawn it. Mirrors the
+    /// "is_local" check in [`Self::remote_member_pubkeys`] and short-circuits
+    /// on the first match — used by the daemon to decide whether spawning a
+    /// runtime for this project would have any locally-runnable agent at all.
+    pub fn has_locally_signable_agents(&self) -> Result<bool> {
+        let pubkeys = self.member_pubkeys()?;
+        for pk in &pubkeys {
+            let path = paths::agent_file(&self.base_dir, pk);
+            if let Ok(agent) = try_read_agent_file(&path, pk) {
+                if agent.signer_ref.is_some() {
+                    return Ok(true);
+                }
+            }
+        }
+        Ok(false)
+    }
+
     /// Members listed in the project's 31933 whose agent JSON projection is
     /// either absent or carries no `signer_ref` — i.e. agents this backend
     /// cannot sign for. These are the pubkeys we depend on remote backends to

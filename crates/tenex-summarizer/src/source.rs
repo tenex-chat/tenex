@@ -1,6 +1,7 @@
 //! Conversation storage adapter for the per-project `conversation.db` file.
 
 use std::fs;
+use std::path::Path;
 
 use anyhow::{Context, Result};
 use serde::Deserialize;
@@ -36,6 +37,29 @@ impl ProjectEvent {
 /// Enumerate projects under the host's TENEX base directory.
 pub fn discover_projects() -> Result<Vec<ProjectRef>> {
     tenex_conversations::discover_projects(&paths::base_dir())
+}
+
+/// True iff this backend can sign as the project's PM agent — the first
+/// agent listed in the project's kind:31933 event. Returns `false` when
+/// the project has no agents listed, when the PM agent has no on-disk
+/// projection on this backend, or when that projection lacks a signer.
+///
+/// Used by the publisher to gate kind:513 emission so multiple backends
+/// running for the same project don't all publish duplicate metadata
+/// events.
+pub fn pm_owned_locally(d_tag: &str, base_dir: &Path) -> Result<bool> {
+    let project = tenex_project::Project::open(d_tag, base_dir)
+        .with_context(|| format!("open project {d_tag}"))?;
+    let agents = project
+        .project_agents()
+        .with_context(|| format!("read project agents for {d_tag}"))?;
+    let Some(pm) = agents.into_iter().find(|a| a.is_pm) else {
+        return Ok(false);
+    };
+    let agent = project
+        .agent_by_pubkey(&pm.agent_pubkey)
+        .with_context(|| format!("read PM agent {} for {d_tag}", pm.agent_pubkey))?;
+    Ok(agent.map(|a| a.is_local).unwrap_or(false))
 }
 
 pub fn load_project_event(project: &ProjectRef) -> Result<ProjectEvent> {

@@ -139,6 +139,145 @@ pub fn current_branch(repo_path: &Path) -> Result<Option<String>, GitError> {
     }
 }
 
+/// Return `true` when the working tree at `path` has no uncommitted changes
+/// (no modified, staged, or untracked files).
+///
+/// Implemented via `git status --porcelain`: empty stdout ⇔ clean.
+pub fn is_worktree_clean(path: &Path) -> Result<bool, GitError> {
+    let output = Command::new("git")
+        .args(["status", "--porcelain"])
+        .current_dir(path)
+        .output()?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+        return Err(GitError::CommandFailed(stderr));
+    }
+
+    Ok(output.stdout.iter().all(u8::is_ascii_whitespace))
+}
+
+/// Resolve `refs/heads/<branch>` to its commit hash. Errors when the branch
+/// does not exist locally.
+pub fn branch_head_commit(repo_path: &Path, branch: &str) -> Result<String, GitError> {
+    let output = Command::new("git")
+        .args(["rev-parse", &format!("refs/heads/{branch}")])
+        .current_dir(repo_path)
+        .output()?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+        return Err(GitError::CommandFailed(stderr));
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+/// Resolve `HEAD` to its commit hash within `path` (a worktree or main repo).
+fn head_commit(path: &Path) -> Result<String, GitError> {
+    let output = Command::new("git")
+        .args(["rev-parse", "HEAD"])
+        .current_dir(path)
+        .output()?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+        return Err(GitError::CommandFailed(stderr));
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+/// Push `branch` to `origin`, setting upstream on first push.
+///
+/// We try `git push origin <branch>` first; if the branch has no upstream
+/// configured (`fatal: The current branch ... has no upstream`), retry with
+/// `-u`. Both succeed silently when the remote already has the same commit.
+pub fn push_branch_to_origin(repo_path: &Path, branch: &str) -> Result<(), GitError> {
+    let output = Command::new("git")
+        .args(["push", "origin", branch])
+        .current_dir(repo_path)
+        .output()?;
+    if output.status.success() {
+        return Ok(());
+    }
+
+    // Retry with -u to establish upstream when first push for this branch.
+    let output = Command::new("git")
+        .args(["push", "-u", "origin", branch])
+        .current_dir(repo_path)
+        .output()?;
+    if output.status.success() {
+        return Ok(());
+    }
+
+    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+    Err(GitError::CommandFailed(format!(
+        "git push origin {branch} failed: {stderr}"
+    )))
+}
+
+/// Fetch `branch` from `origin`. Best-effort: returns `Ok(())` when the
+/// remote does not yet have the branch (first-time receive on a host).
+pub fn fetch_branch_from_origin(repo_path: &Path, branch: &str) -> Result<(), GitError> {
+    let output = Command::new("git")
+        .args(["fetch", "origin", branch])
+        .current_dir(repo_path)
+        .output()?;
+    if output.status.success() {
+        return Ok(());
+    }
+    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+    Err(GitError::CommandFailed(format!(
+        "git fetch origin {branch} failed: {stderr}"
+    )))
+}
+
+/// Hard-reset the worktree at `path` to `commit`. Caller is responsible for
+/// confirming the worktree is clean — this discards any working-tree state.
+pub fn reset_worktree_to_commit(path: &Path, commit: &str) -> Result<(), GitError> {
+    let status = Command::new("git")
+        .args(["reset", "--hard", commit])
+        .current_dir(path)
+        .status()?;
+    if !status.success() {
+        return Err(GitError::CommandFailed(format!(
+            "git reset --hard {commit} failed in {}",
+            path.display()
+        )));
+    }
+    Ok(())
+}
+
+/// Sync the worktree at `path` to `expected_commit`.
+///
+/// 1. Fetch `branch` from origin (so the commit is locally available).
+/// 2. If HEAD already matches, no-op.
+/// 3. Else require the worktree to be clean and `git reset --hard` to the
+///    expected commit. A dirty worktree is a hard error — the delegation flow
+///    refuses to clobber in-progress work.
+pub fn sync_worktree_to_commit(
+    path: &Path,
+    branch: &str,
+    expected_commit: &str,
+) -> Result<(), GitError> {
+    // Best-effort fetch — failure is fine if origin lacks the branch and the
+    // commit is already present locally; we'll catch missing commits at reset.
+    let _ = fetch_branch_from_origin(path, branch);
+
+    let head = head_commit(path)?;
+    if head == expected_commit {
+        return Ok(());
+    }
+
+    if !is_worktree_clean(path)? {
+        return Err(GitError::CommandFailed(format!(
+            "worktree {} is dirty; refusing to sync branch '{branch}' to commit {expected_commit}",
+            path.display()
+        )));
+    }
+
+    reset_worktree_to_commit(path, expected_commit)
+}
+
 /// Returns `true` if the branch already exists as a local ref.
 fn branch_exists_locally(repo_path: &Path, branch: &str) -> bool {
     Command::new("git")
@@ -229,10 +368,17 @@ pub fn create_worktree(
 /// under `{repo_path}/.worktrees/<sanitized>`. On worktree creation failure
 /// the function falls back to the project root.
 ///
+/// When `commit_tag` is set alongside `branch_tag`, the worktree is fetched
+/// and synced to that commit (see [`sync_worktree_to_commit`]). Sync failures
+/// — e.g. a dirty worktree, or a commit not reachable on the local remote —
+/// are logged at error level and the worktree is returned as-is; the caller's
+/// environment will surface the divergence to the agent.
+///
 /// Returns `(working_directory, current_branch)`.
 pub fn resolve_working_dir(
     project_base: &Path,
     branch_tag: Option<&str>,
+    commit_tag: Option<&str>,
 ) -> (PathBuf, Option<String>) {
     let Some(branch) = branch_tag else {
         let current = current_branch(project_base).ok().flatten();
@@ -240,7 +386,16 @@ pub fn resolve_working_dir(
     };
 
     match create_worktree(project_base, branch, None) {
-        Ok(wt) => (wt.path, Some(branch.to_owned())),
+        Ok(wt) => {
+            if let Some(commit) = commit_tag {
+                if let Err(e) = sync_worktree_to_commit(&wt.path, branch, commit) {
+                    tracing::error!(
+                        "failed to sync worktree for branch {branch} to commit {commit}: {e}"
+                    );
+                }
+            }
+            (wt.path, Some(branch.to_owned()))
+        }
         Err(e) => {
             tracing::warn!(
                 "failed to create worktree for branch {branch}: {e}, falling back to project root"
@@ -468,6 +623,39 @@ mod tests {
             .unwrap();
         let branch = current_branch(dir.path()).unwrap();
         assert!(branch.is_none());
+    }
+
+    // ── is_worktree_clean / branch_head_commit tests ──────────────────────
+
+    #[test]
+    fn is_worktree_clean_reports_dirty_after_untracked_file() {
+        let dir = TempDir::new().unwrap();
+        init_repo(dir.path());
+        assert!(is_worktree_clean(dir.path()).unwrap());
+        std::fs::write(dir.path().join("untracked.txt"), "x").unwrap();
+        assert!(!is_worktree_clean(dir.path()).unwrap());
+    }
+
+    #[test]
+    fn branch_head_commit_matches_rev_parse() {
+        let dir = TempDir::new().unwrap();
+        init_repo(dir.path());
+        let head = current_branch(dir.path()).unwrap().unwrap();
+        let via_helper = branch_head_commit(dir.path(), &head).unwrap();
+        let via_git = Command::new("git")
+            .args(["rev-parse", "HEAD"])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+        let expected = String::from_utf8_lossy(&via_git.stdout).trim().to_string();
+        assert_eq!(via_helper, expected);
+    }
+
+    #[test]
+    fn branch_head_commit_errors_for_missing_branch() {
+        let dir = TempDir::new().unwrap();
+        init_repo(dir.path());
+        assert!(branch_head_commit(dir.path(), "no-such-branch").is_err());
     }
 
     // ── create_worktree tests ─────────────────────────────────────────────

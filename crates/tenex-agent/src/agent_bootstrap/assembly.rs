@@ -142,6 +142,7 @@ pub(super) fn init_supervisor_and_hook(
     runtime_state: Option<RuntimeStateHandle>,
     project_agents: Arc<Vec<tenex_project::Agent>>,
     teams: Arc<Vec<tenex_project::Team>>,
+    project_root: std::path::PathBuf,
 ) -> SupervisorComponents {
     let sup_category: Option<tenex_supervision::types::AgentCategory> = agent_config
         .category
@@ -158,7 +159,12 @@ pub(super) fn init_supervisor_and_hook(
     );
     let allows_delegation = sup_category.map(|c| c.allows_delegation()).unwrap_or(true);
     let delegate_tool = if allows_delegation {
-        Some(DelegateTool::new(emit_state, project_agents, teams))
+        Some(DelegateTool::new(
+            emit_state,
+            project_agents,
+            teams,
+            project_root,
+        ))
     } else {
         None
     };

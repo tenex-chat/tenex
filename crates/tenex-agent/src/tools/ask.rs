@@ -128,6 +128,7 @@ impl Tool for AskTool {
                     recipient_label: "@escalation-agent".to_string(),
                     request: prompt,
                     branch: None,
+                    commit: None,
                     followup_of: None,
                     extra_tags: Vec::new(),
                 }],

@@ -88,6 +88,9 @@ pub struct InboundMetadata {
     pub tool_name: Option<String>,
     pub status: Option<String>,
     pub branch: Option<String>,
+    /// Expected git commit hash on `branch`. Set when a cross-host delegation
+    /// pinned the worktree to a specific commit; the receiver syncs to it.
+    pub commit: Option<String>,
     pub variant_override: Option<String>,
     pub team: Option<String>,
     pub article_references: Vec<String>,

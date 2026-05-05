@@ -75,6 +75,7 @@ impl Tool for SelfDelegateTool {
                 recipient_label: "@self".to_string(),
                 request: args.request.clone(),
                 branch: args.branch.clone(),
+                commit: None,
                 followup_of: None,
                 extra_tags: Vec::new(),
             }],

@@ -135,6 +135,20 @@ impl TenexConfigDoc {
         string_array(&self.raw, "relays")
     }
 
+    /// Project d-tags this backend should never boot, even if it has
+    /// matching local agents. Source: opt-out filter applied at the
+    /// daemon's `handle_project` / `handle_boot_trigger` gate.
+    pub fn ignored_projects(&self) -> Vec<String> {
+        string_array(&self.raw, "ignoredProjects")
+    }
+
+    /// Project d-tags this backend exclusively serves. When non-empty,
+    /// any project not in the list is skipped at boot time. Combined
+    /// with `ignoredProjects` as `onlyProjects ∖ ignoredProjects`.
+    pub fn only_projects(&self) -> Vec<String> {
+        string_array(&self.raw, "onlyProjects")
+    }
+
     pub fn set_relays(&mut self, relays: Vec<String>) {
         set_string_array(&mut self.raw, "relays", relays);
     }

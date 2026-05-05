@@ -2,15 +2,19 @@
 //! (`tenex runtime <d-tag>`) when whitelisted authors send kind:1 / kind:24000
 //! events a-tagging a known project, restart on crash.
 
+pub mod boot_policy;
 pub mod config;
 pub mod control_socket;
 pub mod display;
+pub mod identity_watch;
 pub mod lockfile;
 pub mod nostr;
+pub mod pending_boots;
 pub mod reap;
 pub mod supervisor;
 
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
@@ -101,13 +105,23 @@ pub async fn run(args: DaemonArgs) -> Result<()> {
         }
     }
 
+    // Shared skip-state: nostr.rs records deferred boots here when filters or
+    // missing local agents block them; control_socket.rs reads/writes the
+    // same set so transport-driven boots go through an identical gate.
+    let skipped_projects = boot_policy::SkippedProjects::new();
+
     // Bind the daemon control socket so transport bridges (tenex-telegram)
     // can request a per-project runtime boot on demand.
     {
         let supervisor = supervisor.clone();
         let base_dir = base_dir.clone();
+        let gate = control_socket::BootGate {
+            ignored_projects: cfg.ignored_projects.clone(),
+            only_projects: cfg.only_projects.clone(),
+            skipped_projects: Arc::clone(&skipped_projects),
+        };
         tokio::spawn(async move {
-            if let Err(e) = control_socket::serve(base_dir, supervisor).await {
+            if let Err(e) = control_socket::serve(base_dir, supervisor, gate).await {
                 error!(error = %e, "daemon control socket exited");
             }
         });
@@ -122,6 +136,7 @@ pub async fn run(args: DaemonArgs) -> Result<()> {
         backend_keys,
         supervisor.clone(),
         args.boot,
+        skipped_projects,
     )
     .await?;
 

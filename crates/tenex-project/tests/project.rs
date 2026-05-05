@@ -284,6 +284,33 @@ fn signer_for_agent_with_bunker_reference_resolves() {
 }
 
 #[test]
+fn has_locally_signable_agents_requires_signer_ref() {
+    let tmp = TempDir::new().unwrap();
+    write_event_json(tmp.path(), "my-project", &[]);
+
+    // Agent JSON without `nsec` (and no other signer ref) — describes a
+    // remote agent whose kind:0 we cache, not one we can run locally.
+    let agents_dir = tmp.path().join("agents");
+    fs::create_dir_all(&agents_dir).unwrap();
+    let agent = serde_json::json!({
+        "slug": "remote",
+        "name": "Remote",
+    });
+    fs::write(
+        agents_dir.join(format!("{AGENT_PK}.json")),
+        serde_json::to_vec(&agent).unwrap(),
+    )
+    .unwrap();
+
+    let p = Project::open("my-project", tmp.path()).unwrap();
+    assert!(!p.has_locally_signable_agents().unwrap());
+
+    // Replace with a projection that *does* carry an nsec.
+    write_agent_json(tmp.path(), AGENT_PK);
+    assert!(p.has_locally_signable_agents().unwrap());
+}
+
+#[test]
 fn signer_for_missing_agent_returns_not_found() {
     let tmp = TempDir::new().unwrap();
     write_event_json(tmp.path(), "my-project", &[]);

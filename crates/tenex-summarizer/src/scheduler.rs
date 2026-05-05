@@ -16,6 +16,7 @@ use tracing::{debug, error, info, warn};
 
 use crate::categories;
 use crate::config::Config;
+use crate::paths;
 use crate::publish::Publisher;
 use tenex_conversations::ProjectRef;
 
@@ -68,11 +69,35 @@ async fn scan_once(cfg: &Config, state: &SummaryStateStore, publisher: &Publishe
     let mut total_processed = 0usize;
     let mut total_skipped = 0usize;
 
+    let base_dir = paths::base_dir();
     for project in &projects {
         let project_event = match source::load_project_event(project) {
             Ok(p) => p,
             Err(e) => {
                 debug!(d_tag = %project.d_tag, error = %e, "skip project: bad event.json");
+                continue;
+            }
+        };
+
+        // Only the backend that owns the project's PM agent (first agent
+        // in the kind:31933 event) is allowed to publish kind:513s — see
+        // `process_inner` for the gate. Compute it once per scan so the
+        // decision is consistent across this project's conversations.
+        //
+        // A clean "not PM" verdict (`Ok(false)`) lets the loop proceed and
+        // mark conversations as summarized without publishing. A read or
+        // parse failure (`Err`) skips the project entirely so the next
+        // scan retries — otherwise a transient agent-file error would
+        // permanently suppress kind:513 publishing for affected
+        // conversations.
+        let publish_allowed = match source::pm_owned_locally(&project.d_tag, &base_dir) {
+            Ok(v) => v,
+            Err(e) => {
+                warn!(
+                    d_tag = %project.d_tag,
+                    error = ?e,
+                    "pm ownership check failed; skipping project this cycle",
+                );
                 continue;
             }
         };
@@ -90,6 +115,12 @@ async fn scan_once(cfg: &Config, state: &SummaryStateStore, publisher: &Publishe
 
         total_candidates += candidates.len();
 
+        let scan_ctx = ProjectScanContext {
+            project,
+            project_event: &project_event,
+            publish_allowed,
+        };
+
         for cand in candidates {
             match should_process(state, &cand.conversation_id, cand.last_activity)? {
                 Decision::Skip => {
@@ -100,8 +131,7 @@ async fn scan_once(cfg: &Config, state: &SummaryStateStore, publisher: &Publishe
                         cfg,
                         state,
                         publisher,
-                        project,
-                        &project_event,
+                        &scan_ctx,
                         &cand.conversation_id,
                         cand.last_activity,
                     )
@@ -131,6 +161,12 @@ async fn scan_once(cfg: &Config, state: &SummaryStateStore, publisher: &Publishe
         );
     }
     Ok(())
+}
+
+struct ProjectScanContext<'a> {
+    project: &'a ProjectRef,
+    project_event: &'a ProjectEvent,
+    publish_allowed: bool,
 }
 
 enum Decision {
@@ -163,13 +199,12 @@ async fn process_one(
     cfg: &Config,
     state: &SummaryStateStore,
     publisher: &Publisher,
-    project: &ProjectRef,
-    project_event: &ProjectEvent,
+    ctx: &ProjectScanContext<'_>,
     conversation_id: &str,
     catalog_last_activity: i64,
 ) -> bool {
     let started = std::time::Instant::now();
-    let result = process_inner(cfg, publisher, project, project_event, conversation_id).await;
+    let result = process_inner(cfg, publisher, ctx, conversation_id).await;
     match result {
         Ok(Some(summary)) => {
             if let Err(e) = state.record(conversation_id, catalog_last_activity, now_ms()) {
@@ -182,7 +217,7 @@ async fn process_one(
             }
             info!(
                 conversation_id = %short(conversation_id),
-                d_tag = %project.d_tag,
+                d_tag = %ctx.project.d_tag,
                 model = %cfg.llm.model,
                 latency_ms = started.elapsed().as_millis() as u64,
                 "summarized"
@@ -198,7 +233,7 @@ async fn process_one(
         Err(e) => {
             warn!(
                 conversation_id = %short(conversation_id),
-                d_tag = %project.d_tag,
+                d_tag = %ctx.project.d_tag,
                 error = %e,
                 latency_ms = started.elapsed().as_millis() as u64,
                 "summarize failed"
@@ -211,11 +246,10 @@ async fn process_one(
 async fn process_inner(
     cfg: &Config,
     publisher: &Publisher,
-    project: &ProjectRef,
-    project_event: &ProjectEvent,
+    ctx: &ProjectScanContext<'_>,
     conversation_id: &str,
 ) -> Result<Option<Summary>> {
-    let content = match source::fetch_content(project, project_event, conversation_id)? {
+    let content = match source::fetch_content(ctx.project, ctx.project_event, conversation_id)? {
         Some(c) => c,
         None => return Ok(None),
     };
@@ -228,7 +262,7 @@ async fn process_inner(
         &content.transcript,
         summarize::SummarizeContext {
             conversation_id: Some(conversation_id.to_string()),
-            project_id: Some(project.d_tag.clone()),
+            project_id: Some(ctx.project.d_tag.clone()),
         },
     )
     .await?;
@@ -239,16 +273,24 @@ async fn process_inner(
         status_label: non_empty(&summary.status_label),
         status_current_activity: non_empty(&summary.status_current_activity),
     };
-    source::write_metadata(project, conversation_id, &update)?;
+    source::write_metadata(ctx.project, conversation_id, &update)?;
 
-    publisher
-        .publish(
-            conversation_id,
-            &content.project_event,
-            &cfg.llm.model,
-            &summary,
-        )
-        .await?;
+    if ctx.publish_allowed {
+        publisher
+            .publish(
+                conversation_id,
+                &content.project_event,
+                &cfg.llm.model,
+                &summary,
+            )
+            .await?;
+    } else {
+        debug!(
+            conversation_id = %short(conversation_id),
+            d_tag = %ctx.project.d_tag,
+            "skip kind:513 publish: backend does not own project PM agent",
+        );
+    }
 
     Ok(Some(summary))
 }

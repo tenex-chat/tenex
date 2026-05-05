@@ -6,13 +6,17 @@
 //!
 //! ```text
 //! BOOT <d_tag>\n   →   OK\n            (d_tag known, boot queued / already running)
-//!                       ERR <message>\n (d_tag unknown or other failure)
+//!                       ERR <message>\n (d_tag unknown, filtered, or other failure)
 //! ```
 //!
 //! The socket is intentionally small: it only accepts commands that the
-//! supervisor itself can execute.
+//! supervisor itself can execute. Boots routed through this socket go
+//! through the same [`super::boot_policy`] gate as relay-driven boots, so
+//! `ignoredProjects` / `onlyProjects` and "no locally-signable agents"
+//! decisions are honored uniformly across transports.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use tokio::fs;
@@ -20,7 +24,17 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{UnixListener, UnixStream};
 use tracing::{info, warn};
 
+use super::boot_policy::{decide_boot, BootDecision, SkippedProjects};
 use super::supervisor::Supervisor;
+
+/// Operator filters + shared skip-state needed to make a boot decision on
+/// behalf of a transport bridge. Cloned into each connection task.
+#[derive(Clone)]
+pub struct BootGate {
+    pub ignored_projects: Vec<String>,
+    pub only_projects: Vec<String>,
+    pub skipped_projects: Arc<SkippedProjects>,
+}
 
 pub fn socket_path(base_dir: &Path) -> PathBuf {
     base_dir.join("daemon").join("control.sock")
@@ -29,7 +43,7 @@ pub fn socket_path(base_dir: &Path) -> PathBuf {
 /// Bind the daemon control socket and serve requests forever. Each accepted
 /// connection is handled in its own task; the listener loop never returns
 /// while the daemon is alive.
-pub async fn serve(base_dir: PathBuf, supervisor: Supervisor) -> Result<()> {
+pub async fn serve(base_dir: PathBuf, supervisor: Supervisor, gate: BootGate) -> Result<()> {
     let path = socket_path(&base_dir);
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
@@ -47,8 +61,9 @@ pub async fn serve(base_dir: PathBuf, supervisor: Supervisor) -> Result<()> {
         let (stream, _) = listener.accept().await?;
         let supervisor = supervisor.clone();
         let base_dir = base_dir.clone();
+        let gate = gate.clone();
         tokio::spawn(async move {
-            if let Err(e) = handle_connection(stream, supervisor, base_dir).await {
+            if let Err(e) = handle_connection(stream, supervisor, base_dir, gate).await {
                 warn!(error = %e, "daemon control connection failed");
             }
         });
@@ -59,6 +74,7 @@ async fn handle_connection(
     stream: UnixStream,
     supervisor: Supervisor,
     base_dir: PathBuf,
+    gate: BootGate,
 ) -> Result<()> {
     let mut reader = BufReader::new(stream);
     let mut line = String::new();
@@ -68,10 +84,12 @@ async fn handle_connection(
     }
     let cmd = line.trim();
     let response = match parse_command(cmd) {
-        Ok(Command::Boot { d_tag }) => match boot_project(&supervisor, &base_dir, &d_tag).await {
-            Ok(()) => "OK\n".to_string(),
-            Err(e) => format!("ERR {e}\n"),
-        },
+        Ok(Command::Boot { d_tag }) => {
+            match boot_project(&supervisor, &base_dir, &gate, &d_tag).await {
+                Ok(()) => "OK\n".to_string(),
+                Err(e) => format!("ERR {e}\n"),
+            }
+        }
         Err(e) => format!("ERR {e}\n"),
     };
     let mut stream = reader.into_inner();
@@ -102,7 +120,12 @@ fn parse_command(line: &str) -> Result<Command, String> {
     }
 }
 
-async fn boot_project(supervisor: &Supervisor, base_dir: &Path, d_tag: &str) -> Result<()> {
+async fn boot_project(
+    supervisor: &Supervisor,
+    base_dir: &Path,
+    gate: &BootGate,
+    d_tag: &str,
+) -> Result<()> {
     // Reject d_tags that don't correspond to a discovered project, otherwise a
     // typo from a transport bridge would spawn a runtime that can't open
     // `event.json` and immediately fails.
@@ -110,6 +133,26 @@ async fn boot_project(supervisor: &Supervisor, base_dir: &Path, d_tag: &str) -> 
     if !project_event.exists() {
         anyhow::bail!("unknown project '{d_tag}'");
     }
-    supervisor.boot(d_tag.to_string()).await;
-    Ok(())
+
+    let decision = decide_boot(
+        base_dir,
+        &gate.ignored_projects,
+        &gate.only_projects,
+        d_tag,
+    );
+    match decision {
+        BootDecision::Allow => {
+            // A successful control-socket boot means the project is going up
+            // now — drop any prior deferral so the next discovery doesn't
+            // log a stale "now bootable" transition.
+            gate.skipped_projects.clear(d_tag).await;
+            supervisor.boot(d_tag.to_string()).await;
+            Ok(())
+        }
+        BootDecision::Filtered | BootDecision::NoLocalAgents => {
+            let reason = decision.skip_reason().unwrap_or("unknown");
+            gate.skipped_projects.record(d_tag, reason).await;
+            anyhow::bail!("project '{d_tag}' not bootable: {reason}");
+        }
+    }
 }

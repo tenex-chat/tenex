@@ -10,36 +10,31 @@
 //! Trust enforcement is relay-side via `authors`. Author-untrusted boot events
 //! never reach this process.
 
-use std::collections::{BTreeSet, HashSet};
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use nostr_sdk::prelude::*;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::net::UnixStream;
+use notify::{
+    Config as NotifyConfig, Event as NotifyEvent, RecommendedWatcher, RecursiveMode, Watcher,
+};
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 use tokio::time::Duration;
 use tracing::{debug, info, warn};
 
+use super::boot_policy::{decide_boot, BootDecision, SkippedProjects};
 use super::config::Config;
 use super::display;
+use super::identity_watch::push_remote_pubkey_watch;
+use super::pending_boots::{self, PendingBoots};
 use super::supervisor::Supervisor;
 use crate::store::atomic;
 
 const PROJECT_KIND: u16 = 31933;
 const BOOT_KIND: u16 = 24000;
-
-/// Tracks `--boot <prefix>` requests waiting for a matching project discovery.
-/// `pending` shrinks as prefixes are matched against newly-discovered d-tags;
-/// `consumed` retains them so a later discovery that would have also matched
-/// an already-booted prefix can be reported as ambiguous.
-struct PendingBoots {
-    pending: Vec<String>,
-    consumed: Vec<(String, String)>,
-}
 
 struct RuntimeCtx<'a> {
     client: &'a Client,
@@ -52,6 +47,20 @@ struct RuntimeCtx<'a> {
     debounce_handle: Arc<Mutex<Option<JoinHandle<()>>>>,
     base_dir: &'a Path,
     backend_pubkey: PublicKey,
+    skipped_projects: Arc<SkippedProjects>,
+    ignored_projects: &'a [String],
+    only_projects: &'a [String],
+}
+
+impl RuntimeCtx<'_> {
+    fn decide(&self, d_tag: &str) -> BootDecision {
+        decide_boot(
+            self.base_dir,
+            self.ignored_projects,
+            self.only_projects,
+            d_tag,
+        )
+    }
 }
 
 pub async fn run(
@@ -60,6 +69,7 @@ pub async fn run(
     backend_keys: Keys,
     supervisor: Supervisor,
     pending_boot_prefixes: Vec<String>,
+    skipped_projects: Arc<SkippedProjects>,
 ) -> Result<JoinHandle<()>> {
     let discovery_authors: Vec<PublicKey> = cfg
         .whitelisted_pubkeys
@@ -115,33 +125,87 @@ pub async fn run(
 
     let known: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
     let boot_sub: Arc<Mutex<Option<SubscriptionId>>> = Arc::new(Mutex::new(None));
-    let pending_boots: Arc<Mutex<PendingBoots>> = Arc::new(Mutex::new(PendingBoots {
-        pending: pending_boot_prefixes
-            .into_iter()
-            .filter(|p| !p.is_empty())
-            .collect(),
-        consumed: Vec::new(),
-    }));
+    let pending_boots: Arc<Mutex<PendingBoots>> =
+        Arc::new(Mutex::new(PendingBoots::new(pending_boot_prefixes)));
     let debounce_handle: Arc<Mutex<Option<JoinHandle<()>>>> = Arc::new(Mutex::new(None));
 
+    let agents_dir = base_dir.join("agents");
+    std::fs::create_dir_all(&agents_dir)
+        .with_context(|| format!("creating agents dir {}", agents_dir.display()))?;
+    let (agent_fs_tx, mut agent_fs_rx) =
+        tokio::sync::mpsc::channel::<Result<NotifyEvent, notify::Error>>(64);
+    let mut agent_watcher = RecommendedWatcher::new(
+        move |res| {
+            let _ = agent_fs_tx.blocking_send(res);
+        },
+        NotifyConfig::default(),
+    )
+    .context("create agents-dir watcher")?;
+    agent_watcher
+        .watch(&agents_dir, RecursiveMode::NonRecursive)
+        .with_context(|| format!("watch agents dir {}", agents_dir.display()))?;
+
     let task_client = client.clone();
+    let task_ignored_projects = cfg.ignored_projects.clone();
+    let task_only_projects = cfg.only_projects.clone();
     let handle = tokio::spawn(async move {
+        // Keep watcher alive for the life of the loop.
+        let _agent_watcher = agent_watcher;
         let mut notifications = task_client.notifications();
-        while let Ok(notification) = notifications.recv().await {
-            if let RelayPoolNotification::Event { event, .. } = notification {
-                let ctx = RuntimeCtx {
-                    client: &task_client,
-                    supervisor: &supervisor,
-                    known: Arc::clone(&known),
-                    boot_sub: Arc::clone(&boot_sub),
-                    pending_boots: &pending_boots,
-                    boot_authors: &boot_authors,
-                    startup_ts,
-                    debounce_handle: Arc::clone(&debounce_handle),
-                    base_dir: &base_dir,
-                    backend_pubkey,
-                };
-                handle_event(&ctx, &event).await;
+        loop {
+            tokio::select! {
+                notification = notifications.recv() => {
+                    match notification {
+                        Ok(RelayPoolNotification::Event { event, .. }) => {
+                            let ctx = RuntimeCtx {
+                                client: &task_client,
+                                supervisor: &supervisor,
+                                known: Arc::clone(&known),
+                                boot_sub: Arc::clone(&boot_sub),
+                                pending_boots: &pending_boots,
+                                boot_authors: &boot_authors,
+                                startup_ts,
+                                debounce_handle: Arc::clone(&debounce_handle),
+                                base_dir: &base_dir,
+                                backend_pubkey,
+                                skipped_projects: Arc::clone(&skipped_projects),
+                                ignored_projects: &task_ignored_projects,
+                                only_projects: &task_only_projects,
+                            };
+                            handle_event(&ctx, &event).await;
+                        }
+                        Ok(_) => {}
+                        Err(_) => break,
+                    }
+                }
+                Some(fs_event) = agent_fs_rx.recv() => {
+                    let event = match fs_event {
+                        Ok(e) => e,
+                        Err(error) => {
+                            warn!(%error, "agents-dir watcher error");
+                            continue;
+                        }
+                    };
+                    if !agent_event_is_relevant(&event) {
+                        continue;
+                    }
+                    let ctx = RuntimeCtx {
+                        client: &task_client,
+                        supervisor: &supervisor,
+                        known: Arc::clone(&known),
+                        boot_sub: Arc::clone(&boot_sub),
+                        pending_boots: &pending_boots,
+                        boot_authors: &boot_authors,
+                        startup_ts,
+                        debounce_handle: Arc::clone(&debounce_handle),
+                        base_dir: &base_dir,
+                        backend_pubkey,
+                        skipped_projects: Arc::clone(&skipped_projects),
+                        ignored_projects: &task_ignored_projects,
+                        only_projects: &task_only_projects,
+                    };
+                    retry_skipped_boots(&ctx).await;
+                }
             }
         }
     });
@@ -149,13 +213,33 @@ pub async fn run(
     Ok(handle)
 }
 
+fn agent_event_is_relevant(event: &NotifyEvent) -> bool {
+    event.paths.iter().any(|path| {
+        path.extension()
+            .and_then(|extension| extension.to_str())
+            .is_some_and(|extension| extension == "json")
+    })
+}
+
+/// Re-evaluate every project we previously deferred. Triggered when a new
+/// agent JSON file lands in `<base_dir>/agents/`, which may have flipped
+/// the local-agent gate from no→yes for one or more deferred projects.
+async fn retry_skipped_boots(ctx: &RuntimeCtx<'_>) {
+    for d_tag in ctx.skipped_projects.snapshot().await {
+        if let BootDecision::Allow = ctx.decide(&d_tag) {
+            if ctx.skipped_projects.clear(&d_tag).await {
+                info!(d_tag, "project now bootable — agents available locally");
+            }
+            ctx.supervisor.boot(d_tag).await;
+        }
+    }
+}
+
 async fn handle_event(ctx: &RuntimeCtx<'_>, event: &Event) {
     match event.kind.as_u16() {
         PROJECT_KIND => handle_project(ctx, event).await,
-        1 => handle_boot_trigger(ctx.supervisor, &ctx.known, event, BootKind::TextNote).await,
-        BOOT_KIND => {
-            handle_boot_trigger(ctx.supervisor, &ctx.known, event, BootKind::Explicit).await
-        }
+        1 => handle_boot_trigger(ctx, event, BootKind::TextNote).await,
+        BOOT_KIND => handle_boot_trigger(ctx, event, BootKind::Explicit).await,
         _ => {}
     }
 }
@@ -198,16 +282,53 @@ async fn handle_project(ctx: &RuntimeCtx<'_>, event: &Event) {
         let mut k = ctx.known.lock().await;
         k.insert(address.clone())
     };
-    if !inserted {
+    let was_skipped = ctx.skipped_projects.contains(&d_tag).await;
+    // Already-booted republish with no membership change for the boot
+    // gate: nothing to do. (Skipped projects fall through so a new
+    // member list can flip the decision.)
+    if !inserted && !was_skipped {
         return;
     }
 
     debug!(d_tag, address, "project discovered");
 
-    let matched_prefixes = resolve_pending_boots(ctx.pending_boots, &d_tag).await;
+    let decision = ctx.decide(&d_tag);
+    match decision {
+        BootDecision::Allow => {
+            if ctx.skipped_projects.clear(&d_tag).await {
+                info!(d_tag, "project now bootable — agents available locally");
+            }
+            ctx.supervisor.boot(d_tag.clone()).await;
+        }
+        BootDecision::Filtered | BootDecision::NoLocalAgents => {
+            ctx.skipped_projects
+                .record(&d_tag, decision.skip_reason().unwrap_or("unknown"))
+                .await;
+        }
+    }
+
+    // First-discovery side effects: --boot prefix matching and
+    // boot-trigger subscription refresh. Skip on republish — the
+    // address is already known and already in the boot filter.
+    if !inserted {
+        return;
+    }
+
+    let matched_prefixes = pending_boots::resolve(ctx.pending_boots, &d_tag).await;
     for prefix in matched_prefixes {
-        info!(prefix, d_tag, "matched --boot prefix to discovered project");
-        ctx.supervisor.boot(d_tag.clone()).await;
+        match decision {
+            BootDecision::Allow => {
+                info!(prefix, d_tag, "matched --boot prefix to discovered project");
+                // supervisor.boot is idempotent — already called above.
+            }
+            BootDecision::Filtered | BootDecision::NoLocalAgents => {
+                info!(
+                    prefix,
+                    d_tag,
+                    "matched --boot prefix but project is filtered or has no local agents; not booting"
+                );
+            }
+        }
     }
 
     // Debounce: cancel any pending refresh and schedule a new one. During the
@@ -245,126 +366,13 @@ async fn handle_project(ctx: &RuntimeCtx<'_>, event: &Event) {
     }
 }
 
-/// Recompute the union of remote (non-locally-signed) member pubkeys across
-/// every known project and tell the identity daemon to maintain an always-on
-/// kind:0 subscription for that set.
-///
-/// Excludes this backend's own pubkey defensively — even though it shouldn't
-/// appear in a 31933 p-tag, lacking a local agent JSON would otherwise let it
-/// slip through the "remote" filter.
-async fn push_remote_pubkey_watch(
-    base_dir: &Path,
-    addresses: &[String],
-    backend_pubkey: &PublicKey,
-) -> Result<()> {
-    let backend_hex = backend_pubkey.to_hex();
-    let mut union: BTreeSet<String> = BTreeSet::new();
-    for address in addresses {
-        let parts: Vec<&str> = address.splitn(3, ':').collect();
-        if parts.len() != 3 {
-            continue;
-        }
-        let d_tag = parts[2];
-        let project = match tenex_project::Project::open(d_tag, base_dir) {
-            Ok(p) => p,
-            Err(e) => {
-                debug!(d_tag, error = %e, "skipping project for remote-pubkey watch");
-                continue;
-            }
-        };
-        match project.remote_member_pubkeys() {
-            Ok(pubkeys) => {
-                for pk in pubkeys {
-                    if pk != backend_hex {
-                        union.insert(pk);
-                    }
-                }
-            }
-            Err(e) => {
-                debug!(d_tag, error = %e, "failed to enumerate remote members");
-            }
-        }
-    }
-
-    let pubkeys: Vec<String> = union.into_iter().collect();
-    send_watch_authors(base_dir, &pubkeys).await
-}
-
-/// Send `WATCH_AUTHORS [<pk>...]` over the identity daemon Unix socket. A
-/// missing socket is treated as "identity daemon not up yet" and silently
-/// skipped — the next debounce will retry.
-async fn send_watch_authors(base_dir: &Path, pubkeys: &[String]) -> Result<()> {
-    let socket = base_dir.join(tenex_identity::paths::IDENTITY_SOCKET_FILENAME);
-    if !socket.exists() {
-        debug!(path = %socket.display(), "identity socket absent; skipping WATCH_AUTHORS");
-        return Ok(());
-    }
-
-    let stream = UnixStream::connect(&socket).await?;
-    let (reader_half, mut writer_half) = stream.into_split();
-
-    let line = if pubkeys.is_empty() {
-        "WATCH_AUTHORS\n".to_string()
-    } else {
-        format!("WATCH_AUTHORS {}\n", pubkeys.join(" "))
-    };
-    writer_half.write_all(line.as_bytes()).await?;
-    writer_half.flush().await?;
-
-    let mut reader = BufReader::new(reader_half);
-    let mut response = String::new();
-    reader.read_line(&mut response).await?;
-    let trimmed = response.trim();
-    if trimmed.starts_with("OK") {
-        debug!(count = pubkeys.len(), "identity WATCH_AUTHORS updated");
-        Ok(())
-    } else {
-        Err(anyhow!("identity daemon rejected WATCH_AUTHORS: {trimmed}"))
-    }
-}
-
-/// Pop every pending prefix that the freshly-discovered d-tag starts with,
-/// move them into `consumed`, and warn for any already-consumed prefix that
-/// would have also matched this discovery (first-match-wins ambiguity).
-async fn resolve_pending_boots(pending_boots: &Mutex<PendingBoots>, d_tag: &str) -> Vec<String> {
-    let mut pb = pending_boots.lock().await;
-    let mut matched: Vec<String> = Vec::new();
-    pb.pending.retain(|prefix| {
-        if d_tag.starts_with(prefix) {
-            matched.push(prefix.clone());
-            false
-        } else {
-            true
-        }
-    });
-    for p in &matched {
-        pb.consumed.push((p.clone(), d_tag.to_string()));
-    }
-    for (prefix, prior_d_tag) in &pb.consumed {
-        if prior_d_tag != d_tag && d_tag.starts_with(prefix) {
-            warn!(
-                prefix = %prefix,
-                booted = %prior_d_tag,
-                also_matches = %d_tag,
-                "ambiguous --boot prefix: already booted earlier match; ignoring later discovery"
-            );
-        }
-    }
-    matched
-}
-
 #[derive(Debug)]
 enum BootKind {
     TextNote,
     Explicit,
 }
 
-async fn handle_boot_trigger(
-    supervisor: &Supervisor,
-    known: &Mutex<HashSet<String>>,
-    event: &Event,
-    kind: BootKind,
-) {
+async fn handle_boot_trigger(ctx: &RuntimeCtx<'_>, event: &Event, kind: BootKind) {
     info!(?kind, event_id = %event.id, pubkey = %event.pubkey, "boot trigger event received");
 
     let a_tags = a_tag_values(event);
@@ -373,7 +381,7 @@ async fn handle_boot_trigger(
         return;
     }
 
-    let k = known.lock().await;
+    let k = ctx.known.lock().await;
     let known_snapshot: Vec<String> = k.iter().cloned().collect();
     let matched: Option<String> = a_tags.iter().find(|a| k.contains(*a)).cloned();
     drop(k);
@@ -396,8 +404,21 @@ async fn handle_boot_trigger(
     }
     let d_tag = parts[2].to_string();
 
-    display::project_booted(&d_tag);
-    supervisor.boot(d_tag).await;
+    let decision = ctx.decide(&d_tag);
+    match decision {
+        BootDecision::Allow => {
+            // The project may have been deferred earlier (e.g. a kind:0
+            // sync race); a successful trigger means we're booting now.
+            ctx.skipped_projects.clear(&d_tag).await;
+            display::project_booted(&d_tag);
+            ctx.supervisor.boot(d_tag).await;
+        }
+        BootDecision::Filtered | BootDecision::NoLocalAgents => {
+            ctx.skipped_projects
+                .record(&d_tag, decision.skip_reason().unwrap_or("unknown"))
+                .await;
+        }
+    }
 }
 
 async fn update_boot_subscription(

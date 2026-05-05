@@ -178,6 +178,7 @@ fn delegation_omits_e_root_and_prepends_label() {
             recipient_label: "@architect".into(),
             request: "Please review".into(),
             branch: None,
+            commit: None,
             followup_of: None,
             extra_tags: Vec::new(),
         }],
@@ -213,6 +214,7 @@ fn delegation_includes_extra_routing_tags() {
             recipient_label: "@worker".into(),
             request: "Please review".into(),
             branch: None,
+            commit: None,
             followup_of: None,
             extra_tags: vec![vec!["a".to_string(), source_project.clone()]],
         }],
@@ -222,6 +224,35 @@ fn delegation_includes_extra_routing_tags() {
     let expected = vec!["a".to_string(), source_project];
 
     assert!(tags.iter().any(|tag| tag == &expected));
+}
+
+#[test]
+fn delegation_emits_branch_and_commit_tags() {
+    let ctx = test_ctx();
+    let recipient_keys = Keys::generate();
+    let intent = DelegationIntent {
+        items: vec![crate::intent::DelegationRequest {
+            recipient: PrincipalRef::Nostr {
+                pubkey: recipient_keys.public_key(),
+                kind: PrincipalKind::Agent,
+                display_name: None,
+            },
+            recipient_label: "@worker".into(),
+            request: "Implement X".into(),
+            branch: Some("feature/x".into()),
+            commit: Some("deadbeefcafebabe1234567890abcdef12345678".into()),
+            followup_of: None,
+            extra_tags: Vec::new(),
+        }],
+    };
+    let builders = NostrEncoder::encode(&Intent::Delegation(intent), &ctx).expect("encode");
+    let tags = signed_tags(builders.into_iter().next().unwrap());
+    assert!(tags
+        .iter()
+        .any(|t| t[0] == "branch" && t[1] == "feature/x"));
+    assert!(tags.iter().any(|t| {
+        t[0] == "commit" && t[1] == "deadbeefcafebabe1234567890abcdef12345678"
+    }));
 }
 
 #[test]
@@ -241,6 +272,7 @@ fn delegation_followup_uses_delegation_as_root() {
             recipient_label: "@worker".into(),
             request: "Clarification".into(),
             branch: None,
+            commit: None,
             followup_of: Some(MessageRef::Nostr {
                 event_id: delegation_id,
             }),
@@ -382,6 +414,7 @@ fn self_delegation_keeps_p_tag_when_recipient_equals_signer() {
             recipient_label: "@self".into(),
             request: "Reply with done.".into(),
             branch: None,
+            commit: None,
             followup_of: None,
             extra_tags: Vec::new(),
         }],

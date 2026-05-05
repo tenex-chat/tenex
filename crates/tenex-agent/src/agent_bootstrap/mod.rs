@@ -103,7 +103,11 @@ pub(crate) async fn build(
         project_base_path,
         current_branch,
         root_agents_md,
-    } = stages::resolve_workspace(&agent_config, envelope.metadata.branch.as_deref());
+    } = stages::resolve_workspace(
+        &agent_config,
+        envelope.metadata.branch.as_deref(),
+        envelope.metadata.commit.as_deref(),
+    );
 
     // Open project and load context used for prompts + delegate tool.
     let stages::OpenedProject {
@@ -390,6 +394,7 @@ pub(crate) async fn build(
         runtime_state.clone(),
         project_agents.clone(),
         teams.clone(),
+        project_root.clone(),
     );
 
     let skill_list_tool = SkillListTool::new(skill_ctx.clone());
@@ -457,7 +462,8 @@ pub(crate) async fn build(
         initial_history.len()
     );
 
-    let escalation_pubkey = escalation::resolve_escalation_pubkey(&base_dir, &project_agents);
+    let escalation_pubkey = escalation::resolve_escalation_pubkey(&base_dir, &project_agents)
+        .filter(|pk| pk != &pubkey_hex);
     let blossom_url = helpers::read_blossom_server_url(&base_dir)
         .unwrap_or_else(|| "https://blossom.primal.net".to_string());
     let suppress_response = Arc::new(AtomicBool::new(false));

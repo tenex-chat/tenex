@@ -26,6 +26,7 @@ pub fn decode(event: &Event) -> Result<InboundEnvelope, DecodeError> {
     let mut tool_name: Option<String> = None;
     let mut status: Option<String> = None;
     let mut branch: Option<String> = None;
+    let mut commit: Option<String> = None;
     let mut team: Option<String> = None;
     let mut variant_override: Option<String> = None;
     let mut article_references: Vec<String> = Vec::new();
@@ -86,6 +87,7 @@ pub fn decode(event: &Event) -> Result<InboundEnvelope, DecodeError> {
             "tool" => tool_name = parts.get(1).cloned(),
             "status" => status = parts.get(1).cloned(),
             "branch" => branch = parts.get(1).cloned(),
+            "commit" => commit = parts.get(1).cloned(),
             "team" => team = parts.get(1).cloned(),
             "variant" => variant_override = parts.get(1).cloned(),
             "delegation" => {
@@ -135,6 +137,7 @@ pub fn decode(event: &Event) -> Result<InboundEnvelope, DecodeError> {
         tool_name,
         status,
         branch,
+        commit,
         variant_override,
         team,
         article_references,

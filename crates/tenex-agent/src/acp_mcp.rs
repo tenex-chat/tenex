@@ -64,6 +64,9 @@ pub(crate) struct AcpMcpContext {
     model: String,
     team: Option<String>,
     event_socket_path: PathBuf,
+    /// Git project root (the main worktree, parent of `.worktrees/`). Used by
+    /// the delegate tool to drive cross-host branch coordination.
+    project_root: PathBuf,
 }
 
 pub(crate) struct AcpMcpBridge {
@@ -87,6 +90,7 @@ pub(crate) struct AcpMcpBridgeInput {
     pub(crate) team: Option<String>,
     pub(crate) stdout_sink: SharedStdoutEventSink,
     pub(crate) pending_external_work: Arc<AtomicBool>,
+    pub(crate) project_root: PathBuf,
 }
 
 impl AcpMcpBridge {
@@ -122,6 +126,7 @@ impl AcpMcpBridge {
             model: input.model,
             team: input.team,
             event_socket_path: socket_path.clone(),
+            project_root: input.project_root,
         };
 
         write_private_json(&context_path, &context)?;

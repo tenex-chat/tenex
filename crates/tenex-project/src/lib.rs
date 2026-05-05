@@ -18,8 +18,9 @@ pub mod teams;
 
 pub use error::{Error, Result};
 pub use git::{
-    create_worktree, current_branch, list_worktrees, parse_worktree_list, resolve_working_dir,
-    GitError, WorktreeInfo, WorktreeMetadata, WorktreeMetadataStore,
+    branch_head_commit, create_worktree, current_branch, is_worktree_clean, list_worktrees,
+    parse_worktree_list, push_branch_to_origin, resolve_working_dir, GitError, WorktreeInfo,
+    WorktreeMetadata, WorktreeMetadataStore,
 };
 pub use id::{normalize_project_id, ProjectDTag};
 pub use models::{Agent, ProjectAgent, ProjectMetadata};

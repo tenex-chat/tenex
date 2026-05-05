@@ -143,10 +143,13 @@ pub(super) struct WorkspacePaths {
 /// `AGENTS.md` overlay from the agent config + triggering envelope.
 ///
 /// Honours the envelope's `branch` first; falls back to the current branch
-/// of the configured working directory.
+/// of the configured working directory. When `envelope_commit` is set, the
+/// worktree is fetched and synced to that commit so cross-host delegations
+/// see exactly the state the sender pushed.
 pub(super) fn resolve_workspace(
     agent_config: &AgentConfig,
     envelope_branch: Option<&str>,
+    envelope_commit: Option<&str>,
 ) -> WorkspacePaths {
     let configured_working_dir = agent_config
         .working_directory
@@ -157,7 +160,7 @@ pub(super) fn resolve_workspace(
         });
     let project_root = crate::project_instructions::infer_project_root(&configured_working_dir);
     let (resolved_working_dir, current_branch) = if envelope_branch.is_some() {
-        tenex_project::resolve_working_dir(&project_root, envelope_branch)
+        tenex_project::resolve_working_dir(&project_root, envelope_branch, envelope_commit)
     } else {
         let current = tenex_project::current_branch(&configured_working_dir)
             .ok()

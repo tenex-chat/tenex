@@ -101,6 +101,7 @@ fn build_tools(context: &AcpMcpContext) -> Result<Vec<Box<dyn ToolDyn>>> {
                 state.clone(),
                 project_agents.clone(),
                 teams.clone(),
+                context.project_root.clone(),
             )),
             state.clone(),
             true,

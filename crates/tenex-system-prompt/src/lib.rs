@@ -110,7 +110,7 @@ fn render_available_agents(
     active_team: Option<&str>,
 ) -> String {
     let header_disclaimer =
-        "Agents marked as [remote agent] run on a different host — you do not share a filesystem with them. Coordinate via the conversation, not local paths.";
+        "Agents marked as [remote agent] run on a different host — you do not share a filesystem with them. Coordinate work via the conversation (not local paths) and via git (you share a remote `origin`): commit, push, and reference branches/commits when collaborating on code.";
 
     if teams.is_empty() {
         // No teams configured — render the flat agent list.

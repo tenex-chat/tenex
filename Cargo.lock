@@ -3569,6 +3569,7 @@ dependencies = [
  "tenex-accounting",
  "tenex-conversations",
  "tenex-llm-config",
+ "tenex-project",
  "tenex-telemetry",
  "thiserror 2.0.18",
  "tokio",

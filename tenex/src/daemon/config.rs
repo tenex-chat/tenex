@@ -27,6 +27,12 @@ pub struct Config {
     /// config.json). Emitted as `["backend", "<name>"]` on kind:0 agent
     /// profiles so clients can distinguish multi-backend setups.
     pub backend_name: Option<String>,
+    /// Project d-tags this backend will never boot, even when it has
+    /// matching local agents. Opt-out filter; empty = no exclusions.
+    pub ignored_projects: Vec<String>,
+    /// When non-empty, the *only* project d-tags this backend will boot.
+    /// Allowlist applied before [`ignored_projects`] subtraction.
+    pub only_projects: Vec<String>,
 }
 
 /// Load `<base_dir>/config.json` and apply daemon-startup invariants.
@@ -53,5 +59,7 @@ pub fn load(base_dir: &Path) -> Result<Config> {
         relays,
         route_unauthorized_authors: doc.route_unauthorized_authors(),
         backend_name: doc.backend_name(),
+        ignored_projects: doc.ignored_projects(),
+        only_projects: doc.only_projects(),
     })
 }

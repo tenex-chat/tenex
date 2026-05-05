@@ -58,6 +58,10 @@ pub struct DelegationRequest {
     pub recipient_label: String,
     pub request: String,
     pub branch: Option<String>,
+    /// Expected git commit hash on `branch`. Set on cross-host delegations so
+    /// the receiver can sync its worktree to the exact commit the sender
+    /// pushed, eliminating filesystem coupling.
+    pub commit: Option<String>,
     /// When set, the outbound event carries an e-tag referencing this message,
     /// turning the delegation into a followup rather than a fresh conversation.
     pub followup_of: Option<MessageRef>,
