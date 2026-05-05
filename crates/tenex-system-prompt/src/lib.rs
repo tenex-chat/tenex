@@ -43,7 +43,16 @@ pub struct BuildSystemPromptInput<'a> {
     pub conversation_id: Option<&'a str>,
     pub root_agents_md: Option<&'a str>,
     pub agents: &'a [tenex_project::Agent],
-    pub teams_fragment: &'a str,
+    /// All teams (global + project-specific) loaded for this project.
+    /// Drives team-aware filtering of `<available-agents>`.
+    pub teams: &'a [tenex_project::Team],
+    /// Slug of the running agent — used to exclude self from teammates and
+    /// unaffiliated lists.
+    pub agent_slug: &'a str,
+    /// Active team scope from the inbound envelope's `["team", ...]` tag.
+    /// When set, teammates resolve to that team's members; otherwise to the
+    /// union of every team the agent belongs to.
+    pub active_team: Option<&'a str>,
     pub home: &'a HomeDirectoryInfo<'a>,
     pub preloaded_skills_block: Option<&'a str>,
     /// Pre-rendered `<available-workflows>` block listing the agent's
@@ -61,6 +70,200 @@ pub struct BuildSystemPromptInput<'a> {
     pub current_branch: Option<&'a str>,
     /// All worktrees for this project (from `git worktree list`).
     pub worktrees: &'a [tenex_project::git::WorktreeInfo],
+}
+
+/// Render a single agent bullet in `<available-agents>`.
+///
+/// Mirrors the TS `renderAgentBullet` helper: locality marker first, then
+/// description/role, then a `Use when:` line when `use_criteria` is set.
+fn render_agent_bullet(a: &tenex_project::Agent) -> String {
+    let mut line = format!("  - {}", a.slug);
+    if !a.is_local {
+        if let Some(backend) = &a.backend_name {
+            line.push_str(&format!(" [remote agent running on {backend}]"));
+        } else {
+            line.push_str(" [remote agent]");
+        }
+    }
+    if let Some(desc) = &a.description {
+        line.push_str(&format!(": {desc}"));
+    } else if let Some(role) = &a.role {
+        line.push_str(&format!(": {role}"));
+    }
+    if let Some(criteria) = &a.use_criteria {
+        line.push_str(&format!("\n    Use when: {criteria}"));
+    }
+    line
+}
+
+/// Render the `<available-agents>` fragment.
+///
+/// When the project defines no teams, falls back to a flat list of every
+/// project agent. Otherwise mirrors the TypeScript renderer: detail only the
+/// active team's teammates plus unaffiliated agents, and summarize every
+/// other team as a one-liner. This pushes delegation through team leads
+/// instead of letting agents reach into unrelated teams' members.
+fn render_available_agents(
+    agents: &[tenex_project::Agent],
+    teams: &[tenex_project::Team],
+    agent_slug: &str,
+    active_team: Option<&str>,
+) -> String {
+    let header_disclaimer =
+        "Agents marked as [remote agent] run on a different host — you do not share a filesystem with them. Coordinate via the conversation, not local paths.";
+
+    if teams.is_empty() {
+        // No teams configured — render the flat agent list.
+        let any_remote = agents.iter().any(|a| !a.is_local);
+        let mut block = String::from("<available-agents>\n");
+        if any_remote {
+            block.push_str(header_disclaimer);
+            block.push('\n');
+        }
+        let lines: Vec<String> = agents.iter().map(render_agent_bullet).collect();
+        block.push_str(&lines.join("\n"));
+        block.push_str("\n</available-agents>");
+        return block;
+    }
+
+    // Index agents by slug for quick lookup.
+    let agent_by_slug: std::collections::HashMap<&str, &tenex_project::Agent> = agents
+        .iter()
+        .map(|a| (a.slug.as_str(), a))
+        .collect();
+
+    let member_teams: Vec<&tenex_project::Team> = teams
+        .iter()
+        .filter(|t| t.members.iter().any(|m| m == agent_slug))
+        .collect();
+
+    let active_team_obj: Option<&tenex_project::Team> = active_team.and_then(|name| {
+        teams
+            .iter()
+            .find(|t| t.name.eq_ignore_ascii_case(name))
+    });
+
+    // Resolve teammate slugs: scoped to active team when set, otherwise the
+    // union of every member team. Always excludes the running agent.
+    let teammate_slugs: Vec<&str> = if let Some(team) = active_team_obj {
+        team.members
+            .iter()
+            .filter(|s| s.as_str() != agent_slug)
+            .map(|s| s.as_str())
+            .collect()
+    } else {
+        let mut seen: Vec<&str> = Vec::new();
+        for team in &member_teams {
+            for s in &team.members {
+                if s.as_str() != agent_slug && !seen.contains(&s.as_str()) {
+                    seen.push(s.as_str());
+                }
+            }
+        }
+        seen
+    };
+
+    let teammates: Vec<&tenex_project::Agent> = teammate_slugs
+        .iter()
+        .filter_map(|s| agent_by_slug.get(s).copied())
+        .collect();
+
+    let other_teams: Vec<&tenex_project::Team> = teams
+        .iter()
+        .filter(|t| {
+            !member_teams.iter().any(|mt| mt.name == t.name)
+                && active_team_obj.is_none_or(|at| at.name != t.name)
+        })
+        .collect();
+
+    let my_other_teams: Vec<&tenex_project::Team> = if let Some(active) = active_team_obj {
+        member_teams
+            .iter()
+            .copied()
+            .filter(|t| t.name != active.name)
+            .collect()
+    } else {
+        member_teams.clone()
+    };
+
+    let all_team_members: std::collections::HashSet<&str> = teams
+        .iter()
+        .flat_map(|t| t.members.iter().map(|s| s.as_str()))
+        .collect();
+
+    let unaffiliated: Vec<&tenex_project::Agent> = agents
+        .iter()
+        .filter(|a| a.slug != agent_slug && !all_team_members.contains(a.slug.as_str()))
+        .collect();
+
+    // `any_remote` is computed from the agents we actually detail (teammates
+    // + unaffiliated). Team summaries hide individual locality, so members of
+    // other teams should not flip the disclaimer.
+    let any_remote = teammates.iter().any(|a| !a.is_local)
+        || unaffiliated.iter().any(|a| !a.is_local);
+
+    let mut lines: Vec<String> = vec!["<available-agents>".to_string()];
+    if any_remote {
+        lines.push(header_disclaimer.to_string());
+    }
+
+    if let Some(team) = active_team_obj {
+        lines.push("  <active-team>".to_string());
+        lines.push(format!(
+            "    You are working in team \"{}\" — {}",
+            team.name, team.description
+        ));
+        lines.push("    Delegate within your team first. Only reach outside when a specific expert is a clearly better fit.".to_string());
+        if !teammates.is_empty() {
+            lines.push(String::new());
+            lines.push("    Teammates:".to_string());
+            for a in &teammates {
+                lines.push(render_agent_bullet(a));
+            }
+        }
+        lines.push("  </active-team>".to_string());
+    } else if !teammates.is_empty() {
+        // No active team scope but the agent has teammates from its member
+        // teams — list them as the primary delegation pool.
+        lines.push("  Teammates:".to_string());
+        for a in &teammates {
+            lines.push(render_agent_bullet(a));
+        }
+    }
+
+    if !my_other_teams.is_empty() {
+        lines.push("  <my-teams>".to_string());
+        let header = if active_team_obj.is_some() {
+            "    You are also a member of:"
+        } else {
+            "    You are a member of:"
+        };
+        lines.push(header.to_string());
+        for team in &my_other_teams {
+            lines.push(format!("    * {} — {}", team.name, team.description));
+        }
+        lines.push("  </my-teams>".to_string());
+    }
+
+    if !other_teams.is_empty() || !unaffiliated.is_empty() {
+        lines.push("  <also-available>".to_string());
+        lines.push("    Other teams and agents in this project:".to_string());
+        for team in &other_teams {
+            lines.push(format!(
+                "    * Team {} — {} [{} agents]",
+                team.name,
+                team.description,
+                team.members.len()
+            ));
+        }
+        for a in &unaffiliated {
+            lines.push(render_agent_bullet(a));
+        }
+        lines.push("  </also-available>".to_string());
+    }
+
+    lines.push("</available-agents>".to_string());
+    lines.join("\n")
 }
 
 /// Build the full system prompt for an agent.
@@ -83,7 +286,9 @@ pub fn build_system_prompt(input: BuildSystemPromptInput<'_>) -> String {
         conversation_id,
         root_agents_md,
         agents,
-        teams_fragment,
+        teams,
+        agent_slug,
+        active_team,
         home,
         preloaded_skills_block,
         workflows_fragment,
@@ -261,44 +466,7 @@ Your nsec and other secrets are in $AGENT_HOME/.env (auto-loaded in shell sessio
 
     // Available agents fragment
     if !agents.is_empty() {
-        let agent_lines: Vec<String> = agents
-            .iter()
-            .map(|a| {
-                let mut line = format!("  - {}", a.slug);
-                if !a.is_local {
-                    if let Some(backend) = &a.backend_name {
-                        line.push_str(&format!(" [remote agent running on {backend}]"));
-                    } else {
-                        line.push_str(" [remote agent]");
-                    }
-                }
-                if let Some(desc) = &a.description {
-                    line.push_str(&format!(": {desc}"));
-                } else if let Some(role) = &a.role {
-                    line.push_str(&format!(": {role}"));
-                }
-                if let Some(criteria) = &a.use_criteria {
-                    line.push_str(&format!("\n    Use when: {criteria}"));
-                }
-                line
-            })
-            .collect();
-        let any_remote = agents.iter().any(|a| !a.is_local);
-        let header = if any_remote {
-            "<available-agents>\nAgents marked as [remote agent] run on a different host — you do not share a filesystem with them. Coordinate via the conversation, not local paths.\n"
-        } else {
-            "<available-agents>\n"
-        };
-        parts.push(format!(
-            "{}{}\n</available-agents>",
-            header,
-            agent_lines.join("\n")
-        ));
-    }
-
-    // Teams context
-    if !teams_fragment.is_empty() {
-        parts.push(teams_fragment.to_string());
+        parts.push(render_available_agents(agents, teams, agent_slug, active_team));
     }
 
     // Fragment 06: Todo guidance
@@ -394,7 +562,9 @@ mod tests {
             conversation_id: None,
             root_agents_md: None,
             agents: &[],
-            teams_fragment: "",
+            teams: &[],
+            agent_slug: "",
+            active_team: None,
             home: home_info,
             preloaded_skills_block: None,
             workflows_fragment: None,

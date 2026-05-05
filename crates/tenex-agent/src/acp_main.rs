@@ -224,10 +224,6 @@ async fn run(
 
     let base_dir = tenex_project::paths::default_base_dir();
     let teams = tenex_project::load_teams(&base_dir, Some(&project_id));
-    let member_teams =
-        tenex_project::teams_for_agent(&teams, agent_config.slug.as_deref().unwrap_or(""));
-    let teams_fragment =
-        tenex_project::render_teams_context(&member_teams, envelope.metadata.team.as_deref());
 
     let agent_home = home::agent_home_dir(&base_dir, &pubkey_hex);
     home::ensure_agent_home_dir(&agent_home);
@@ -300,7 +296,9 @@ async fn run(
             conversation_id: Some(&conversation_id),
             root_agents_md: root_agents_md.as_deref(),
             agents: &project_agents,
-            teams_fragment: &teams_fragment,
+            teams: &teams,
+            agent_slug: agent_config.slug.as_deref().unwrap_or(""),
+            active_team: envelope.metadata.team.as_deref(),
             home: &home_info,
             preloaded_skills_block: None,
             workflows_fragment: None,

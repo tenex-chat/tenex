@@ -215,17 +215,25 @@ Omitted for `orchestrator` category (adds noise with no benefit).
 ### Available Agents
 ```xml
 <available-agents>
-  - {slug} ({name}): {description|role}
-    Use when: {use_criteria}
+  <active-team>
+    You are working in team "{name}" — {description}
+    Teammates:
+      - {slug}: {description|role}
+        Use when: {use_criteria}
+  </active-team>
+  <my-teams>
+    You are also a member of:
+    * {team-name} — {description}
+  </my-teams>
+  <also-available>
+    Other teams and agents in this project:
+    * Team {name} — {description} [{N} agents]
+    - {slug}: {description|role}
+      Use when: {use_criteria}
+  </also-available>
 </available-agents>
 ```
-Emitted only when the project has registered agents. Read through `tenex-project` from the project event membership plus global installed-agent JSON records.
-
-### Teams Context
-```xml
-<teams-context>...</teams-context>
-```
-Emitted when the agent belongs to teams or the triggering event carries a `["team", ...]` tag. Loaded from `~/.tenex/teams.json` and `~/.tenex/projects/<id>/teams.json`.
+Emitted only when the project has registered agents. Read through `tenex-project` from the project event membership plus global installed-agent JSON records. When the project defines no teams, the block degrades to a flat list of every project agent. With teams configured, only the active team's teammates and unaffiliated agents are detailed; other teams appear as one-line summaries — pushing delegation through team leads. Teams are loaded from `~/.tenex/teams.json` and `~/.tenex/projects/<id>/teams.json`; the active team is taken from the inbound event's `["team", ...]` tag.
 
 ### Fragment 06 — Todo Guidance
 Instructs the agent to use `todo_write` proactively, explains status lifecycle and the one-in-progress rule. Present for all categories.

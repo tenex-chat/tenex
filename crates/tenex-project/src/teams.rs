@@ -89,60 +89,6 @@ fn normalize(name: String, def: TeamDefinition) -> Team {
     }
 }
 
-/// Returns references to teams whose members list contains `agent_slug`.
-pub fn teams_for_agent<'a>(teams: &'a [Team], agent_slug: &str) -> Vec<&'a Team> {
-    teams
-        .iter()
-        .filter(|t| t.members.iter().any(|m| m == agent_slug))
-        .collect()
-}
-
-/// Render the `<teams-context>` system-prompt fragment.
-///
-/// `member_teams` — teams the agent belongs to (from [`teams_for_agent`]).
-/// `active_team`  — team name from the inbound event's `["team", ...]` tag.
-///
-/// Mirrors the TypeScript renderer at
-/// `src/prompts/fragments/teams-context/index.ts`.
-pub fn render_teams_context(member_teams: &[&Team], active_team: Option<&str>) -> String {
-    if member_teams.is_empty() && active_team.is_none() {
-        return String::new();
-    }
-
-    let mut lines = vec!["<teams-context>".to_string()];
-
-    if !member_teams.is_empty() {
-        let names: Vec<&str> = member_teams.iter().map(|t| t.name.as_str()).collect();
-        lines.push(format!("  You belong to teams: {}", names.join(", ")));
-        lines.push("  Team members:".to_string());
-        for team in member_teams {
-            let label = if active_team.is_some_and(|a| a.eq_ignore_ascii_case(&team.name)) {
-                format!("{} (active)", team.name)
-            } else {
-                team.name.clone()
-            };
-            lines.push(format!(
-                "    {}: lead={}, members={}",
-                label,
-                team.team_lead,
-                team.members.join(", ")
-            ));
-        }
-    }
-
-    if let Some(active) = active_team {
-        if !member_teams
-            .iter()
-            .any(|t| t.name.eq_ignore_ascii_case(active))
-        {
-            lines.push(format!("  You are operating in team scope: {active}"));
-        }
-    }
-
-    lines.push("</teams-context>".to_string());
-    lines.join("\n")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

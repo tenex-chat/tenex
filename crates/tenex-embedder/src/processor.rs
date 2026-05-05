@@ -223,8 +223,9 @@ fn render_chunk_body(conversation_id: &str, chunk: &Chunk) -> String {
         }
     }
 
+    let conversation_preview: String = conversation_id.chars().take(8).collect();
     let mut out = String::new();
-    out.push_str(&format!("Conversation: {conversation_id}\n"));
+    out.push_str(&format!("Conversation: {conversation_preview}\n"));
     out.push_str(&format!(
         "Messages: {a}..{b} ({n})\n",
         a = chunk.seq_start,

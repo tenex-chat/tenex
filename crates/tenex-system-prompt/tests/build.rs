@@ -27,7 +27,9 @@ fn minimal_input<'a>(home: &'a HomeDirectoryInfo<'a>) -> BuildSystemPromptInput<
         conversation_id: None,
         root_agents_md: None,
         agents: &[],
-        teams_fragment: "",
+        teams: &[],
+        agent_slug: "",
+        active_team: None,
         home,
         preloaded_skills_block: None,
         workflows_fragment: None,
@@ -94,7 +96,9 @@ fn identical_inputs_produce_byte_identical_output() {
         conversation_id: None,
         root_agents_md: None,
         agents: &[],
-        teams_fragment: "",
+        teams: &[],
+        agent_slug: "",
+        active_team: None,
         home: &home_a,
         preloaded_skills_block: None,
         workflows_fragment: None,
@@ -119,7 +123,9 @@ fn identical_inputs_produce_byte_identical_output() {
         conversation_id: None,
         root_agents_md: None,
         agents: &[],
-        teams_fragment: "",
+        teams: &[],
+        agent_slug: "",
+        active_team: None,
         home: &home_b,
         preloaded_skills_block: None,
         workflows_fragment: None,
@@ -151,7 +157,9 @@ fn orchestrator_category_skips_env_vars() {
         conversation_id: None,
         root_agents_md: None,
         agents: &[],
-        teams_fragment: "",
+        teams: &[],
+        agent_slug: "",
+        active_team: None,
         home: &home,
         preloaded_skills_block: None,
         workflows_fragment: None,
@@ -183,7 +191,9 @@ fn includes_root_agents_md_when_supplied() {
         conversation_id: None,
         root_agents_md: Some("\n# Project Rules\nUse repo conventions.\n"),
         agents: &[],
-        teams_fragment: "",
+        teams: &[],
+        agent_slug: "",
+        active_team: None,
         home: &home,
         preloaded_skills_block: None,
         workflows_fragment: None,
@@ -214,7 +224,9 @@ fn project_context_renders_project_base_relative_cwd() {
         conversation_id: None,
         root_agents_md: None,
         agents: &[],
-        teams_fragment: "",
+        teams: &[],
+        agent_slug: "",
+        active_team: None,
         home: &home,
         preloaded_skills_block: None,
         workflows_fragment: None,
@@ -246,7 +258,9 @@ fn project_context_renders_exact_root_as_project_base() {
         conversation_id: None,
         root_agents_md: None,
         agents: &[],
-        teams_fragment: "",
+        teams: &[],
+        agent_slug: "",
+        active_team: None,
         home: &home,
         preloaded_skills_block: None,
         workflows_fragment: None,
@@ -281,7 +295,9 @@ fn project_context_does_not_rewrite_sibling_path() {
         conversation_id: None,
         root_agents_md: None,
         agents: &[],
-        teams_fragment: "",
+        teams: &[],
+        agent_slug: "",
+        active_team: None,
         home: &home,
         preloaded_skills_block: None,
         workflows_fragment: None,
@@ -313,7 +329,9 @@ fn project_context_renders_project_id_and_conversation_id() {
         conversation_id: Some("deadbeef01234567"),
         root_agents_md: None,
         agents: &[],
-        teams_fragment: "",
+        teams: &[],
+        agent_slug: "",
+        active_team: None,
         home: &home,
         preloaded_skills_block: None,
         workflows_fragment: None,
@@ -353,7 +371,9 @@ fn project_context_renders_telegram_channel_bindings() {
         conversation_id: None,
         root_agents_md: None,
         agents: &[],
-        teams_fragment: "",
+        teams: &[],
+        agent_slug: "",
+        active_team: None,
         home: &home,
         preloaded_skills_block: None,
         workflows_fragment: None,
@@ -415,4 +435,145 @@ fn telegram_channel_binding_parse_topic() {
 fn telegram_channel_binding_parse_unknown_returns_none() {
     assert!(TelegramChannelBinding::parse("unknown:format:here").is_none());
     assert!(TelegramChannelBinding::parse("").is_none());
+}
+
+fn make_agent(slug: &str, description: &str) -> tenex_project::Agent {
+    tenex_project::Agent {
+        pubkey: format!("pk-{slug}"),
+        slug: slug.to_string(),
+        name: slug.to_string(),
+        role: None,
+        description: Some(description.to_string()),
+        instructions: None,
+        use_criteria: None,
+        category: None,
+        signer_ref: None,
+        event_id: None,
+        status: None,
+        default_config_json: None,
+        telegram_config_json: None,
+        mcp_servers_json: None,
+        is_local: true,
+        backend_name: None,
+    }
+}
+
+fn make_team(name: &str, description: &str, lead: &str, members: &[&str]) -> tenex_project::Team {
+    tenex_project::Team {
+        name: name.to_string(),
+        description: description.to_string(),
+        team_lead: lead.to_string(),
+        members: members.iter().map(|s| s.to_string()).collect(),
+    }
+}
+
+#[test]
+fn available_agents_falls_back_to_flat_list_when_no_teams() {
+    let home = minimal_home();
+    let agents = vec![
+        make_agent("alpha", "alpha agent"),
+        make_agent("beta", "beta agent"),
+    ];
+    let out = build_system_prompt(BuildSystemPromptInput {
+        agents: &agents,
+        ..minimal_input(&home)
+    });
+    assert!(out.contains("<available-agents>"));
+    assert!(out.contains("- alpha: alpha agent"));
+    assert!(out.contains("- beta: beta agent"));
+    assert!(!out.contains("<active-team>"));
+    assert!(!out.contains("<my-teams>"));
+    assert!(!out.contains("<also-available>"));
+}
+
+#[test]
+fn available_agents_active_team_details_only_teammates_and_summarizes_others() {
+    let home = minimal_home();
+    let agents = vec![
+        make_agent("self", "running agent"),
+        make_agent("teammate", "teammate agent"),
+        make_agent("outsider", "agent in another team"),
+        make_agent("loner", "no team agent"),
+    ];
+    let teams = vec![
+        make_team("alpha", "Alpha team", "self", &["self", "teammate"]),
+        make_team("beta", "Beta team", "outsider", &["outsider"]),
+    ];
+    let out = build_system_prompt(BuildSystemPromptInput {
+        agents: &agents,
+        teams: &teams,
+        agent_slug: "self",
+        active_team: Some("alpha"),
+        ..minimal_input(&home)
+    });
+
+    // Active team teammates detailed.
+    assert!(out.contains("<active-team>"));
+    assert!(out.contains("You are working in team \"alpha\""));
+    assert!(out.contains("- teammate: teammate agent"));
+
+    // Other (non-member) team summarized — outsider must NOT be detailed.
+    assert!(out.contains("* Team beta — Beta team [1 agents]"));
+    assert!(!out.contains("- outsider:"));
+
+    // Unaffiliated agents detailed; running agent never listed.
+    assert!(out.contains("- loner: no team agent"));
+    assert!(!out.contains("- self:"));
+}
+
+#[test]
+fn available_agents_no_active_team_lists_member_team_teammates() {
+    let home = minimal_home();
+    let agents = vec![
+        make_agent("self", "running agent"),
+        make_agent("teammate", "teammate agent"),
+    ];
+    let teams = vec![make_team(
+        "alpha",
+        "Alpha team",
+        "self",
+        &["self", "teammate"],
+    )];
+    let out = build_system_prompt(BuildSystemPromptInput {
+        agents: &agents,
+        teams: &teams,
+        agent_slug: "self",
+        active_team: None,
+        ..minimal_input(&home)
+    });
+
+    // No active-team scope, but member-team teammates surface as detailed.
+    assert!(!out.contains("<active-team>"));
+    assert!(out.contains("Teammates:"));
+    assert!(out.contains("- teammate: teammate agent"));
+    assert!(!out.contains("- self:"));
+}
+
+#[test]
+fn available_agents_renders_my_teams_when_member_of_multiple() {
+    let home = minimal_home();
+    let agents = vec![
+        make_agent("self", "running agent"),
+        make_agent("teammate-a", "team a member"),
+        make_agent("teammate-b", "team b member"),
+    ];
+    let teams = vec![
+        make_team("alpha", "Alpha team", "self", &["self", "teammate-a"]),
+        make_team("beta", "Beta team", "self", &["self", "teammate-b"]),
+    ];
+    let out = build_system_prompt(BuildSystemPromptInput {
+        agents: &agents,
+        teams: &teams,
+        agent_slug: "self",
+        active_team: Some("alpha"),
+        ..minimal_input(&home)
+    });
+
+    // Active team's teammate is detailed; the other member team is summarized.
+    assert!(out.contains("- teammate-a: team a member"));
+    assert!(out.contains("<my-teams>"));
+    assert!(out.contains("You are also a member of:"));
+    assert!(out.contains("* beta — Beta team"));
+    // teammate-b is in beta only — not detailed under active-team scope.
+    assert!(!out.contains("- teammate-b:"));
 }

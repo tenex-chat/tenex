@@ -207,12 +207,9 @@ pub(crate) async fn build(
         runtime_state.clone(),
     )));
 
-    // Load teams (global + project-specific) and compute the prompt fragment.
+    // Load teams (global + project-specific). The system-prompt builder
+    // filters `<available-agents>` against this list.
     let teams = Arc::new(tenex_project::load_teams(&base_dir, Some(&project_id)));
-    let member_teams =
-        tenex_project::teams_for_agent(&teams, agent_config.slug.as_deref().unwrap_or(""));
-    let teams_fragment =
-        tenex_project::render_teams_context(&member_teams, envelope.metadata.team.as_deref());
 
     // Set up agent home directory.
     let agent_home = home::agent_home_dir(&base_dir, &pubkey_hex);
@@ -298,7 +295,9 @@ pub(crate) async fn build(
         project_base_path: &project_base_path,
         project_meta: &project_meta,
         project_agents: &project_agents,
-        teams_fragment: &teams_fragment,
+        teams: &teams,
+        agent_slug: agent_config.slug.as_deref().unwrap_or(""),
+        active_team: envelope.metadata.team.as_deref(),
         home: &home_info,
         root_agents_md: root_agents_md.as_deref(),
         preloaded_skills_block: preloaded_skills_block.as_deref(),

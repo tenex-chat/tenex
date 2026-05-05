@@ -27,4 +27,4 @@ pub use project::Project;
 #[cfg(feature = "nip46")]
 pub use signer::BunkerSigner;
 pub use signer::{NsecSigner, Signer, SignerError, SignerScheme};
-pub use teams::{load_teams, render_teams_context, teams_for_agent, Team};
+pub use teams::{load_teams, Team};

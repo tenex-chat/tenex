@@ -215,7 +215,7 @@ Teams are local JSON-defined memberships that never become standalone Nostr enti
 
 - Team definitions stay local on disk and are not published as Nostr events.
 - Delegation events carry team scope through the `["team", "..."]` tag.
-- Prompt rendering uses the teams-aware project context plus the lightweight `src/prompts/fragments/teams-context` summary fragment.
+- Prompt rendering uses team membership to filter `<available-agents>`: when teams are defined, only the active team's teammates and unaffiliated agents are detailed; other teams appear as one-line summaries.
 - Team names are resolved case-insensitively, with agent slugs still taking priority when a recipient string matches both.
 
 ---
