@@ -306,10 +306,17 @@ fn compact_json(value: &Value) -> String {
     let raw = value.to_string();
     const MAX: usize = 500;
     if raw.len() <= MAX {
-        raw
-    } else {
-        format!("{}...", &raw[..MAX])
+        return raw;
     }
+    // `&raw[..MAX]` would panic if byte index `MAX` lands inside a
+    // multi-byte UTF-8 character. Walk backward to the nearest char
+    // boundary (at most 3 bytes for valid UTF-8) so this stays safe
+    // regardless of what Unicode the JSON value carries.
+    let mut end = MAX;
+    while end > 0 && !raw.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}...", &raw[..end])
 }
 
 fn push_tool_result(out: &mut Vec<Message>, tool: ToolMessage) {
@@ -324,4 +331,64 @@ fn push_tool_result(out: &mut Vec<Message>, tool: ToolMessage) {
         content,
         is_error: tool.is_error,
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn compact_json_passes_through_short_value() {
+        let v = json!({"k": "v"});
+        let out = compact_json(&v);
+        assert_eq!(out, r#"{"k":"v"}"#);
+    }
+
+    #[test]
+    fn compact_json_truncates_long_value_with_ellipsis() {
+        let long = "a".repeat(1000);
+        let v = json!({"x": long});
+        let out = compact_json(&v);
+        assert!(out.ends_with("..."));
+        // 500 bytes plus the 3-char ellipsis (max).
+        assert!(out.len() <= 503);
+    }
+
+    #[test]
+    fn compact_json_does_not_panic_when_byte_500_is_mid_multibyte() {
+        // Regression: compact_json sliced `raw[..500]` by byte index. If
+        // the JSON serialization happens to put a multi-byte UTF-8
+        // character across byte 500, the slice would panic with "byte
+        // index 500 is not a char boundary". Tool args are arbitrary
+        // user/agent input — easy to hit with realistic Unicode content.
+        //
+        // Build a JSON object whose `to_string()` puts a 4-byte emoji
+        // straddling byte 500. JSON quoting adds 8 bytes of overhead
+        // (`{"a":"..."}`), so 491 ASCII bytes + emoji = 491 + 4 = 495
+        // payload bytes; with the 8-byte JSON wrapper the emoji's
+        // bytes land at indices 499..503 of the serialized form,
+        // bracketing byte 500.
+        let mut payload = String::new();
+        payload.push_str(&"a".repeat(491));
+        payload.push('😀'); // 4 UTF-8 bytes
+        payload.push_str(&"b".repeat(100));
+        let v = json!({ "a": payload });
+        let serialized = v.to_string();
+        // Sanity-check that the test actually exercises the boundary —
+        // if the JSON encoding ever changes, the assertion below will
+        // catch it.
+        assert!(
+            serialized.len() > 500,
+            "test setup must produce >500 bytes"
+        );
+        assert!(
+            !serialized.is_char_boundary(500),
+            "test setup must straddle byte 500 with a multi-byte char"
+        );
+
+        // Must not panic.
+        let out = compact_json(&v);
+        assert!(out.ends_with("..."));
+    }
 }
