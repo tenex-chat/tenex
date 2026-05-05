@@ -282,13 +282,19 @@ async fn handle_project(ctx: &RuntimeCtx<'_>, event: &Event) {
 
     debug!(d_tag, address, "project discovered");
 
+    // Discovery alone never boots a runtime: registering the project as
+    // known is enough for kind:1 / kind:24000 triggers to wake it on real
+    // user activity. Auto-booting every discovered project caused a
+    // startup-time connection + REQ storm against the relay (every project
+    // with local agents would spawn its own runtime within the same tick).
+    // Explicit `--boot <prefix>` matches below still warm a project on
+    // demand.
     let decision = ctx.decide(&d_tag);
     match decision {
         BootDecision::Allow => {
             if ctx.skipped_projects.clear(&d_tag).await {
                 info!(d_tag, "project now bootable — agents available locally");
             }
-            ctx.supervisor.boot(d_tag.clone()).await;
         }
         BootDecision::Filtered | BootDecision::NoLocalAgents => {
             ctx.skipped_projects
@@ -308,8 +314,8 @@ async fn handle_project(ctx: &RuntimeCtx<'_>, event: &Event) {
     for prefix in matched_prefixes {
         match decision {
             BootDecision::Allow => {
-                info!(prefix, d_tag, "matched --boot prefix to discovered project");
-                // supervisor.boot is idempotent — already called above.
+                info!(prefix, d_tag, "matched --boot prefix; booting discovered project");
+                ctx.supervisor.boot(d_tag.clone()).await;
             }
             BootDecision::Filtered | BootDecision::NoLocalAgents => {
                 info!(

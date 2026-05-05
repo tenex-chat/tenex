@@ -11,7 +11,7 @@ use std::os::unix::process::ExitStatusExt;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use tokio::process::Command;
 use tokio::sync::{watch, Mutex};
@@ -40,14 +40,6 @@ const RESTART_BACKOFF_INITIAL_MS: u64 = 1_000;
 const RESTART_BACKOFF_MAX_MS: u64 = 30_000;
 const SIGTERM_GRACE_MS: u64 = 5_000;
 
-/// Minimum spacing between project-runtime process spawns. Each runtime
-/// opens its own ws connection and fires several REQ subscriptions on
-/// startup; without spacing, daemon-startup with N projects causes N
-/// connections + ~6N subscriptions to hit the relay in the same tick and
-/// trip its REQ rate limit (HTTP 429). Companion daemons are not paced
-/// — they boot once and don't subscribe in bursts.
-const RUNTIME_BOOT_INTERVAL: Duration = Duration::from_millis(500);
-
 #[derive(Clone)]
 pub struct Supervisor {
     boot_argv: Arc<Vec<String>>,
@@ -55,10 +47,6 @@ pub struct Supervisor {
     children: Arc<Mutex<HashMap<String, JoinHandle<()>>>>,
     shutdown_tx: watch::Sender<bool>,
     shutdown_rx: watch::Receiver<bool>,
-    /// Earliest `Instant` at which the next project-runtime spawn is
-    /// allowed. Each successful `boot()` reserves the next slot under
-    /// this lock and the spawned task sleeps until it arrives.
-    runtime_boot_pacer: Arc<Mutex<Instant>>,
 }
 
 impl Supervisor {
@@ -70,18 +58,7 @@ impl Supervisor {
             children: Arc::new(Mutex::new(HashMap::new())),
             shutdown_tx,
             shutdown_rx,
-            runtime_boot_pacer: Arc::new(Mutex::new(Instant::now())),
         }
-    }
-
-    /// Reserve the next runtime-boot time slot. Returns how long the caller
-    /// must wait before its spawn is permitted to run.
-    async fn reserve_runtime_boot_slot(&self) -> Duration {
-        let mut pacer = self.runtime_boot_pacer.lock().await;
-        let now = Instant::now();
-        let scheduled = (*pacer).max(now);
-        *pacer = scheduled + RUNTIME_BOOT_INTERVAL;
-        scheduled.saturating_duration_since(now)
     }
 
     pub async fn boot(&self, d_tag: String) {
@@ -101,19 +78,8 @@ impl Supervisor {
         let base_dir = self.base_dir.clone();
         let mut shutdown = self.shutdown_rx.clone();
         let key = d_tag.clone();
-        let boot_delay = self.reserve_runtime_boot_slot().await;
-        if !boot_delay.is_zero() {
-            debug!(
-                d_tag = %d_tag,
-                delay_ms = boot_delay.as_millis() as u64,
-                "staggering runtime boot to spread relay load"
-            );
-        }
 
         let handle = tokio::spawn(async move {
-            if !boot_delay.is_zero() {
-                tokio::time::sleep(boot_delay).await;
-            }
             supervise(&key, &argv, &base_dir, &mut shutdown).await;
         });
 
