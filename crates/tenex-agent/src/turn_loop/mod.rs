@@ -331,7 +331,11 @@ pub(crate) async fn run_turn_loop(boot: &mut AgentBootstrap) -> Result<()> {
         };
         let outcome = {
             let mut sup = boot.supervisor_ref.lock().unwrap();
-            sup.check_post_completion(todos_snap, 0, boot.envelope_content.clone())
+            sup.check_post_completion(
+                todos_snap,
+                usize::from(boot.emit_state.has_pending_external_work()),
+                boot.envelope_content.clone(),
+            )
         };
         match outcome {
             PostCompletionOutcome::Accept => {
@@ -412,21 +416,8 @@ pub(crate) async fn run_turn_loop(boot: &mut AgentBootstrap) -> Result<()> {
                 break 'agent_loop;
             }
             PostCompletionOutcome::ReEngage { message } => {
-                use rig::completion::message::{Text, UserContent};
-                use rig::completion::AssistantContent;
-                use rig::OneOrMany;
-
-                re_engage_history.push(RigMessage::User {
-                    content: OneOrMany::one(UserContent::Text(Text {
-                        text: current_message,
-                    })),
-                });
-                re_engage_history.push(RigMessage::Assistant {
-                    id: None,
-                    content: OneOrMany::one(AssistantContent::Text(Text {
-                        text: final_response.response().to_string(),
-                    })),
-                });
+                re_engage_history
+                    .extend(final_response.history().unwrap_or_default().iter().cloned());
                 current_message = message;
                 eprintln!("[tenex-agent] Supervision: pending todos — re-engaging...");
             }
