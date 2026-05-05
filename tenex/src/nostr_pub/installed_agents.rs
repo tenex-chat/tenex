@@ -1,10 +1,7 @@
 //! kind:24011 `TenexInstalledAgentList` — backend inventory of installed
-//! agents.
+//! agents and the LLM configurations available on this installation.
 //!
-//! Mirrors `InstalledAgentListService.publishImmediately` +
-//! `createInventoryEvent` (`src/services/status/InstalledAgentListService.ts:32-65`).
-//!
-//! Event shape (TS verbatim):
+//! Event shape:
 //!
 //! ```text
 //! kind     = 24011
@@ -12,7 +9,13 @@
 //! tags     = ["p", <whitelisted_pubkey>] for each whitelisted_pubkey
 //!          + ["agent", <pubkey>, <slug>] for each stored agent,
 //!            sorted first by slug, then by pubkey
+//!          + ["model", <slug>] for each LLM configuration in `llms.json`,
+//!            sorted alphabetically
 //! ```
+//!
+//! The model list comes from the keys of `~/.tenex/llms.json#/configurations`
+//! and is republished whenever that set changes (mirroring how the agent
+//! list triggers a republish on add/remove).
 //!
 //! Signed with the backend signer (`config.tenexPrivateKey`,
 //! see [`tenex_backend_keys::ensure`]).
@@ -20,6 +23,7 @@
 use anyhow::{anyhow, Context, Result};
 use nostr_sdk::{Client, ClientOptions, Event, EventBuilder, Keys, Kind, Tag, TagKind};
 
+use crate::store::llms::LlmsDoc;
 use crate::store::tenex_config::TenexConfigDoc;
 use tenex_agent_registry::{derive_agent_pubkey_from_nsec, AgentStorage};
 
@@ -71,15 +75,19 @@ fn sort_entries(entries: &mut [AgentEntry]) {
 /// Build (and sign) a kind:24011 inventory event. Pure function — does no
 /// I/O of its own. Callers usually drive this via
 /// [`publish_installed_agents_inventory`].
+///
+/// `available_models` is expected pre-sorted (alphabetical) by the caller.
 pub fn build_inventory_event(
     keys: &Keys,
     whitelisted_pubkeys: &[String],
     agents: &[AgentEntry],
+    available_models: &[String],
 ) -> Result<Event> {
-    let mut tags: Vec<Tag> = Vec::with_capacity(whitelisted_pubkeys.len() + agents.len());
+    let mut tags: Vec<Tag> = Vec::with_capacity(
+        whitelisted_pubkeys.len() + agents.len() + available_models.len(),
+    );
 
-    // ["p", <whitelistedPubkey>] — TS uses .tag() in `getWhitelistedPubkeys`
-    // iteration order, so we mirror that.
+    // ["p", <whitelistedPubkey>]
     for pk in whitelisted_pubkeys {
         tags.push(
             Tag::parse(["p", pk.as_str()]).map_err(|e| anyhow!("build p tag for {pk}: {e}"))?,
@@ -94,11 +102,25 @@ pub fn build_inventory_event(
         ));
     }
 
+    // ["model", <slug>] — pre-sorted by caller.
+    for slug in available_models {
+        tags.push(Tag::custom(TagKind::Custom("model".into()), [slug.clone()]));
+    }
+
     let event = EventBuilder::new(Kind::Custom(KIND_INSTALLED_AGENT_LIST), "")
         .tags(tags)
         .sign_with_keys(keys)
         .map_err(|e| anyhow!("sign inventory event: {e}"))?;
     Ok(event)
+}
+
+/// Available LLM configuration names from `~/.tenex/llms.json`, sorted
+/// alphabetically. Returns an empty vec when the file is absent.
+pub fn collect_available_models(base_dir: &std::path::Path) -> Result<Vec<String>> {
+    let llms = LlmsDoc::load(base_dir)?;
+    let mut names = llms.config_names();
+    names.sort();
+    Ok(names)
 }
 
 /// Resolve relays to publish to. Mirrors the daemon's resolution: prefer
@@ -126,7 +148,8 @@ pub async fn publish_installed_agents_inventory(base_dir: &std::path::Path) -> R
 
     let keys = tenex_backend_keys::ensure(base_dir)?;
     let agents = collect_inventory_entries(base_dir)?;
-    let event = build_inventory_event(&keys, &whitelisted, &agents)?;
+    let available_models = collect_available_models(base_dir)?;
+    let event = build_inventory_event(&keys, &whitelisted, &agents, &available_models)?;
 
     let client = Client::builder()
         .signer(keys)
@@ -212,7 +235,7 @@ mod tests {
     #[test]
     fn build_event_has_correct_kind_and_empty_content() {
         let keys = make_keys();
-        let event = build_inventory_event(&keys, &[], &[]).unwrap();
+        let event = build_inventory_event(&keys, &[], &[], &[]).unwrap();
         assert_eq!(u16::from(event.kind), KIND_INSTALLED_AGENT_LIST);
         assert_eq!(event.content, "");
     }
@@ -221,7 +244,7 @@ mod tests {
     fn build_event_emits_one_p_tag_per_whitelisted_pubkey() {
         let keys = make_keys();
         let whitelisted: Vec<String> = vec!["a".repeat(64), "b".repeat(64), "c".repeat(64)];
-        let event = build_inventory_event(&keys, &whitelisted, &[]).unwrap();
+        let event = build_inventory_event(&keys, &whitelisted, &[], &[]).unwrap();
         let p_tags: Vec<Vec<&str>> = event
             .tags
             .iter()
@@ -253,7 +276,7 @@ mod tests {
                 pubkey: "p2".into(),
             },
         ];
-        let event = build_inventory_event(&keys, &[], &agents).unwrap();
+        let event = build_inventory_event(&keys, &[], &agents, &[]).unwrap();
         let agent_tags: Vec<Vec<&str>> = event
             .tags
             .iter()
@@ -275,11 +298,77 @@ mod tests {
     #[test]
     fn build_event_signature_verifies() {
         let keys = make_keys();
-        let event = build_inventory_event(&keys, &[], &[]).unwrap();
+        let event = build_inventory_event(&keys, &[], &[], &[]).unwrap();
         // nostr's verify() returns Result<()>; success means signature good.
         event
             .verify()
             .expect("backend-signed inventory event must verify");
+    }
+
+    #[test]
+    fn build_event_emits_one_model_tag_per_available_model() {
+        let keys = make_keys();
+        let models: Vec<String> = vec!["Auto".into(), "Opus".into(), "Sonnet".into()];
+        let event = build_inventory_event(&keys, &[], &[], &models).unwrap();
+        let model_tags: Vec<Vec<&str>> = event
+            .tags
+            .iter()
+            .filter_map(|t| {
+                let s = t.as_slice();
+                if s.first().map(String::as_str) == Some("model") {
+                    Some(s.iter().map(String::as_str).collect())
+                } else {
+                    None
+                }
+            })
+            .collect();
+        assert_eq!(
+            model_tags,
+            vec![
+                vec!["model", "Auto"],
+                vec!["model", "Opus"],
+                vec!["model", "Sonnet"],
+            ]
+        );
+    }
+
+    #[test]
+    fn build_event_orders_p_then_agent_then_model_tags() {
+        let keys = make_keys();
+        let whitelisted = vec!["a".repeat(64)];
+        let agents = vec![AgentEntry {
+            slug: "x".into(),
+            pubkey: "p".into(),
+        }];
+        let models = vec!["Sonnet".into()];
+        let event = build_inventory_event(&keys, &whitelisted, &agents, &models).unwrap();
+        let kinds: Vec<&str> = event
+            .tags
+            .iter()
+            .map(|t| t.as_slice().first().map(String::as_str).unwrap_or(""))
+            .collect();
+        assert_eq!(kinds, vec!["p", "agent", "model"]);
+    }
+
+    #[test]
+    fn collect_available_models_reads_sorted_config_names() {
+        let base = unique_temp();
+        std::fs::write(
+            base.join("llms.json"),
+            br#"{"configurations":{"Zeta":{"provider":"x","model":"a"},"Alpha":{"provider":"x","model":"b"}}}"#,
+        )
+        .unwrap();
+        let names = collect_available_models(&base).unwrap();
+        assert_eq!(names, vec!["Alpha", "Zeta"]);
+        std::fs::remove_dir_all(&base).ok();
+    }
+
+    #[test]
+    fn collect_available_models_returns_empty_when_no_llms_json() {
+        let base = unique_temp();
+        let names = collect_available_models(&base).unwrap();
+        assert!(names.is_empty());
+        std::fs::remove_dir_all(&base).ok();
     }
 
     #[test]
@@ -308,24 +397,6 @@ mod tests {
         std::fs::remove_dir_all(&base).ok();
     }
 
-    #[test]
-    fn build_event_p_tags_precede_agent_tags() {
-        // TS source iterates p tags first then agents — preserve that order
-        // so external consumers parsing the event see them in that order.
-        let keys = make_keys();
-        let whitelisted = vec!["a".repeat(64)];
-        let agents = vec![AgentEntry {
-            slug: "x".into(),
-            pubkey: "p".into(),
-        }];
-        let event = build_inventory_event(&keys, &whitelisted, &agents).unwrap();
-        let kinds: Vec<&str> = event
-            .tags
-            .iter()
-            .map(|t| t.as_slice().first().map(String::as_str).unwrap_or(""))
-            .collect();
-        assert_eq!(kinds, vec!["p", "agent"]);
-    }
 
     #[test]
     fn resolve_relays_uses_default_when_empty() {

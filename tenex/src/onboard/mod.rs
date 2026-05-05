@@ -259,7 +259,22 @@ async fn run_inner(args: OnboardArgs) -> Result<()> {
             display::blank();
         }
         // Step 4 (sub-step B): interactive LLM config editor.
-        match llm_editor::run(&base_dir)? {
+        let editor_outcome = llm_editor::run(&base_dir)?;
+        // The editor may have added/removed configurations, which changes
+        // the set of available models advertised on kind:24011. Republish
+        // unconditionally — covers both Done and Cancelled paths so any
+        // saves the user made before exiting are reflected immediately.
+        if let Err(e) =
+            crate::nostr_pub::installed_agents::publish_installed_agents_inventory(&base_dir).await
+        {
+            eprintln!(
+                "{}",
+                crate::tui::theme::chalk_yellow(&format!(
+                    "Warning: failed to publish installed-agent inventory: {e}"
+                )),
+            );
+        }
+        match editor_outcome {
             llm_editor::LlmEditorResult::Done => {
                 llm_editor_done = true;
             }

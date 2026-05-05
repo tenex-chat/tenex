@@ -256,7 +256,7 @@ async fn dispatch(base_dir: &std::path::Path, value: &str) -> Result<()> {
 async fn dispatch_inner(base_dir: &std::path::Path, value: &str) -> Result<()> {
     match value {
         "providers" => run_providers_submenu(base_dir).await,
-        "llm" => run_llm_submenu(base_dir),
+        "llm" => run_llm_submenu(base_dir).await,
         "roles" => run_roles_submenu(base_dir),
         "embed" => run_embed_submenu(base_dir),
         "relays" => relays::run(base_dir),
@@ -336,7 +336,7 @@ async fn run_providers_submenu(base_dir: &std::path::Path) -> Result<()> {
     Ok(())
 }
 
-fn run_llm_submenu(base_dir: &std::path::Path) -> Result<()> {
+async fn run_llm_submenu(base_dir: &std::path::Path) -> Result<()> {
     // Mirror the no-providers guard at TS `commands/config/llm.ts:23-29`.
     // Two-line error: red "❌ No providers configured." then an amber `→`
     // hint pointing at `tenex config providers`. TS uses `console.log`
@@ -371,6 +371,20 @@ fn run_llm_submenu(base_dir: &std::path::Path) -> Result<()> {
         return Ok(());
     }
     let _ = crate::onboard::llm_editor::run(base_dir)?;
+    // The editor may have added/removed configurations, which changes the
+    // set of available models advertised on kind:24011. Republish so the
+    // inventory reflects the new state immediately rather than waiting for
+    // the daemon's 30-second timer.
+    if let Err(e) =
+        crate::nostr_pub::installed_agents::publish_installed_agents_inventory(base_dir).await
+    {
+        eprintln!(
+            "{}",
+            crate::tui::theme::chalk_yellow(&format!(
+                "Warning: failed to publish installed-agent inventory: {e}"
+            )),
+        );
+    }
     Ok(())
 }
 

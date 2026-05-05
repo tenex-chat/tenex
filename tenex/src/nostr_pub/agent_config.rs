@@ -15,8 +15,7 @@
 //!         + ["use-criteria", "<text>"]                    # when set
 //!         + ["p", "<backend_pubkey_hex>"]
 //!         + ["backend", "<name>"]                        # when set
-//!         + ["model", "<slug>"]                           # available
-//!           or ["model", "<slug>", "active"]              # selected
+//!         + ["model", "<slug>"]                           # currently active model
 //!         + ["skill", "<id>"]                             # available
 //!           or ["skill", "<id>", "active"]                # enabled
 //!         + ["mcp", "<slug>", "active"]                   # configured = active
@@ -28,9 +27,10 @@
 //! (`{project_path}/.agents/skills/`) are deliberately excluded here; they
 //! are advertised on the per-project kind:24010 event instead.
 //!
-//! Models = every config name in the project's `LlmsDoc`. Active marker is
-//! placed on the entry that matches `agent.default_config_json["model"]`
-//! when one is set.
+//! The model tag carries only the agent's currently active selection (the
+//! `model` field in `default_config_json`, falling back to
+//! `LlmsDoc::default_config()` when absent). The full list of *available*
+//! models lives on the backend's kind:24011 inventory, not here.
 //!
 //! MCPs come from `agent.mcp_servers_json` keys. Every configured MCP is
 //! considered active (there is no notion of an MCP being "available but not
@@ -167,7 +167,7 @@ fn mcp_server_slugs(agent: &Agent) -> Vec<String> {
 /// - `agent`            — the agent being announced.
 /// - `backend_pubkey`   — the backend that runs this agent (emitted as `p`).
 /// - `base_dir`         — TENEX base dir (`~/.tenex`); used to find skills.
-/// - `llms`             — the project's LLM doc (provides the model universe).
+/// - `llms`             — the project's LLM doc; consulted for the default-config fallback when the agent has no explicit model.
 /// - `backend_name`     — optional human-readable backend name (emitted as
 ///                        `["backend", "<name>"]` when present).
 pub async fn build_agent_config_event(
@@ -237,15 +237,13 @@ pub async fn build_agent_config_event(
         );
     }
 
-    // Models — sorted by config slug; "active" marker on the agent's selection.
-    let mut model_names = llms.config_names();
-    model_names.sort();
-    for slug in model_names {
-        let mut vals = vec![slug.clone()];
-        if active.model.as_deref() == Some(slug.as_str()) {
-            vals.push("active".to_string());
-        }
-        tags.push(Tag::custom(TagKind::Custom("model".into()), vals));
+    // Model — only the agent's currently active selection. The full list of
+    // available models lives on the backend's kind:24011 inventory.
+    if let Some(active_model) = active.model.as_deref() {
+        tags.push(Tag::custom(
+            TagKind::Custom("model".into()),
+            [active_model.to_string()],
+        ));
     }
 
     // Skills — built-in + agent-home + user-global; "active" on those in default_config.
@@ -431,10 +429,11 @@ mod tests {
         let p_tags = extract(&event, "p");
         assert_eq!(p_tags, vec![vec!["p", BACKEND_PK_HEX]]);
 
-        // model tags: alpha active, beta available
+        // model tags: only the agent's active selection appears (alpha).
+        // Other configs (beta) live on the backend's kind:24011 inventory,
+        // not on the per-agent kind:0 profile.
         let m_tags = extract(&event, "model");
-        assert!(m_tags.contains(&vec!["model", "alpha", "active"]));
-        assert!(m_tags.contains(&vec!["model", "beta"]));
+        assert_eq!(m_tags, vec![vec!["model", "alpha"]]);
 
         // skill tags: built-in available, home-only active.
         // Project-scoped `project-only` MUST NOT appear — it belongs on kind:24010.
@@ -505,12 +504,12 @@ mod tests {
         fs::remove_dir_all(&project_path).ok();
     }
 
-    /// Codex finding #5: when an agent has no explicit `model` in its
-    /// `default_config_json`, the runtime falls back to `LlmsDoc::default_config()`.
-    /// The published kind:0 profile must mark THAT model as `active`, not leave
-    /// the agent's row model-less in the TUI.
+    /// When an agent has no explicit `model` in its `default_config_json`,
+    /// the runtime falls back to `LlmsDoc::default_config()`. The published
+    /// kind:0 profile must emit THAT model as the active selection, not
+    /// leave the agent's row model-less in the TUI.
     #[tokio::test]
-    async fn build_event_marks_llms_default_model_active_when_agent_has_no_model() {
+    async fn build_event_emits_llms_default_model_when_agent_has_no_model() {
         let base_dir = unique_temp("base-fallback");
         let project_path = unique_temp("proj-fallback");
 
@@ -535,12 +534,41 @@ mod tests {
             .expect("event built");
 
         let m_tags = extract(&event, "model");
-        // Fallback: beta (the LlmsDoc default) is marked active.
-        assert!(
-            m_tags.contains(&vec!["model", "beta", "active"]),
-            "expected ['model','beta','active'], got {m_tags:?}"
+        assert_eq!(m_tags, vec![vec!["model", "beta"]]);
+
+        fs::remove_dir_all(&base_dir).ok();
+        fs::remove_dir_all(&project_path).ok();
+    }
+
+    /// When neither the agent nor the LlmsDoc default specifies a model,
+    /// no model tag is emitted (the kind:0 stays silent rather than picking
+    /// some arbitrary "available" model).
+    #[tokio::test]
+    async fn build_event_emits_no_model_tag_when_no_active_resolvable() {
+        let base_dir = unique_temp("base-none");
+        let project_path = unique_temp("proj-none");
+
+        // Two configs available, but no `default` role pointer.
+        let llms = load_llms(serde_json::json!({
+            "configurations": {
+                "alpha": { "provider": "mock", "model": "a" },
+                "beta":  { "provider": "mock", "model": "b" }
+            }
+        }));
+
+        let (agent, _keys) = agent_with_signer(
+            "no-active",
+            serde_json::json!({ "skills": [] }),
+            serde_json::json!({}),
         );
-        assert!(m_tags.contains(&vec!["model", "alpha"]));
+
+        let backend_pk = nostr_sdk::PublicKey::from_hex(BACKEND_PK_HEX).unwrap();
+        let event = build_agent_config_event(&agent, &backend_pk, &base_dir, &llms, None)
+            .await
+            .expect("event built");
+
+        let m_tags = extract(&event, "model");
+        assert!(m_tags.is_empty(), "no model tag expected, got {m_tags:?}");
 
         fs::remove_dir_all(&base_dir).ok();
         fs::remove_dir_all(&project_path).ok();
