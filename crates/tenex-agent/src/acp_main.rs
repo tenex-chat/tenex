@@ -47,6 +47,7 @@ use tenex_protocol::{
     nostr::{read_one_from_stdin, NostrChannel},
     Channel, CompletionIntent, ConversationIntent, ConversationRef, EncodingContext, Intent,
     LlmMetadata, MessageRef, PrincipalKind, PrincipalRef, ProjectRef, StreamTextDeltaIntent,
+    ToolUseIntent,
 };
 
 #[tokio::main]
@@ -302,6 +303,7 @@ async fn run(
             teams_fragment: &teams_fragment,
             home: &home_info,
             preloaded_skills_block: None,
+            workflows_fragment: None,
             telegram_channel_bindings: &telegram_channel_bindings,
             telegram_chat_context: None,
             scheduled_tasks: &[],
@@ -420,6 +422,10 @@ async fn run(
     };
     let mut stream_sequence = 0_u64;
     let stream_session_id = session_id.clone();
+    // Carries the tool name from `ToolCallStarted` until `ToolCallArgs` arrives
+    // with the actual arguments. Cleared each time args are received; any name
+    // still set here after the loop gets emitted without args.
+    let mut pending_tool_name: Option<String> = None;
     let prompt_result = acp
         .request_with_update_handler(
             "session/prompt",
@@ -434,13 +440,52 @@ async fn run(
                 let channel = channel.clone();
                 let ctx = stream_ctx.clone();
                 let thread_id = stream_session_id.clone();
+                // Sync: update pending state and decide what to emit.
+                let (flush_segment, tool_use): (Option<String>, Option<ToolUseIntent>) =
+                    match &update {
+                        AcpUpdate::AgentMessageChunk { .. } => (None, None),
+                        AcpUpdate::ToolCallStarted { segment_to_flush, tool_name } => {
+                            // If a previous tool never received args, emit it now without args.
+                            let stale = pending_tool_name.replace(tool_name.clone());
+                            let stale_intent = stale.filter(|n| !n.is_empty()).map(|n| {
+                                ToolUseIntent {
+                                    tool_name: n,
+                                    content: String::new(),
+                                    args_json: None,
+                                    referenced_messages: Vec::new(),
+                                    usage: None,
+                                    extra_tags: Vec::new(),
+                                }
+                            });
+                            (
+                                if segment_to_flush.is_empty() {
+                                    None
+                                } else {
+                                    Some(segment_to_flush.clone())
+                                },
+                                stale_intent,
+                            )
+                        }
+                        AcpUpdate::ToolCallArgs { tool_name, args_json } => {
+                            // Args arrived — clear pending and emit with full args.
+                            pending_tool_name.take();
+                            (
+                                None,
+                                Some(ToolUseIntent {
+                                    tool_name: tool_name.clone(),
+                                    content: String::new(),
+                                    args_json: Some(args_json.clone()),
+                                    referenced_messages: Vec::new(),
+                                    usage: None,
+                                    extra_tags: Vec::new(),
+                                }),
+                            )
+                        }
+                    };
                 async move {
                     match update {
                         AcpUpdate::AgentMessageChunk { text } => {
-                            let intent = StreamTextDeltaIntent {
-                                delta: text,
-                                sequence,
-                            };
+                            let intent = StreamTextDeltaIntent { delta: text, sequence };
                             if let Err(err) =
                                 channel.send(Intent::StreamTextDelta(intent), &ctx).await
                             {
@@ -449,24 +494,33 @@ async fn run(
                                 );
                             }
                         }
-                        AcpUpdate::ToolCallStarted { segment_to_flush } => {
-                            if segment_to_flush.is_empty() {
-                                return;
+                        AcpUpdate::ToolCallStarted { .. } | AcpUpdate::ToolCallArgs { .. } => {
+                            if let Some(segment) = flush_segment {
+                                let intent = ConversationIntent {
+                                    content: segment,
+                                    is_reasoning: false,
+                                    usage: None,
+                                    metadata: Some(LlmMetadata {
+                                        thread_id: Some(thread_id),
+                                        ..Default::default()
+                                    }),
+                                };
+                                if let Err(err) =
+                                    channel.send(Intent::Conversation(intent), &ctx).await
+                                {
+                                    eprintln!(
+                                        "[tenex-agent-acp] warn: tool-boundary flush failed: {err}"
+                                    );
+                                }
                             }
-                            let intent = ConversationIntent {
-                                content: segment_to_flush,
-                                is_reasoning: false,
-                                usage: None,
-                                metadata: Some(LlmMetadata {
-                                    thread_id: Some(thread_id),
-                                    ..Default::default()
-                                }),
-                            };
-                            if let Err(err) = channel.send(Intent::Conversation(intent), &ctx).await
-                            {
-                                eprintln!(
-                                    "[tenex-agent-acp] warn: tool-boundary flush failed: {err}"
-                                );
+                            if let Some(intent) = tool_use {
+                                if let Err(err) =
+                                    channel.send(Intent::ToolUse(intent), &ctx).await
+                                {
+                                    eprintln!(
+                                        "[tenex-agent-acp] warn: tool-use emit failed: {err}"
+                                    );
+                                }
                             }
                         }
                     }
@@ -474,6 +528,20 @@ async fn run(
             },
         )
         .await?;
+    // Any tool whose args never arrived (e.g. permission denied before tool_call_update).
+    if let Some(tool_name) = pending_tool_name.take().filter(|n| !n.is_empty()) {
+        let intent = ToolUseIntent {
+            tool_name,
+            content: String::new(),
+            args_json: None,
+            referenced_messages: Vec::new(),
+            usage: None,
+            extra_tags: Vec::new(),
+        };
+        if let Err(err) = channel.send(Intent::ToolUse(intent), &stream_ctx).await {
+            eprintln!("[tenex-agent-acp] warn: post-loop tool-use emit failed: {err}");
+        }
+    }
     let stop_reason = prompt_result
         .get("stopReason")
         .and_then(Value::as_str)

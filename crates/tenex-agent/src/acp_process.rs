@@ -10,13 +10,21 @@ use crate::acp_config::{AcpPermissionPolicy, AcpRuntimeConfig};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum AcpUpdate {
     AgentMessageChunk { text: String },
-    ToolCallStarted { segment_to_flush: String },
+    /// A new tool call began. The preceding text segment should be flushed and
+    /// the tool name recorded; `ToolUseIntent` is NOT emitted yet — we wait for
+    /// the companion `ToolCallArgs` that carries the actual `rawInput`.
+    ToolCallStarted { segment_to_flush: String, tool_name: String },
+    /// The first `tool_call_update` with non-empty `rawInput`. Emit
+    /// `ToolUseIntent` now that we have the structured arguments.
+    ToolCallArgs { tool_name: String, args_json: String },
 }
 
 #[derive(Default)]
 pub(crate) struct AcpUpdates {
     pub(crate) visible_text: String,
     pub(crate) current_segment: String,
+    /// Tool name saved from the most recent `tool_call`, waiting for args.
+    pending_tool_name: Option<String>,
 }
 
 impl AcpUpdates {
@@ -39,7 +47,28 @@ impl AcpUpdates {
             }
             "tool_call" => {
                 let segment_to_flush = std::mem::take(&mut self.current_segment);
-                Some(AcpUpdate::ToolCallStarted { segment_to_flush })
+                let tool_name = update
+                    .get("_meta")
+                    .and_then(|m| m.get("claudeCode"))
+                    .and_then(|cc| cc.get("toolName"))
+                    .and_then(Value::as_str)
+                    .or_else(|| update.get("title").and_then(Value::as_str))
+                    .unwrap_or("")
+                    .to_string();
+                self.pending_tool_name = Some(tool_name.clone());
+                Some(AcpUpdate::ToolCallStarted { segment_to_flush, tool_name })
+            }
+            "tool_call_update" => {
+                // Only produce an update on the first non-empty rawInput — that
+                // is when we know the structured arguments for the pending tool.
+                let raw_input = update.get("rawInput").and_then(Value::as_object)?;
+                if raw_input.is_empty() {
+                    return None;
+                }
+                let tool_name = self.pending_tool_name.take()?;
+                let args_json = serde_json::to_string(update.get("rawInput").unwrap())
+                    .unwrap_or_default();
+                Some(AcpUpdate::ToolCallArgs { tool_name, args_json })
             }
             _ => None,
         }
@@ -290,7 +319,8 @@ mod tests {
         assert_eq!(
             updates.apply(&tool),
             Some(AcpUpdate::ToolCallStarted {
-                segment_to_flush: "thinking...".to_string()
+                segment_to_flush: "thinking...".to_string(),
+                tool_name: "do thing".to_string(),
             })
         );
         assert_eq!(updates.visible_text, "thinking...");
@@ -328,15 +358,117 @@ mod tests {
         assert_eq!(
             updates.apply(&tool),
             Some(AcpUpdate::ToolCallStarted {
-                segment_to_flush: String::new()
+                segment_to_flush: String::new(),
+                tool_name: String::new(),
             })
         );
         assert_eq!(
             updates.apply(&tool),
             Some(AcpUpdate::ToolCallStarted {
-                segment_to_flush: String::new()
+                segment_to_flush: String::new(),
+                tool_name: String::new(),
             })
         );
+    }
+
+    #[test]
+    fn apply_tool_call_prefers_meta_tool_name_over_title() {
+        let mut updates = AcpUpdates::default();
+        let tool = json!({
+            "jsonrpc": "2.0",
+            "method": "session/update",
+            "params": {
+                "update": {
+                    "_meta": {"claudeCode": {"toolName": "Read"}},
+                    "sessionUpdate": "tool_call",
+                    "toolCallId": "abc",
+                    "title": "Read File",
+                    "kind": "read",
+                    "status": "pending"
+                }
+            }
+        });
+        assert_eq!(
+            updates.apply(&tool),
+            Some(AcpUpdate::ToolCallStarted {
+                segment_to_flush: String::new(),
+                tool_name: "Read".to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn apply_tool_call_update_with_args_produces_tool_call_args() {
+        let mut updates = AcpUpdates::default();
+        // First, a tool_call to set up pending state.
+        let tool_call = json!({
+            "jsonrpc": "2.0",
+            "method": "session/update",
+            "params": {
+                "update": {
+                    "_meta": {"claudeCode": {"toolName": "Read"}},
+                    "sessionUpdate": "tool_call",
+                    "toolCallId": "abc",
+                    "rawInput": {}
+                }
+            }
+        });
+        updates.apply(&tool_call);
+
+        let update = json!({
+            "jsonrpc": "2.0",
+            "method": "session/update",
+            "params": {
+                "update": {
+                    "_meta": {"claudeCode": {"toolName": "Read"}},
+                    "sessionUpdate": "tool_call_update",
+                    "toolCallId": "abc",
+                    "rawInput": {"file_path": "/etc/hostname"}
+                }
+            }
+        });
+        assert_eq!(
+            updates.apply(&update),
+            Some(AcpUpdate::ToolCallArgs {
+                tool_name: "Read".to_string(),
+                args_json: r#"{"file_path":"/etc/hostname"}"#.to_string(),
+            })
+        );
+        // Pending is consumed — second update produces nothing.
+        assert_eq!(updates.apply(&update), None);
+    }
+
+    #[test]
+    fn apply_tool_call_update_ignores_empty_raw_input() {
+        let mut updates = AcpUpdates::default();
+        let tool_call = json!({
+            "jsonrpc": "2.0",
+            "method": "session/update",
+            "params": {
+                "update": {
+                    "_meta": {"claudeCode": {"toolName": "Bash"}},
+                    "sessionUpdate": "tool_call",
+                    "toolCallId": "xyz",
+                    "rawInput": {}
+                }
+            }
+        });
+        updates.apply(&tool_call);
+
+        let empty_update = json!({
+            "jsonrpc": "2.0",
+            "method": "session/update",
+            "params": {
+                "update": {
+                    "sessionUpdate": "tool_call_update",
+                    "toolCallId": "xyz",
+                    "rawInput": {}
+                }
+            }
+        });
+        assert_eq!(updates.apply(&empty_update), None);
+        // Pending tool name should still be set.
+        assert_eq!(updates.pending_tool_name, Some("Bash".to_string()));
     }
 
     #[test]
