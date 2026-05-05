@@ -3,10 +3,40 @@ use crate::types::{Detection, EnforcementMode, PostCompletionContext, TodoStatus
 
 pub struct PendingTodosHeuristic;
 
+/// Returns `true` iff `text` contains `phrase` bounded on both sides by
+/// non-alphanumeric characters (or by string boundaries). This is a tiny
+/// word-boundary matcher: it prevents `"and do"` from matching inside
+/// `"and don't"` and `"fix"` from matching inside `"fixed"` or `"prefix"`,
+/// without pulling a regex dependency into this no-deps crate.
+///
+/// Both `text` and `phrase` are expected to already be lowercased ASCII.
+/// Multi-byte UTF-8 boundary bytes are not ASCII-alphanumeric, so they
+/// behave as word separators — acceptable for the English-language
+/// keyword phrases this heuristic uses.
+fn contains_word_phrase(text: &str, phrase: &str) -> bool {
+    if phrase.is_empty() {
+        return false;
+    }
+    let bytes = text.as_bytes();
+    let mut search_start = 0;
+    while let Some(idx) = text[search_start..].find(phrase) {
+        let abs = search_start + idx;
+        let before_ok = abs == 0 || !bytes[abs - 1].is_ascii_alphanumeric();
+        let end = abs + phrase.len();
+        let after_ok = end == bytes.len() || !bytes[end].is_ascii_alphanumeric();
+        if before_ok && after_ok {
+            return true;
+        }
+        search_start = abs + 1;
+    }
+    false
+}
+
 fn is_explicit_todo_list_only_request(message: &str) -> bool {
     let lower = message.to_lowercase();
-    let mentions_todos =
-        lower.contains("todo") || lower.contains("to-do") || lower.contains("task list");
+    let mentions_todos = ["todo", "to-do", "task list"]
+        .iter()
+        .any(|phrase| contains_word_phrase(&lower, phrase));
     if !mentions_todos {
         return false;
     }
@@ -23,7 +53,7 @@ fn is_explicit_todo_list_only_request(message: &str) -> bool {
         "prepare",
     ]
     .iter()
-    .any(|phrase| lower.contains(phrase));
+    .any(|phrase| contains_word_phrase(&lower, phrase));
     if !asks_to_set_up {
         return false;
     }
@@ -41,7 +71,7 @@ fn is_explicit_todo_list_only_request(message: &str) -> bool {
         "don't do",
     ]
     .iter()
-    .any(|phrase| lower.contains(phrase));
+    .any(|phrase| contains_word_phrase(&lower, phrase));
 
     let asks_to_execute_items = [
         "then do",
@@ -55,7 +85,7 @@ fn is_explicit_todo_list_only_request(message: &str) -> bool {
         "fix",
     ]
     .iter()
-    .any(|phrase| lower.contains(phrase));
+    .any(|phrase| contains_word_phrase(&lower, phrase));
 
     asks_to_stop_after && !asks_to_execute_items
 }
@@ -193,5 +223,44 @@ mod tests {
         let mut ctx = ctx(&todos, 0);
         ctx.triggering_message = "setup a todo list and then complete the tasks";
         assert!(h.check(&ctx).is_some());
+    }
+
+    #[test]
+    fn suppressed_when_user_explicitly_says_dont_do_them() {
+        // Regression: "and do" used to substring-match "and don't do", so a
+        // request that explicitly forbids execution was misclassified as
+        // asking for execution and the heuristic kept firing.
+        let h = PendingTodosHeuristic;
+        let todos = vec![TodoEntry {
+            id: "t1".to_string(),
+            status: TodoStatus::Pending,
+        }];
+        let mut ctx = ctx(&todos, 0);
+        ctx.triggering_message = "create a todo list and don't do anything else";
+        assert!(
+            h.check(&ctx).is_none(),
+            "explicit 'don't do' must suppress, not fire"
+        );
+    }
+
+    #[test]
+    fn suppressed_when_setup_words_appear_inside_other_words() {
+        // Regression: substring matching let "fix" match inside words like
+        // "fixed" or "prefix", and let "execute" match inside "executed",
+        // muddying the suppression decision. Word-boundary matching pins the
+        // execute-vocabulary to actual standalone tokens.
+        let h = PendingTodosHeuristic;
+        let todos = vec![TodoEntry {
+            id: "t1".to_string(),
+            status: TodoStatus::Pending,
+        }];
+        let mut ctx = ctx(&todos, 0);
+        // No real execute verbs here — just words that *contain* execute
+        // tokens as substrings. Should suppress.
+        ctx.triggering_message = "create a todo list of prefixed items, just stop";
+        assert!(
+            h.check(&ctx).is_none(),
+            "substrings inside larger words must not count as execute verbs"
+        );
     }
 }
