@@ -18,6 +18,7 @@
 
 pub mod agent_config;
 pub mod backend_heartbeat;
+pub mod backend_profile;
 pub mod installed_agents;
 pub mod operations_status;
 pub mod owner_signer;

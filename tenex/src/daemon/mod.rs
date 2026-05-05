@@ -125,6 +125,19 @@ pub async fn run(args: DaemonArgs) -> Result<()> {
     )
     .await?;
 
+    // Publish the backend's own kind:0 profile so Nostr clients can always
+    // resolve its identity after a restart.
+    {
+        let base_dir_clone = base_dir.clone();
+        tokio::spawn(async move {
+            if let Err(e) =
+                crate::nostr_pub::backend_profile::publish_backend_profile(&base_dir_clone).await
+            {
+                tracing::warn!(error = %e, "startup kind:0 backend profile publish failed");
+            }
+        });
+    }
+
     // Republish kind:0 profiles for all locally-managed agents at startup so
     // Nostr clients always see up-to-date agent identities after a daemon
     // restart, without waiting for the next per-project runtime boot.
