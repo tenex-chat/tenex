@@ -38,16 +38,27 @@ pub async fn bind_socket(config: SocketServerConfig) -> Result<BoundSocketServer
 
 pub async fn serve_socket(
     config: SocketServerConfig,
-    runtime: Arc<ProjectMcpRuntime>,
+    project_runtime: Arc<ProjectMcpRuntime>,
+    agent_runtime: Option<Arc<ProjectMcpRuntime>>,
     shutdown: oneshot::Receiver<()>,
 ) -> Result<()> {
-    bind_socket(config).await?.serve(runtime, shutdown).await
+    bind_socket(config)
+        .await?
+        .serve(project_runtime, agent_runtime, shutdown)
+        .await
 }
 
 impl BoundSocketServer {
+    /// Serve MCP tool calls from a connected agent subprocess.
+    ///
+    /// `project_runtime` is the shared project-level pool; `agent_runtime` is
+    /// an optional per-run pool for servers the agent carries with it.
+    /// Dispatch is based on the server slug embedded in the namespaced tool
+    /// name (`mcp__<server>__<tool>`): agent-owned servers take priority.
     pub async fn serve(
         self,
-        runtime: Arc<ProjectMcpRuntime>,
+        project_runtime: Arc<ProjectMcpRuntime>,
+        agent_runtime: Option<Arc<ProjectMcpRuntime>>,
         mut shutdown: oneshot::Receiver<()>,
     ) -> Result<()> {
         loop {
@@ -56,10 +67,13 @@ impl BoundSocketServer {
                 accepted = self.listener.accept() => {
                     match accepted {
                         Ok((stream, _)) => {
-                            let runtime = runtime.clone();
+                            let project_runtime = project_runtime.clone();
+                            let agent_runtime = agent_runtime.clone();
                             let allowed_tools = self.allowed_tools.clone();
                             tokio::spawn(async move {
-                                if let Err(error) = handle_client(stream, runtime, allowed_tools).await {
+                                if let Err(error) =
+                                    handle_client(stream, project_runtime, agent_runtime, allowed_tools).await
+                                {
                                     warn!(error = %error, "MCP socket client failed");
                                 }
                             });
@@ -79,7 +93,8 @@ impl BoundSocketServer {
 
 async fn handle_client(
     stream: UnixStream,
-    runtime: Arc<ProjectMcpRuntime>,
+    project_runtime: Arc<ProjectMcpRuntime>,
+    agent_runtime: Option<Arc<ProjectMcpRuntime>>,
     allowed_tools: Arc<HashSet<String>>,
 ) -> Result<()> {
     let (reader, mut writer) = stream.into_split();
@@ -93,10 +108,8 @@ async fn handle_client(
                         request.tool_name
                     ))
                 } else {
-                    match runtime
-                        .call_tool(&request.tool_name, request.arguments)
-                        .await
-                    {
+                    let runtime = pick_runtime(&request.tool_name, &project_runtime, &agent_runtime);
+                    match runtime.call_tool(&request.tool_name, request.arguments).await {
                         Ok(result) => McpToolCallResponse::ok(result),
                         Err(error) => McpToolCallResponse::error(error.to_string()),
                     }
@@ -112,4 +125,24 @@ async fn handle_client(
     writer.write_all(&bytes).await?;
     writer.flush().await?;
     Ok(())
+}
+
+/// Route a tool call to the agent-owned runtime when the server slug belongs
+/// to it; otherwise fall back to the shared project runtime.
+fn pick_runtime<'a>(
+    tool_name: &str,
+    project: &'a Arc<ProjectMcpRuntime>,
+    agent: &'a Option<Arc<ProjectMcpRuntime>>,
+) -> &'a Arc<ProjectMcpRuntime> {
+    if let Some(ar) = agent {
+        // Parse the server slug from `mcp__<server>__<tool>`.
+        if let Some(rest) = tool_name.strip_prefix("mcp__") {
+            if let Some((server, _)) = rest.split_once("__") {
+                if ar.has_server(server) {
+                    return ar;
+                }
+            }
+        }
+    }
+    project
 }

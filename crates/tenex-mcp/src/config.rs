@@ -87,6 +87,18 @@ impl ProjectMcpConfig {
     }
 }
 
+impl ProjectMcpConfig {
+    /// Parse agent-owned MCP servers from the inner-map JSON stored in
+    /// `Agent.mcp_servers_json`. That field holds the value of the
+    /// `mcpServers` key (e.g. `{"git": {"type":"stdio","command":"..."}}`)
+    /// rather than the full `.mcp.json` wrapper object.
+    pub fn from_agent_json(json: &str) -> Result<Self> {
+        let inner: IndexMap<String, RawServerConfig> =
+            serde_json::from_str(json).context("parsing agent mcpServers")?;
+        Self::from_raw(RawProjectMcpConfig { mcp_servers: inner })
+    }
+}
+
 pub fn mcp_access_from_default_json(default_config_json: Option<&str>) -> Result<Vec<String>> {
     let Some(raw) = default_config_json else {
         return Ok(Vec::new());
@@ -144,5 +156,28 @@ mod tests {
         assert_eq!(server.command, "git-mcp");
         assert_eq!(server.args, vec!["--stdio"]);
         assert_eq!(server.env.get("A").map(String::as_str), Some("B"));
+    }
+
+    #[test]
+    fn parses_agent_mcp_servers_inner_map() {
+        // mcp_servers_json stores the inner map (no mcpServers wrapper).
+        let json =
+            r#"{"github":{"type":"stdio","command":"gh-mcp","args":["--stdio"],"env":{}}}"#;
+        let config = ProjectMcpConfig::from_agent_json(json).unwrap();
+        let server = config.servers.get("github").unwrap();
+        assert_eq!(server.command, "gh-mcp");
+        assert_eq!(server.args, vec!["--stdio"]);
+    }
+
+    #[test]
+    fn rejects_agent_mcp_servers_with_non_stdio_transport() {
+        let json = r#"{"srv":{"type":"http","url":"https://example.com"}}"#;
+        assert!(ProjectMcpConfig::from_agent_json(json).is_err());
+    }
+
+    #[test]
+    fn rejects_agent_mcp_servers_missing_command() {
+        let json = r#"{"srv":{"type":"stdio"}}"#;
+        assert!(ProjectMcpConfig::from_agent_json(json).is_err());
     }
 }

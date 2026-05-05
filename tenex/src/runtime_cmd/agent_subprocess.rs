@@ -376,17 +376,60 @@ async fn start_mcp_bridge_for_run(
     execution_id: &str,
     command: &mut tokio::process::Command,
 ) -> Result<Option<ActiveMcpBridge>> {
-    let allowed_slugs =
+    let project_slugs =
         tenex_mcp::mcp_access_from_default_json(job.agent.default_config_json.as_deref())
             .with_context(|| format!("reading MCP access for agent '{}'", job.agent.slug))?;
-    if allowed_slugs.is_empty() {
+
+    // Parse agent-owned servers from mcp_servers_json (inner-map format:
+    // `{"slug": {config}}` without the outer `mcpServers` wrapper).
+    let agent_mcp_config = match job.agent.mcp_servers_json.as_deref() {
+        Some(json) => tenex_mcp::ProjectMcpConfig::from_agent_json(json)
+            .with_context(|| format!("parsing agent MCP servers for '{}'", job.agent.slug))?,
+        None => tenex_mcp::ProjectMcpConfig::default(),
+    };
+
+    if project_slugs.is_empty() && agent_mcp_config.is_empty() {
         return Ok(None);
     }
-    let manifest = shared
+
+    // Guard against name collisions so routing is unambiguous.
+    for slug in &project_slugs {
+        if agent_mcp_config.servers.contains_key(slug.as_str()) {
+            anyhow::bail!(
+                "agent '{}' owns an MCP server named '{}' which conflicts with a \
+                 project server of the same name granted via default.mcp",
+                job.agent.slug,
+                slug
+            );
+        }
+    }
+
+    let project_manifest = shared
         .mcp_runtime
-        .prepare_manifest(&allowed_slugs)
+        .prepare_manifest(&project_slugs)
         .await
-        .with_context(|| format!("preparing MCP tools for agent '{}'", job.agent.slug))?;
+        .with_context(|| format!("preparing project MCP tools for agent '{}'", job.agent.slug))?;
+
+    // Build a per-run runtime for agent-owned servers and collect their tools.
+    let (agent_runtime, agent_manifest) = if !agent_mcp_config.is_empty() {
+        let agent_slugs: Vec<String> = agent_mcp_config.servers.keys().cloned().collect();
+        let runtime = tenex_mcp::ProjectMcpRuntime::from_config(
+            &shared.project_dir,
+            agent_mcp_config,
+        );
+        let manifest = runtime
+            .prepare_manifest(&agent_slugs)
+            .await
+            .with_context(|| {
+                format!("preparing agent MCP tools for '{}'", job.agent.slug)
+            })?;
+        (Some(runtime), manifest)
+    } else {
+        (None, tenex_mcp::ToolManifest::empty())
+    };
+
+    let mut combined_manifest = project_manifest;
+    combined_manifest.tools.extend(agent_manifest.tools);
 
     let run_id: String = execution_id
         .chars()
@@ -397,11 +440,11 @@ async fn start_mcp_bridge_for_run(
     tokio::fs::create_dir_all(&run_dir).await?;
     let manifest_path = run_dir.join(format!("{run_id}.manifest.json"));
     let socket_path = run_dir.join(format!("{run_id}.sock"));
-    tokio::fs::write(&manifest_path, serde_json::to_vec(&manifest)?).await?;
+    tokio::fs::write(&manifest_path, serde_json::to_vec(&combined_manifest)?).await?;
 
     let server = match tenex_mcp::bind_socket(SocketServerConfig {
         socket_path: socket_path.clone(),
-        allowed_tools: manifest.tool_names(),
+        allowed_tools: combined_manifest.tool_names(),
     })
     .await
     {
@@ -413,9 +456,9 @@ async fn start_mcp_bridge_for_run(
     };
 
     let (shutdown, shutdown_rx) = tokio::sync::oneshot::channel();
-    let runtime = shared.mcp_runtime.clone();
+    let project_runtime = shared.mcp_runtime.clone();
     let task = tokio::spawn(async move {
-        if let Err(error) = server.serve(runtime, shutdown_rx).await {
+        if let Err(error) = server.serve(project_runtime, agent_runtime, shutdown_rx).await {
             warn!(error = %error, "MCP bridge socket stopped with error");
         }
     });

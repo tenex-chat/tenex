@@ -1,4 +1,4 @@
-//! `tenex mcp` — manage project-level `.mcp.json`.
+//! `tenex mcp` — manage project-level `.mcp.json` or per-agent MCP servers.
 //!
 //! Mirrors the `claude mcp` subcommands that write to `.mcp.json` in the
 //! current working directory (`--scope project` in Claude Code).
@@ -8,6 +8,11 @@
 //!   - stdio:  { "type":"stdio", "command":"...", "args":[...], "env":{} }
 //!   - http:   { "type":"http",  "url":"...", "headers":{...} }  (headers omitted when empty)
 //!   - sse:    { "type":"sse",   "url":"..." }
+//!
+//! When `--agent <slug>` is supplied the target is the agent's own
+//! `mcpServers` block rather than the project `.mcp.json`.  Agent-owned
+//! servers travel with the agent to every project it joins and are always
+//! available during the agent's runs (no `default.mcp` entry required).
 
 use std::path::PathBuf;
 
@@ -29,23 +34,23 @@ pub struct McpArgs {
 
 #[derive(Subcommand)]
 enum McpCommand {
-    /// Add an MCP server to .mcp.json.
+    /// Add an MCP server to .mcp.json (or to an agent with --agent).
     Add(AddArgs),
     /// Add an MCP server using a raw JSON config string.
     #[command(name = "add-json")]
     AddJson(AddJsonArgs),
     /// List all configured MCP servers.
-    List,
+    List(ListArgs),
     /// Show details for a single MCP server.
     Get {
         /// Server name.
         name: String,
+        /// Agent slug — show from agent's own servers instead of project config.
+        #[arg(long = "agent")]
+        agent: Option<String>,
     },
     /// Remove an MCP server.
-    Remove {
-        /// Server name.
-        name: String,
-    },
+    Remove(RemoveArgs),
 }
 
 #[derive(Parser)]
@@ -67,6 +72,9 @@ struct AddArgs {
     /// HTTP header ("Key: Value"). Repeatable. http/sse only.
     #[arg(short = 'H', long = "header")]
     header: Vec<String>,
+    /// Agent slug — add to the agent's own servers instead of project config.
+    #[arg(long = "agent")]
+    agent: Option<String>,
 }
 
 #[derive(Parser)]
@@ -75,15 +83,34 @@ struct AddJsonArgs {
     name: String,
     /// Server config as a JSON object string.
     json: String,
+    /// Agent slug — add to the agent's own servers instead of project config.
+    #[arg(long = "agent")]
+    agent: Option<String>,
+}
+
+#[derive(Parser)]
+struct ListArgs {
+    /// Agent slug — list the agent's own servers instead of project config.
+    #[arg(long = "agent")]
+    agent: Option<String>,
+}
+
+#[derive(Parser)]
+struct RemoveArgs {
+    /// Server name.
+    name: String,
+    /// Agent slug — remove from the agent's own servers instead of project config.
+    #[arg(long = "agent")]
+    agent: Option<String>,
 }
 
 pub async fn run(args: McpArgs) -> Result<()> {
     match args.command {
         McpCommand::Add(a) => cmd_add(a),
         McpCommand::AddJson(a) => cmd_add_json(a),
-        McpCommand::List => cmd_list(),
-        McpCommand::Get { name } => cmd_get(&name),
-        McpCommand::Remove { name } => cmd_remove(&name),
+        McpCommand::List(a) => cmd_list(a),
+        McpCommand::Get { name, agent } => cmd_get(&name, agent.as_deref()),
+        McpCommand::Remove(a) => cmd_remove(a),
     }
 }
 
@@ -98,13 +125,23 @@ fn cmd_add(args: AddArgs) -> Result<()> {
         }
         other => bail!("unknown transport: {other:?} (expected stdio, http, or sse)"),
     };
-    let mut doc = load_doc()?;
-    servers_mut(&mut doc).insert(args.name.clone(), entry);
-    save_doc(&doc)?;
-    println!(
-        "Added {transport} MCP server {} to project config",
-        args.name
-    );
+    if let Some(slug) = &args.agent {
+        let mut storage = open_storage()?;
+        let pubkey = resolve_agent_pubkey(&storage, slug)?;
+        storage.set_agent_mcp_server(&pubkey, &args.name, entry)?;
+        println!(
+            "Added {transport} MCP server {} to agent {slug}",
+            args.name
+        );
+    } else {
+        let mut doc = load_doc()?;
+        servers_mut(&mut doc).insert(args.name.clone(), entry);
+        save_doc(&doc)?;
+        println!(
+            "Added {transport} MCP server {} to project config",
+            args.name
+        );
+    }
     Ok(())
 }
 
@@ -114,14 +151,42 @@ fn cmd_add_json(args: AddJsonArgs) -> Result<()> {
     if !value.is_object() {
         bail!("server config must be a JSON object");
     }
-    let mut doc = load_doc()?;
-    servers_mut(&mut doc).insert(args.name.clone(), value);
-    save_doc(&doc)?;
-    println!("Added MCP server {} to project config", args.name);
+    if let Some(slug) = &args.agent {
+        let mut storage = open_storage()?;
+        let pubkey = resolve_agent_pubkey(&storage, slug)?;
+        storage.set_agent_mcp_server(&pubkey, &args.name, value)?;
+        println!("Added MCP server {} to agent {slug}", args.name);
+    } else {
+        let mut doc = load_doc()?;
+        servers_mut(&mut doc).insert(args.name.clone(), value);
+        save_doc(&doc)?;
+        println!("Added MCP server {} to project config", args.name);
+    }
     Ok(())
 }
 
-fn cmd_list() -> Result<()> {
+fn cmd_list(args: ListArgs) -> Result<()> {
+    if let Some(slug) = &args.agent {
+        let storage = open_storage()?;
+        let doc = storage
+            .get_agent_by_slug(slug)?
+            .ok_or_else(|| anyhow!("agent {slug:?} not found"))?;
+        let servers = doc
+            .raw()
+            .get(SERVERS_KEY)
+            .and_then(Value::as_object)
+            .cloned()
+            .unwrap_or_default();
+        if servers.is_empty() {
+            println!("Agent {slug} has no MCP servers configured.");
+            return Ok(());
+        }
+        for (name, cfg) in &servers {
+            print_server_summary(name, cfg);
+        }
+        return Ok(());
+    }
+
     let doc = load_doc()?;
     let Some(servers) = doc.get(SERVERS_KEY).and_then(Value::as_object) else {
         println!("No MCP servers configured.");
@@ -132,24 +197,29 @@ fn cmd_list() -> Result<()> {
         return Ok(());
     }
     for (name, cfg) in servers {
-        let transport = cfg.get("type").and_then(Value::as_str).unwrap_or("stdio");
-        let target = if transport == "stdio" {
-            cfg.get("command")
-                .and_then(Value::as_str)
-                .unwrap_or("?")
-                .to_owned()
-        } else {
-            cfg.get("url")
-                .and_then(Value::as_str)
-                .unwrap_or("?")
-                .to_owned()
-        };
-        println!("{name} ({transport}): {target}");
+        print_server_summary(name, cfg);
     }
     Ok(())
 }
 
-fn cmd_get(name: &str) -> Result<()> {
+fn cmd_get(name: &str, agent: Option<&str>) -> Result<()> {
+    if let Some(slug) = agent {
+        let storage = open_storage()?;
+        let doc = storage
+            .get_agent_by_slug(slug)?
+            .ok_or_else(|| anyhow!("agent {slug:?} not found"))?;
+        let servers = doc
+            .raw()
+            .get(SERVERS_KEY)
+            .and_then(Value::as_object)
+            .ok_or_else(|| anyhow!("agent {slug:?} has no MCP servers configured"))?;
+        let cfg = servers
+            .get(name)
+            .ok_or_else(|| anyhow!("server {name:?} not found for agent {slug:?}"))?;
+        println!("{}", serde_json::to_string_pretty(cfg)?);
+        return Ok(());
+    }
+
     let doc = load_doc()?;
     let servers = doc
         .get(SERVERS_KEY)
@@ -162,18 +232,68 @@ fn cmd_get(name: &str) -> Result<()> {
     Ok(())
 }
 
-fn cmd_remove(name: &str) -> Result<()> {
+fn cmd_remove(args: RemoveArgs) -> Result<()> {
+    if let Some(slug) = &args.agent {
+        let mut storage = open_storage()?;
+        let pubkey = resolve_agent_pubkey(&storage, slug)?;
+        let removed = storage.remove_agent_mcp_server(&pubkey, &args.name)?;
+        if !removed {
+            bail!("server {:?} not found for agent {slug:?}", args.name);
+        }
+        println!("Removed MCP server {} from agent {slug}", args.name);
+        return Ok(());
+    }
+
     let mut doc = load_doc()?;
     let servers = doc
         .get_mut(SERVERS_KEY)
         .and_then(Value::as_object_mut)
         .ok_or_else(|| anyhow!("no MCP servers configured"))?;
-    if servers.shift_remove(name).is_none() {
-        bail!("server {name:?} not found");
+    if servers.shift_remove(&args.name).is_none() {
+        bail!("server {:?} not found", args.name);
     }
     save_doc(&doc)?;
-    println!("Removed MCP server {name} from project config");
+    println!("Removed MCP server {} from project config", args.name);
     Ok(())
+}
+
+// ---- agent storage helpers -----------------------------------------------
+
+fn open_storage() -> Result<tenex_agent_registry::AgentStorage> {
+    let base_dir = crate::store::resolve_base_dir(None);
+    tenex_agent_registry::AgentStorage::open(&base_dir)
+}
+
+fn resolve_agent_pubkey(
+    storage: &tenex_agent_registry::AgentStorage,
+    slug: &str,
+) -> Result<String> {
+    let doc = storage
+        .get_agent_by_slug(slug)?
+        .ok_or_else(|| anyhow!("agent {slug:?} not found"))?;
+    let nsec = doc
+        .nsec()
+        .ok_or_else(|| anyhow!("agent {slug:?} has no nsec"))?;
+    // Derive pubkey from nsec using the existing identity crate.
+    let keys = nostr_sdk::Keys::parse(nsec)
+        .with_context(|| format!("parsing nsec for agent {slug:?}"))?;
+    Ok(keys.public_key().to_hex())
+}
+
+fn print_server_summary(name: &str, cfg: &Value) {
+    let transport = cfg.get("type").and_then(Value::as_str).unwrap_or("stdio");
+    let target = if transport == "stdio" {
+        cfg.get("command")
+            .and_then(Value::as_str)
+            .unwrap_or("?")
+            .to_owned()
+    } else {
+        cfg.get("url")
+            .and_then(Value::as_str)
+            .unwrap_or("?")
+            .to_owned()
+    };
+    println!("{name} ({transport}): {target}");
 }
 
 // ---- entry builders ------------------------------------------------------

@@ -33,8 +33,22 @@ impl ProjectMcpRuntime {
         }))
     }
 
+    /// Construct from an already-parsed config (used for per-run agent-owned
+    /// MCP servers that don't come from the project's `.mcp.json`).
+    pub fn from_config(project_dir: impl AsRef<Path>, config: ProjectMcpConfig) -> Arc<Self> {
+        Arc::new(Self {
+            project_dir: project_dir.as_ref().to_path_buf(),
+            config,
+            servers: Mutex::new(HashMap::new()),
+        })
+    }
+
     pub fn configured_server_names(&self) -> Vec<String> {
         self.config.servers.keys().cloned().collect()
+    }
+
+    pub fn has_server(&self, slug: &str) -> bool {
+        self.config.servers.contains_key(slug)
     }
 
     pub async fn prepare_manifest(&self, allowed_slugs: &[String]) -> Result<ToolManifest> {

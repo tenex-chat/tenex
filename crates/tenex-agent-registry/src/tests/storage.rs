@@ -445,3 +445,58 @@ fn save_inactive_agent_reassigns_slug_to_active_alternative() {
     assert_eq!(entry.pubkey, pk_b, "slug ownership should pass to active B");
     std::fs::remove_dir_all(&base).ok();
 }
+
+#[test]
+fn set_agent_mcp_server_inserts_and_replaces() {
+    let base = unique_temp();
+    let mut storage = AgentStorage::open(&base).unwrap();
+    let (doc, pubkey) = fixture_agent("mcp-tester");
+    storage.save_agent(&doc).unwrap();
+
+    let config = serde_json::json!({"type":"stdio","command":"git-mcp","args":[],"env":{}});
+    let ok = storage
+        .set_agent_mcp_server(&pubkey, "git", config.clone())
+        .unwrap();
+    assert!(ok, "should find the agent");
+
+    let reloaded = AgentDoc::load(&base, &pubkey).unwrap().unwrap();
+    let servers = reloaded.raw().get("mcpServers").and_then(Value::as_object).unwrap();
+    assert_eq!(servers.get("git"), Some(&config));
+
+    // Replace with an updated config.
+    let updated = serde_json::json!({"type":"stdio","command":"git-mcp-v2","args":[],"env":{}});
+    storage
+        .set_agent_mcp_server(&pubkey, "git", updated.clone())
+        .unwrap();
+    let reloaded2 = AgentDoc::load(&base, &pubkey).unwrap().unwrap();
+    let servers2 = reloaded2.raw().get("mcpServers").and_then(Value::as_object).unwrap();
+    assert_eq!(servers2.get("git"), Some(&updated));
+
+    std::fs::remove_dir_all(&base).ok();
+}
+
+#[test]
+fn remove_agent_mcp_server_collapses_empty_map() {
+    let base = unique_temp();
+    let mut storage = AgentStorage::open(&base).unwrap();
+    let (doc, pubkey) = fixture_agent("mcp-remover");
+    storage.save_agent(&doc).unwrap();
+
+    let config = serde_json::json!({"type":"stdio","command":"tool","args":[],"env":{}});
+    storage.set_agent_mcp_server(&pubkey, "tool", config).unwrap();
+
+    let removed = storage.remove_agent_mcp_server(&pubkey, "tool").unwrap();
+    assert!(removed);
+
+    let reloaded = AgentDoc::load(&base, &pubkey).unwrap().unwrap();
+    assert!(
+        reloaded.raw().get("mcpServers").is_none(),
+        "mcpServers key should be removed when empty"
+    );
+
+    // Removing non-existent entry returns false.
+    let not_found = storage.remove_agent_mcp_server(&pubkey, "tool").unwrap();
+    assert!(!not_found);
+
+    std::fs::remove_dir_all(&base).ok();
+}
