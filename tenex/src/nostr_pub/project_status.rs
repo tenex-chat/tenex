@@ -8,17 +8,17 @@
 //! tags    = ["a", "31933:<owner_pk>:<d_tag>"]
 //!         + ["p", <owner_pk>] (+ ["p", <whitelisted_pk>]..., deduped)
 //!         + ["skill", <id>]                              (one per project-scoped skill)
+//!         + ["mcp", <name>]                              (one per project MCP server)
 //! ```
 //!
-//! Skills emitted here are **project-scoped only** — skills installed at
-//! `{project_path}/.agents/skills/<id>/SKILL.md`. These are the same across
-//! every backend that has access to the project directory.
+//! Skills and MCP servers emitted here are **project-scoped** — skills from
+//! `{project_path}/.agents/skills/<id>/SKILL.md` and MCP servers from
+//! `{project_path}/.mcp.json`. These are the same across every backend that
+//! has access to the project directory.
 //!
-//! Built-in (`{base_dir}/skills/built-in`) and user-global (`~/.agents/skills`)
-//! skills are backend-specific and therefore live on each agent's kind:0 profile,
-//! not here. Per-agent assignments are likewise on kind:0. Agent, model, and MCP
-//! tags are NOT emitted here — the available agents are on kind:24011, per-agent
-//! capabilities on kind:0.
+//! Built-in and user-global skills are backend-specific and live on each
+//! agent's kind:0 profile, not here. Per-agent assignments and per-agent MCP
+//! access are likewise on kind:0. Available agents are on kind:24011.
 //!
 //! tool/branch/scheduled-task tags are not emitted — they require
 //! infrastructure (tool registry, git, scheduler storage) not yet available
@@ -31,6 +31,7 @@ use std::path::Path;
 
 use anyhow::{anyhow, Result};
 use nostr_sdk::{Event, EventBuilder, Keys, Kind, Tag, TagKind};
+use tenex_mcp::ProjectMcpConfig;
 
 use tenex_project::ProjectMetadata;
 
@@ -87,14 +88,22 @@ pub fn build_project_status_event(
     }
 
     // ─── Project-scoped skill emission ────────────────────────────────────────
-    //
-    // Emit one ["skill", <id>] tag per project-scoped skill. Built-in and
-    // user-global skills are backend-specific; they live on each agent's kind:0.
     let universe: BTreeSet<String> = project_scoped_skill_ids(project_path).into_iter().collect();
     for id in &universe {
         tags.push(Tag::custom(
             TagKind::Custom("skill".into()),
             vec![id.clone()],
+        ));
+    }
+
+    // ─── Project MCP server emission ──────────────────────────────────────────
+    let mcp_config = ProjectMcpConfig::load_project(project_path)
+        .unwrap_or_default();
+    let mcp_names: BTreeSet<String> = mcp_config.servers.keys().cloned().collect();
+    for name in &mcp_names {
+        tags.push(Tag::custom(
+            TagKind::Custom("mcp".into()),
+            vec![name.clone()],
         ));
     }
 
