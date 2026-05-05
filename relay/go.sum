@@ -98,6 +98,8 @@ github.com/modern-go/reflect2 v1.0.2 h1:xBagoLtFs94CBntxluKeaWgTMpvLxC4ur3nMaC9G
 github.com/modern-go/reflect2 v1.0.2/go.mod h1:yWuevngMOJpCy52FWWMvUC8ws7m/LJsjYzDa0/r8luk=
 github.com/nbd-wtf/go-nostr v0.51.8 h1:CIoS+YqChcm4e1L1rfMZ3/mIwTz4CwApM2qx7MHNzmE=
 github.com/nbd-wtf/go-nostr v0.51.8/go.mod h1:d6+DfvMWYG5pA3dmNMBJd6WCHVDDhkXbHqvfljf0Gzg=
+github.com/nbd-wtf/go-nostr v0.52.3 h1:Xd87pXfJEJRXHpM+fLjQQln8dBNNaoPA10V7BbyP4KI=
+github.com/nbd-wtf/go-nostr v0.52.3/go.mod h1:4avYoc9mDGZ9wHsvCOhHH9vPzKucCfuYBtJUSpHTfNk=
 github.com/pkg/errors v0.9.1 h1:FEBLx1zS214owpjy7qsBeixbURkuhQAwrK5UwLGTwt4=
 github.com/pkg/errors v0.9.1/go.mod h1:bwawxfHBFNV+L2hUp1rHADufV3IMtnDRdf1r5NINEl0=
 github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZbAQM=

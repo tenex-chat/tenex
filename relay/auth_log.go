@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/fiatjaf/eventstore"
 	"github.com/fiatjaf/khatru"
 	"github.com/nbd-wtf/go-nostr"
 )
@@ -32,6 +33,9 @@ func newAuthLogger(config *Config) *AuthLogger {
 // LogREQRejected records a subscription that was rejected because the client
 // was not authenticated.
 func (l *AuthLogger) LogREQRejected(ctx context.Context, filter nostr.Filter) {
+	if eventstore.IsNegentropySession(ctx) {
+		return
+	}
 	ws := khatru.GetConnection(ctx)
 	entry := map[string]any{
 		"time":   time.Now().UTC().Format(time.RFC3339Nano),

@@ -55,6 +55,7 @@ func NewRelay(config *Config) (*Relay, error) {
 	var db eventstore.Store = dbImpl
 
 	relay := khatru.NewRelay()
+	relay.Negentropy = true // enable NIP-77 negentropy support
 	ephemeralCache := newEphemeralEventCache(ephemeralEventRetention)
 	relay.MaxMessageSize = int64(config.Limits.MaxMessageLength)
 	recentHistoricalQueries := newHistoricalQueryReplayGuard(5 * time.Second)

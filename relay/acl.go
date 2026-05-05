@@ -232,6 +232,11 @@ func (a *ACL) OverwriteFilterHook(ctx context.Context, filter *nostr.Filter) {
 		return
 	}
 
+	// Negentropy sessions don't have a subscription ID in context — skip tracking.
+	if eventstore.IsNegentropySession(ctx) {
+		return
+	}
+
 	ws := khatru.GetConnection(ctx)
 	subID := khatru.GetSubscriptionID(ctx)
 	if ws == nil || subID == "" {
