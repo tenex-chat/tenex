@@ -31,10 +31,12 @@ const MAX_AGE_SECS: i64 = 7 * 24 * 60 * 60;
 
 pub async fn run(cfg: Config, state: SummaryStateStore) -> Result<()> {
     let publisher = Publisher::new(&cfg.backend_secret_key, &cfg.relays).await?;
+    let startup_secs = now_secs();
     info!(
         relays = ?cfg.relays,
         provider = %cfg.llm.provider,
         model = %cfg.llm.model,
+        startup_secs,
         "tenex-summarizer started",
     );
 
@@ -48,7 +50,7 @@ pub async fn run(cfg: Config, state: SummaryStateStore) -> Result<()> {
             _ = sigint.recv() => { info!("SIGINT received; shutting down"); return Ok(()); }
             _ = sigterm.recv() => { info!("SIGTERM received; shutting down"); return Ok(()); }
             _ = ticker.tick() => {
-                if let Err(e) = scan_once(&cfg, &state, &publisher).await {
+                if let Err(e) = scan_once(&cfg, &state, &publisher, startup_secs).await {
                     error!(error = %e, "scan cycle failed");
                 }
             }
@@ -56,7 +58,12 @@ pub async fn run(cfg: Config, state: SummaryStateStore) -> Result<()> {
     }
 }
 
-async fn scan_once(cfg: &Config, state: &SummaryStateStore, publisher: &Publisher) -> Result<()> {
+async fn scan_once(
+    cfg: &Config,
+    state: &SummaryStateStore,
+    publisher: &Publisher,
+    startup_secs: i64,
+) -> Result<()> {
     let projects = match source::discover_projects() {
         Ok(p) => p,
         Err(e) => {
@@ -122,8 +129,14 @@ async fn scan_once(cfg: &Config, state: &SummaryStateStore, publisher: &Publishe
         };
 
         for cand in candidates {
-            match should_process(state, &cand.conversation_id, cand.last_activity)? {
+            match should_process(state, &cand.conversation_id, cand.last_activity, startup_secs)? {
                 Decision::Skip => {
+                    total_skipped += 1;
+                }
+                Decision::Baseline => {
+                    if let Err(e) = state.record(&cand.conversation_id, cand.last_activity, 0) {
+                        warn!(error = %e, "state.record (baseline) failed");
+                    }
                     total_skipped += 1;
                 }
                 Decision::Process => {
@@ -171,6 +184,10 @@ struct ProjectScanContext<'a> {
 
 enum Decision {
     Skip,
+    /// First time we've seen this conversation and its latest activity
+    /// predates summarizer startup — record state so the next advance
+    /// triggers a real summary, but do not backfill the existing history.
+    Baseline,
     Process,
 }
 
@@ -178,11 +195,18 @@ fn should_process(
     state: &SummaryStateStore,
     conversation_id: &str,
     last_activity: i64,
+    startup_secs: i64,
 ) -> Result<Decision> {
     let now_ms = now_ms();
     let prior = state.get(conversation_id)?;
     Ok(match prior {
-        None => Decision::Process,
+        None => {
+            if last_activity <= startup_secs {
+                Decision::Baseline
+            } else {
+                Decision::Process
+            }
+        }
         Some(s) => {
             if last_activity > s.last_activity_summarized
                 && now_ms - s.last_summarized_at_ms >= MIN_INTERVAL_MS
@@ -308,6 +332,13 @@ fn now_ms() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
+fn now_secs() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
         .unwrap_or(0)
 }
 
