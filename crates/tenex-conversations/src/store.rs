@@ -532,6 +532,26 @@ impl ConversationStore {
         Ok(())
     }
 
+    /// Returns the maximum `timestamp` (seconds since epoch) among message rows
+    /// that carry a `nostr_event_id`. Used by the runtime backfill path to
+    /// determine the lower bound of the offline window to REQ on next startup.
+    /// Returns `Ok(None)` when no relay-sourced messages exist yet.
+    pub fn last_seen_event_timestamp(&self) -> Result<Option<i64>> {
+        self.conn
+            .query_row(
+                "SELECT MAX(timestamp) FROM messages WHERE nostr_event_id IS NOT NULL",
+                [],
+                |row| row.get::<_, Option<i64>>(0),
+            )
+            .map_err(ConversationsError::from)
+    }
+
+    /// Returns `true` when a message row with the given `nostr_event_id` already
+    /// exists — i.e. this Nostr event was processed in a prior session.
+    pub fn has_seen_event(&self, event_id: &str) -> Result<bool> {
+        self.find_message_id_by_event(event_id).map(|opt| opt.is_some())
+    }
+
     fn find_message_id_by_record(
         &self,
         conversation_id: &str,
