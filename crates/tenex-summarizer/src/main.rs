@@ -3,6 +3,7 @@ use clap::{Parser, Subcommand};
 
 mod categories;
 mod config;
+mod ingest;
 mod lockfile;
 mod paths;
 mod publish;

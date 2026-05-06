@@ -1,5 +1,8 @@
-//! `source::pm_owned_locally` predicate. The summarizer uses it to gate
-//! kind:513 publishes when several backends share the same project.
+//! `source::pm_identity` resolves the PM agent for a project and tells
+//! us whether this backend can sign for it. The summarizer uses it to
+//! decide whether to (a) run the LLM pass and publish kind:513s itself,
+//! or (b) drop into ingest-only mode and trust events authored by the
+//! known PM pubkey from another backend.
 
 use std::fs;
 
@@ -36,7 +39,7 @@ fn write_agent(base: &std::path::Path, pubkey: &str, with_nsec: bool) {
         json!({
             "slug": "pm",
             "name": "PM",
-            "nsec": "nsec1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqsm0lzze",
+            "nsec": "nsec125v964gu6u6ncqdkczwjq7pdtu0adj03sjfcm3lsj67ljk7v2hrsr2juay",
         })
     } else {
         json!({
@@ -52,64 +55,81 @@ fn write_agent(base: &std::path::Path, pubkey: &str, with_nsec: bool) {
 }
 
 #[test]
-fn returns_true_when_pm_agent_has_local_signer() {
+fn resolves_pm_pubkey_and_local_signer_when_pm_is_local() {
     let tmp = tempdir().unwrap();
     let pm = "1".repeat(64);
     let other = "2".repeat(64);
     write_project_event(tmp.path(), "Project-A", &[&pm, &other]);
     write_agent(tmp.path(), &pm, true);
 
-    assert!(source::pm_owned_locally("Project-A", tmp.path()).unwrap());
+    let id = source::pm_identity("Project-A", tmp.path())
+        .unwrap()
+        .expect("pm identity present");
+    assert_eq!(id.pubkey, pm);
+    assert!(id.local_signer.is_some());
 }
 
 #[test]
-fn returns_false_when_pm_agent_file_is_missing() {
+fn resolves_pm_pubkey_with_no_signer_when_pm_file_is_missing() {
     let tmp = tempdir().unwrap();
     let pm = "1".repeat(64);
     write_project_event(tmp.path(), "Project-B", &[&pm]);
     // No agent file written — PM lives on a remote backend.
 
-    assert!(!source::pm_owned_locally("Project-B", tmp.path()).unwrap());
+    let id = source::pm_identity("Project-B", tmp.path())
+        .unwrap()
+        .expect("pm identity present");
+    assert_eq!(id.pubkey, pm);
+    assert!(id.local_signer.is_none());
 }
 
 #[test]
-fn returns_false_when_pm_agent_file_has_no_signer() {
+fn resolves_pm_pubkey_with_no_signer_when_pm_file_has_no_signer_ref() {
     let tmp = tempdir().unwrap();
     let pm = "1".repeat(64);
     write_project_event(tmp.path(), "Project-C", &[&pm]);
     write_agent(tmp.path(), &pm, false);
 
-    assert!(!source::pm_owned_locally("Project-C", tmp.path()).unwrap());
+    let id = source::pm_identity("Project-C", tmp.path())
+        .unwrap()
+        .expect("pm identity present");
+    assert_eq!(id.pubkey, pm);
+    assert!(id.local_signer.is_none());
 }
 
 #[test]
-fn returns_false_when_project_event_lists_no_agents() {
+fn returns_none_when_project_event_lists_no_agents() {
     let tmp = tempdir().unwrap();
     write_project_event(tmp.path(), "Project-D", &[]);
 
-    assert!(!source::pm_owned_locally("Project-D", tmp.path()).unwrap());
+    assert!(source::pm_identity("Project-D", tmp.path())
+        .unwrap()
+        .is_none());
 }
 
 #[test]
-fn returns_false_when_project_event_file_is_missing() {
-    // No `event.json` written at all — the project directory simply does not
-    // exist on this backend. `tenex_project::Project::member_pubkeys` treats a
-    // missing event file as "no members", so PM ownership resolves cleanly to
-    // `false` rather than bubbling up a read error and skipping the project.
+fn returns_none_when_project_event_file_is_missing() {
     let tmp = tempdir().unwrap();
 
-    assert!(!source::pm_owned_locally("Project-F", tmp.path()).unwrap());
+    assert!(source::pm_identity("Project-F", tmp.path())
+        .unwrap()
+        .is_none());
 }
 
 #[test]
-fn returns_false_when_only_non_pm_agent_is_local() {
+fn pm_pubkey_is_first_listed_agent_even_when_other_agents_are_local() {
     let tmp = tempdir().unwrap();
     let pm = "1".repeat(64);
     let other = "2".repeat(64);
     write_project_event(tmp.path(), "Project-E", &[&pm, &other]);
     // We have a local signer for the second agent, but the PM lives on
-    // another backend — we must not publish kind:513s for this project.
+    // another backend — local_signer must be None so we ingest rather
+    // than publish.
     write_agent(tmp.path(), &other, true);
 
-    assert!(!source::pm_owned_locally("Project-E", tmp.path()).unwrap());
+    let id = source::pm_identity("Project-E", tmp.path())
+        .unwrap()
+        .expect("pm identity present");
+    assert_eq!(id.pubkey, pm);
+    assert!(id.local_signer.is_none());
 }

@@ -1,5 +1,6 @@
 pub mod categories;
 pub mod config;
+pub mod ingest;
 pub mod lockfile;
 pub mod paths;
 pub mod publish;

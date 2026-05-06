@@ -16,6 +16,7 @@ use tracing::{debug, error, info, warn};
 
 use crate::categories;
 use crate::config::Config;
+use crate::ingest;
 use crate::paths;
 use crate::publish::Publisher;
 use tenex_conversations::ProjectRef;
@@ -23,6 +24,7 @@ use tenex_conversations::ProjectRef;
 use crate::source::{self, MetadataUpdate, ProjectEvent};
 use crate::state::SummaryStateStore;
 use crate::summarize::{self, Summary};
+use tenex_project::Signer;
 
 const SCAN_INTERVAL: Duration = Duration::from_secs(5);
 const DEBOUNCE_SECS: i64 = 10;
@@ -40,22 +42,44 @@ pub async fn run(cfg: Config, state: SummaryStateStore) -> Result<()> {
         "tenex-summarizer started",
     );
 
+    // Spawn the ingester. It receives kind:513 events for projects
+    // whose PM agent is hosted on a different backend and applies the
+    // metadata to the local conversation DB, so non-PM backends do
+    // not have to run a redundant LLM pass.
+    let (ingest_shutdown_tx, ingest_shutdown_rx) = tokio::sync::mpsc::channel::<()>(1);
+    let ingest_task = tokio::spawn({
+        let secret_key = cfg.backend_secret_key.clone();
+        let relays = cfg.relays.clone();
+        async move {
+            if let Err(e) = ingest::run(&secret_key, &relays, ingest_shutdown_rx).await {
+                error!(error = %e, "ingest task exited with error");
+            }
+        }
+    });
+
     let mut sigint = signal(SignalKind::interrupt())?;
     let mut sigterm = signal(SignalKind::terminate())?;
     let mut ticker = tokio::time::interval(SCAN_INTERVAL);
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
-    loop {
+    let shutdown_reason: &str = loop {
         tokio::select! {
-            _ = sigint.recv() => { info!("SIGINT received; shutting down"); return Ok(()); }
-            _ = sigterm.recv() => { info!("SIGTERM received; shutting down"); return Ok(()); }
+            _ = sigint.recv() => { break "SIGINT"; }
+            _ = sigterm.recv() => { break "SIGTERM"; }
             _ = ticker.tick() => {
                 if let Err(e) = scan_once(&cfg, &state, &publisher, startup_secs).await {
                     error!(error = %e, "scan cycle failed");
                 }
             }
         }
+    };
+
+    info!(reason = shutdown_reason, "shutting down; signalling ingest");
+    let _ = ingest_shutdown_tx.send(()).await;
+    if let Err(e) = ingest_task.await {
+        warn!(error = %e, "ingest task join failed");
     }
+    Ok(())
 }
 
 async fn scan_once(
@@ -86,24 +110,27 @@ async fn scan_once(
             }
         };
 
-        // Only the backend that owns the project's PM agent (first agent
-        // in the kind:31933 event) is allowed to publish kind:513s — see
-        // `process_inner` for the gate. Compute it once per scan so the
-        // decision is consistent across this project's conversations.
+        // Only the backend that owns the project's PM agent (the first
+        // agent in the kind:31933 event) does any summarization work for
+        // this project. Backends without the PM signer rely on the
+        // `ingest` task to receive kind:513 events from the PM-owning
+        // backend and apply them to the local conversation.db — they
+        // must not run a redundant LLM pass.
         //
-        // A clean "not PM" verdict (`Ok(false)`) lets the loop proceed and
-        // mark conversations as summarized without publishing. A read or
-        // parse failure (`Err`) skips the project entirely so the next
-        // scan retries — otherwise a transient agent-file error would
-        // permanently suppress kind:513 publishing for affected
-        // conversations.
-        let publish_allowed = match source::pm_owned_locally(&project.d_tag, &base_dir) {
-            Ok(v) => v,
+        // A read or parse failure of the PM identity skips the project
+        // entirely so the next scan retries — otherwise a transient
+        // agent-file error would permanently suppress publishing.
+        let pm_signer = match source::pm_identity(&project.d_tag, &base_dir) {
+            Ok(Some(pm)) => match pm.local_signer {
+                Some(s) => s,
+                None => continue,
+            },
+            Ok(None) => continue,
             Err(e) => {
                 warn!(
                     d_tag = %project.d_tag,
                     error = ?e,
-                    "pm ownership check failed; skipping project this cycle",
+                    "pm identity lookup failed; skipping project this cycle",
                 );
                 continue;
             }
@@ -125,7 +152,7 @@ async fn scan_once(
         let scan_ctx = ProjectScanContext {
             project,
             project_event: &project_event,
-            publish_allowed,
+            pm_signer: pm_signer.as_ref(),
         };
 
         for cand in candidates {
@@ -179,7 +206,7 @@ async fn scan_once(
 struct ProjectScanContext<'a> {
     project: &'a ProjectRef,
     project_event: &'a ProjectEvent,
-    publish_allowed: bool,
+    pm_signer: &'a dyn Signer,
 }
 
 enum Decision {
@@ -299,22 +326,15 @@ async fn process_inner(
     };
     source::write_metadata(ctx.project, conversation_id, &update)?;
 
-    if ctx.publish_allowed {
-        publisher
-            .publish(
-                conversation_id,
-                &content.project_event,
-                &cfg.llm.model,
-                &summary,
-            )
-            .await?;
-    } else {
-        debug!(
-            conversation_id = %short(conversation_id),
-            d_tag = %ctx.project.d_tag,
-            "skip kind:513 publish: backend does not own project PM agent",
-        );
-    }
+    publisher
+        .publish(
+            conversation_id,
+            &content.project_event,
+            &cfg.llm.model,
+            &summary,
+            ctx.pm_signer,
+        )
+        .await?;
 
     Ok(Some(summary))
 }

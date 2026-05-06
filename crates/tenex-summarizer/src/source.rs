@@ -6,6 +6,7 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use serde::Deserialize;
 use tenex_conversations::{ConversationStore, MessageQuery, MessageRecord, ProjectRef};
+use tenex_project::Signer;
 
 use crate::paths;
 
@@ -39,27 +40,54 @@ pub fn discover_projects() -> Result<Vec<ProjectRef>> {
     tenex_conversations::discover_projects(&paths::base_dir())
 }
 
-/// True iff this backend can sign as the project's PM agent — the first
-/// agent listed in the project's kind:31933 event. Returns `false` when
-/// the project has no agents listed, when the PM agent has no on-disk
-/// projection on this backend, or when that projection lacks a signer.
+/// PM identity for a project — the first agent listed in the project's
+/// kind:31933 event.
 ///
-/// Used by the publisher to gate kind:513 emission so multiple backends
-/// running for the same project don't all publish duplicate metadata
-/// events.
-pub fn pm_owned_locally(d_tag: &str, base_dir: &Path) -> Result<bool> {
+/// `pubkey` is always known when this returns `Some`; it is the authority
+/// for kind:513 events for this project (publishers sign with it,
+/// ingesters authenticate against it).
+///
+/// `local_signer` is `Some` only when the PM agent has a usable on-disk
+/// projection on this backend — i.e., this backend can sign as the PM
+/// and is therefore the publisher for the project. Other backends keep
+/// `local_signer = None` and rely on the ingester to receive metadata.
+pub struct PmIdentity {
+    pub pubkey: String,
+    pub local_signer: Option<Box<dyn Signer>>,
+}
+
+/// Resolve the PM identity for a project from on-disk state. Returns
+/// `None` when the project has no agents listed in its kind:31933 event.
+pub fn pm_identity(d_tag: &str, base_dir: &Path) -> Result<Option<PmIdentity>> {
     let project = tenex_project::Project::open(d_tag, base_dir)
         .with_context(|| format!("open project {d_tag}"))?;
     let agents = project
         .project_agents()
         .with_context(|| format!("read project agents for {d_tag}"))?;
     let Some(pm) = agents.into_iter().find(|a| a.is_pm) else {
-        return Ok(false);
+        return Ok(None);
     };
+
     let agent = project
         .agent_by_pubkey(&pm.agent_pubkey)
         .with_context(|| format!("read PM agent {} for {d_tag}", pm.agent_pubkey))?;
-    Ok(agent.map(|a| a.is_local).unwrap_or(false))
+    let local_signer = match agent {
+        Some(a) if a.is_local => match project.signer_for_agent(&pm.agent_pubkey)? {
+            Ok(signer) => Some(signer),
+            Err(e) => {
+                return Err(anyhow::anyhow!(
+                    "PM agent {} for {d_tag} has signer_ref but signer_for_agent failed: {e}",
+                    pm.agent_pubkey
+                ));
+            }
+        },
+        _ => None,
+    };
+
+    Ok(Some(PmIdentity {
+        pubkey: pm.agent_pubkey,
+        local_signer,
+    }))
 }
 
 pub fn load_project_event(project: &ProjectRef) -> Result<ProjectEvent> {
