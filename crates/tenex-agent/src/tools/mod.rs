@@ -2,7 +2,6 @@ pub mod agent_tool_set;
 pub(crate) mod agents_md;
 pub mod agents_write;
 pub mod ask;
-pub mod change_model;
 pub mod conversation_get;
 pub mod conversation_list;
 pub mod conversation_search;

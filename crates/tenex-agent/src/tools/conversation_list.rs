@@ -1,15 +1,19 @@
+use crate::emit::EmitState;
 use rig::{completion::ToolDefinition, tool::Tool};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use tenex_conversations::{
     model::ConversationRow, paths::CONVERSATION_DB_FILENAME, store::ConversationListFilter,
     ConversationStore,
 };
+use tenex_protocol::intent::{Intent, ToolUseIntent};
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct ConversationListArgs {
+    pub description: String,
     pub limit: Option<i64>,
     pub from_time: Option<i64>,
     pub to_time: Option<i64>,
@@ -23,14 +27,21 @@ pub struct ConversationListError(String);
 
 #[derive(Clone)]
 pub struct ConversationListTool {
+    state: Arc<EmitState>,
     conv_db_path: PathBuf,
     base_dir: PathBuf,
     project_d_tag: String,
 }
 
 impl ConversationListTool {
-    pub fn new(conv_db_path: PathBuf, base_dir: PathBuf, project_d_tag: String) -> Self {
+    pub fn new(
+        state: Arc<EmitState>,
+        conv_db_path: PathBuf,
+        base_dir: PathBuf,
+        project_d_tag: String,
+    ) -> Self {
         Self {
+            state,
             conv_db_path,
             base_dir,
             project_d_tag,
@@ -189,6 +200,10 @@ impl Tool for ConversationListTool {
             parameters: json!({
                 "type": "object",
                 "properties": {
+                    "description": {
+                        "type": "string",
+                        "description": "One-line reason why you are listing conversations"
+                    },
                     "limit": {
                         "type": "integer",
                         "description": "Maximum number of conversations to return per project (default: 20)"
@@ -210,12 +225,31 @@ impl Tool for ConversationListTool {
                         "description": "Project dTag to list, or 'ALL' to list across all projects. Defaults to current project."
                     }
                 },
-                "required": []
+                "required": ["description"]
             }),
         }
     }
 
     async fn call(&self, args: Self::Args) -> Result<String, Self::Error> {
+        let ral = self.state.meta.lock().unwrap().ral;
+        let ctx = self.state.build_ctx(ral);
+        let args_json = serde_json::to_string(&args).unwrap_or_default();
+        self.state
+            .channel
+            .send(
+                Intent::ToolUse(ToolUseIntent {
+                    tool_name: Self::NAME.to_string(),
+                    content: String::new(),
+                    args_json: Some(args_json),
+                    referenced_messages: vec![],
+                    usage: None,
+                    extra_tags: vec![],
+                }),
+                &ctx,
+            )
+            .await
+            .map_err(|e| ConversationListError(format!("failed to emit tool-use event: {e}")))?;
+
         let filter = ConversationListFilter {
             limit: Some(args.limit.unwrap_or(20)),
             from_time: args.from_time,

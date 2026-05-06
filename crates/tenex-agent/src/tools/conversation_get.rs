@@ -4,6 +4,7 @@ mod xml;
 mod tests;
 
 use crate::config::ResolvedModel;
+use crate::emit::EmitState;
 use crate::llm_accounting::{assistant_text, usage_from_rig};
 use rig::completion::{Completion, Message};
 use rig::providers::{anthropic, ollama, openai, openrouter};
@@ -14,11 +15,13 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tenex_accounting::{record_llm_call, RecordLlmCall, RootKindOrStr};
 use tenex_conversations::{ConversationListFilter, ConversationStore, MessageQuery};
+use tenex_protocol::intent::{Intent, ToolUseIntent};
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct ConversationGetArgs {
     #[serde(alias = "conversationId")]
     pub conversation_id: String,
+    pub description: String,
     pub limit: Option<i64>,
     #[serde(alias = "untilId")]
     pub until_id: Option<String>,
@@ -33,13 +36,18 @@ pub struct ConversationGetError(String);
 
 #[derive(Clone)]
 pub struct ConversationGetTool {
+    state: Arc<EmitState>,
     db_path: PathBuf,
     resolved: Arc<ResolvedModel>,
 }
 
 impl ConversationGetTool {
-    pub fn new(db_path: PathBuf, resolved: Arc<ResolvedModel>) -> Self {
-        Self { db_path, resolved }
+    pub fn new(state: Arc<EmitState>, db_path: PathBuf, resolved: Arc<ResolvedModel>) -> Self {
+        Self {
+            state,
+            db_path,
+            resolved,
+        }
     }
 
     async fn call_llm(
@@ -215,6 +223,10 @@ impl Tool for ConversationGetTool {
                         "type": "string",
                         "description": "Stored conversation ID. Full 64-character hex IDs and unique 8+ character hex prefixes are accepted."
                     },
+                    "description": {
+                        "type": "string",
+                        "description": "One-line reason why you are retrieving this conversation"
+                    },
                     "limit": {
                         "type": "integer",
                         "description": "Maximum number of text/delegation messages to return after slicing."
@@ -238,12 +250,31 @@ impl Tool for ConversationGetTool {
                         "default": false
                     }
                 },
-                "required": ["conversation_id"]
+                "required": ["conversation_id", "description"]
             }),
         }
     }
 
     async fn call(&self, args: Self::Args) -> Result<String, Self::Error> {
+        let ral = self.state.meta.lock().unwrap().ral;
+        let ctx = self.state.build_ctx(ral);
+        let args_json = serde_json::to_string(&args).unwrap_or_default();
+        self.state
+            .channel
+            .send(
+                Intent::ToolUse(ToolUseIntent {
+                    tool_name: Self::NAME.to_string(),
+                    content: String::new(),
+                    args_json: Some(args_json),
+                    referenced_messages: vec![],
+                    usage: None,
+                    extra_tags: vec![],
+                }),
+                &ctx,
+            )
+            .await
+            .map_err(|e| ConversationGetError(format!("failed to emit tool-use event: {e}")))?;
+
         let store = ConversationStore::open(&self.db_path)
             .map_err(|e| ConversationGetError(format!("failed to open conversation store: {e}")))?;
         let conversation_id = resolve_conversation_id(&store, &args.conversation_id)?;

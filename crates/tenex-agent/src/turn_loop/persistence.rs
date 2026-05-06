@@ -61,7 +61,7 @@ pub(super) fn save_context_state(
             .and_then(|s| s.reminder_delta_state.clone()),
         todos: Some(todos_json),
         self_applied_skills: skills_json,
-        meta_model_variant: existing.as_ref().and_then(|s| s.meta_model_variant.clone()),
+        meta_model_variant: None,
         is_blocked: existing.as_ref().is_some_and(|s| s.is_blocked),
         todo_nudged: existing.as_ref().is_some_and(|s| s.todo_nudged),
         updated_at: now,

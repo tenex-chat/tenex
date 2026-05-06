@@ -14,7 +14,6 @@ use crate::runtime_state::RuntimeStateHandle;
 use super::agents_md::AgentsMdReminderState;
 use super::agents_write::AgentsWriteTool;
 use super::ask::AskTool;
-use super::change_model::ChangeModelTool;
 use super::conversation_get::ConversationGetTool;
 use super::conversation_list::ConversationListTool;
 use super::conversation_search::ConversationSearchTool;
@@ -277,6 +276,7 @@ impl ToolSet {
             &mut tools,
             &recorder,
             Box::new(ConversationGetTool::new(
+                self.emit_state.clone(),
                 self.conv_db_path.clone(),
                 self.summarization_model.clone(),
             )),
@@ -285,6 +285,7 @@ impl ToolSet {
             &mut tools,
             &recorder,
             Box::new(ConversationListTool::new(
+                self.emit_state.clone(),
                 self.conv_db_path.clone(),
                 self.base_dir.clone(),
                 self.project_d_tag.clone(),
@@ -297,16 +298,6 @@ impl ToolSet {
             Box::new(ConversationSearchTool::new(
                 self.rag_store.clone(),
                 self.project_d_tag.clone(),
-            )),
-        );
-
-        self.push_tool(
-            &mut tools,
-            &recorder,
-            Box::new(ChangeModelTool::new(
-                self.conv_db_path.clone(),
-                self.conversation_id.clone(),
-                self.agent_pubkey.clone(),
             )),
         );
 

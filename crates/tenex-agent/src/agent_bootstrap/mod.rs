@@ -142,22 +142,16 @@ pub(crate) async fn build(
     ));
     let base_dir = tenex_project::paths::default_base_dir();
 
-    // Check for a per-conversation model override stored by a prior change_model call.
-    let model_override: Option<String> = conv_store
-        .as_ref()
-        .and_then(|s| {
-            s.get_agent_context_state(&conversation_id, &pubkey_hex)
-                .ok()
-                .flatten()
-        })
-        .and_then(|state| state.meta_model_variant);
-
-    // Resolve provider + model + API key (override takes precedence over static config).
-    let resolved = ResolvedModel::resolve(
+    // Resolve provider + model + API key. Precedence (highest first):
+    // 1. `variant` tag on the triggering event (per-invocation override from
+    //    self_delegate's `variant` parameter or any other delegation), applied
+    //    against the agent's base meta config.
+    // 2. Agent's static default model.
+    // 3. Global default in llms.json (resolved by ConfigStore).
+    let resolved = ResolvedModel::resolve_with_variant(
         &base_dir,
-        model_override
-            .as_deref()
-            .or_else(|| agent_config.raw_model()),
+        agent_config.raw_model(),
+        envelope.metadata.variant_override.as_deref(),
     )?;
     let cassette_recorder = CassetteRecorder::from_env(
         agent_config.identity_name(),

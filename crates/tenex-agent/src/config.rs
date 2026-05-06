@@ -4,7 +4,7 @@ use std::fs;
 use std::path::Path;
 use tenex_llm_config::key_health::KeyHealthTracker;
 use tenex_llm_config::resolver::{resolved_config_default_standard, ConfigStore};
-use tenex_llm_config::StandardConfig;
+use tenex_llm_config::{ResolvedConfig, StandardConfig};
 use tenex_telegram::config::TelegramAgentConfig;
 
 #[derive(Debug, Deserialize)]
@@ -66,6 +66,45 @@ impl ResolvedModel {
         Ok(Self::from_standard(config))
     }
 
+    /// Resolve the agent's base config and select a specific variant from a
+    /// meta config. When `variant_override` is `None`, behaves identically to
+    /// [`resolve`]. When `variant_override` is `Some(name)`, the base config
+    /// must resolve to a [`ResolvedConfig::Meta`] containing that variant.
+    pub fn resolve_with_variant(
+        base_dir: &Path,
+        raw_model: Option<&str>,
+        variant_override: Option<&str>,
+    ) -> Result<Self> {
+        let Some(variant_name) = variant_override else {
+            return Self::resolve(base_dir, raw_model);
+        };
+
+        let store = ConfigStore::load(base_dir)?;
+        let key_health = KeyHealthTracker::new();
+        let resolved_config = resolve_to_resolved_config(&store, raw_model, &key_health)?;
+
+        match resolved_config {
+            ResolvedConfig::Meta(meta) => {
+                let variant = meta.variants.get(variant_name).ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "variant '{}' not found in meta config (available: {})",
+                        variant_name,
+                        meta.variants
+                            .keys()
+                            .cloned()
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    )
+                })?;
+                Ok(Self::from_standard(variant.resolved.clone()))
+            }
+            _ => Err(anyhow::anyhow!(
+                "variant override '{}' specified but the agent's base model is not a meta configuration",
+                variant_name,
+            )),
+        }
+    }
+
     /// Resolve a named role from `llms.json`, falling back to the `default`
     /// role when the requested role isn't assigned.
     pub fn resolve_role(base_dir: &Path, role: &str) -> Result<Self> {
@@ -84,6 +123,39 @@ impl ResolvedModel {
             base_url: config.base_url,
         }
     }
+}
+
+/// Resolve a raw model reference to its full [`ResolvedConfig`] (without
+/// collapsing meta configs to their default variant). Mirrors the dispatch
+/// in [`tenex_llm_config::resolver::resolve_model_reference`] but returns the
+/// unflattened result so callers can inspect whether it's a meta config.
+///
+/// Inline references (`provider/model`, `provider:model`, bare model name)
+/// can never produce a meta config — those paths return an error since the
+/// only caller (variant override) requires a meta config.
+fn resolve_to_resolved_config(
+    store: &ConfigStore,
+    raw_model: Option<&str>,
+    key_health: &KeyHealthTracker,
+) -> Result<ResolvedConfig> {
+    let raw = raw_model.map(str::trim).filter(|s| !s.is_empty());
+
+    let Some(raw) = raw.filter(|s| *s != "default") else {
+        let default_name = store
+            .llms
+            .roles
+            .get("default")
+            .ok_or_else(|| anyhow::anyhow!("llms.json has no `default` role"))?;
+        return store.resolve_config(default_name, key_health);
+    };
+
+    if store.llms.configurations.contains_key(raw) {
+        return store.resolve_config(raw, key_health);
+    }
+
+    Err(anyhow::anyhow!(
+        "model reference '{raw}' is not a named llms.json configuration"
+    ))
 }
 
 pub(crate) fn read_global_system_prompt(base_dir: &Path) -> Option<String> {
