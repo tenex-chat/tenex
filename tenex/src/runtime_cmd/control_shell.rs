@@ -118,16 +118,16 @@ pub(super) async fn run_shell(
     let stderr_task = tokio::spawn(read_pipe(stderr));
 
     let timeout = req.timeout_secs.map(Duration::from_secs);
-    let status = if let Some(timeout) = timeout {
+    let (status, timed_out) = if let Some(timeout) = timeout {
         tokio::select! {
-            status = child.wait() => status?,
+            status = child.wait() => (status?, false),
             _ = tokio::time::sleep(timeout) => {
                 terminate_process_group(pid);
-                child.wait().await?
+                (child.wait().await?, true)
             }
         }
     } else {
-        child.wait().await?
+        (child.wait().await?, false)
     };
 
     state.shell_tasks.lock().unwrap().remove(&task_id);
@@ -135,7 +135,8 @@ pub(super) async fn run_shell(
     let stdout = stdout_task.await.unwrap_or_default();
     let stderr = stderr_task.await.unwrap_or_default();
     let signal = status_signal(&status);
-    let output = format_shell_output(&req.command, status.code(), signal.clone(), stdout, stderr);
+    let timed_out_after = if timed_out { req.timeout_secs } else { None };
+    let output = format_shell_output(&req.command, status.code(), signal.clone(), stdout, stderr, timed_out_after);
 
     Ok(RuntimeControlResponse::ShellCompleted(
         ShellCompletedResponse {
@@ -195,6 +196,7 @@ fn format_shell_output(
     signal: Option<String>,
     stdout: String,
     stderr: String,
+    timed_out_after: Option<u64>,
 ) -> String {
     if exit_code == Some(0) {
         let mut output = stdout;
@@ -224,8 +226,10 @@ fn format_shell_output(
         "type": "shell-error",
         "command": command.chars().take(200).collect::<String>(),
         "exitCode": exit_code,
-        "error": signal.as_ref().map(|s| format!("Process killed by {s}")).unwrap_or_else(|| {
-            format!("Command exited with code {}", exit_code.unwrap_or(-1))
+        "error": timed_out_after.map(|s| format!("Command timed out after {s}s (default: 30s, max: 600s — pass a longer 'timeout' argument if needed)")).unwrap_or_else(|| {
+            signal.as_ref().map(|s| format!("Process killed by {s}")).unwrap_or_else(|| {
+                format!("Command exited with code {}", exit_code.unwrap_or(-1))
+            })
         }),
         "stdout": stdout,
         "stderr": stderr,
