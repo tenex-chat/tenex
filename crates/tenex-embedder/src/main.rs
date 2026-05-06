@@ -4,6 +4,7 @@ use clap::{Parser, Subcommand};
 use tenex_embedder::backfill::{self, BackfillOptions};
 use tenex_embedder::lockfile::Lockfile;
 use tenex_embedder::paths;
+use tenex_embedder::republish::{self, RepublishOptions};
 use tenex_embedder::scheduler;
 
 #[derive(Parser)]
@@ -19,33 +20,34 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Run the daemon in the foreground (default).
     Run,
-    /// Print daemon status.
     Status,
-    /// One-shot bulk embed: walk forward through relay history.
     Backfill(BackfillArgs),
+    RepublishLocal(RepublishLocalArgs),
+}
+
+#[derive(clap::Args, Debug)]
+struct RepublishLocalArgs {
+    #[arg(long, value_delimiter = ',')]
+    relays: Option<Vec<String>>,
+    #[arg(long, default_value_t = 50.0)]
+    rate: f64,
+    #[arg(long)]
+    dry_run: bool,
 }
 
 #[derive(clap::Args, Debug)]
 struct BackfillArgs {
-    /// Floor: never walk further back than this Unix timestamp (seconds).
     #[arg(long)]
     since: Option<i64>,
-    /// Drop existing chunks + state for owned conversations and re-embed
-    /// from `--since` (or 0).
     #[arg(long)]
     reset: bool,
-    /// Override embeddings/sec (default 10).
     #[arg(long)]
     rate: Option<f64>,
-    /// Page size for relay REQs (default 500).
     #[arg(long)]
     page_size: Option<usize>,
-    /// Comma-separated relay URLs; overrides config.
     #[arg(long, value_delimiter = ',')]
     relays: Option<Vec<String>>,
-    /// Don't write anything; print pages and counts only.
     #[arg(long)]
     dry_run: bool,
 }
@@ -70,6 +72,14 @@ async fn main() -> Result<()> {
                 rate_per_sec: args.rate,
                 page_size: args.page_size,
                 relays: args.relays,
+                dry_run: args.dry_run,
+            })
+            .await
+        }
+        Command::RepublishLocal(args) => {
+            republish::run(RepublishOptions {
+                relays: args.relays,
+                rate_per_sec: args.rate,
                 dry_run: args.dry_run,
             })
             .await

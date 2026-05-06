@@ -21,6 +21,7 @@ pub mod pacing;
 pub mod paths;
 pub mod processor;
 pub mod relay;
+pub mod republish;
 pub mod scheduler;
 pub mod scope;
 pub mod state;

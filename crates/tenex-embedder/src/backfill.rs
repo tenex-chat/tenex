@@ -328,7 +328,7 @@ fn project_ids_for_events(
     project_ids.into_iter().collect()
 }
 
-fn relays_from_config(base: &std::path::Path) -> Vec<String> {
+pub fn relays_from_config(base: &std::path::Path) -> Vec<String> {
     use serde::Deserialize;
     #[derive(Deserialize, Default)]
     struct Doc {
