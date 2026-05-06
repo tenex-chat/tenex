@@ -132,7 +132,7 @@ impl Tool for DelegateTool {
                 "properties": {
                     "recipient": {
                         "type": "string",
-                        "description": "Agent slug (e.g. 'architect') or team name (e.g. 'design')"
+                        "description": "Agent or team"
                     },
                     "prompt": {
                         "type": "string",

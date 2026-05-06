@@ -51,7 +51,7 @@ impl Tool for DelegateCrossProjectTool {
                     },
                     "recipient": {
                         "type": "string",
-                        "description": "Agent slug in the target project"
+                        "description": "Agent in the target project"
                     },
                     "request": {
                         "type": "string",

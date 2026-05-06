@@ -9,6 +9,7 @@ use tenex_conversations::{
     model::ConversationRow, paths::CONVERSATION_DB_FILENAME, store::ConversationListFilter,
     ConversationStore,
 };
+use tenex_project::{resolve_recipient, Agent, RecipientResolution};
 use tenex_protocol::intent::{Intent, ToolUseIntent};
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -31,6 +32,7 @@ pub struct ConversationListTool {
     conv_db_path: PathBuf,
     base_dir: PathBuf,
     project_d_tag: String,
+    project_agents: Arc<Vec<Agent>>,
 }
 
 impl ConversationListTool {
@@ -39,12 +41,14 @@ impl ConversationListTool {
         conv_db_path: PathBuf,
         base_dir: PathBuf,
         project_d_tag: String,
+        project_agents: Arc<Vec<Agent>>,
     ) -> Self {
         Self {
             state,
             conv_db_path,
             base_dir,
             project_d_tag,
+            project_agents,
         }
     }
 }
@@ -218,7 +222,7 @@ impl Tool for ConversationListTool {
                     },
                     "with": {
                         "type": "string",
-                        "description": "Filter to conversations where this pubkey is a participant (author or recipient)."
+                        "description": "Filter to conversations where this agent is a participant (author or recipient)."
                     },
                     "project_id": {
                         "type": "string",
@@ -250,11 +254,30 @@ impl Tool for ConversationListTool {
             .await
             .map_err(|e| ConversationListError(format!("failed to emit tool-use event: {e}")))?;
 
+        let participant_pubkey = match args.with.as_deref() {
+            None => None,
+            Some(input) => match resolve_recipient(&self.project_agents, input) {
+                RecipientResolution::Resolved(agent) => Some(agent.pubkey.clone()),
+                RecipientResolution::Ambiguous(candidates) => {
+                    let labels: Vec<String> = candidates
+                        .iter()
+                        .map(|a| format!("{} ({})", a.slug, &a.pubkey[..8.min(a.pubkey.len())]))
+                        .collect();
+                    return Ok(format!(
+                        "Error: 'with' value '{}' matches multiple agents: {}. Use a longer pubkey prefix or the agent slug.",
+                        input,
+                        labels.join(", ")
+                    ));
+                }
+                RecipientResolution::NotFound => Some(input.to_string()),
+            },
+        };
+
         let filter = ConversationListFilter {
             limit: Some(args.limit.unwrap_or(20).max(20)),
             from_time: args.from_time,
             to_time: args.to_time,
-            participant_pubkey: args.with.clone(),
+            participant_pubkey,
         };
 
         let scope = args.project_id.as_deref().unwrap_or("");

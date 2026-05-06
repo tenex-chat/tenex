@@ -304,6 +304,7 @@ impl ToolSet {
                 self.conv_db_path.clone(),
                 self.base_dir.clone(),
                 self.project_d_tag.clone(),
+                self.project_agents.clone(),
             )),
         );
 
