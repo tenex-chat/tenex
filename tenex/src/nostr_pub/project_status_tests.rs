@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use nostr_sdk::{Event, Keys};
 use tenex_project::ProjectMetadata;
 
-use super::project_status::{build_project_status_event, project_scoped_skill_ids};
+use super::project_status::{build_project_status_event, project_scoped_skill_ids, RunningAgent};
 use tenex_mcp::PROJECT_MCP_FILE_NAME;
 
 const OWNER_PK: &str = "c506be742732723deaaf8260d2b43d75d33420c601c05a9e1fa3b7986cc1b957";
@@ -76,7 +76,7 @@ fn build_event_emits_one_skill_tag_per_universe_entry() {
     write_skill_dir(&tmp, "beta", true);
 
     let keys = Keys::generate();
-    let event = build_project_status_event(&keys, &project_meta(), &tmp, &[]).unwrap();
+    let event = build_project_status_event(&keys, &project_meta(), &tmp, &[], &[]).unwrap();
 
     let all = tags(&event);
 
@@ -98,8 +98,38 @@ fn build_event_emits_one_skill_tag_per_universe_entry() {
         "24010 must not emit assignment-form skill tags; got {all:?}",
     );
 
-    // No agent, model, or tool tags ever — these are per-agent and live on kind:0.
-    for capability in ["agent", "model", "tool"] {
+    // model and tool tags never appear on 24010 — they live on kind:0.
+    // agent tags appear only when running_agents is non-empty (tested separately).
+    for capability in ["model", "tool"] {
+        assert!(
+            !all.iter()
+                .any(|t| t.first().map(String::as_str) == Some(capability)),
+            "24010 must not emit {capability} tags; got {all:?}",
+        );
+    }
+    assert!(
+        !all.iter()
+            .any(|t| t.first().map(String::as_str) == Some("agent")),
+        "24010 must not emit agent tags when running_agents is empty; got {all:?}",
+    );
+}
+
+#[test]
+fn build_event_emits_skill_tags_independent_of_agent_state() {
+    // Skills appear regardless of whether running_agents is populated.
+    let tmp = unique_temp("nocaps");
+    write_skill_dir(&tmp, "gamma", true);
+
+    let keys = Keys::generate();
+    let event = build_project_status_event(&keys, &project_meta(), &tmp, &[], &[]).unwrap();
+
+    let all = tags(&event);
+    assert!(
+        all.iter()
+            .any(|t| t.len() == 2 && t[0] == "skill" && t[1] == "gamma"),
+        "expected ['skill', 'gamma']; got {all:?}",
+    );
+    for capability in ["model", "tool"] {
         assert!(
             !all.iter()
                 .any(|t| t.first().map(String::as_str) == Some(capability)),
@@ -109,28 +139,37 @@ fn build_event_emits_one_skill_tag_per_universe_entry() {
 }
 
 #[test]
-fn build_event_emits_skill_tags_independent_of_agent_state() {
-    // No agents are passed in — assignments are sourced from kind:0, not 24010.
-    // The universe tag must still appear for any on-disk skill.
-    let tmp = unique_temp("nocaps");
-    write_skill_dir(&tmp, "gamma", true);
-
+fn build_event_emits_agent_tags_for_running_agents() {
+    let tmp = unique_temp("agents");
     let keys = Keys::generate();
-    let event = build_project_status_event(&keys, &project_meta(), &tmp, &[]).unwrap();
-
+    let agents = vec![
+        RunningAgent {
+            pubkey: "a".repeat(64),
+            slug: "planner".into(),
+        },
+        RunningAgent {
+            pubkey: "b".repeat(64),
+            slug: "coder".into(),
+        },
+    ];
+    let event =
+        build_project_status_event(&keys, &project_meta(), &tmp, &[], &agents).unwrap();
     let all = tags(&event);
+
     assert!(
-        all.iter()
-            .any(|t| t.len() == 2 && t[0] == "skill" && t[1] == "gamma"),
-        "expected ['skill', 'gamma']; got {all:?}",
+        all.iter().any(|t| t.len() == 3
+            && t[0] == "agent"
+            && t[1] == "a".repeat(64)
+            && t[2] == "planner"),
+        "expected ['agent', 'aaa...', 'planner']; got {all:?}",
     );
-    for capability in ["agent", "model", "tool"] {
-        assert!(
-            !all.iter()
-                .any(|t| t.first().map(String::as_str) == Some(capability)),
-            "24010 must not emit {capability} tags; got {all:?}",
-        );
-    }
+    assert!(
+        all.iter().any(|t| t.len() == 3
+            && t[0] == "agent"
+            && t[1] == "b".repeat(64)
+            && t[2] == "coder"),
+        "expected ['agent', 'bbb...', 'coder']; got {all:?}",
+    );
 }
 
 #[test]
@@ -143,7 +182,7 @@ fn build_event_emits_mcp_tags_from_dot_mcp_json() {
     .unwrap();
 
     let keys = Keys::generate();
-    let event = build_project_status_event(&keys, &project_meta(), &tmp, &[]).unwrap();
+    let event = build_project_status_event(&keys, &project_meta(), &tmp, &[], &[]).unwrap();
 
     let all = tags(&event);
 
@@ -164,7 +203,7 @@ fn build_event_emits_no_mcp_tags_when_dot_mcp_json_absent() {
     let tmp = unique_temp("nomcp");
 
     let keys = Keys::generate();
-    let event = build_project_status_event(&keys, &project_meta(), &tmp, &[]).unwrap();
+    let event = build_project_status_event(&keys, &project_meta(), &tmp, &[], &[]).unwrap();
 
     let all = tags(&event);
     assert!(

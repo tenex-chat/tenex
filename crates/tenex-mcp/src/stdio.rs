@@ -6,7 +6,7 @@ use std::time::Duration;
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader as AsyncBufReader};
 use tokio::process::{Child, ChildStdin, Command};
 use tokio::sync::{broadcast, oneshot};
 use tokio::task::JoinHandle;
@@ -29,6 +29,8 @@ pub struct StdioMcpClient {
     pending: PendingResponses,
     resource_updates: broadcast::Sender<String>,
     reader_task: JoinHandle<()>,
+    stderr_lines: Arc<StdMutex<Vec<String>>>,
+    stderr_task: JoinHandle<()>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -148,7 +150,7 @@ impl StdioMcpClient {
             .envs(inherited_env(&config.env))
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::inherit());
+            .stderr(Stdio::piped());
 
         let mut child = command
             .spawn()
@@ -161,6 +163,20 @@ impl StdioMcpClient {
             .stdout
             .take()
             .with_context(|| format!("MCP server '{server_name}' has no stdout"))?;
+        let stderr = child
+            .stderr
+            .take()
+            .with_context(|| format!("MCP server '{server_name}' has no stderr"))?;
+
+        let stderr_lines: Arc<StdMutex<Vec<String>>> = Arc::new(StdMutex::new(Vec::new()));
+        let stderr_lines_clone = stderr_lines.clone();
+        let stderr_task = tokio::spawn(async move {
+            let mut reader = AsyncBufReader::new(stderr).lines();
+            while let Ok(Some(line)) = reader.next_line().await {
+                eprintln!("{line}");
+                stderr_lines_clone.lock().unwrap().push(line);
+            }
+        });
 
         let pending = Arc::new(StdMutex::new(HashMap::new()));
         let (resource_updates, _) = broadcast::channel(256);
@@ -179,8 +195,23 @@ impl StdioMcpClient {
             pending,
             resource_updates,
             reader_task,
+            stderr_lines,
+            stderr_task,
         };
-        client.initialize().await?;
+        if let Err(init_err) = client.initialize().await {
+            // Give the server process a moment to flush stderr, then collect it.
+            let _ = tokio::time::timeout(
+                Duration::from_millis(500),
+                client.child.wait(),
+            )
+            .await;
+            client.stderr_task.abort();
+            let output = client.stderr_lines.lock().unwrap().join("\n");
+            if output.is_empty() {
+                return Err(init_err);
+            }
+            return Err(init_err.context(format!("server output:\n{output}")));
+        }
         Ok(client)
     }
 
@@ -346,6 +377,7 @@ impl StdioMcpClient {
         let _ = self.child.start_kill();
         let _ = self.child.wait().await;
         self.reader_task.abort();
+        self.stderr_task.abort();
     }
 
     async fn initialize(&mut self) -> Result<()> {

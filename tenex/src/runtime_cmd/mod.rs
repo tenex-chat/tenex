@@ -282,15 +282,28 @@ pub async fn run(args: RuntimeArgs) -> Result<()> {
     let whitelist_status = cfg.whitelisted_pubkeys.clone();
     let project_dir_status = resolve_project_working_dir(&base_dir, &meta.d_tag)
         .with_context(|| format!("resolving project working directory for '{}'", meta.d_tag))?;
+    let agent_snapshot_status = Arc::clone(&agent_snapshot_state);
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(30));
         loop {
             interval.tick().await;
+            let running_agents: Vec<project_status::RunningAgent> = {
+                let snapshot = agent_snapshot_status.read().unwrap();
+                snapshot
+                    .agents
+                    .iter()
+                    .map(|a| project_status::RunningAgent {
+                        pubkey: a.pubkey.clone(),
+                        slug: a.slug.clone(),
+                    })
+                    .collect()
+            };
             match project_status::build_project_status_event(
                 &keys_status,
                 &meta_status,
                 &project_dir_status,
                 &whitelist_status,
+                &running_agents,
             ) {
                 Ok(event) => {
                     if let Err(e) = client_status.send_event(&event).await {

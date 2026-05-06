@@ -129,6 +129,7 @@ pub(super) fn spawn_dispatch_job(shared: Arc<RuntimeShared>, job: DispatchJob) {
                         error = %e,
                         "agent run failed"
                     );
+                    publish_agent_error(&shared, &job, &format!("{e:#}")).await;
                     Err(e)
                 }
             }

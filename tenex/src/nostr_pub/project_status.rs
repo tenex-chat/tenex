@@ -7,9 +7,14 @@
 //! content = ""
 //! tags    = ["a", "31933:<owner_pk>:<d_tag>"]
 //!         + ["p", <owner_pk>] (+ ["p", <whitelisted_pk>]..., deduped)
+//!         + ["agent", <pubkey>, <slug>]                 (one per locally-running agent)
 //!         + ["skill", <id>]                              (one per project-scoped skill)
 //!         + ["mcp", <name>]                              (one per project MCP server)
 //! ```
+//!
+//! Agent tags list only the agents this backend is actively running (i.e. those
+//! with a local signer). Other backends use these tags to detect which agents are
+//! already covered so they can auto-boot their own agents without overlap.
 //!
 //! Skills and MCP servers emitted here are **project-scoped** — skills from
 //! `{project_path}/.agents/skills/<id>/SKILL.md` and MCP servers from
@@ -62,12 +67,19 @@ pub fn project_scoped_skill_ids(project_path: &Path) -> HashSet<String> {
     skill_ids_in_dir(&project_path.join(".agents").join("skills"))
 }
 
+/// A locally-running agent to be announced in a kind:24010 event.
+pub struct RunningAgent {
+    pub pubkey: String,
+    pub slug: String,
+}
+
 /// Build (but do not send) a kind:24010 project status event.
 pub fn build_project_status_event(
     keys: &Keys,
     meta: &ProjectMetadata,
     project_path: &Path,
     whitelisted_pubkeys: &[String],
+    running_agents: &[RunningAgent],
 ) -> Result<Event> {
     let owner_pk = meta
         .owner_pubkey
@@ -85,6 +97,14 @@ pub fn build_project_status_event(
         if seen.insert(pk) {
             tags.push(Tag::parse(["p", pk]).map_err(|e| anyhow!("p tag: {e}"))?);
         }
+    }
+
+    // ─── Running agents ───────────────────────────────────────────────────────
+    for agent in running_agents {
+        tags.push(Tag::custom(
+            TagKind::Custom("agent".into()),
+            vec![agent.pubkey.clone(), agent.slug.clone()],
+        ));
     }
 
     // ─── Project-scoped skill emission ────────────────────────────────────────

@@ -419,11 +419,23 @@ pub(super) async fn startup_publish_missing_agent_configs(shared: &RuntimeShared
 }
 
 pub(super) async fn publish_project_status_now(shared: &RuntimeShared, meta: &ProjectMetadata) {
+    let running_agents: Vec<project_status::RunningAgent> = {
+        let snapshot = shared.agent_snapshot.read().unwrap();
+        snapshot
+            .agents
+            .iter()
+            .map(|a| project_status::RunningAgent {
+                pubkey: a.pubkey.clone(),
+                slug: a.slug.clone(),
+            })
+            .collect()
+    };
     match project_status::build_project_status_event(
         &shared.backend_keys,
         meta,
         &shared.project_dir,
         &shared.whitelisted_pubkeys,
+        &running_agents,
     ) {
         Ok(event) => {
             if let Err(error) = shared.client.send_event(&event).await {

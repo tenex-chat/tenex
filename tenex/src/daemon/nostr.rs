@@ -1,14 +1,18 @@
 //! Nostr subscription layer.
 //!
-//! Two filters:
+//! Three filters:
 //!   - Discovery: kind 31933 from whitelisted authors (no `since` — relay
 //!     returns latest replaceable per d-tag).
 //!   - Boot triggers: kind 1 + 24000 from whitelisted authors or this
 //!     backend's own pubkey that #a-tag a known project. Resubscribed every
 //!     time a new project is discovered.
+//!   - Remote project status: kind 24010 p-tagged with any whitelisted user.
+//!     When a remote backend is running a project that this backend has
+//!     locally-signable agents for (and none overlap), auto-boot that project.
 //!
-//! Trust enforcement is relay-side via `authors`. Author-untrusted boot events
-//! never reach this process.
+//! Trust enforcement is relay-side via `authors` for discovery/boot filters.
+//! The 24010 filter uses p-tag targeting instead of author filtering because
+//! the publisher is a backend signer, not a whitelisted user.
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -32,9 +36,11 @@ use super::identity_watch::push_remote_pubkey_watch;
 use super::pending_boots::{self, PendingBoots};
 use super::supervisor::Supervisor;
 use crate::store::atomic;
+use tenex_project;
 
 const PROJECT_KIND: u16 = 31933;
 const BOOT_KIND: u16 = 24000;
+const PROJECT_STATUS_KIND: u16 = 24010;
 
 struct RuntimeCtx<'a> {
     client: &'a Client,
@@ -50,6 +56,10 @@ struct RuntimeCtx<'a> {
     skipped_projects: Arc<SkippedProjects>,
     ignored_projects: &'a [String],
     only_projects: &'a [String],
+    /// Projects already evaluated from a remote 24010: either booted or
+    /// confirmed overlapping. Re-evaluation on every 30-second pulse is
+    /// suppressed once a decision has been logged.
+    remote_status_seen: Arc<Mutex<HashSet<String>>>,
 }
 
 impl RuntimeCtx<'_> {
@@ -113,11 +123,27 @@ pub async fn run(
             .unwrap_or(0),
     );
 
+    // Subscribe to project status events (kind:24010) p-tagged with any
+    // whitelisted user.  These are published by *other* backends running a
+    // project runtime and let this daemon detect projects it should auto-boot.
+    let status_filter = Filter::new()
+        .kind(Kind::Custom(PROJECT_STATUS_KIND))
+        .custom_tags(
+            SingleLetterTag::lowercase(Alphabet::P),
+            discovery_authors.iter().map(|pk| pk.to_hex()),
+        );
+    let status_id = SubscriptionId::generate();
+    client
+        .subscribe_with_id(status_id, status_filter, None)
+        .await?;
+    info!("project status (24010) subscription active");
+
     let known: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
     let boot_sub: Arc<Mutex<Option<SubscriptionId>>> = Arc::new(Mutex::new(None));
     let pending_boots: Arc<Mutex<PendingBoots>> =
         Arc::new(Mutex::new(PendingBoots::new(pending_boot_prefixes)));
     let debounce_handle: Arc<Mutex<Option<JoinHandle<()>>>> = Arc::new(Mutex::new(None));
+    let remote_status_seen: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
 
     let agents_dir = base_dir.join("agents");
     std::fs::create_dir_all(&agents_dir)
@@ -161,6 +187,7 @@ pub async fn run(
                                 skipped_projects: Arc::clone(&skipped_projects),
                                 ignored_projects: &task_ignored_projects,
                                 only_projects: &task_only_projects,
+                                remote_status_seen: Arc::clone(&remote_status_seen),
                             };
                             handle_event(&ctx, &event).await;
                         }
@@ -193,6 +220,7 @@ pub async fn run(
                         skipped_projects: Arc::clone(&skipped_projects),
                         ignored_projects: &task_ignored_projects,
                         only_projects: &task_only_projects,
+                        remote_status_seen: Arc::clone(&remote_status_seen),
                     };
                     retry_skipped_boots(&ctx).await;
                 }
@@ -230,6 +258,7 @@ async fn handle_event(ctx: &RuntimeCtx<'_>, event: &Event) {
         PROJECT_KIND => handle_project(ctx, event).await,
         1 => handle_boot_trigger(ctx, event, BootKind::TextNote).await,
         BOOT_KIND => handle_boot_trigger(ctx, event, BootKind::Explicit).await,
+        PROJECT_STATUS_KIND => handle_project_status(ctx, event).await,
         _ => {}
     }
 }
@@ -415,6 +444,103 @@ async fn handle_boot_trigger(ctx: &RuntimeCtx<'_>, event: &Event, kind: BootKind
                 .await;
         }
     }
+}
+
+/// Handle a kind:24010 project status event from a remote backend.
+///
+/// Auto-boots the project when this backend has locally-signable agents that
+/// are not already covered by the remote backend's running agent set.  Skips
+/// if our own backend published the event, if the project is already running,
+/// or if any local agent overlaps with the remote agent list.
+async fn handle_project_status(ctx: &RuntimeCtx<'_>, event: &Event) {
+    // Only react to 24010 from other backends.
+    if event.pubkey == ctx.backend_pubkey {
+        return;
+    }
+
+    let Some(a_value) = single_letter_tag(event, Alphabet::A) else {
+        debug!(event_id = %event.id, "24010 missing a-tag; ignoring");
+        return;
+    };
+
+    // a-tag format: "31933:<owner_pk>:<d_tag>"
+    let d_tag = match a_value.splitn(3, ':').nth(2) {
+        Some(d) if !d.is_empty() => d.to_string(),
+        _ => {
+            debug!(a_value, "24010 a-tag has unexpected format; ignoring");
+            return;
+        }
+    };
+
+    // Suppress repeated evaluation of the same project (24010 fires every 30s).
+    {
+        let seen = ctx.remote_status_seen.lock().await;
+        if seen.contains(&d_tag) {
+            return;
+        }
+    }
+
+    // Apply operator filters and local-agent gate.
+    match ctx.decide(&d_tag) {
+        BootDecision::Allow => {}
+        BootDecision::Filtered | BootDecision::NoLocalAgents => {
+            return;
+        }
+    }
+
+    // Collect remote agent pubkeys from ["agent", <pubkey>, <slug>] tags.
+    let remote_pubkeys: HashSet<String> = event
+        .tags
+        .iter()
+        .filter_map(|t| {
+            let s = t.as_slice();
+            if s.first().map(String::as_str) == Some("agent") {
+                s.get(1).cloned()
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    // Collect our locally-signable agent pubkeys for this project.
+    let local_pubkeys: HashSet<String> =
+        match tenex_project::Project::open(&d_tag, ctx.base_dir) {
+            Ok(p) => match p.agents() {
+                Ok(agents) => agents.into_iter().map(|a| a.pubkey).collect(),
+                Err(e) => {
+                    warn!(d_tag, error = %e, "failed to read local agents for 24010 auto-boot check");
+                    return;
+                }
+            },
+            Err(e) => {
+                debug!(d_tag, error = %e, "project not on disk; skipping 24010 auto-boot");
+                return;
+            }
+        };
+
+    if local_pubkeys.is_empty() {
+        return;
+    }
+
+    let has_overlap = local_pubkeys.iter().any(|pk| remote_pubkeys.contains(pk));
+    if has_overlap {
+        info!(
+            d_tag,
+            remote_pubkey = %event.pubkey,
+            "24010 received: local agents overlap with remote backend; not auto-booting"
+        );
+        ctx.remote_status_seen.lock().await.insert(d_tag);
+        return;
+    }
+
+    info!(
+        d_tag,
+        remote_pubkey = %event.pubkey,
+        "24010 received: local agents not covered by remote backend; auto-booting"
+    );
+    ctx.remote_status_seen.lock().await.insert(d_tag.clone());
+    ctx.skipped_projects.clear(&d_tag).await;
+    ctx.supervisor.boot(d_tag).await;
 }
 
 async fn update_boot_subscription(
