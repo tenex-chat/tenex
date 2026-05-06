@@ -121,28 +121,6 @@ pub fn truncate_until(
     }
 }
 
-pub fn truncate_message_limit(
-    messages: &mut Vec<MessageRecord>,
-    tool_messages: &mut Vec<ToolMessage>,
-    limit: usize,
-) {
-    if limit == 0 {
-        messages.clear();
-        tool_messages.clear();
-        return;
-    }
-    if messages.len() <= limit {
-        return;
-    }
-    let bound = messages
-        .get(limit.saturating_sub(1))
-        .and_then(message_timestamp_seconds);
-    messages.truncate(limit);
-    if let Some(bound) = bound {
-        tool_messages.retain(|tool| tool_timestamp_seconds(tool).is_some_and(|ts| ts <= bound));
-    }
-}
-
 fn timeline_entries<'a>(
     messages: &'a [MessageRecord],
     tool_messages: &'a [ToolMessage],
