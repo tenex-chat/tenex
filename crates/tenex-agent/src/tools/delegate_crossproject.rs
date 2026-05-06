@@ -3,7 +3,7 @@ use rig::{completion::ToolDefinition, tool::Tool};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::sync::Arc;
-use tenex_project::Project;
+use tenex_project::{resolve_recipient, Project, RecipientResolution};
 use tenex_protocol::{
     DelegationIntent, DelegationRequest, Intent, MessageRef, PrincipalKind, PrincipalRef,
     ProjectRef, ToolUseIntent,
@@ -106,18 +106,30 @@ impl Tool for DelegateCrossProjectTool {
             ))
         })?;
 
-        let agent = agents
-            .iter()
-            .find(|a| a.slug == args.recipient)
-            .ok_or_else(|| {
+        let agent = match resolve_recipient(&agents, &args.recipient) {
+            RecipientResolution::Resolved(a) => a,
+            RecipientResolution::Ambiguous(candidates) => {
+                let labels: Vec<String> = candidates
+                    .iter()
+                    .map(|a| format!("{} ({})", a.slug, &a.pubkey[..8.min(a.pubkey.len())]))
+                    .collect();
+                return Err(DelegateCrossProjectError(format!(
+                    "'{}' matches multiple agents in '{}': {}. Use a longer pubkey prefix or the agent slug.",
+                    args.recipient,
+                    args.project_id,
+                    labels.join(", ")
+                )));
+            }
+            RecipientResolution::NotFound => {
                 let slugs: Vec<&str> = agents.iter().map(|a| a.slug.as_str()).collect();
-                DelegateCrossProjectError(format!(
+                return Err(DelegateCrossProjectError(format!(
                     "no agent '{}' in project '{}'. Available: {}",
                     args.recipient,
                     args.project_id,
                     slugs.join(", ")
-                ))
-            })?;
+                )));
+            }
+        };
 
         let pubkey = nostr::PublicKey::from_hex(&agent.pubkey)
             .map_err(|e| DelegateCrossProjectError(format!("invalid agent pubkey: {e}")))?;

@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::path::PathBuf;
 use std::sync::Arc;
-use tenex_project::{Agent, Team};
+use tenex_project::{resolve_recipient, Agent, RecipientResolution, Team};
 use tenex_protocol::{
     DelegationIntent, DelegationRequest, Intent, MessageRef, PrincipalKind, PrincipalRef,
     ToolUseIntent,
@@ -20,6 +20,12 @@ pub struct DelegateArgs {
 #[derive(Debug, thiserror::Error)]
 #[error("{0}")]
 pub struct DelegateError(String);
+
+enum ResolveOutcome {
+    Agent(String, bool, Option<String>),
+    Ambiguous(Vec<String>),
+    NotFound,
+}
 
 #[derive(Clone)]
 pub struct DelegateTool {
@@ -45,20 +51,37 @@ impl DelegateTool {
     }
 
     /// Resolve a recipient string to (agent_pubkey, agent_is_local, resolved_team_name).
-    /// Tries agent slug first; falls back to team name → team lead → pubkey.
-    fn resolve_recipient(&self, recipient: &str) -> Option<(String, bool, Option<String>)> {
-        if let Some(agent) = self.project_agents.iter().find(|a| a.slug == recipient) {
-            return Some((agent.pubkey.clone(), agent.is_local, None));
+    /// Delegates agent matching to the shared [`resolve_recipient`]; falls back
+    /// to team-name → team-lead lookup when the input matches no agent.
+    fn resolve(&self, recipient: &str) -> ResolveOutcome {
+        match resolve_recipient(&self.project_agents, recipient) {
+            RecipientResolution::Resolved(agent) => {
+                ResolveOutcome::Agent(agent.pubkey.clone(), agent.is_local, None)
+            }
+            RecipientResolution::Ambiguous(candidates) => ResolveOutcome::Ambiguous(
+                candidates
+                    .into_iter()
+                    .map(|a| format!("{} ({})", a.slug, &a.pubkey[..8.min(a.pubkey.len())]))
+                    .collect(),
+            ),
+            RecipientResolution::NotFound => {
+                let Some(team) = self
+                    .teams
+                    .iter()
+                    .find(|t| t.name.eq_ignore_ascii_case(recipient))
+                else {
+                    return ResolveOutcome::NotFound;
+                };
+                let Some(agent) = self
+                    .project_agents
+                    .iter()
+                    .find(|a| a.slug == team.team_lead)
+                else {
+                    return ResolveOutcome::NotFound;
+                };
+                ResolveOutcome::Agent(agent.pubkey.clone(), agent.is_local, Some(team.name.clone()))
+            }
         }
-        let team = self
-            .teams
-            .iter()
-            .find(|t| t.name.eq_ignore_ascii_case(recipient))?;
-        let agent = self
-            .project_agents
-            .iter()
-            .find(|a| a.slug == team.team_lead)?;
-        Some((agent.pubkey.clone(), agent.is_local, Some(team.name.clone())))
     }
 
     /// Pre-flight a remote delegation that names a branch: ensure the branch's
@@ -126,28 +149,40 @@ impl Tool for DelegateTool {
     }
 
     async fn call(&self, args: DelegateArgs) -> Result<String, DelegateError> {
-        let (pubkey_hex, recipient_is_local, resolved_team) =
-            match self.resolve_recipient(&args.recipient) {
-                Some(r) => r,
-                None => {
-                    let agent_slugs = self
-                        .project_agents
-                        .iter()
-                        .map(|a| a.slug.as_str())
-                        .collect::<Vec<_>>()
-                        .join(", ");
-                    let team_names = self
-                        .teams
-                        .iter()
-                        .map(|t| t.name.as_str())
-                        .collect::<Vec<_>>()
-                        .join(", ");
-                    return Ok(format!(
-                        "Error: no agent or team found with name '{}'. Agents: {}. Teams: {}.",
-                        args.recipient, agent_slugs, team_names
-                    ));
-                }
-            };
+        let (pubkey_hex, recipient_is_local, resolved_team) = match self.resolve(&args.recipient) {
+            ResolveOutcome::Agent(pk, is_local, team) => (pk, is_local, team),
+            ResolveOutcome::Ambiguous(candidates) => {
+                return Ok(format!(
+                    "Error: '{}' matches multiple agents: {}. Use a longer pubkey prefix or the agent slug.",
+                    args.recipient,
+                    candidates.join(", ")
+                ));
+            }
+            ResolveOutcome::NotFound => {
+                let agents = self
+                    .project_agents
+                    .iter()
+                    .map(|a| {
+                        if a.slug == a.name {
+                            a.slug.clone()
+                        } else {
+                            format!("{} ({})", a.slug, a.name)
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let team_names = self
+                    .teams
+                    .iter()
+                    .map(|t| t.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                return Ok(format!(
+                    "Error: no agent or team found with name '{}'. Agents: {}. Teams: {}.",
+                    args.recipient, agents, team_names
+                ));
+            }
+        };
 
         let pubkey = nostr::PublicKey::from_hex(&pubkey_hex)
             .map_err(|e| DelegateError(format!("invalid recipient pubkey: {e}")))?;

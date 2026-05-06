@@ -4,7 +4,7 @@ use rig::{completion::ToolDefinition, tool::Tool};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::{path::PathBuf, sync::Arc};
-use tenex_project::{Agent, Team};
+use tenex_project::{resolve_recipient, Agent, RecipientResolution, Team};
 use tenex_protocol::{
     DelegationIntent, DelegationRequest, Intent, MessageRef, PrincipalKind, PrincipalRef,
     ToolUseIntent,
@@ -47,9 +47,13 @@ impl DelegateFollowupTool {
     }
 
     fn resolve_named_recipient(&self, recipient: &str) -> Option<String> {
-        if let Some(agent) = self.project_agents.iter().find(|a| a.slug == recipient) {
+        if let RecipientResolution::Resolved(agent) =
+            resolve_recipient(&self.project_agents, recipient)
+        {
             return Some(agent.pubkey.clone());
         }
+        // Followup may target an agent that has since left the roster — accept
+        // a bare 64-char hex pubkey as a final fallback.
         if nostr::PublicKey::from_hex(recipient).is_ok() {
             return Some(recipient.to_string());
         }

@@ -13,6 +13,7 @@ mod identity;
 pub mod models;
 pub mod paths;
 pub mod project;
+pub mod recipient;
 pub mod signer;
 pub mod teams;
 
@@ -25,6 +26,7 @@ pub use git::{
 pub use id::{normalize_project_id, ProjectDTag};
 pub use models::{Agent, ProjectAgent, ProjectMetadata};
 pub use project::Project;
+pub use recipient::{resolve_recipient, RecipientResolution};
 #[cfg(feature = "nip46")]
 pub use signer::BunkerSigner;
 pub use signer::{NsecSigner, Signer, SignerError, SignerScheme};
