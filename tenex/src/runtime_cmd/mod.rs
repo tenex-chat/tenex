@@ -18,7 +18,7 @@ mod runtime_state_store;
 mod sign_as_user;
 mod transport;
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
@@ -392,6 +392,10 @@ pub async fn run(args: RuntimeArgs) -> Result<()> {
     // fetch timeout so a slow relay can't block the runtime from coming up.
     startup_publish_missing_agent_configs(&shared).await;
 
+    // Startup-only: backfill any kind:1 events that arrived while the daemon
+    // was offline (between the last processed event and now).
+    backfill_missed_events(&shared, &project_addr, since, &trusted_authors, &reload_context, &base_dir).await;
+
     loop {
         tokio::select! {
             Some(event) = agent_fs_rx.recv() => {
@@ -456,4 +460,128 @@ pub async fn run(args: RuntimeArgs) -> Result<()> {
     let _ = tokio::fs::remove_file(control_socket_path).await;
     client.disconnect().await;
     Ok(())
+}
+
+/// Fetch and dispatch kind:1 events that arrived while the daemon was offline.
+///
+/// Queries the conversation store for the highest `timestamp` among
+/// relay-sourced messages — that marks the end of the last online session.
+/// Everything between that timestamp and `startup_ts` is the "offline window".
+/// We fetch it with two filter shapes (project-scoped and directed-to-agent),
+/// dedup by event ID, sort oldest-first, then run each event through the
+/// normal `handle_relay_event` path.
+///
+/// Events already in the store get their IDs seeded into the in-memory `seen`
+/// set so the live subscription won't re-dispatch them when it delivers the
+/// same events after EOSE.
+async fn backfill_missed_events(
+    shared: &Arc<RuntimeShared>,
+    project_addr: &str,
+    startup_ts: Timestamp,
+    trusted_authors: &[PublicKey],
+    reload_context: &RuntimeReloadContext<'_>,
+    base_dir: &std::path::Path,
+) {
+    let last_ts_secs = {
+        let store = shared.store.lock().unwrap();
+        match store.last_seen_event_timestamp() {
+            Ok(ts) => ts,
+            Err(e) => {
+                warn!(error = %e, "backfill: failed to query last event timestamp");
+                return;
+            }
+        }
+    };
+    let Some(last_ts_secs) = last_ts_secs else {
+        return; // No prior events — nothing to backfill
+    };
+
+    let backfill_since = Timestamp::from(last_ts_secs as u64);
+    if backfill_since >= startup_ts {
+        return; // No offline window
+    }
+
+    info!(
+        since = last_ts_secs,
+        until = startup_ts.as_secs(),
+        "backfill: querying missed events in offline window"
+    );
+
+    let agent_keys: Vec<PublicKey> = shared
+        .agent_snapshot()
+        .agents
+        .iter()
+        .filter_map(|a| PublicKey::from_hex(&a.pubkey).ok())
+        .collect();
+    let mut p_authors = trusted_authors.to_vec();
+    p_authors.extend(agent_keys.iter().copied());
+
+    let timeout = Duration::from_secs(10);
+
+    // Two filter shapes: project-scoped (#a tag) and directed to agent (#p tag).
+    // Nostr doesn't support OR across tag types in a single filter, so we need
+    // two separate fetches.
+    let project_filter = Filter::new()
+        .kind(Kind::TextNote)
+        .custom_tags(
+            SingleLetterTag::lowercase(Alphabet::A),
+            [project_addr],
+        )
+        .since(backfill_since)
+        .until(startup_ts);
+
+    let directed_filter = Filter::new()
+        .kind(Kind::TextNote)
+        .authors(p_authors)
+        .pubkeys(agent_keys)
+        .since(backfill_since)
+        .until(startup_ts);
+
+    let mut events_by_id: HashMap<EventId, Event> = HashMap::new();
+    match shared.client.fetch_events(project_filter, timeout).await {
+        Ok(events) => {
+            for ev in events {
+                events_by_id.insert(ev.id, ev);
+            }
+        }
+        Err(e) => warn!(error = %e, "backfill: project filter fetch failed"),
+    }
+    match shared.client.fetch_events(directed_filter, timeout).await {
+        Ok(events) => {
+            for ev in events {
+                events_by_id.entry(ev.id).or_insert(ev);
+            }
+        }
+        Err(e) => warn!(error = %e, "backfill: directed filter fetch failed"),
+    }
+
+    if events_by_id.is_empty() {
+        info!("backfill: no missed events in offline window");
+        return;
+    }
+
+    let mut backfill_events: Vec<Event> = events_by_id.into_values().collect();
+    backfill_events.sort_by_key(|e| e.created_at);
+
+    info!(count = backfill_events.len(), "backfill: processing missed events");
+
+    for event in backfill_events {
+        let event_id_hex = event.id.to_hex();
+        let already_seen = {
+            let store = shared.store.lock().unwrap();
+            match store.has_seen_event(&event_id_hex) {
+                Ok(seen) => seen,
+                Err(e) => {
+                    warn!(error = %e, event_id = %&event_id_hex[..8], "backfill: has_seen_event failed");
+                    false
+                }
+            }
+        };
+        if already_seen {
+            // Seed in-memory dedup so the live subscription won't re-dispatch
+            shared.seen.lock().unwrap().insert(event.id);
+            continue;
+        }
+        handle_relay_event(shared, Box::new(event), reload_context, base_dir).await;
+    }
 }

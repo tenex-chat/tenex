@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"sync"
@@ -10,6 +11,9 @@ import (
 
 	"github.com/fiatjaf/eventstore"
 	"github.com/nbd-wtf/go-nostr"
+	"github.com/nbd-wtf/go-nostr/nip77"
+	"github.com/nbd-wtf/go-nostr/nip77/negentropy"
+	"github.com/nbd-wtf/go-nostr/nip77/negentropy/storage/vector"
 )
 
 // RelayStatus tracks the connection status for a single sync relay
@@ -86,7 +90,193 @@ func (s *Syncer) Start(ctx context.Context) {
 		}(url)
 	}
 
+	// Run kind:0 negentropy reconciliation immediately at startup and periodically.
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		s.runKind0NegentropyLoop(ctx)
+	}()
+
 	log.Printf("[sync] started sync for %d relay(s), %d kind(s)", len(s.config.Relays), len(s.config.Kinds))
+}
+
+// runKind0NegentropyLoop runs kind:0 negentropy reconciliation against all configured
+// relays immediately on startup, then repeats every 30 minutes.
+func (s *Syncer) runKind0NegentropyLoop(ctx context.Context) {
+	if len(s.config.Relays) == 0 {
+		return
+	}
+
+	s.syncKind0AllRelays(ctx)
+
+	ticker := time.NewTicker(30 * time.Minute)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			s.syncKind0AllRelays(ctx)
+		}
+	}
+}
+
+func (s *Syncer) syncKind0AllRelays(ctx context.Context) {
+	for _, url := range s.config.Relays {
+		if err := s.syncKind0Negentropy(ctx, url); err != nil {
+			log.Printf("[sync] kind:0 negentropy %s: %v", url, err)
+		}
+	}
+}
+
+// syncKind0Negentropy performs NIP-77 negentropy reconciliation for kind:0 events
+// against a single remote relay. It builds the local set from storage, reconciles
+// with the remote, then fetches and stores any profiles the remote has that we don't.
+func (s *Syncer) syncKind0Negentropy(ctx context.Context, relayURL string) error {
+	// 1. Build the local kind:0 item set from storage.
+	queryCtx, queryCancel := context.WithTimeout(ctx, 30*time.Second)
+	defer queryCancel()
+
+	ch, err := s.storage.QueryEvents(queryCtx, nostr.Filter{Kinds: []int{0}})
+	if err != nil {
+		return fmt.Errorf("query local kind:0: %w", err)
+	}
+
+	vec := vector.New()
+	var localCount int
+	for evt := range ch {
+		vec.Insert(evt.CreatedAt, evt.ID)
+		localCount++
+	}
+	vec.Seal()
+
+	neg := negentropy.New(vec, 1024*1024)
+
+	// 2. Collect HaveNots concurrently so the channel never fills up and blocks Reconcile.
+	var collectMu sync.Mutex
+	var haveNots []string
+	drainDone := make(chan struct{})
+	go func() {
+		for id := range neg.HaveNots {
+			collectMu.Lock()
+			haveNots = append(haveNots, id)
+			collectMu.Unlock()
+		}
+		close(drainDone)
+	}()
+
+	// 3. Connect with a custom handler for NIP-77 messages.
+	subID := fmt.Sprintf("neg-kind0-%d", time.Now().UnixNano()%1e9)
+	doneCh := make(chan error, 1)
+
+	connectCtx, connectCancel := context.WithTimeout(ctx, 15*time.Second)
+	defer connectCancel()
+
+	var conn *nostr.Relay
+	conn, err = nostr.RelayConnect(connectCtx, relayURL, nostr.WithCustomHandler(func(data string) {
+		env := nip77.ParseNegMessage(data)
+		// khatru serialises error envelopes as ["NEG-ERROR",...]; handle both forms.
+		if env == nil && len(data) > 13 && data[2:11] == "NEG-ERROR" {
+			var parts []string
+			if json.Unmarshal([]byte(data), &parts) == nil && len(parts) >= 3 {
+				env = &nip77.ErrorEnvelope{SubscriptionID: parts[1], Reason: parts[2]}
+			}
+		}
+		if env == nil {
+			return
+		}
+		switch env := env.(type) {
+		case *nip77.ErrorEnvelope:
+			select {
+			case doneCh <- fmt.Errorf("NEG-ERR[%s]: %s", env.SubscriptionID, env.Reason):
+			default:
+			}
+		case *nip77.MessageEnvelope:
+			nextMsg, rerr := neg.Reconcile(env.Message)
+			if rerr != nil {
+				select {
+				case doneCh <- fmt.Errorf("reconcile: %w", rerr):
+				default:
+				}
+				return
+			}
+			if nextMsg == "" {
+				select {
+				case doneCh <- nil:
+				default:
+				}
+			} else {
+				msg, _ := nip77.MessageEnvelope{SubscriptionID: subID, Message: nextMsg}.MarshalJSON()
+				conn.Write(msg)
+			}
+		}
+	}))
+	if err != nil {
+		return fmt.Errorf("connect: %w", err)
+	}
+	defer conn.Close()
+
+	// 4. Send NEG-OPEN.
+	syncCtx, syncCancel := context.WithTimeout(ctx, 60*time.Second)
+	defer syncCancel()
+
+	open, _ := nip77.OpenEnvelope{
+		SubscriptionID: subID,
+		Filter:         nostr.Filter{Kinds: []int{0}},
+		Message:        neg.Start(),
+	}.MarshalJSON()
+	if werr := <-conn.Write(open); werr != nil {
+		return fmt.Errorf("NEG-OPEN write: %w", werr)
+	}
+
+	// 5. Wait for reconciliation to complete.
+	select {
+	case syncErr := <-doneCh:
+		if syncErr != nil {
+			return syncErr
+		}
+	case <-syncCtx.Done():
+		return fmt.Errorf("timeout after 60s")
+	}
+
+	// Wait for the drain goroutine (HaveNots channel is already closed by Reconcile).
+	<-drainDone
+
+	if len(haveNots) == 0 {
+		log.Printf("[sync] kind:0 negentropy %s: up to date (%d local profiles)", relayURL, localCount)
+		return nil
+	}
+
+	// 6. Fetch missing profiles in batches.
+	log.Printf("[sync] kind:0 negentropy %s: fetching %d missing profiles (have %d locally)", relayURL, len(haveNots), localCount)
+
+	stored := 0
+	batchSize := 100
+	for i := 0; i < len(haveNots); i += batchSize {
+		end := i + batchSize
+		if end > len(haveNots) {
+			end = len(haveNots)
+		}
+		events, ferr := conn.QuerySync(syncCtx, nostr.Filter{IDs: haveNots[i:end]})
+		if ferr != nil {
+			log.Printf("[sync] kind:0 negentropy fetch batch: %v", ferr)
+			continue
+		}
+		for _, evt := range events {
+			if serr := s.storeEvent(ctx, evt); serr == nil {
+				stored++
+				atomic.AddInt64(&s.stats.EventsSynced, 1)
+				now := time.Now()
+				s.stats.mu.Lock()
+				s.stats.LastSyncTime = &now
+				s.stats.mu.Unlock()
+			}
+		}
+	}
+
+	log.Printf("[sync] kind:0 negentropy %s: stored %d/%d profiles", relayURL, stored, len(haveNots))
+	return nil
 }
 
 // Stop cancels all sync goroutines and waits for them to finish
