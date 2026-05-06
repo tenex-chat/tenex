@@ -276,6 +276,7 @@ impl ToolSet {
             &mut tools,
             &recorder,
             Box::new(ConversationGetTool::new(
+                self.emit_state.clone(),
                 self.conv_db_path.clone(),
                 self.summarization_model.clone(),
             )),
@@ -284,6 +285,7 @@ impl ToolSet {
             &mut tools,
             &recorder,
             Box::new(ConversationListTool::new(
+                self.emit_state.clone(),
                 self.conv_db_path.clone(),
                 self.base_dir.clone(),
                 self.project_d_tag.clone(),
