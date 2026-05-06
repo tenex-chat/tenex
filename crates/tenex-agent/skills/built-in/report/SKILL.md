@@ -15,7 +15,8 @@ Use `html_publish` to create and publish a visual HTML report that appears in th
 html_publish(
   title="Q1 Performance Summary",
   description="One-line description shown in the report list",
-  path="$AGENT_HOME/report.html"
+  path="$AGENT_HOME/report.html",
+  slug="q1-performance-summary"
 )
 ```
 
@@ -25,7 +26,8 @@ The directory **must** contain `index.html`. All files are zipped and uploaded t
 html_publish(
   title="Dashboard",
   description="Interactive project dashboard",
-  path="$AGENT_HOME/dashboard/"
+  path="$AGENT_HOME/dashboard/",
+  slug="dashboard"
 )
 ```
 
@@ -41,3 +43,4 @@ Within a bundle, relative links between files work correctly in the viewer:
 - Self-contained HTML with inline CSS is simplest; external CDN resources (e.g. Chart.js from a CDN URL) also work since the viewer allows network access
 - Avoid absolute `file://` paths — use relative paths for all intra-bundle references
 - The `description` is shown as the subtitle in the report list — keep it to one sentence
+- `slug` is a stable identifier emitted as a `["d", <slug>]` tag — re-publishing with the same slug replaces the prior version, so use a fresh slug per distinct report and reuse the same slug to update one

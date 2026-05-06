@@ -7,9 +7,10 @@
 //! signed with this agent's keys, base64-encoded into the `Authorization`
 //! header, and PUT'd to `<blossom_url>/upload`.
 //!
-//! The emitted ToolUse event carries `["url", <uploaded_url>]` and
-//! `["t", "html-report"]` tags via [`ToolUseIntent::extra_tags`], so downstream
-//! consumers can filter and dereference the published artifact directly.
+//! The emitted ToolUse event carries `["url", <uploaded_url>]`,
+//! `["t", "html-report"]`, and `["d", <slug>]` tags via
+//! [`ToolUseIntent::extra_tags`], so downstream consumers can filter,
+//! dereference, and address the published artifact by its stable slug.
 
 use crate::emit::EmitState;
 use base64::Engine as _;
@@ -33,6 +34,7 @@ pub struct HtmlPublishArgs {
     pub title: String,
     pub description: String,
     pub path: String,
+    pub slug: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -90,9 +92,14 @@ impl Tool for HtmlPublishTool {
                         "type": "string",
                         "description": "Path to an HTML file or a directory containing index.html. \
                             Supports $VAR and ${VAR} env-var substitution."
+                    },
+                    "slug": {
+                        "type": "string",
+                        "description": "Stable identifier for the report; emitted as a \"d\" tag \
+                            so subsequent publishes with the same slug replace the prior version."
                     }
                 },
-                "required": ["title", "description", "path"]
+                "required": ["title", "description", "path", "slug"]
             }),
         }
     }
@@ -147,6 +154,7 @@ impl Tool for HtmlPublishTool {
                 vec!["t".to_string(), "html-report".to_string()],
                 vec!["title".to_string(), args.title.clone()],
                 vec!["m".to_string(), content_type.to_string()],
+                vec!["d".to_string(), args.slug.clone()],
             ],
         };
 
