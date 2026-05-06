@@ -12,6 +12,7 @@ use tenex_protocol::{
 pub struct SelfDelegateArgs {
     pub request: String,
     pub branch: Option<String>,
+    pub variant: Option<String>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -49,6 +50,10 @@ impl Tool for SelfDelegateTool {
                     "branch": {
                         "type": "string",
                         "description": "Optional git branch context to pass along"
+                    },
+                    "variant": {
+                        "type": "string",
+                        "description": "Optional model variant name (e.g. 'fast', 'powerful'). Only available when the agent uses a meta model configuration with multiple variants."
                     }
                 },
                 "required": ["request"]
@@ -69,6 +74,11 @@ impl Tool for SelfDelegateTool {
             display_name: None,
         };
 
+        let extra_tags = match &args.variant {
+            Some(variant) => vec![vec!["variant".to_string(), variant.clone()]],
+            None => Vec::new(),
+        };
+
         let intent = DelegationIntent {
             items: vec![DelegationRequest {
                 recipient,
@@ -77,7 +87,7 @@ impl Tool for SelfDelegateTool {
                 branch: args.branch.clone(),
                 commit: None,
                 followup_of: None,
-                extra_tags: Vec::new(),
+                extra_tags,
             }],
         };
 
