@@ -251,7 +251,7 @@ impl Tool for ConversationListTool {
             .map_err(|e| ConversationListError(format!("failed to emit tool-use event: {e}")))?;
 
         let filter = ConversationListFilter {
-            limit: Some(args.limit.unwrap_or(20)),
+            limit: Some(args.limit.unwrap_or(20).max(20)),
             from_time: args.from_time,
             to_time: args.to_time,
             participant_pubkey: args.with.clone(),

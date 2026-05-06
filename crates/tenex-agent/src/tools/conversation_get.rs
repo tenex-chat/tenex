@@ -22,7 +22,6 @@ pub struct ConversationGetArgs {
     #[serde(alias = "conversationId")]
     pub conversation_id: String,
     pub description: String,
-    pub limit: Option<i64>,
     #[serde(alias = "untilId")]
     pub until_id: Option<String>,
     pub prompt: Option<String>,
@@ -227,10 +226,6 @@ impl Tool for ConversationGetTool {
                         "type": "string",
                         "description": "One-line reason why you are retrieving this conversation"
                     },
-                    "limit": {
-                        "type": "integer",
-                        "description": "Maximum number of text/delegation messages to return after slicing."
-                    },
                     "until_id": {
                         "type": "string",
                         "description": "Optional stored message/event/tool-call ID. Returns the transcript up to and including this entry; unique 8+ character prefixes are accepted."
@@ -295,9 +290,6 @@ impl Tool for ConversationGetTool {
 
         if let Some(until_id) = args.until_id.as_deref() {
             xml::truncate_until(&mut messages, &mut tool_messages, until_id);
-        }
-        if let Some(limit) = args.limit.and_then(|value| usize::try_from(value).ok()) {
-            xml::truncate_message_limit(&mut messages, &mut tool_messages, limit);
         }
 
         let messages_xml = xml::render_conversation_xml(
