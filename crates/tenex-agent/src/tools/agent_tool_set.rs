@@ -110,12 +110,6 @@ impl ToolSet {
             .unwrap_or(false)
     }
 
-    fn publishing_output_allowed(&self) -> bool {
-        self.agent_category
-            .map(AgentCategory::is_publishing_output_allowed)
-            .unwrap_or(true)
-    }
-
     fn push_fs(
         &self,
         tools: &mut Vec<Box<dyn ToolDyn>>,
@@ -372,26 +366,24 @@ impl ToolSet {
             Box::new(NoResponseTool::new(self.suppress_response.clone())),
         );
 
-        if self.publishing_output_allowed() {
-            self.push_tool(
-                &mut tools,
-                &recorder,
-                Box::new(ReportPublishTool::new(
-                    self.emit_state.clone(),
-                    self.working_dir.clone(),
-                )),
-            );
+        self.push_tool(
+            &mut tools,
+            &recorder,
+            Box::new(ReportPublishTool::new(
+                self.emit_state.clone(),
+                self.working_dir.clone(),
+            )),
+        );
 
-            self.push_tool(
-                &mut tools,
-                &recorder,
-                Box::new(HtmlPublishTool::new(
-                    self.emit_state.clone(),
-                    self.blossom_url.clone(),
-                    self.agent_keys.clone(),
-                )),
-            );
-        }
+        self.push_tool(
+            &mut tools,
+            &recorder,
+            Box::new(HtmlPublishTool::new(
+                self.emit_state.clone(),
+                self.blossom_url.clone(),
+                self.agent_keys.clone(),
+            )),
+        );
 
         if let Some(ref tc) = self.telegram_config {
             self.push_tool(

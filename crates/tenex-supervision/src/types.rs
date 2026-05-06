@@ -26,11 +26,6 @@ impl AgentCategory {
         matches!(self, Self::Orchestrator | Self::Principal)
     }
 
-    /// All categories may publish reports and HTML artifacts except
-    /// orchestrators, whose role is purely coordinative.
-    pub fn is_publishing_output_allowed(self) -> bool {
-        !matches!(self, Self::Orchestrator)
-    }
 }
 
 impl FromStr for AgentCategory {
