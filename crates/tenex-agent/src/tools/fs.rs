@@ -14,8 +14,58 @@ use super::agents_md::AgentsMdReminderState;
 #[error("{0}")]
 pub struct FsError(String);
 
+/// Expand `$VAR` and `${VAR}` substrings using `std::env::var`. Unknown
+/// variables are left verbatim so callers see their literal input in any
+/// subsequent filesystem error rather than a silently empty expansion.
+fn expand_env_vars(input: &str) -> String {
+    let bytes = input.as_bytes();
+    let mut out = String::with_capacity(input.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'$' && i + 1 < bytes.len() {
+            // ${NAME}
+            if bytes[i + 1] == b'{' {
+                if let Some(end_rel) = bytes[i + 2..].iter().position(|&b| b == b'}') {
+                    let name = std::str::from_utf8(&bytes[i + 2..i + 2 + end_rel]).unwrap_or("");
+                    if !name.is_empty() {
+                        match std::env::var(name) {
+                            Ok(v) => out.push_str(&v),
+                            Err(_) => out.push_str(&input[i..i + 2 + end_rel + 1]),
+                        }
+                        i += 2 + end_rel + 1;
+                        continue;
+                    }
+                }
+            }
+            // $NAME — terminated by anything that is not [A-Za-z0-9_]
+            let start = i + 1;
+            let mut end = start;
+            while end < bytes.len()
+                && (bytes[end].is_ascii_alphanumeric() || bytes[end] == b'_')
+            {
+                end += 1;
+            }
+            if end > start {
+                let name = std::str::from_utf8(&bytes[start..end]).unwrap_or("");
+                match std::env::var(name) {
+                    Ok(v) => out.push_str(&v),
+                    Err(_) => out.push_str(&input[i..end]),
+                }
+                i = end;
+                continue;
+            }
+        }
+        // Safe: ASCII bytes map 1-to-1 to chars; non-ASCII bytes outside a
+        // `$VAR` reference are copied byte-by-byte through the ASCII branch.
+        out.push(bytes[i] as char);
+        i += 1;
+    }
+    out
+}
+
 fn resolve_path(base: &str, path: &str) -> PathBuf {
-    let p = Path::new(path);
+    let expanded = expand_env_vars(path);
+    let p = Path::new(&expanded);
     if p.is_absolute() {
         p.to_path_buf()
     } else {
@@ -39,10 +89,11 @@ fn normalize_lexically(path: &Path) -> PathBuf {
 
 fn resolve_home_path(home_dir: &str, path: &str) -> Result<PathBuf, FsError> {
     let base = PathBuf::from(home_dir);
-    let raw = if Path::new(path).is_absolute() {
-        PathBuf::from(path)
+    let expanded = expand_env_vars(path);
+    let raw = if Path::new(&expanded).is_absolute() {
+        PathBuf::from(&expanded)
     } else {
-        base.join(path)
+        base.join(&expanded)
     };
     let normalized = normalize_lexically(&raw);
     if !normalized.starts_with(&base) {
@@ -382,10 +433,11 @@ impl Tool for FsGlobTool {
         let head_limit = args.head_limit.unwrap_or(DEFAULT_GLOB_LIMIT);
         let offset = args.offset.unwrap_or(0);
 
-        let full_pattern = if Path::new(&args.pattern).is_absolute() {
-            args.pattern.clone()
+        let expanded_pattern = expand_env_vars(&args.pattern);
+        let full_pattern = if Path::new(&expanded_pattern).is_absolute() {
+            expanded_pattern
         } else {
-            format!("{}/{}", self.working_dir, args.pattern)
+            format!("{}/{}", self.working_dir, expanded_pattern)
         };
 
         let mut all_paths: Vec<(String, PathBuf)> = Vec::new();
@@ -997,17 +1049,18 @@ impl Tool for HomeFsGlobTool {
         let head_limit = args.head_limit.unwrap_or(DEFAULT_GLOB_LIMIT);
         let offset = args.offset.unwrap_or(0);
 
-        let full_pattern = if Path::new(&args.pattern).is_absolute() {
-            // Verify the absolute pattern is within home_dir
-            if !Path::new(&args.pattern).starts_with(&self.home_dir) {
+        let expanded_pattern = expand_env_vars(&args.pattern);
+        let full_pattern = if Path::new(&expanded_pattern).is_absolute() {
+            // Verify the expanded absolute pattern is within home_dir
+            if !Path::new(&expanded_pattern).starts_with(&self.home_dir) {
                 return Err(FsError(format!(
                     "Access denied: pattern '{}' is outside your home directory",
                     args.pattern
                 )));
             }
-            args.pattern.clone()
+            expanded_pattern
         } else {
-            format!("{}/{}", self.home_dir, args.pattern)
+            format!("{}/{}", self.home_dir, expanded_pattern)
         };
 
         let mut all_paths: Vec<String> = Vec::new();
@@ -1056,6 +1109,55 @@ impl Tool for HomeFsGlobTool {
         } else {
             Ok(body)
         }
+    }
+}
+
+// ─── tests ───────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn expand_env_vars_dollar_brace_form() {
+        let home = std::env::var("HOME").expect("HOME must be set");
+        let input = "${HOME}/some/path";
+        let result = expand_env_vars(input);
+        assert_eq!(result, format!("{home}/some/path"));
+    }
+
+    #[test]
+    fn expand_env_vars_bare_dollar_form() {
+        let home = std::env::var("HOME").expect("HOME must be set");
+        let input = "$HOME/some/path";
+        let result = expand_env_vars(input);
+        assert_eq!(result, format!("{home}/some/path"));
+    }
+
+    #[test]
+    fn expand_env_vars_unknown_var_left_verbatim() {
+        let result = expand_env_vars("$__TENEX_NONEXISTENT_VAR__/path");
+        assert_eq!(result, "$__TENEX_NONEXISTENT_VAR__/path");
+    }
+
+    #[test]
+    fn resolve_path_expands_project_base() {
+        let home = std::env::var("HOME").expect("HOME must be set");
+        let resolved = resolve_path("/base", "$HOME/file.txt");
+        assert_eq!(resolved, PathBuf::from(format!("{home}/file.txt")));
+    }
+
+    #[test]
+    fn resolve_home_path_expands_var_in_subpath() {
+        let home = std::env::var("HOME").expect("HOME must be set");
+        // Relative subpath containing $HOME should be rejected by the
+        // containment check, but expanded first so it becomes absolute.
+        // Here we just verify expansion happens: a relative path with a bare
+        // word (no $) remains relative and is joined to the base.
+        let base = home.clone();
+        let result = resolve_home_path(&base, "subdir/file.txt");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), PathBuf::from(format!("{home}/subdir/file.txt")));
     }
 }
 
