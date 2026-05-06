@@ -77,6 +77,15 @@ impl Drop for Lockfile {
 }
 
 fn process_alive(pid: i32) -> bool {
+    // `kill(0, sig)` sends to the caller's process group; `kill(-N, sig)`
+    // sends to process group N. Both are special, group-scoped probes
+    // that succeed for any reachable process and would falsely report
+    // "process pid is alive" — a corrupt lockfile (pid 0 or negative)
+    // would then permanently block reacquisition. Reject these
+    // sentinels up front so only positive pids reach `kill`.
+    if pid <= 0 {
+        return false;
+    }
     // SAFETY: kill with signal 0 is a probe; no signal is delivered.
     let rc = unsafe { libc::kill(pid, 0) };
     if rc == 0 {
@@ -102,4 +111,39 @@ fn now_millis() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
         .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn process_alive_returns_false_for_pid_zero() {
+        // Regression: `kill(0, 0)` is documented as "send to the
+        // caller's process group", which always succeeds and would
+        // make `process_alive(0)` return true. A corrupt or partially
+        // written lockfile (pid field "0") would then look like a
+        // running supervisor forever, blocking reacquisition.
+        assert!(!process_alive(0));
+    }
+
+    #[test]
+    fn process_alive_returns_false_for_negative_pid() {
+        // `kill(-N, 0)` targets process group N — also group-scoped,
+        // not a per-process probe. Negative pids in the lockfile
+        // (impossible to write but easy to type into a corrupt file)
+        // must not be treated as live.
+        assert!(!process_alive(-1));
+        assert!(!process_alive(-12345));
+    }
+
+    #[test]
+    fn process_alive_returns_true_for_current_process() {
+        // Sanity check: the test process is itself a positive pid
+        // that the caller has permission to signal, so `kill(self, 0)`
+        // succeeds and `process_alive` returns true.
+        let me = std::process::id() as i32;
+        assert!(me > 0);
+        assert!(process_alive(me));
+    }
 }
