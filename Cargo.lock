@@ -3328,6 +3328,7 @@ name = "tenex-builtin-skills"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "tempfile",
 ]
 
 [[package]]

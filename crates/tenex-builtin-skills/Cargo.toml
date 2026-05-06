@@ -10,3 +10,6 @@ path = "src/lib.rs"
 
 [dependencies]
 anyhow = "1"
+
+[dev-dependencies]
+tempfile = "3"

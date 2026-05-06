@@ -332,14 +332,13 @@ fn escape_attr(s: &str) -> String {
 }
 
 /// Render a single skill as `<skill id="..." path="...">content</skill>`.
-/// Omits `path` attribute for built-in scope (matching TypeScript behavior).
+/// The `path` attribute lets the agent resolve relative links to `references/*.md`
+/// (or other supporting files) without preloading them into the prompt.
 pub fn render_skill(skill: &SkillData, path_vars: &[(&str, &str)]) -> String {
     let mut attrs = format!(r#"id="{}""#, escape_attr(&skill.id));
 
-    if skill.scope != SkillScope::BuiltIn {
-        let compressed = compress_path(&skill.local_dir, path_vars);
-        attrs.push_str(&format!(r#" path="{}""#, escape_attr(&compressed)));
-    }
+    let compressed = compress_path(&skill.local_dir, path_vars);
+    attrs.push_str(&format!(r#" path="{}""#, escape_attr(&compressed)));
 
     let content = skill.content.trim();
     if content.is_empty() {
@@ -530,6 +529,27 @@ mod tests {
         let skill = find_skill("signer", &ctx).expect("built-in signer skill");
         let tools = skill.frontmatter.expect("frontmatter").tools;
         assert_eq!(tools, vec!["sign_as_user".to_string()]);
+    }
+
+    #[test]
+    fn render_skill_emits_path_for_built_in_scope() {
+        let tmp = tempfile::tempdir().unwrap();
+        let ctx = SkillLookupCtx {
+            agent_pubkey: "0123456789abcdef".to_string(),
+            project_path: tmp.path().display().to_string(),
+            base_dir: tmp.path().join("missing-base"),
+            agent_config_path: tmp.path().join("agent.json").display().to_string(),
+        };
+
+        let skill = find_skill("skills", &ctx).expect("built-in skills skill");
+        assert_eq!(skill.scope, SkillScope::BuiltIn);
+        let local_dir_str = skill.local_dir.display().to_string();
+        let path_vars: Vec<(&str, &str)> = vec![("$BUILTIN_ROOT", &local_dir_str)];
+        let rendered = render_skill(&skill, &path_vars);
+        assert!(
+            rendered.contains(r#"path="$BUILTIN_ROOT""#),
+            "expected path attribute in rendered built-in skill: {rendered}"
+        );
     }
 }
 
