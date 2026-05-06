@@ -5,6 +5,7 @@ use std::sync::{atomic::AtomicBool, Arc, Mutex};
 use nostr::Keys;
 use rig::tool::ToolDyn;
 use tenex_rag::RagStore;
+use tenex_supervision::types::AgentCategory;
 
 use crate::config::ResolvedModel;
 use crate::emit::EmitState;
@@ -56,6 +57,7 @@ pub(crate) struct ToolSet {
     pub(crate) escalation_pubkey: Option<String>,
     pub(crate) base_dir: PathBuf,
     pub(crate) allows_delegation: bool,
+    pub(crate) agent_category: Option<AgentCategory>,
     pub(crate) conv_db_path: PathBuf,
     pub(crate) conversation_id: String,
     pub(crate) agent_pubkey: String,
@@ -102,6 +104,18 @@ impl ToolSet {
         ));
     }
 
+    fn workspace_access_restricted(&self) -> bool {
+        self.agent_category
+            .map(AgentCategory::is_workspace_access_restricted)
+            .unwrap_or(false)
+    }
+
+    fn publishing_output_allowed(&self) -> bool {
+        self.agent_category
+            .map(AgentCategory::is_publishing_output_allowed)
+            .unwrap_or(true)
+    }
+
     fn push_fs(
         &self,
         tools: &mut Vec<Box<dyn ToolDyn>>,
@@ -110,7 +124,9 @@ impl ToolSet {
         project_tool: Box<dyn ToolDyn>,
         home_tool: Box<dyn ToolDyn>,
     ) {
-        let tool = if self.granted_tools.contains(granted_name) {
+        let tool = if !self.workspace_access_restricted()
+            && self.granted_tools.contains(granted_name)
+        {
             project_tool
         } else {
             home_tool
@@ -121,19 +137,22 @@ impl ToolSet {
     pub(crate) fn build_for_turn(&self, recorder: Arc<ToolRecorder>) -> Vec<Box<dyn ToolDyn>> {
         let mut tools: Vec<Box<dyn ToolDyn>> = Vec::new();
         let agent_home_str = self.agent_home.display().to_string();
+        let workspace_restricted = self.workspace_access_restricted();
 
-        self.push_tool(
-            &mut tools,
-            &recorder,
-            Box::new(ShellTool::new(
-                self.working_dir.clone(),
-                self.shell_env.clone(),
-                self.project_id.clone(),
-                self.conversation_id.clone(),
-                self.agent_pubkey.clone(),
-                self.execution_id.clone(),
-            )),
-        );
+        if !workspace_restricted {
+            self.push_tool(
+                &mut tools,
+                &recorder,
+                Box::new(ShellTool::new(
+                    self.working_dir.clone(),
+                    self.shell_env.clone(),
+                    self.project_id.clone(),
+                    self.conversation_id.clone(),
+                    self.agent_pubkey.clone(),
+                    self.execution_id.clone(),
+                )),
+            );
+        }
 
         self.push_fs(
             &mut tools,
@@ -146,7 +165,7 @@ impl ToolSet {
             Box::new(HomeFsReadTool::new(agent_home_str.clone())),
         );
 
-        if self.granted_tools.contains("fs_write") {
+        if !workspace_restricted && self.granted_tools.contains("fs_write") {
             self.push_tool(
                 &mut tools,
                 &recorder,
@@ -231,8 +250,10 @@ impl ToolSet {
             );
         }
 
-        for tool in &self.mcp_proxy_tools {
-            self.push_tool(&mut tools, &recorder, Box::new(tool.clone()));
+        if !workspace_restricted {
+            for tool in &self.mcp_proxy_tools {
+                self.push_tool(&mut tools, &recorder, Box::new(tool.clone()));
+            }
         }
 
         if let Some(d) = &self.delegate {
@@ -351,24 +372,26 @@ impl ToolSet {
             Box::new(NoResponseTool::new(self.suppress_response.clone())),
         );
 
-        self.push_tool(
-            &mut tools,
-            &recorder,
-            Box::new(ReportPublishTool::new(
-                self.emit_state.clone(),
-                self.working_dir.clone(),
-            )),
-        );
+        if self.publishing_output_allowed() {
+            self.push_tool(
+                &mut tools,
+                &recorder,
+                Box::new(ReportPublishTool::new(
+                    self.emit_state.clone(),
+                    self.working_dir.clone(),
+                )),
+            );
 
-        self.push_tool(
-            &mut tools,
-            &recorder,
-            Box::new(HtmlPublishTool::new(
-                self.emit_state.clone(),
-                self.blossom_url.clone(),
-                self.agent_keys.clone(),
-            )),
-        );
+            self.push_tool(
+                &mut tools,
+                &recorder,
+                Box::new(HtmlPublishTool::new(
+                    self.emit_state.clone(),
+                    self.blossom_url.clone(),
+                    self.agent_keys.clone(),
+                )),
+            );
+        }
 
         if let Some(ref tc) = self.telegram_config {
             self.push_tool(
@@ -428,3 +451,6 @@ impl ToolSet {
         tools
     }
 }
+
+#[cfg(test)]
+mod tests;

@@ -1,5 +1,5 @@
 use super::super::*;
-use super::support::resolved;
+use super::support::{emit_state, resolved};
 use tempfile::TempDir;
 
 /// E2E probe against a copy of the live project DB.
@@ -18,10 +18,11 @@ async fn probe_real_database() {
     let copy = dir.path().join("conversation.db");
     std::fs::copy(&src, &copy).expect("copy db");
 
-    let tool = ConversationGetTool::new(copy, resolved());
+    let tool = ConversationGetTool::new(emit_state(), copy, resolved());
     let out = tool
         .call(ConversationGetArgs {
             conversation_id: cid,
+            description: "test".to_string(),
             limit: Some(5),
             until_id: None,
             prompt: None,

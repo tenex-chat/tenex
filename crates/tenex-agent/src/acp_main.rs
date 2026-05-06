@@ -370,7 +370,7 @@ async fn run(
     let session_result = acp
         .request(
             "session/new",
-            session_new_params(&working_dir, mcp_bridge.as_ref())?,
+            session_new_params(&working_dir, mcp_bridge.as_ref(), resolved_category_enum)?,
             &mut updates,
         )
         .await?;

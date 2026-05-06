@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use tenex_protocol::{
     Channel, ConversationRef, InboundEnvelope, PrincipalKind, PrincipalRef, ProjectRef,
 };
-use tenex_supervision::{heuristics::default_supervisor, supervisor::Supervisor};
+use tenex_supervision::{heuristics::default_supervisor, supervisor::Supervisor, types::AgentCategory};
 
 use crate::config::AgentConfig;
 use crate::emit::{EmitState, EmitStateArgs};
@@ -130,13 +130,16 @@ pub(super) struct SupervisorComponents {
     pub hook: EmitHook,
     pub allows_delegation: bool,
     pub delegate_tool: Option<DelegateTool>,
+    pub agent_category: Option<AgentCategory>,
 }
 
 /// Initialize the per-turn supervisor, completion hook, and (when the
-/// agent's category permits) the delegation tool. The category from the
-/// agent config drives both delegation gating and supervisor policy.
+/// agent's category permits) the delegation tool. The category is
+/// pre-resolved by the bootstrap (with backfill) so all downstream
+/// consumers — supervisor policy, delegation gating, and ToolSet
+/// category gating — share a single source of truth.
 pub(super) fn init_supervisor_and_hook(
-    agent_config: &AgentConfig,
+    agent_category: Option<AgentCategory>,
     emit_state: Arc<EmitState>,
     todos: Arc<Mutex<Vec<TodoItem>>>,
     runtime_state: Option<RuntimeStateHandle>,
@@ -144,20 +147,18 @@ pub(super) fn init_supervisor_and_hook(
     teams: Arc<Vec<tenex_project::Team>>,
     project_root: std::path::PathBuf,
 ) -> SupervisorComponents {
-    let sup_category: Option<tenex_supervision::types::AgentCategory> = agent_config
-        .category
-        .as_deref()
-        .and_then(|s| s.parse().ok());
     let supervisor = Arc::new(Mutex::new(default_supervisor()));
     let supervisor_ref = supervisor.clone();
     let hook = EmitHook::new(
         emit_state.clone(),
         supervisor,
         todos,
-        sup_category,
+        agent_category,
         runtime_state,
     );
-    let allows_delegation = sup_category.map(|c| c.allows_delegation()).unwrap_or(true);
+    let allows_delegation = agent_category
+        .map(|c| c.allows_delegation())
+        .unwrap_or(true);
     let delegate_tool = if allows_delegation {
         Some(DelegateTool::new(
             emit_state,
@@ -173,5 +174,112 @@ pub(super) fn init_supervisor_and_hook(
         hook,
         allows_delegation,
         delegate_tool,
+        agent_category,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use async_trait::async_trait;
+    use tenex_protocol::{
+        Channel, ChannelError, EncodingContext, Intent, MessageRef, PrincipalRef, ProjectRef,
+    };
+
+    struct FakeChannel(PrincipalRef);
+
+    #[async_trait]
+    impl Channel for FakeChannel {
+        fn name(&self) -> &'static str {
+            "fake"
+        }
+
+        fn identity(&self) -> &PrincipalRef {
+            &self.0
+        }
+
+        async fn send(
+            &self,
+            _intent: Intent,
+            _ctx: &EncodingContext,
+        ) -> Result<Vec<MessageRef>, ChannelError> {
+            Err(ChannelError::Unsupported("test"))
+        }
+    }
+
+    fn make_emit_state() -> Arc<EmitState> {
+        let keys = nostr::Keys::generate();
+        let identity = PrincipalRef::nostr_agent(keys.public_key());
+        let channel: Arc<dyn Channel> = Arc::new(FakeChannel(identity.clone()));
+        let project = ProjectRef {
+            author: keys.public_key(),
+            d_tag: "test".into(),
+        };
+        Arc::new(EmitState::new(EmitStateArgs {
+            channel,
+            project,
+            triggering_principal: identity,
+            triggering_message: None,
+            conversation_root: None,
+            completion_recipient: None,
+            model: "test:test".into(),
+            team: None,
+            current_branch: None,
+            completion_project_a_tags: vec![],
+        }))
+    }
+
+    fn run(category: Option<AgentCategory>) -> SupervisorComponents {
+        init_supervisor_and_hook(
+            category,
+            make_emit_state(),
+            Arc::new(Mutex::new(Vec::new())),
+            None,
+            Arc::new(Vec::new()),
+            Arc::new(Vec::new()),
+            std::path::PathBuf::from("/tmp"),
+        )
+    }
+
+    /// Reproduces the bug where the static `agent_config.category` was re-parsed
+    /// inside `init_supervisor_and_hook` instead of using the value resolved
+    /// (and possibly backfilled) by the bootstrap. With backfill, the static
+    /// config has `None` but the resolved value is `Some(Orchestrator)`; the
+    /// resolved value must reach `ToolSet.agent_category` so the workspace
+    /// restriction applies.
+    #[tokio::test]
+    async fn backfilled_orchestrator_propagates_to_supervisor_components() {
+        let components = run(Some(AgentCategory::Orchestrator));
+        assert_eq!(
+            components.agent_category,
+            Some(AgentCategory::Orchestrator)
+        );
+        assert!(components.allows_delegation);
+        assert!(components.delegate_tool.is_some());
+    }
+
+    #[tokio::test]
+    async fn backfilled_principal_propagates_to_supervisor_components() {
+        let components = run(Some(AgentCategory::Principal));
+        assert_eq!(components.agent_category, Some(AgentCategory::Principal));
+        assert!(components.allows_delegation);
+        assert!(components.delegate_tool.is_some());
+    }
+
+    #[tokio::test]
+    async fn worker_cannot_delegate() {
+        let components = run(Some(AgentCategory::Worker));
+        assert_eq!(components.agent_category, Some(AgentCategory::Worker));
+        assert!(!components.allows_delegation);
+        assert!(components.delegate_tool.is_none());
+    }
+
+    #[tokio::test]
+    async fn unresolved_category_defaults_to_unrestricted() {
+        let components = run(None);
+        assert_eq!(components.agent_category, None);
+        assert!(components.allows_delegation);
+        assert!(components.delegate_tool.is_some());
     }
 }

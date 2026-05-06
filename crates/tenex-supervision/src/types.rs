@@ -17,6 +17,20 @@ impl AgentCategory {
     pub fn allows_delegation(self) -> bool {
         !matches!(self, Self::DomainExpert | Self::Worker)
     }
+
+    /// Orchestrators and principals coordinate work rather than touching the
+    /// project workspace directly. The shell and project-scoped filesystem
+    /// tools (and MCP proxies that may wrap them) are withheld from these
+    /// categories; they fall back to their personal `home_fs_*` workspace.
+    pub fn is_workspace_access_restricted(self) -> bool {
+        matches!(self, Self::Orchestrator | Self::Principal)
+    }
+
+    /// All categories may publish reports and HTML artifacts except
+    /// orchestrators, whose role is purely coordinative.
+    pub fn is_publishing_output_allowed(self) -> bool {
+        !matches!(self, Self::Orchestrator)
+    }
 }
 
 impl FromStr for AgentCategory {

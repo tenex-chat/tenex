@@ -1,6 +1,13 @@
 use super::super::*;
+use crate::emit::{EmitState, EmitStateArgs};
+use async_trait::async_trait;
+use nostr::Keys;
+use std::sync::Arc;
 use tenex_conversations::model::ConversationRow;
 use tenex_conversations::{NewMessage, NewToolMessage};
+use tenex_protocol::{
+    Channel, ChannelError, EncodingContext, Intent, MessageRef, PrincipalRef, ProjectRef,
+};
 
 pub(super) fn resolved() -> Arc<ResolvedModel> {
     Arc::new(ResolvedModel {
@@ -9,6 +16,53 @@ pub(super) fn resolved() -> Arc<ResolvedModel> {
         api_key: None,
         base_url: None,
     })
+}
+
+struct NoopChannel {
+    identity: PrincipalRef,
+}
+
+#[async_trait]
+impl Channel for NoopChannel {
+    fn name(&self) -> &'static str {
+        "noop"
+    }
+
+    fn identity(&self) -> &PrincipalRef {
+        &self.identity
+    }
+
+    async fn send(
+        &self,
+        _intent: Intent,
+        _ctx: &EncodingContext,
+    ) -> Result<Vec<MessageRef>, ChannelError> {
+        Ok(vec![])
+    }
+}
+
+pub(super) fn emit_state() -> Arc<EmitState> {
+    let keys = Keys::generate();
+    let pubkey = keys.public_key();
+    let identity = PrincipalRef::nostr_agent(pubkey);
+    let channel: Arc<dyn Channel> = Arc::new(NoopChannel {
+        identity: identity.clone(),
+    });
+    Arc::new(EmitState::new(EmitStateArgs {
+        channel,
+        project: ProjectRef {
+            author: pubkey,
+            d_tag: "test".to_string(),
+        },
+        triggering_principal: identity,
+        triggering_message: None,
+        conversation_root: None,
+        completion_recipient: None,
+        model: "test:test".to_string(),
+        team: None,
+        current_branch: None,
+        completion_project_a_tags: vec![],
+    }))
 }
 
 pub(super) fn seed_db(

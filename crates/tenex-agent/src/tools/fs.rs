@@ -1050,6 +1050,15 @@ impl Tool for HomeFsGlobTool {
         let offset = args.offset.unwrap_or(0);
 
         let expanded_pattern = expand_env_vars(&args.pattern);
+        if Path::new(&expanded_pattern)
+            .components()
+            .any(|c| matches!(c, std::path::Component::ParentDir))
+        {
+            return Err(FsError(format!(
+                "Access denied: pattern '{}' contains parent directory traversal",
+                args.pattern
+            )));
+        }
         let full_pattern = if Path::new(&expanded_pattern).is_absolute() {
             // Verify the expanded absolute pattern is within home_dir
             if !Path::new(&expanded_pattern).starts_with(&self.home_dir) {
@@ -1158,6 +1167,99 @@ mod tests {
         let result = resolve_home_path(&base, "subdir/file.txt");
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), PathBuf::from(format!("{home}/subdir/file.txt")));
+    }
+
+    #[tokio::test]
+    async fn home_fs_glob_rejects_relative_parent_traversal() {
+        let tmp = tempfile::tempdir().unwrap();
+        let tool = HomeFsGlobTool::new(tmp.path().display().to_string());
+        let result = tool
+            .call(FsGlobArgs {
+                pattern: "../outside/**/*.rs".to_string(),
+                head_limit: None,
+                offset: None,
+            })
+            .await;
+        let err = result.expect_err("expected traversal to be rejected");
+        assert!(
+            err.0.contains("parent directory traversal"),
+            "unexpected error: {}",
+            err.0
+        );
+    }
+
+    #[tokio::test]
+    async fn home_fs_glob_rejects_nested_parent_traversal() {
+        let tmp = tempfile::tempdir().unwrap();
+        let tool = HomeFsGlobTool::new(tmp.path().display().to_string());
+        let result = tool
+            .call(FsGlobArgs {
+                pattern: "subdir/../../outside/*.rs".to_string(),
+                head_limit: None,
+                offset: None,
+            })
+            .await;
+        let err = result.expect_err("expected traversal to be rejected");
+        assert!(
+            err.0.contains("parent directory traversal"),
+            "unexpected error: {}",
+            err.0
+        );
+    }
+
+    #[tokio::test]
+    async fn home_fs_glob_rejects_absolute_parent_traversal() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().display().to_string();
+        let tool = HomeFsGlobTool::new(home.clone());
+        let result = tool
+            .call(FsGlobArgs {
+                pattern: format!("{home}/../outside/*.rs"),
+                head_limit: None,
+                offset: None,
+            })
+            .await;
+        let err = result.expect_err("expected traversal to be rejected");
+        assert!(
+            err.0.contains("parent directory traversal"),
+            "unexpected error: {}",
+            err.0
+        );
+    }
+
+    #[tokio::test]
+    async fn home_fs_glob_rejects_outside_absolute_pattern() {
+        let tmp = tempfile::tempdir().unwrap();
+        let tool = HomeFsGlobTool::new(tmp.path().display().to_string());
+        let result = tool
+            .call(FsGlobArgs {
+                pattern: "/etc/*.conf".to_string(),
+                head_limit: None,
+                offset: None,
+            })
+            .await;
+        let err = result.expect_err("expected outside-home pattern to be rejected");
+        assert!(
+            err.0.contains("outside your home directory"),
+            "unexpected error: {}",
+            err.0
+        );
+    }
+
+    #[tokio::test]
+    async fn home_fs_glob_accepts_normal_pattern() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("note.md"), "hello").unwrap();
+        let tool = HomeFsGlobTool::new(tmp.path().display().to_string());
+        let result = tool
+            .call(FsGlobArgs {
+                pattern: "*.md".to_string(),
+                head_limit: None,
+                offset: None,
+            })
+            .await
+            .expect("normal pattern should succeed");
+        assert!(result.contains("note.md"), "got: {result}");
     }
 }
 

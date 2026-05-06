@@ -2,13 +2,13 @@ use super::*;
 mod probe;
 mod support;
 
-use support::{message_count, messages_xml, resolved, seed_db, seed_tool};
+use support::{emit_state, message_count, messages_xml, resolved, seed_db, seed_tool};
 use tempfile::TempDir;
 
 #[test]
 fn test_conversation_get_tool_creation() {
     let db_path = PathBuf::from("/home/user/.tenex/projects/myproject/conversation.db");
-    let tool = ConversationGetTool::new(db_path.clone(), resolved());
+    let tool = ConversationGetTool::new(emit_state(), db_path.clone(), resolved());
     assert_eq!(tool.db_path, db_path);
 }
 
@@ -36,10 +36,11 @@ async fn returns_xml_conversation_for_existing_conversation() {
         ],
     );
 
-    let tool = ConversationGetTool::new(db, resolved());
+    let tool = ConversationGetTool::new(emit_state(), db, resolved());
     let out = tool
         .call(ConversationGetArgs {
             conversation_id: cid,
+            description: "test".to_string(),
             limit: None,
             until_id: None,
             prompt: None,
@@ -80,10 +81,11 @@ async fn resolves_unique_conversation_prefix() {
         &[("event:abc", "alice0000aaaa", "phantom data", 0)],
     );
 
-    let tool = ConversationGetTool::new(db, resolved());
+    let tool = ConversationGetTool::new(emit_state(), db, resolved());
     let out = tool
         .call(ConversationGetArgs {
             conversation_id: "208825626d1f07c393".to_string(),
+            description: "test".to_string(),
             limit: None,
             until_id: None,
             prompt: None,
@@ -115,10 +117,11 @@ async fn rejects_ambiguous_conversation_prefix() {
         &[("rec1", "alice0000aaaa", "second", 0)],
     );
 
-    let tool = ConversationGetTool::new(db, resolved());
+    let tool = ConversationGetTool::new(emit_state(), db, resolved());
     let err = tool
         .call(ConversationGetArgs {
             conversation_id: "eeeeeeee".to_string(),
+            description: "test".to_string(),
             limit: None,
             until_id: None,
             prompt: None,
@@ -136,10 +139,11 @@ async fn reports_missing_conversation_as_xml() {
     let db = dir.path().join("conversation.db");
     ConversationStore::open(&db).unwrap();
 
-    let tool = ConversationGetTool::new(db, resolved());
+    let tool = ConversationGetTool::new(emit_state(), db, resolved());
     let out = tool
         .call(ConversationGetArgs {
             conversation_id: "f".repeat(64),
+            description: "test".to_string(),
             limit: None,
             until_id: None,
             prompt: None,
@@ -169,10 +173,11 @@ async fn until_id_includes_matching_message() {
         ],
     );
 
-    let tool = ConversationGetTool::new(db, resolved());
+    let tool = ConversationGetTool::new(emit_state(), db, resolved());
     let out = tool
         .call(ConversationGetArgs {
             conversation_id: cid,
+            description: "test".to_string(),
             limit: None,
             until_id: Some("rec2".to_string()),
             prompt: None,
@@ -203,10 +208,11 @@ async fn include_tool_calls_controls_tool_xml() {
     );
     seed_tool(&db, &cid, 1_700_000_003_000);
 
-    let tool = ConversationGetTool::new(db, resolved());
+    let tool = ConversationGetTool::new(emit_state(), db, resolved());
     let without_tools = tool
         .call(ConversationGetArgs {
             conversation_id: cid.clone(),
+            description: "test".to_string(),
             limit: None,
             until_id: None,
             prompt: None,
@@ -219,6 +225,7 @@ async fn include_tool_calls_controls_tool_xml() {
     let with_tools = tool
         .call(ConversationGetArgs {
             conversation_id: cid,
+            description: "test".to_string(),
             limit: None,
             until_id: None,
             prompt: None,
@@ -246,10 +253,11 @@ async fn limit_caps_returned_messages() {
         ],
     );
 
-    let tool = ConversationGetTool::new(db, resolved());
+    let tool = ConversationGetTool::new(emit_state(), db, resolved());
     let out = tool
         .call(ConversationGetArgs {
             conversation_id: cid,
+            description: "test".to_string(),
             limit: Some(2),
             until_id: None,
             prompt: None,

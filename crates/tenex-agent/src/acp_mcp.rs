@@ -12,6 +12,8 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::Mutex;
 
+use tenex_supervision::types::AgentCategory;
+
 use crate::acp_config::AcpAgentConfig;
 
 const SERVER_NAME: &str = "tenex";
@@ -169,12 +171,14 @@ impl AcpMcpBridge {
 pub(crate) fn session_new_params(
     working_dir: &str,
     bridge: Option<&AcpMcpBridge>,
+    agent_category: Option<AgentCategory>,
 ) -> Result<Value> {
     let mcp_servers = match bridge {
         Some(bridge) => vec![bridge.session_server_config()?],
         None => Vec::new(),
     };
-    if mcp_servers.is_empty() {
+    let disallowed_tools = claude_code_disallowed_tools(agent_category);
+    if mcp_servers.is_empty() && disallowed_tools.is_empty() {
         return Ok(json!({
             "cwd": working_dir,
             "mcpServers": []
@@ -187,11 +191,39 @@ pub(crate) fn session_new_params(
         "_meta": {
             "claudeCode": {
                 "options": {
-                    "disallowedTools": ["Task"]
+                    "disallowedTools": disallowed_tools
                 }
             }
         }
     }))
+}
+
+/// Compute the Claude Code `disallowedTools` list for an ACP session.
+/// Workspace-restricted categories (orchestrator, principal) must not be
+/// able to read or mutate the project workspace via the ACP backend's
+/// native filesystem/shell tools — the same restriction the non-ACP
+/// `ToolSet` enforces in `agent_tool_set.rs`.
+fn claude_code_disallowed_tools(agent_category: Option<AgentCategory>) -> Vec<&'static str> {
+    let mut disallowed = vec!["Task"];
+    if matches!(
+        agent_category,
+        Some(AgentCategory::Orchestrator) | Some(AgentCategory::Principal)
+    ) {
+        disallowed.extend([
+            "Bash",
+            "Read",
+            "Edit",
+            "Write",
+            "Glob",
+            "Grep",
+            "LS",
+            "MultiEdit",
+            "NotebookEdit",
+            "NotebookRead",
+            "WebFetch",
+        ]);
+    }
+    disallowed
 }
 
 fn agent_allows_delegation(agent_config: &AcpAgentConfig) -> bool {
@@ -344,5 +376,93 @@ mod tests {
         let ev = event(vec![Tag::parse(["tool", "todo_write"]).unwrap()]);
 
         assert!(!is_pending_external_work_event(&ev));
+    }
+
+    fn disallowed_tools_for(
+        category: Option<AgentCategory>,
+    ) -> Vec<String> {
+        let params = session_new_params("/tmp", None, category).unwrap();
+        params
+            .pointer("/_meta/claudeCode/options/disallowedTools")
+            .and_then(Value::as_array)
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(str::to_owned))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn orchestrator_session_disallows_workspace_tools() {
+        let disallowed = disallowed_tools_for(Some(AgentCategory::Orchestrator));
+        for tool in [
+            "Task",
+            "Bash",
+            "Read",
+            "Edit",
+            "Write",
+            "Glob",
+            "Grep",
+            "LS",
+            "MultiEdit",
+            "NotebookEdit",
+            "NotebookRead",
+            "WebFetch",
+        ] {
+            assert!(
+                disallowed.iter().any(|t| t == tool),
+                "{tool} must be disallowed for orchestrator, got: {disallowed:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn principal_session_disallows_workspace_tools() {
+        let disallowed = disallowed_tools_for(Some(AgentCategory::Principal));
+        for tool in [
+            "Task",
+            "Bash",
+            "Read",
+            "Edit",
+            "Write",
+            "Glob",
+            "Grep",
+            "LS",
+            "MultiEdit",
+            "NotebookEdit",
+            "NotebookRead",
+            "WebFetch",
+        ] {
+            assert!(
+                disallowed.iter().any(|t| t == tool),
+                "{tool} must be disallowed for principal, got: {disallowed:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn worker_session_keeps_workspace_tools() {
+        // Worker still loses Task (the Claude Code subagent tool), since
+        // delegation is owned by the tenex MCP bridge. But filesystem and
+        // shell tools must remain available.
+        let disallowed = disallowed_tools_for(Some(AgentCategory::Worker));
+        assert!(disallowed.iter().any(|t| t == "Task"));
+        for tool in [
+            "Bash",
+            "Read",
+            "Edit",
+            "Write",
+            "Glob",
+            "Grep",
+            "LS",
+            "MultiEdit",
+            "NotebookRead",
+        ] {
+            assert!(
+                !disallowed.iter().any(|t| t == tool),
+                "{tool} must NOT be disallowed for worker, got: {disallowed:?}"
+            );
+        }
     }
 }

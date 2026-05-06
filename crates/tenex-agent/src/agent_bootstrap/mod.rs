@@ -236,6 +236,17 @@ pub(crate) async fn build(
     let agent_workflows = workflows::list_workflows(&agent_home);
     let workflows_fragment = workflows::render_workflows_fragment(&agent_workflows);
 
+    // Resolve the agent's category once. When the static config has no
+    // category, this backfills via LLM and persists to the registry. The
+    // resolved value drives skill auto-enable, system prompt restrictions,
+    // supervisor policy, delegation gating, and ToolSet category gating —
+    // all downstream consumers must use this single source of truth.
+    let resolved_category_string =
+        helpers::resolve_agent_category(&agent_config, &resolved, &base_dir, &pubkey_hex).await;
+    let resolved_category_enum = resolved_category_string
+        .as_deref()
+        .and_then(|s| s.parse::<tenex_supervision::types::AgentCategory>().ok());
+
     // Resolve skill context: persisted self-applied skills, always-on config
     // skills, preloaded-skills system-prompt block, and skill-granted tools.
     let stages::SkillContextOutputs {
@@ -253,10 +264,7 @@ pub(crate) async fn build(
         conversation_id: &conversation_id,
         agent_default_skills: agent_config.default.as_ref().and_then(|d| d.skills.clone()),
         envelope_skills: envelope.metadata.skills.clone(),
-        agent_category: agent_config
-            .category
-            .as_deref()
-            .and_then(|s| s.parse().ok()),
+        agent_category: resolved_category_enum,
     });
 
     // Shared self-applied skills state (pre-seeded from persistence; updated by skills_set tool).
@@ -277,11 +285,6 @@ pub(crate) async fn build(
         });
     let scheduled_tasks_for_prompt = helpers::load_scheduled_tasks_for_prompt(&pubkey_hex);
     let git_worktrees = helpers::list_worktrees_safe(&project_root);
-    let resolved_category_string =
-        helpers::resolve_agent_category(&agent_config, &resolved, &base_dir, &pubkey_hex).await;
-    let resolved_category_enum = resolved_category_string
-        .as_deref()
-        .and_then(|s| s.parse::<tenex_supervision::types::AgentCategory>().ok());
     let global_system_prompt = config::read_global_system_prompt(&base_dir);
 
     // Build system prompt
@@ -381,8 +384,9 @@ pub(crate) async fn build(
         hook,
         allows_delegation,
         delegate_tool,
+        agent_category,
     } = assembly::init_supervisor_and_hook(
-        &agent_config,
+        resolved_category_enum,
         emit_state.clone(),
         todos.clone(),
         runtime_state.clone(),
@@ -470,6 +474,7 @@ pub(crate) async fn build(
         escalation_pubkey,
         base_dir: base_dir.clone(),
         allows_delegation,
+        agent_category,
         conv_db_path: conv_db_path.clone(),
         conversation_id: conversation_id.clone(),
         agent_pubkey: pubkey_hex.clone(),
