@@ -11,7 +11,7 @@ mod telegram;
 
 use guidance::{
     AGENT_DIRECTED_MONITORING, DELEGATION_TIPS, DOMAIN_EXPERT_GUIDANCE, ORCHESTRATOR_GUIDANCE,
-    TODO_BEFORE_DELEGATION,
+    PRINCIPAL_GUIDANCE, TODO_BEFORE_DELEGATION,
 };
 use home::render_home_directory;
 pub use home::{HomeDirectoryInfo, InjectedFile};
@@ -77,7 +77,8 @@ pub struct BuildSystemPromptInput<'a> {
 /// Mirrors the TS `renderAgentBullet` helper: locality marker first, then
 /// description/role, then a `Use when:` line when `use_criteria` is set.
 fn render_agent_bullet(a: &tenex_project::Agent) -> String {
-    let mut line = format!("  - {}", a.slug);
+    let short_pubkey = &a.pubkey[..8.min(a.pubkey.len())];
+    let mut line = format!("  - {} ({})", a.slug, short_pubkey);
     if !a.is_local {
         if let Some(backend) = &a.backend_name {
             line.push_str(&format!(" [remote agent running on {backend}]"));
@@ -354,8 +355,13 @@ into your behavior naturally, but never surface the reminder itself in your resp
         parts.push(block.to_string());
     }
 
-    // Fragment 07: Environment variables (skipped for orchestrators — adds noise)
-    if category != Some(AgentCategory::Orchestrator) {
+    // Fragment 07: Environment variables (skipped for workspace-restricted
+    // categories — they have no shell or project fs access, so the var list
+    // is irrelevant noise).
+    if !category
+        .map(AgentCategory::is_workspace_access_restricted)
+        .unwrap_or(false)
+    {
         parts.push(
             "<environment-variables>\n\
 These variables are available in shell commands and file tool path arguments.\n\
@@ -497,6 +503,10 @@ Creating a todo list helps you stay organized, shows your progress to observers,
     // Category-specific guidance fragments
     if category == Some(AgentCategory::Orchestrator) {
         parts.push(ORCHESTRATOR_GUIDANCE.to_string());
+    }
+
+    if category == Some(AgentCategory::Principal) {
+        parts.push(PRINCIPAL_GUIDANCE.to_string());
     }
 
     if category == Some(AgentCategory::DomainExpert) {

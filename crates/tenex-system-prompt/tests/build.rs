@@ -479,8 +479,8 @@ fn available_agents_falls_back_to_flat_list_when_no_teams() {
         ..minimal_input(&home)
     });
     assert!(out.contains("<available-agents>"));
-    assert!(out.contains("- alpha: alpha agent"));
-    assert!(out.contains("- beta: beta agent"));
+    assert!(out.contains("- alpha (pk-alpha): alpha agent"));
+    assert!(out.contains("- beta (pk-beta): beta agent"));
     assert!(!out.contains("<active-team>"));
     assert!(!out.contains("<my-teams>"));
     assert!(!out.contains("<also-available>"));
@@ -510,15 +510,15 @@ fn available_agents_active_team_details_only_teammates_and_summarizes_others() {
     // Active team teammates detailed.
     assert!(out.contains("<active-team>"));
     assert!(out.contains("You are working in team \"alpha\""));
-    assert!(out.contains("- teammate: teammate agent"));
+    assert!(out.contains("- teammate (pk-teamm): teammate agent"));
 
     // Other (non-member) team summarized — outsider must NOT be detailed.
     assert!(out.contains("* Team beta — Beta team [1 agents]"));
-    assert!(!out.contains("- outsider:"));
+    assert!(!out.contains("- outsider "));
 
     // Unaffiliated agents detailed; running agent never listed.
-    assert!(out.contains("- loner: no team agent"));
-    assert!(!out.contains("- self:"));
+    assert!(out.contains("- loner (pk-loner): no team agent"));
+    assert!(!out.contains("- self "));
 }
 
 #[test]
@@ -545,8 +545,8 @@ fn available_agents_no_active_team_lists_member_team_teammates() {
     // No active-team scope, but member-team teammates surface as detailed.
     assert!(!out.contains("<active-team>"));
     assert!(out.contains("Teammates:"));
-    assert!(out.contains("- teammate: teammate agent"));
-    assert!(!out.contains("- self:"));
+    assert!(out.contains("- teammate (pk-teamm): teammate agent"));
+    assert!(!out.contains("- self "));
 }
 
 #[test]
@@ -570,10 +570,10 @@ fn available_agents_renders_my_teams_when_member_of_multiple() {
     });
 
     // Active team's teammate is detailed; the other member team is summarized.
-    assert!(out.contains("- teammate-a: team a member"));
+    assert!(out.contains("- teammate-a (pk-teamm): team a member"));
     assert!(out.contains("<my-teams>"));
     assert!(out.contains("You are also a member of:"));
     assert!(out.contains("* beta — Beta team"));
     // teammate-b is in beta only — not detailed under active-team scope.
-    assert!(!out.contains("- teammate-b:"));
+    assert!(!out.contains("- teammate-b "));
 }
