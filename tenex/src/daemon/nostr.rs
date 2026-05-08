@@ -18,6 +18,7 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
+use tokio::time::Instant;
 
 use anyhow::{anyhow, Context, Result};
 use nostr_sdk::prelude::*;
@@ -60,6 +61,11 @@ struct RuntimeCtx<'a> {
     /// confirmed overlapping. Re-evaluation on every 30-second pulse is
     /// suppressed once a decision has been logged.
     remote_status_seen: Arc<Mutex<HashSet<String>>>,
+    /// Timestamp of the last project boot triggered by a 24010 event.
+    /// Enforces a minimum 5-second gap between successive 24010-driven boots
+    /// to avoid a relay connection storm when many historical events arrive at
+    /// startup.
+    remote_status_boot_limiter: Arc<Mutex<Option<Instant>>>,
 }
 
 impl RuntimeCtx<'_> {
@@ -144,6 +150,7 @@ pub async fn run(
         Arc::new(Mutex::new(PendingBoots::new(pending_boot_prefixes)));
     let debounce_handle: Arc<Mutex<Option<JoinHandle<()>>>> = Arc::new(Mutex::new(None));
     let remote_status_seen: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
+    let remote_status_boot_limiter: Arc<Mutex<Option<Instant>>> = Arc::new(Mutex::new(None));
 
     let agents_dir = base_dir.join("agents");
     std::fs::create_dir_all(&agents_dir)
@@ -188,6 +195,7 @@ pub async fn run(
                                 ignored_projects: &task_ignored_projects,
                                 only_projects: &task_only_projects,
                                 remote_status_seen: Arc::clone(&remote_status_seen),
+                                remote_status_boot_limiter: Arc::clone(&remote_status_boot_limiter),
                             };
                             handle_event(&ctx, &event).await;
                         }
@@ -221,6 +229,7 @@ pub async fn run(
                         ignored_projects: &task_ignored_projects,
                         only_projects: &task_only_projects,
                         remote_status_seen: Arc::clone(&remote_status_seen),
+                        remote_status_boot_limiter: Arc::clone(&remote_status_boot_limiter),
                     };
                     retry_skipped_boots(&ctx).await;
                 }
@@ -533,6 +542,23 @@ async fn handle_project_status(ctx: &RuntimeCtx<'_>, event: &Event) {
         return;
     }
 
+    const REMOTE_STATUS_BOOT_INTERVAL: Duration = Duration::from_secs(5);
+    {
+        let mut last = ctx.remote_status_boot_limiter.lock().await;
+        if let Some(t) = *last {
+            if t.elapsed() < REMOTE_STATUS_BOOT_INTERVAL {
+                info!(
+                    d_tag,
+                    remote_pubkey = %event.pubkey,
+                    elapsed_ms = t.elapsed().as_millis(),
+                    "24010 auto-boot deferred: rate limit (1 per 5s); will retry on next pulse"
+                );
+                // Don't mark as seen — let it be re-evaluated on the next 24010 pulse.
+                return;
+            }
+        }
+        *last = Some(Instant::now());
+    }
     info!(
         d_tag,
         remote_pubkey = %event.pubkey,
