@@ -6,7 +6,7 @@ use anyhow::{bail, Context, Result};
 use serde_json::Value;
 use tokio::sync::broadcast;
 use tokio::sync::Mutex;
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::config::{ProjectMcpConfig, ProjectMcpServerConfig};
 use crate::manifest::{McpResourceReadResult, McpServerResources, ToolManifest};
@@ -59,7 +59,8 @@ impl ProjectMcpRuntime {
         let mut manifest = ToolManifest::empty();
         for slug in allowed_slugs {
             if !self.config.servers.contains_key(slug) {
-                bail!("agent requests unknown project MCP server '{}'", slug);
+                warn!(server = %slug, "agent requests unknown project MCP server; skipping");
+                continue;
             }
             let handle = self.ensure_server(slug).await?;
             let mut client = handle.client.lock().await;

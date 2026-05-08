@@ -393,21 +393,16 @@ async fn start_mcp_bridge_for_run(
         return Ok(None);
     }
 
-    // Guard against name collisions so routing is unambiguous.
-    for slug in &project_slugs {
-        if agent_mcp_config.servers.contains_key(slug.as_str()) {
-            anyhow::bail!(
-                "agent '{}' owns an MCP server named '{}' which conflicts with a \
-                 project server of the same name granted via default.mcp",
-                job.agent.slug,
-                slug
-            );
-        }
-    }
+    // Agent-owned servers take precedence: skip any project slug that the
+    // agent owns itself so the agent version is always the one that runs.
+    let effective_project_slugs: Vec<String> = project_slugs
+        .into_iter()
+        .filter(|slug| !agent_mcp_config.servers.contains_key(slug.as_str()))
+        .collect();
 
     let project_manifest = shared
         .mcp_runtime
-        .prepare_manifest(&project_slugs)
+        .prepare_manifest(&effective_project_slugs)
         .await
         .with_context(|| format!("preparing project MCP tools for agent '{}'", job.agent.slug))?;
 
