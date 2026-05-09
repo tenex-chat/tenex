@@ -31,24 +31,10 @@ struct FileEntry {
     document_tag: String,
 }
 
-fn assert_contained(real_path: &Path, allowed_root: &Path) -> Result<(), ReportPublishError> {
-    if real_path != allowed_root && !real_path.starts_with(allowed_root) {
-        return Err(ReportPublishError(
-            "Access denied: path is outside the project directory".into(),
-        ));
-    }
-    Ok(())
-}
-
-fn collect_files(
-    input_path: &Path,
-    allowed_root: &Path,
-) -> Result<Vec<FileEntry>, ReportPublishError> {
+fn collect_files(input_path: &Path) -> Result<Vec<FileEntry>, ReportPublishError> {
     let real_path = input_path.canonicalize().map_err(|_| {
         ReportPublishError(format!("path does not exist: {}", input_path.display()))
     })?;
-
-    assert_contained(&real_path, allowed_root)?;
 
     if !real_path.is_dir() {
         let filename = real_path
@@ -75,13 +61,7 @@ fn collect_files(
         .to_string();
 
     let mut entries: Vec<FileEntry> = Vec::new();
-    walk_dir(
-        &real_path,
-        &real_path,
-        &dir_name,
-        allowed_root,
-        &mut entries,
-    )?;
+    walk_dir(&real_path, &real_path, &dir_name, &mut entries)?;
     entries.sort_by(|a, b| a.d_tag.cmp(&b.d_tag));
     Ok(entries)
 }
@@ -90,7 +70,6 @@ fn walk_dir(
     current: &Path,
     base: &Path,
     dir_name: &str,
-    allowed_root: &Path,
     out: &mut Vec<FileEntry>,
 ) -> Result<(), ReportPublishError> {
     let read_dir = std::fs::read_dir(current).map_err(|e| {
@@ -107,11 +86,8 @@ fn walk_dir(
             Ok(p) => p,
             Err(_) => continue,
         };
-        if assert_contained(&real_entry, allowed_root).is_err() {
-            continue;
-        }
         if real_entry.is_dir() {
-            walk_dir(&real_entry, base, dir_name, allowed_root, out)?;
+            walk_dir(&real_entry, base, dir_name, out)?;
         } else {
             let relative = real_entry.strip_prefix(base).unwrap_or(&real_entry);
             let d_tag = format!("{dir_name}/{}", relative.display());
@@ -150,7 +126,8 @@ impl Tool for ReportPublishTool {
             name: Self::NAME.to_string(),
             description: "Publish markdown files as NIP-23 long-form articles (kind:30023) to \
                 Nostr, signed with this agent's keys. Accepts a single file or a directory \
-                (recursive). Path may be absolute or relative to the project root."
+                (recursive). Absolute paths may point anywhere readable (e.g. the agent home); \
+                relative paths resolve against the project root."
                 .to_string(),
             parameters: json!({
                 "type": "object",
@@ -170,17 +147,13 @@ impl Tool for ReportPublishTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        let allowed_root = PathBuf::from(&self.project_base)
-            .canonicalize()
-            .map_err(|e| ReportPublishError(format!("Project base path not accessible: {e}")))?;
-
         let input_path = if Path::new(&args.path).is_absolute() {
             PathBuf::from(&args.path)
         } else {
             PathBuf::from(&self.project_base).join(&args.path)
         };
 
-        let files = collect_files(&input_path, &allowed_root)?;
+        let files = collect_files(&input_path)?;
 
         if files.is_empty() {
             return Ok(ReportPublishOutput {
@@ -254,8 +227,7 @@ mod tests {
     fn single_file_entry() {
         let dir = make_tree();
         let file = dir.path().join("note.md");
-        let root = dir.path().canonicalize().unwrap();
-        let entries = collect_files(&file, &root).unwrap();
+        let entries = collect_files(&file).unwrap();
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].d_tag, "note.md");
         assert_eq!(entries[0].document_tag, "note");
@@ -265,29 +237,24 @@ mod tests {
     fn directory_entry_prefixes_dir_name() {
         let dir = make_tree();
         let docs = dir.path().join("docs");
-        let root = dir.path().canonicalize().unwrap();
-        let entries = collect_files(&docs, &root).unwrap();
+        let entries = collect_files(&docs).unwrap();
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].d_tag, "docs/guide.md");
         assert_eq!(entries[0].document_tag, "docs");
     }
 
     #[test]
-    fn path_traversal_rejected() {
-        let outer = tempfile::tempdir().unwrap();
-        let inner = tempfile::tempdir().unwrap();
-        fs::write(inner.path().join("secret.md"), "secret").unwrap();
-        let root = outer.path().canonicalize().unwrap();
-        let bad_path = inner.path().join("secret.md");
-        let result = collect_files(&bad_path, &root);
-        assert!(result.is_err(), "should reject path outside project root");
+    fn absolute_path_anywhere_readable_is_accepted() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("report.md"), "# external").unwrap();
+        let entries = collect_files(&dir.path().join("report.md")).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].d_tag, "report.md");
     }
 
     #[test]
     fn missing_path_returns_error() {
-        let dir = tempfile::tempdir().unwrap();
-        let root = dir.path().canonicalize().unwrap();
-        let result = collect_files(Path::new("/nonexistent/path/file.md"), &root);
+        let result = collect_files(Path::new("/nonexistent/path/file.md"));
         assert!(result.is_err());
     }
 }
