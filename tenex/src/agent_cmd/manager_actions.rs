@@ -604,12 +604,13 @@ pub async fn show_agent_detail(
 /// 2. `offer_auto_merge_for_duplicate_slugs` — opportunistic clean-up
 /// 3. Print step header `(0/0  Agent Manager)` plus context line
 /// 4. Build `agent_select_prompt` items from `format_managed_agent_list_line`
-///    plus two action rows: `Delete selected (x)`, `Merge selected (m)`
-///    (the `(x)` / `(m)` shortcut hints are dim-styled per TS at
-///    `:265-267`)
+///    plus three action rows: `Create new agent (c)`, `Delete selected (x)`,
+///    `Merge selected (m)` (the shortcut hints are dim-styled per the same
+///    pattern as TS at `:265-267`)
 /// 5. Run the prompt with message `Agents (N)` (count dim)
 /// 6. Dispatch:
 ///    - `done` (Enter on the `Done` row, or Cancel) → return
+///    - `create-new` → [`crate::agent_cmd::create::run`], loop
 ///    - `delete-selected` → [`bulk_delete_agents`], loop
 ///    - `merge-selected` → [`bulk_merge_agents`], loop
 ///    - `agent:<pubkey>` → [`show_agent_detail`], loop
@@ -667,6 +668,11 @@ pub async fn show_main_menu(base_dir: &std::path::Path) -> Result<()> {
 
         let actions: Vec<ActionItem> = vec![
             ActionItem {
+                name: format!("Create new agent {}", chalk_dim("(c)")),
+                value: "create-new".to_owned(),
+                key: 'c',
+            },
+            ActionItem {
                 name: format!("Delete selected {}", chalk_dim("(x)")),
                 value: "delete-selected".to_owned(),
                 key: 'x',
@@ -686,6 +692,10 @@ pub async fn show_main_menu(base_dir: &std::path::Path) -> Result<()> {
 
         match result.action.as_str() {
             "done" => return Ok(()),
+            "create-new" => {
+                crate::agent_cmd::create::run(base_dir).await?;
+                continue;
+            }
             "delete-selected" => {
                 bulk_delete_agents(
                     base_dir,

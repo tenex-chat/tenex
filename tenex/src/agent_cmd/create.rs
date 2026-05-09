@@ -5,8 +5,8 @@ use tenex_agent_registry::{AgentCategory, AgentDoc, AgentStorage};
 
 use crate::agent_cmd::create_llm;
 use crate::agent_cmd::create_prompts::{
-    existing_slugs, prompt_editor, prompt_model_config, prompt_projects, prompt_required,
-    slug_from_name,
+    existing_slugs, prompt_category, prompt_editor, prompt_model_config, prompt_optional,
+    prompt_projects, prompt_required, prompt_required_with_default, slug_from_name,
 };
 use crate::nostr_pub::owner_signer::try_resolve_owner_signer;
 use crate::nostr_pub::project_mutation::sync_many_project_memberships;
@@ -16,49 +16,66 @@ use nostr_sdk::Keys;
 pub async fn run(base_dir: &std::path::Path) -> Result<()> {
     display::blank();
     display::step(0, 0, "Create Agent");
-    display::context("Describe the agent and the LLM will fill in the details.");
 
-    let model = match create_llm::resolve_supervision_model(base_dir) {
-        Ok(m) => m,
-        Err(e) => {
-            display::hint(&format!("Supervision LLM role is not configured: {e}"));
-            return Ok(());
-        }
-    };
-
-    let Some(description) = prompt_required("Describe the agent you want to create:")? else {
-        return Ok(());
-    };
-
-    display::hint("Generating agent definition…");
-    let generated = match create_llm::generate_agent_from_description(&model, &description).await {
-        Ok(g) => g,
-        Err(e) => {
-            display::hint(&format!("LLM generation failed: {e}"));
-            return Ok(());
-        }
-    };
-
+    let supervision_model = create_llm::resolve_supervision_model(base_dir).ok();
     let existing = existing_slugs(base_dir)?;
-    let base_slug = slug_from_name(&generated.slug);
+
+    let partial = match supervision_model.as_ref() {
+        Some(model) => {
+            display::context(
+                "Describe the agent and the LLM will fill in the details. \
+                 Press Esc to fill in the fields manually.",
+            );
+            match prompt_required("Describe the agent you want to create:")? {
+                Some(description) => {
+                    display::hint("Generating agent definition…");
+                    match create_llm::generate_agent_from_description(model, &description).await {
+                        Ok(generated) => DraftPartial::from_generated(generated),
+                        Err(e) => {
+                            display::hint(&format!("LLM generation failed: {e}"));
+                            return Ok(());
+                        }
+                    }
+                }
+                None => match prompt_manual_fields(&existing)? {
+                    Some(p) => p,
+                    None => return Ok(()),
+                },
+            }
+        }
+        None => {
+            display::context("Supervision LLM is not configured. Filling in fields manually.");
+            match prompt_manual_fields(&existing)? {
+                Some(p) => p,
+                None => return Ok(()),
+            }
+        }
+    };
+
+    let base_slug = slug_from_name(&partial.slug);
     let slug = ensure_unique_slug(&base_slug, &existing);
 
     display::blank();
-    display::summary_line("Name", &generated.name);
+    display::summary_line("Name", &partial.name);
     display::summary_line("Slug", &slug);
-    display::summary_line("Role", &generated.role);
-    if !generated.description.is_empty() {
-        display::summary_line("Description", &generated.description);
+    display::summary_line("Role", &partial.role);
+    if !partial.description.is_empty() {
+        display::summary_line("Description", &partial.description);
     }
-    if !generated.use_criteria.is_empty() {
-        display::summary_line("Use when", &generated.use_criteria);
+    if !partial.use_criteria.is_empty() {
+        display::summary_line("Use when", &partial.use_criteria);
     }
     display::summary_line(
         "Category",
-        generated.category.map(|c| c.as_str()).unwrap_or("none"),
+        partial.category.map(|c| c.as_str()).unwrap_or("none"),
     );
 
-    let Some(instructions) = prompt_editor("Review system prompt", &generated.instructions)? else {
+    let editor_label = if partial.instructions.is_empty() {
+        "System prompt"
+    } else {
+        "Review system prompt"
+    };
+    let Some(instructions) = prompt_editor(editor_label, &partial.instructions)? else {
         return Ok(());
     };
 
@@ -80,9 +97,9 @@ pub async fn run(base_dir: &std::path::Path) -> Result<()> {
     };
 
     display::blank();
-    display::summary_line("Name", &generated.name);
+    display::summary_line("Name", &partial.name);
     display::summary_line("Slug", &slug);
-    display::summary_line("Role", &generated.role);
+    display::summary_line("Role", &partial.role);
     display::summary_line("Model", model_config.as_deref().unwrap_or("TENEX default"));
     let projects_summary = if projects.is_empty() {
         "none".to_owned()
@@ -106,19 +123,76 @@ pub async fn run(base_dir: &std::path::Path) -> Result<()> {
 
     let draft = AgentCreateDraft {
         slug,
-        name: generated.name,
-        role: generated.role,
-        description: generated.description,
-        use_criteria: generated.use_criteria,
+        name: partial.name,
+        role: partial.role,
+        description: partial.description,
+        use_criteria: partial.use_criteria,
         instructions,
         model_config,
-        category: generated.category,
+        category: partial.category,
     };
     let pubkey = save_created_agent(base_dir, &draft, &projects, owner_keys.as_ref()).await?;
     display::blank();
     display::success(&format!("Created \"{}\" ({})", draft.name, draft.slug));
     display::context(&format!("Pubkey: {pubkey}"));
     Ok(())
+}
+
+#[derive(Debug, Clone)]
+struct DraftPartial {
+    name: String,
+    slug: String,
+    role: String,
+    description: String,
+    use_criteria: String,
+    category: Option<AgentCategory>,
+    instructions: String,
+}
+
+impl DraftPartial {
+    fn from_generated(g: create_llm::AgentGenerationResult) -> Self {
+        Self {
+            name: g.name,
+            slug: g.slug,
+            role: g.role,
+            description: g.description,
+            use_criteria: g.use_criteria,
+            category: g.category,
+            instructions: g.instructions,
+        }
+    }
+}
+
+fn prompt_manual_fields(existing: &[String]) -> Result<Option<DraftPartial>> {
+    let Some(name) = prompt_required("Name:")? else {
+        return Ok(None);
+    };
+    let suggested_slug = slug_from_name(&name);
+    let suggested_slug = ensure_unique_slug(&suggested_slug, existing);
+    let Some(slug) = prompt_required_with_default("Slug:", &suggested_slug)? else {
+        return Ok(None);
+    };
+    let Some(role) = prompt_required("Role:")? else {
+        return Ok(None);
+    };
+    let Some(description) = prompt_optional("Description (optional):")? else {
+        return Ok(None);
+    };
+    let Some(use_criteria) = prompt_optional("Use when (optional):")? else {
+        return Ok(None);
+    };
+    let Some(category) = prompt_category()? else {
+        return Ok(None);
+    };
+    Ok(Some(DraftPartial {
+        name,
+        slug,
+        role,
+        description,
+        use_criteria,
+        category,
+        instructions: String::new(),
+    }))
 }
 
 fn ensure_unique_slug(base: &str, existing: &[String]) -> String {

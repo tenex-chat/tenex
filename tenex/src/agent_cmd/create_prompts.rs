@@ -1,5 +1,5 @@
 use anyhow::{anyhow, Result};
-use tenex_agent_registry::AgentStorage;
+use tenex_agent_registry::{AgentCategory, AgentStorage, VALID_CATEGORIES};
 
 use crate::store::llms::LlmsDoc;
 use crate::store::project_members::list_assignable_project_dtags;
@@ -17,6 +17,61 @@ pub fn prompt_required(message: &str) -> Result<Option<String>> {
             return Ok(Some(value));
         }
         display::hint("Enter a non-empty value.");
+    }
+}
+
+pub fn prompt_required_with_default(message: &str, default: &str) -> Result<Option<String>> {
+    loop {
+        let value = match prompts::input(message).with_default(default).prompt() {
+            Ok(value) => value.trim().to_owned(),
+            Err(inquire::InquireError::OperationCanceled)
+            | Err(inquire::InquireError::OperationInterrupted) => return Ok(None),
+            Err(e) => return Err(anyhow!("{message} prompt: {e}")),
+        };
+        if !value.is_empty() {
+            return Ok(Some(value));
+        }
+        display::hint("Enter a non-empty value.");
+    }
+}
+
+pub fn prompt_optional(message: &str) -> Result<Option<String>> {
+    match prompts::input(message).prompt() {
+        Ok(value) => Ok(Some(value.trim().to_owned())),
+        Err(inquire::InquireError::OperationCanceled)
+        | Err(inquire::InquireError::OperationInterrupted) => Ok(None),
+        Err(e) => Err(anyhow!("{message} prompt: {e}")),
+    }
+}
+
+pub fn prompt_category() -> Result<Option<Option<AgentCategory>>> {
+    let mut choices: Vec<CategoryChoice> = vec![CategoryChoice {
+        label: "none".to_owned(),
+        category: None,
+    }];
+    for cat in VALID_CATEGORIES {
+        choices.push(CategoryChoice {
+            label: cat.as_str().to_owned(),
+            category: Some(*cat),
+        });
+    }
+    match prompts::select("Category:", choices).prompt() {
+        Ok(c) => Ok(Some(c.category)),
+        Err(inquire::InquireError::OperationCanceled)
+        | Err(inquire::InquireError::OperationInterrupted) => Ok(None),
+        Err(e) => Err(anyhow!("category prompt: {e}")),
+    }
+}
+
+#[derive(Clone)]
+struct CategoryChoice {
+    label: String,
+    category: Option<AgentCategory>,
+}
+
+impl std::fmt::Display for CategoryChoice {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.label)
     }
 }
 
