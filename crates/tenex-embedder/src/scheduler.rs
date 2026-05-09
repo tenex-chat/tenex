@@ -31,6 +31,7 @@ fn daemon_backfill_options(cfg: &EmbedderConfig) -> BackfillOptions {
         page_size: None,
         relays: None,
         dry_run: false,
+        project_filter: None,
     }
 }
 

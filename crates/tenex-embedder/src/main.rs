@@ -50,6 +50,8 @@ struct BackfillArgs {
     relays: Option<Vec<String>>,
     #[arg(long)]
     dry_run: bool,
+    #[arg(long, value_delimiter = ',')]
+    projects: Option<Vec<String>>,
 }
 
 #[tokio::main]
@@ -73,6 +75,7 @@ async fn main() -> Result<()> {
                 page_size: args.page_size,
                 relays: args.relays,
                 dry_run: args.dry_run,
+                project_filter: args.projects,
             })
             .await
         }

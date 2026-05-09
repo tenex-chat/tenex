@@ -47,6 +47,9 @@ pub struct BackfillOptions {
     pub relays: Option<Vec<String>>,
     /// Don't write embeddings; just walk and report counts.
     pub dry_run: bool,
+    /// Case-insensitive substring patterns matched against project d-tags.
+    /// Only matching projects are walked and embedded.
+    pub project_filter: Option<Vec<String>>,
 }
 
 const DEFAULT_PAGE_SIZE: usize = 500;
@@ -54,12 +57,22 @@ const DEFAULT_PAGE_SIZE: usize = 500;
 pub async fn run(opts: BackfillOptions) -> Result<()> {
     let base = paths::base_dir();
 
-    let scope = scope::derive(&base).context("derive owner scope")?;
+    let mut scope = scope::derive(&base).context("derive owner scope")?;
     if scope.projects.is_empty() {
         anyhow::bail!(
             "no user-owned projects under {}/projects/. Embedder has nothing to filter on.",
             base.display()
         );
+    }
+    if let Some(ref patterns) = opts.project_filter {
+        let lower: Vec<String> = patterns.iter().map(|p| p.to_lowercase()).collect();
+        scope.projects.retain(|p| {
+            let d = p.d_tag.to_lowercase();
+            lower.iter().any(|pat| d.contains(pat.as_str()))
+        });
+        if scope.projects.is_empty() {
+            anyhow::bail!("project_filter matched no owned projects (patterns: {:?})", patterns);
+        }
     }
     let a_tags = scope.a_tags();
     let scope_hash_value = scope_hash(&a_tags);
