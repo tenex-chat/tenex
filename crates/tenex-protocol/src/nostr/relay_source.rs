@@ -3,7 +3,8 @@
 
 use async_trait::async_trait;
 use nostr_sdk::prelude::*;
-use tokio::sync::mpsc;
+use tokio::sync::{broadcast, mpsc};
+use tracing::warn;
 
 use crate::channel::{InboundEnvelope, InboundSource};
 
@@ -22,13 +23,20 @@ impl RelaySource {
         let (tx, rx) = mpsc::channel(buffer);
         let mut notifications = client.notifications();
         tokio::spawn(async move {
-            while let Ok(notification) = notifications.recv().await {
-                if let RelayPoolNotification::Event { event, .. } = notification {
-                    if let Ok(envelope) = decode(&event) {
-                        if tx.send(envelope).await.is_err() {
-                            break;
+            loop {
+                match notifications.recv().await {
+                    Ok(RelayPoolNotification::Event { event, .. }) => {
+                        if let Ok(envelope) = decode(&event) {
+                            if tx.send(envelope).await.is_err() {
+                                break;
+                            }
                         }
                     }
+                    Ok(_) => {}
+                    Err(broadcast::error::RecvError::Lagged(n)) => {
+                        warn!(dropped = n, "relay source consumer lagged");
+                    }
+                    Err(broadcast::error::RecvError::Closed) => break,
                 }
             }
         });

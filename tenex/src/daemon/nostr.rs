@@ -200,7 +200,10 @@ pub async fn run(
                             handle_event(&ctx, &event).await;
                         }
                         Ok(_) => {}
-                        Err(_) => break,
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                            warn!(dropped = n, "daemon nostr consumer lagged");
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                     }
                 }
                 Some(fs_event) = agent_fs_rx.recv() => {
