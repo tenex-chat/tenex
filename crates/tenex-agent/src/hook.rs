@@ -107,10 +107,14 @@ impl<M: CompletionModel> PromptHook<M> for EmitHook {
         _history: &[Message],
     ) -> impl std::future::Future<Output = HookAction> + Send {
         let runtime_state = self.runtime_state.clone();
+        let state = self.state.clone();
         async move {
-            if let Some(state) = runtime_state {
-                state.acquire_driver().await;
+            if let Some(driver) = runtime_state {
+                driver.acquire_driver().await;
             }
+            // Start the runtime timer only after we hold the driver lock,
+            // so cross-agent wait time is not billed as LLM runtime.
+            state.start_llm_stream();
             HookAction::cont()
         }
     }
@@ -120,6 +124,7 @@ impl<M: CompletionModel> PromptHook<M> for EmitHook {
         _prompt: &Message,
         _response: &<M as CompletionModel>::StreamingResponse,
     ) -> impl std::future::Future<Output = HookAction> + Send {
+        self.state.end_llm_stream();
         let content = std::mem::take(&mut *self.accumulated_text.lock().unwrap());
         let _ = self.delta_tx.send(DeltaSignal::EndTurn);
 
@@ -149,7 +154,8 @@ impl<M: CompletionModel> PromptHook<M> for EmitHook {
                 state.release_driver();
             }
             if let Some((prev_content, prev_ral)) = prev_pending {
-                let ctx = state.build_ctx(prev_ral);
+                let mut ctx = state.build_ctx(prev_ral);
+                ctx.llm_runtime_ms = state.take_runtime_delta();
                 let intent = ConversationIntent {
                     content: prev_content,
                     is_reasoning: false,
@@ -171,7 +177,10 @@ impl<M: CompletionModel> PromptHook<M> for EmitHook {
         _internal_call_id: &str,
         args: &str,
     ) -> impl std::future::Future<Output = ToolCallHookAction> + Send {
-        let emits_delayed_tool_use = matches!(tool_name, "delegate" | "delegate_followup");
+        let emits_delayed_tool_use = matches!(
+            tool_name,
+            "delegate" | "delegate_followup" | "self_delegate" | "delegate_crossproject"
+        );
         let name = tool_name.to_string();
         let args_string = args.to_string();
 
@@ -189,21 +198,36 @@ impl<M: CompletionModel> PromptHook<M> for EmitHook {
             sup.record_tool_call(&name);
         }
 
-        let ctx = {
-            let meta = self.state.meta.lock().unwrap();
-            self.state.build_ctx(meta.ral)
-        };
+        // Stop the LLM stream timer at the tool handoff: time spent
+        // executing the tool is not LLM runtime. `end_llm_stream` is
+        // idempotent so the later `on_stream_completion_response_finish`
+        // hook is a safe no-op when timing was already stopped here.
+        self.state.end_llm_stream();
+        let state = self.state.clone();
         let channel = self.state.channel.clone();
         let runtime_state = self.runtime_state.clone();
 
         async move {
             if let Some(reason) = block_reason {
+                // Skip path: leave the runtime delta unconsumed. The
+                // supervisor-blocked tool emits no ToolUse here, and a
+                // subsequent event (the next stream chunk, conversation
+                // emit, or the next tool call) will claim the delta.
                 return ToolCallHookAction::skip(reason);
             }
-            if let Some(state) = runtime_state {
-                state.release_driver();
+            if let Some(rs) = runtime_state {
+                rs.release_driver();
             }
             if !emits_delayed_tool_use {
+                // Only consume the runtime delta when we are actually
+                // sending the generic ToolUse event. Delayed-emit tools
+                // (delegate, delegate_followup, self_delegate,
+                // delegate_crossproject) emit their own events later and
+                // consume the delta themselves; consuming it here would
+                // silently drop it.
+                let ral = state.meta.lock().unwrap().ral;
+                let mut ctx = state.build_ctx(ral);
+                ctx.llm_runtime_ms = state.take_runtime_delta();
                 let intent = ToolUseIntent {
                     tool_name: name,
                     content: String::new(),
@@ -280,10 +304,9 @@ async fn run_delta_buffer(state: Arc<EmitState>, mut rx: mpsc::UnboundedReceiver
 
 async fn flush_chunk(buf: &mut String, sequence: u64, state: &Arc<EmitState>) {
     let delta = std::mem::take(buf);
-    let ctx = {
-        let meta = state.meta.lock().unwrap();
-        state.build_ctx(meta.ral)
-    };
+    let ral = state.meta.lock().unwrap().ral;
+    let mut ctx = state.build_ctx(ral);
+    ctx.llm_runtime_ms = state.take_runtime_delta();
     let intent = StreamTextDeltaIntent { delta, sequence };
     if let Err(e) = state
         .channel

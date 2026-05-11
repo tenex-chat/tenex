@@ -279,7 +279,6 @@ impl Tool for ReportPublishTool {
         }
 
         let ral = self.state.meta.lock().unwrap().ral;
-        let ctx = self.state.build_ctx(ral);
         let mut published: Vec<String> = Vec::new();
 
         for file in files {
@@ -297,6 +296,11 @@ impl Tool for ReportPublishTool {
                 content,
             };
 
+            // Take the runtime delta per-iteration: the first event in
+            // the batch carries the bulk of the LLM time; subsequent
+            // events get only the tiny slice elapsed during publishing.
+            let mut ctx = self.state.build_ctx(ral);
+            ctx.llm_runtime_ms = self.state.take_runtime_delta();
             self.state
                 .channel
                 .send(Intent::PublishArticle(intent), &ctx)

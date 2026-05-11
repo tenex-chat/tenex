@@ -1,6 +1,7 @@
 mod acp_config;
 mod acp_mcp;
 mod acp_process;
+mod acp_runtime_accounting;
 #[path = "categorize.rs"]
 mod categorize;
 #[path = "llm_accounting.rs"]
@@ -15,6 +16,8 @@ mod emit;
 #[path = "home.rs"]
 mod home;
 mod project_instructions;
+#[path = "runtime_tracker.rs"]
+mod runtime_tracker;
 mod tools {
     #[path = "../tools/delegate.rs"]
     pub mod delegate;
@@ -31,6 +34,7 @@ mod tools {
 use acp_config::{load_acp_config, AcpAgentConfig};
 use acp_mcp::{session_new_params, AcpMcpBridge, AcpMcpBridgeInput, SharedStdoutEventSink};
 use acp_process::{AcpProcess, AcpUpdate, AcpUpdates};
+use acp_runtime_accounting::AcpRuntimeAccounting;
 use anyhow::{Context, Result};
 use serde_json::{json, Value};
 use std::sync::{
@@ -428,6 +432,10 @@ async fn run(
     // with the actual arguments. Cleared each time args are received; any name
     // still set here after the loop gets emitted without args.
     let mut pending_tool_name: Option<String> = None;
+    // Runtime accumulation for the ACP session/prompt call: each outbound
+    // event carries the delta in `llm-runtime`, and the final completion
+    // carries the full accumulated total in `llm-runtime-total`.
+    let accounting = Arc::new(AcpRuntimeAccounting::started_now());
     let prompt_result = acp
         .request_with_update_handler(
             "session/prompt",
@@ -440,7 +448,8 @@ async fn run(
                 stream_sequence += 1;
                 let sequence = stream_sequence;
                 let channel = channel.clone();
-                let ctx = stream_ctx.clone();
+                let stream_ctx = stream_ctx.clone();
+                let accounting = accounting.clone();
                 let thread_id = stream_session_id.clone();
                 // Sync: update pending state and decide what to emit.
                 let (flush_segment, tool_use): (Option<String>, Option<ToolUseIntent>) =
@@ -487,6 +496,8 @@ async fn run(
                 async move {
                     match update {
                         AcpUpdate::AgentMessageChunk { text } => {
+                            let mut ctx = stream_ctx.clone();
+                            ctx.llm_runtime_ms = accounting.take_delta();
                             let intent = StreamTextDeltaIntent { delta: text, sequence };
                             if let Err(err) =
                                 channel.send(Intent::StreamTextDelta(intent), &ctx).await
@@ -497,7 +508,15 @@ async fn run(
                             }
                         }
                         AcpUpdate::ToolCallStarted { .. } | AcpUpdate::ToolCallArgs { .. } => {
+                            // Multi-event batch: attach the runtime delta
+                            // to the *first* event in the batch (the
+                            // boundary-flush Conversation when present,
+                            // otherwise the ToolUse) so downstream
+                            // summing sees each delta exactly once.
+                            let mut delta = accounting.take_delta();
                             if let Some(segment) = flush_segment {
+                                let mut ctx = stream_ctx.clone();
+                                ctx.llm_runtime_ms = delta.take();
                                 let intent = ConversationIntent {
                                     content: segment,
                                     is_reasoning: false,
@@ -516,6 +535,8 @@ async fn run(
                                 }
                             }
                             if let Some(intent) = tool_use {
+                                let mut ctx = stream_ctx.clone();
+                                ctx.llm_runtime_ms = delta.take();
                                 if let Err(err) =
                                     channel.send(Intent::ToolUse(intent), &ctx).await
                                 {
@@ -540,10 +561,13 @@ async fn run(
             usage: None,
             extra_tags: Vec::new(),
         };
-        if let Err(err) = channel.send(Intent::ToolUse(intent), &stream_ctx).await {
+        let mut post_ctx = stream_ctx.clone();
+        post_ctx.llm_runtime_ms = accounting.take_delta();
+        if let Err(err) = channel.send(Intent::ToolUse(intent), &post_ctx).await {
             eprintln!("[tenex-agent-acp] warn: post-loop tool-use emit failed: {err}");
         }
     }
+    let (final_runtime_delta, session_total_ms) = accounting.take_final();
     let stop_reason = prompt_result
         .get("stopReason")
         .and_then(Value::as_str)
@@ -575,6 +599,7 @@ async fn run(
         }
     }
 
+    let pending_external = pending_external_work.load(Ordering::Acquire);
     let ctx = EncodingContext {
         project: project_ref,
         conversation_root,
@@ -585,8 +610,15 @@ async fn run(
         model: Some(format!("acp:{}:{}", acp_config.backend, stop_reason)),
         cost_usd: None,
         execution_time_ms: None,
-        llm_runtime_ms: None,
-        llm_runtime_total_ms: None,
+        llm_runtime_ms: final_runtime_delta,
+        // Only completion events carry the accumulated total per the
+        // protocol contract; conversation events emitted in pending-work
+        // mode leave the field unset.
+        llm_runtime_total_ms: if !pending_external && session_total_ms > 0 {
+            Some(session_total_ms)
+        } else {
+            None
+        },
         completion_project_a_tags,
         branch: current_branch,
         team: envelope.metadata.team.clone(),
@@ -595,7 +627,7 @@ async fn run(
         thread_id: Some(session_id),
         ..Default::default()
     });
-    let final_intent = if pending_external_work.load(Ordering::Acquire) {
+    let final_intent = if pending_external {
         Intent::Conversation(ConversationIntent {
             content: updates.current_segment,
             is_reasoning: false,

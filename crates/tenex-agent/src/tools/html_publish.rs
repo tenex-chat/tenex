@@ -140,7 +140,8 @@ impl Tool for HtmlPublishTool {
         .await?;
 
         let ral = self.state.meta.lock().unwrap().ral;
-        let ctx = self.state.build_ctx(ral);
+        let mut ctx = self.state.build_ctx(ral);
+        ctx.llm_runtime_ms = self.state.take_runtime_delta();
         let args_json = serde_json::to_string(&args).unwrap_or_default();
 
         let intent = ToolUseIntent {

@@ -205,7 +205,11 @@ impl Tool for DelegateTool {
         };
 
         let ral = self.state.meta.lock().unwrap().ral;
-        let ctx = self.state.build_ctx_with_team(ral, resolved_team);
+        // Two-event batch: the Delegation carries the runtime delta; the
+        // trailing ToolUse record leaves it unset so the delta is not
+        // double-counted by downstream summing.
+        let mut delegation_ctx = self.state.build_ctx_with_team(ral, resolved_team.clone());
+        delegation_ctx.llm_runtime_ms = self.state.take_runtime_delta();
 
         let delegation_intent = DelegationIntent {
             items: vec![DelegationRequest {
@@ -222,7 +226,7 @@ impl Tool for DelegateTool {
         let refs = self
             .state
             .channel
-            .send(Intent::Delegation(delegation_intent), &ctx)
+            .send(Intent::Delegation(delegation_intent), &delegation_ctx)
             .await
             .map_err(|e| DelegateError(format!("Failed to emit delegation: {e}")))?;
         self.state.mark_pending_external_work();
@@ -250,9 +254,10 @@ impl Tool for DelegateTool {
             extra_tags: Vec::new(),
         };
 
+        let tool_use_ctx = self.state.build_ctx_with_team(ral, resolved_team);
         self.state
             .channel
-            .send(Intent::ToolUse(tool_use_intent), &ctx)
+            .send(Intent::ToolUse(tool_use_intent), &tool_use_ctx)
             .await
             .map_err(|e| DelegateError(format!("Failed to emit tool-use event: {e}")))?;
 

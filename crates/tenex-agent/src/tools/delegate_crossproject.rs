@@ -141,7 +141,6 @@ impl Tool for DelegateCrossProjectTool {
         };
 
         let ral = self.state.meta.lock().unwrap().ral;
-        let source_ctx = self.state.build_ctx(ral);
         let source_project_addr = self.state.project.coordinate();
         let target_project_addr = target_project.coordinate();
         let extra_tags = if source_project_addr != target_project_addr {
@@ -149,6 +148,17 @@ impl Tool for DelegateCrossProjectTool {
         } else {
             Vec::new()
         };
+        // Delayed-emit batch (cross-project): `delegate_crossproject`
+        // is listed in `EmitHook::on_tool_call` as
+        // `emits_delayed_tool_use`, so the hook skips both the generic
+        // ToolUse event and `take_runtime_delta()` for this tool. We
+        // are therefore responsible for consuming the delta below. The
+        // source-tagged ToolUse record carries the runtime delta
+        // because the LLM work happened in the source project's
+        // accounting context. The outbound Delegation (target a-tag)
+        // leaves `llm_runtime_ms` unset so downstream per-project
+        // summing attributes the LLM time to the source project, not
+        // the target.
         let target_ctx = self.state.build_ctx_with_project(ral, target_project);
 
         let intent = DelegationIntent {
@@ -194,6 +204,8 @@ impl Tool for DelegateCrossProjectTool {
             extra_tags: Vec::new(),
         };
 
+        let mut source_ctx = self.state.build_ctx(ral);
+        source_ctx.llm_runtime_ms = self.state.take_runtime_delta();
         self.state
             .channel
             .send(Intent::ToolUse(tool_use_intent), &source_ctx)

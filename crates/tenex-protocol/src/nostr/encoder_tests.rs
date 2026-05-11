@@ -69,6 +69,42 @@ fn completion_has_status_and_p_tag() {
 }
 
 #[test]
+fn completion_emits_runtime_and_runtime_total_tags_when_present() {
+    let mut ctx = test_ctx();
+    ctx.llm_runtime_ms = Some(800);
+    ctx.llm_runtime_total_ms = Some(3500);
+    let intent = CompletionIntent {
+        content: "done".into(),
+        usage: None,
+        metadata: None,
+    };
+    let builders = NostrEncoder::encode(&Intent::Completion(intent), &ctx).expect("encode");
+    let tags = signed_tags(builders.into_iter().next().unwrap());
+    assert!(tags
+        .iter()
+        .any(|t| t[0] == "llm-runtime" && t[1] == "800" && t.get(2).map(String::as_str) == Some("ms")));
+    assert!(tags.iter().any(|t| {
+        t[0] == "llm-runtime-total" && t[1] == "3500" && t.get(2).map(String::as_str) == Some("ms")
+    }));
+}
+
+#[test]
+fn completion_omits_runtime_tags_when_zero_or_unset() {
+    let mut ctx = test_ctx();
+    ctx.llm_runtime_ms = Some(0);
+    ctx.llm_runtime_total_ms = None;
+    let intent = CompletionIntent {
+        content: "done".into(),
+        usage: None,
+        metadata: None,
+    };
+    let builders = NostrEncoder::encode(&Intent::Completion(intent), &ctx).expect("encode");
+    let tags = signed_tags(builders.into_iter().next().unwrap());
+    assert!(!tags.iter().any(|t| t[0] == "llm-runtime"));
+    assert!(!tags.iter().any(|t| t[0] == "llm-runtime-total"));
+}
+
+#[test]
 fn completion_includes_additional_project_a_tags() {
     let mut ctx = test_ctx();
     let source_project = format!("31933:{}:source", Keys::generate().public_key().to_hex());

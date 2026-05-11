@@ -342,7 +342,6 @@ pub(crate) async fn run_turn_loop(boot: &mut AgentBootstrap) -> Result<()> {
                 let suppressed = boot.suppress_response.load(Ordering::Acquire);
                 if let Some((final_content, final_ral)) = pending_final {
                     if !suppressed {
-                        let final_ctx = boot.emit_state.build_ctx(final_ral);
                         let usage = Some(LlmUsage {
                             input_tokens: Some(stream_usage.input_tokens),
                             output_tokens: Some(stream_usage.output_tokens),
@@ -351,6 +350,8 @@ pub(crate) async fn run_turn_loop(boot: &mut AgentBootstrap) -> Result<()> {
                             ..Default::default()
                         });
                         if boot.emit_state.has_pending_external_work() {
+                            let mut final_ctx = boot.emit_state.build_ctx(final_ral);
+                            final_ctx.llm_runtime_ms = boot.emit_state.take_runtime_delta();
                             let intent = ConversationIntent {
                                 content: final_content,
                                 is_reasoning: false,
@@ -362,6 +363,7 @@ pub(crate) async fn run_turn_loop(boot: &mut AgentBootstrap) -> Result<()> {
                                 .await
                                 .context("Failed to emit pending-work conversation event")?;
                         } else {
+                            let final_ctx = boot.emit_state.build_completion_ctx(final_ral);
                             let intent = CompletionIntent {
                                 content: final_content,
                                 usage,
@@ -381,7 +383,6 @@ pub(crate) async fn run_turn_loop(boot: &mut AgentBootstrap) -> Result<()> {
                 let suppressed = boot.suppress_response.load(Ordering::Acquire);
                 if let Some((final_content, final_ral)) = pending_final {
                     if !suppressed {
-                        let final_ctx = boot.emit_state.build_ctx(final_ral);
                         let usage = Some(LlmUsage {
                             input_tokens: Some(stream_usage.input_tokens),
                             output_tokens: Some(stream_usage.output_tokens),
@@ -390,6 +391,8 @@ pub(crate) async fn run_turn_loop(boot: &mut AgentBootstrap) -> Result<()> {
                             ..Default::default()
                         });
                         if boot.emit_state.has_pending_external_work() {
+                            let mut final_ctx = boot.emit_state.build_ctx(final_ral);
+                            final_ctx.llm_runtime_ms = boot.emit_state.take_runtime_delta();
                             let intent = ConversationIntent {
                                 content: final_content,
                                 is_reasoning: false,
@@ -401,6 +404,7 @@ pub(crate) async fn run_turn_loop(boot: &mut AgentBootstrap) -> Result<()> {
                                 .await
                                 .context("Failed to emit pending-work conversation event")?;
                         } else {
+                            let final_ctx = boot.emit_state.build_completion_ctx(final_ral);
                             let intent = CompletionIntent {
                                 content: final_content,
                                 usage,

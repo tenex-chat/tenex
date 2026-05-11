@@ -108,7 +108,8 @@ impl Tool for AskTool {
 
     async fn call(&self, args: AskArgs) -> Result<String, AskError> {
         let ral = self.state.meta.lock().unwrap().ral;
-        let ctx = self.state.build_ctx(ral);
+        let mut ctx = self.state.build_ctx(ral);
+        ctx.llm_runtime_ms = self.state.take_runtime_delta();
 
         if let Some(ref esc_pubkey_hex) = self.escalation_pubkey {
             let pubkey = nostr::PublicKey::from_hex(esc_pubkey_hex)

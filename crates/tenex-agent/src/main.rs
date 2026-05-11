@@ -27,6 +27,7 @@ mod provider_request_sanitizer;
 mod runtime_control;
 mod runtime_state;
 mod runtime_state_json;
+mod runtime_tracker;
 mod shell_task_reminder;
 mod skills;
 mod stdio_home;

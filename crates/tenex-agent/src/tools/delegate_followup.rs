@@ -182,7 +182,11 @@ impl Tool for DelegateFollowupTool {
             self.resolve_recipient(args.recipient.as_deref(), route.as_ref())?;
 
         let ral = self.state.meta.lock().unwrap().ral;
-        let ctx = self.state.build_ctx(ral);
+        // Two-event batch: the Delegation carries the runtime delta; the
+        // trailing ToolUse record leaves it unset so the delta is not
+        // double-counted by downstream summing.
+        let mut delegation_ctx = self.state.build_ctx(ral);
+        delegation_ctx.llm_runtime_ms = self.state.take_runtime_delta();
 
         let intent = DelegationIntent {
             items: vec![DelegationRequest {
@@ -199,7 +203,7 @@ impl Tool for DelegateFollowupTool {
         let refs = self
             .state
             .channel
-            .send(Intent::Delegation(intent), &ctx)
+            .send(Intent::Delegation(intent), &delegation_ctx)
             .await
             .map_err(|e| DelegateFollowupError(format!("failed to emit followup: {e}")))?;
         self.state.mark_pending_external_work();
@@ -216,9 +220,10 @@ impl Tool for DelegateFollowupTool {
             usage: None,
             extra_tags: Vec::new(),
         };
+        let tool_use_ctx = self.state.build_ctx(ral);
         self.state
             .channel
-            .send(Intent::ToolUse(tool_use_intent), &ctx)
+            .send(Intent::ToolUse(tool_use_intent), &tool_use_ctx)
             .await
             .map_err(|e| DelegateFollowupError(format!("failed to emit tool-use event: {e}")))?;
 

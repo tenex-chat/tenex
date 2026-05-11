@@ -237,7 +237,8 @@ impl Tool for LearnTool {
 
     async fn call(&self, args: LearnArgs) -> Result<String, LearnError> {
         let ral = self.state.meta.lock().unwrap().ral;
-        let ctx = self.state.build_ctx(ral);
+        let mut ctx = self.state.build_ctx(ral);
+        ctx.llm_runtime_ms = self.state.take_runtime_delta();
         let hashtags = args.hashtags.unwrap_or_default();
 
         let lesson_intent = LessonIntent {

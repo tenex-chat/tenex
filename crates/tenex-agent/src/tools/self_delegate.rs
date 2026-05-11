@@ -66,7 +66,16 @@ impl Tool for SelfDelegateTool {
         let pubkey_hex = pubkey.to_hex();
 
         let ral = self.state.meta.lock().unwrap().ral;
-        let ctx = self.state.build_ctx(ral);
+        // Delayed-emit batch: `self_delegate` is listed in
+        // `EmitHook::on_tool_call` as `emits_delayed_tool_use`, so the
+        // hook intentionally skips both the generic ToolUse event and
+        // the `take_runtime_delta()` call for this tool. We are
+        // therefore responsible for consuming the delta here: the
+        // primary Delegation event carries it, and the trailing ToolUse
+        // record (below) leaves `llm_runtime_ms` unset to avoid
+        // double-counting.
+        let mut delegation_ctx = self.state.build_ctx(ral);
+        delegation_ctx.llm_runtime_ms = self.state.take_runtime_delta();
 
         let recipient = PrincipalRef::Nostr {
             pubkey,
@@ -94,7 +103,7 @@ impl Tool for SelfDelegateTool {
         let refs = self
             .state
             .channel
-            .send(Intent::Delegation(intent), &ctx)
+            .send(Intent::Delegation(intent), &delegation_ctx)
             .await
             .map_err(|e| SelfDelegateError(format!("failed to emit self-delegation: {e}")))?;
         self.state.mark_pending_external_work();
@@ -122,9 +131,10 @@ impl Tool for SelfDelegateTool {
             extra_tags: Vec::new(),
         };
 
+        let tool_use_ctx = self.state.build_ctx(ral);
         self.state
             .channel
-            .send(Intent::ToolUse(tool_use_intent), &ctx)
+            .send(Intent::ToolUse(tool_use_intent), &tool_use_ctx)
             .await
             .map_err(|e| SelfDelegateError(format!("failed to emit tool-use event: {e}")))?;
 
