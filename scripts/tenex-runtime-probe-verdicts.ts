@@ -1,5 +1,5 @@
 import { verifyEvent, type Event } from "nostr-tools";
-import { evaluateAcpWorker } from "./tenex-runtime-probe-acp-verdicts";
+import { evaluateAcpMidTurnInjection, evaluateAcpWorker } from "./tenex-runtime-probe-acp-verdicts";
 import {
     messageText,
     readAllConversationTranscripts,
@@ -125,6 +125,12 @@ export function evaluate(
             evaluateAgentModelAccess(events, context.pmPubkey, "pm", acpProbeModelName),
             evaluateAgentModelAccess(events, context.workerPubkey, "worker", context.modelName),
             ...evaluateAcpDelegationMcp(events, context),
+        ];
+    }
+    if (name === "acp-mid-turn-injection") {
+        return [
+            evaluateAgentModelAccess(events, context.workerPubkey, "worker", acpProbeModelName),
+            ...evaluateAcpMidTurnInjection(events, context),
         ];
     }
     if (name === "agent-config-update") {

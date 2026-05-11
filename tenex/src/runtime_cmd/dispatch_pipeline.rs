@@ -534,6 +534,15 @@ pub(super) async fn accept_dispatch(
     }
     let key = DispatchKey::new(job.agent.pubkey.clone(), job.conv_id.clone());
     let driver_busy = persisted_driver_busy(&shared.store, &key);
+    // ACP-runtime agents share one persistent child per (agent, conversation);
+    // mid-turn inbound events must reach that child immediately so the ACP
+    // backend can inject them into the running stream. Bypass the
+    // coordinator's tenex-style queueing for ACP and never block on
+    // `driver_busy`.
+    let runtime_is_acp = matches!(
+        super::agent_subprocess::agent_runtime_kind(&job.agent, &shared.base_dir),
+        Ok(super::agent_subprocess::AgentRuntimeKind::Acp),
+    );
     let maybe_start = {
         let mut coordinator = shared.coordinator.lock().unwrap();
         coordinator.sync_driver_busy(&key, driver_busy);
@@ -544,7 +553,7 @@ pub(super) async fn accept_dispatch(
                 .control
                 .has_shell_tasks(&shared.project_id, &job.conv_id, &job.agent.pubkey);
         job.allow_driver_preempt = allow_shell_intervention;
-        coordinator.dispatch_inbound(job, allow_shell_intervention)
+        coordinator.dispatch_inbound(job, allow_shell_intervention || runtime_is_acp)
     };
 
     if let Some(job) = maybe_start {

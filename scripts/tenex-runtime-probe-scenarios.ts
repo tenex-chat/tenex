@@ -53,6 +53,7 @@ export const availableScenarios = [
     "mcp-resource-basic",
     "acp-worker-basic",
     "acp-delegation-mcp",
+    "acp-mid-turn-injection",
     "agent-config-reload",
     "agent-config-update",
     "project-membership-reload",
@@ -210,6 +211,9 @@ export function scenarioProjectDtag(name: ScenarioName): string {
     if (name === "acp-delegation-mcp") {
         return "probe-acp-delegation-mcp";
     }
+    if (name === "acp-mid-turn-injection") {
+        return "probe-acp-mid-turn-injection";
+    }
     if (name === "agent-config-reload") {
         return "probe-agent-config-reload";
     }
@@ -276,6 +280,9 @@ export function pmInstructions(name: ScenarioName): string {
     }
     if (name === "acp-delegation-mcp") {
         return "This scenario verifies TENEX MCP delegation from an ACP backend. Use the TENEX MCP delegate tool, not backend-native delegation, to delegate to worker with the random-color task. Stop after delegating; do not invent a color.";
+    }
+    if (name === "acp-mid-turn-injection") {
+        return "This scenario targets the ACP worker directly; remain idle unless directly mentioned.";
     }
     if (name === "agent-config-reload") {
         return "This scenario verifies runtime agent config reload; remain idle unless directly mentioned.";
@@ -497,6 +504,10 @@ export function mockScenario(name: ScenarioName): unknown {
 
     if (name === "acp-worker-basic") {
         return { responses: [], defaultContent: "ACP worker scenario uses an ACP backend." };
+    }
+
+    if (name === "acp-mid-turn-injection") {
+        return { responses: [], defaultContent: "ACP mid-turn injection scenario uses an ACP backend." };
     }
 
     if (name === "acp-delegation-mcp") {
@@ -724,6 +735,8 @@ export async function runScenario(name: ScenarioName, context: ScenarioContext):
         await runMcpResourceProbe(context);
     } else if (name === "acp-worker-basic") {
         await runAcpWorkerProbe(context);
+    } else if (name === "acp-mid-turn-injection") {
+        await runAcpMidTurnInjectionProbe(context);
     } else if (name === "acp-delegation-mcp") {
         await runAcpDelegationMcpProbe(context);
     } else if (name === "agent-config-reload") {
@@ -1396,6 +1409,59 @@ async function runNestedAgentsMdProbe(context: ScenarioContext): Promise<void> {
 
 async function runAcpWorkerProbe(context: ScenarioContext): Promise<void> {
     await publishAcpWorkerRequest(context);
+}
+
+async function runAcpMidTurnInjectionProbe(context: ScenarioContext): Promise<void> {
+    const firstEvent = context.sign(
+        {
+            kind: 1,
+            created_at: context.now(),
+            content: "ACP mid-turn injection probe: first message.",
+            tags: [
+                ["a", context.projectRef],
+                ["p", context.workerPubkey],
+            ],
+        },
+        context.userSecret
+    );
+    await Promise.all(context.pool.publish([context.relayUrl], firstEvent));
+    await context.delay(Number(process.env.TENEX_PROBE_ACP_INJECTION_GAP_MS ?? 500));
+
+    const secondEvent = context.sign(
+        {
+            kind: 1,
+            created_at: context.now(),
+            content: "ACP mid-turn injection probe: second message arrives mid-turn.",
+            tags: [
+                ["e", firstEvent.id, "", "root"],
+                ["p", context.workerPubkey],
+            ],
+        },
+        context.userSecret
+    );
+    await Promise.all(context.pool.publish([context.relayUrl], secondEvent));
+
+    const waitMs = Number(process.env.TENEX_PROBE_WAIT_MS ?? 15_000);
+    await context.waitForObservedEvent(
+        context.events,
+        (event) =>
+            event.kind === 1 &&
+            event.pubkey === context.workerPubkey &&
+            event.content.includes("[prompt #1]") &&
+            hasTag(event, "status", "completed"),
+        waitMs,
+        "ACP worker completion for first prompt"
+    );
+    await context.waitForObservedEvent(
+        context.events,
+        (event) =>
+            event.kind === 1 &&
+            event.pubkey === context.workerPubkey &&
+            event.content.includes("[prompt #2]") &&
+            hasTag(event, "status", "completed"),
+        waitMs,
+        "ACP worker completion for second prompt"
+    );
 }
 
 async function runAcpDelegationMcpProbe(context: ScenarioContext): Promise<void> {

@@ -34,7 +34,7 @@ impl SharedStdoutEventSink {
         }
     }
 
-    async fn write_event_line(&self, line: &str) -> Result<()> {
+    pub(crate) async fn write_line(&self, line: &str) -> Result<()> {
         let mut out = self.out.lock().await;
         out.write_all(line.as_bytes()).await?;
         if !line.ends_with('\n') {
@@ -42,6 +42,10 @@ impl SharedStdoutEventSink {
         }
         out.flush().await?;
         Ok(())
+    }
+
+    async fn write_event_line(&self, line: &str) -> Result<()> {
+        self.write_line(line).await
     }
 }
 

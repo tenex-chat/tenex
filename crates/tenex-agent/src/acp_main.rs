@@ -31,28 +31,33 @@ mod tools {
     pub mod self_delegate;
 }
 
-use acp_config::{load_acp_config, AcpAgentConfig};
+use acp_config::{load_acp_config, AcpAgentConfig, AcpRuntimeConfig};
 use acp_mcp::{session_new_params, AcpMcpBridge, AcpMcpBridgeInput, SharedStdoutEventSink};
+use tenex_protocol::nostr::ACP_PROMPT_DONE_SENTINEL_KEY;
 use acp_process::{AcpProcess, AcpUpdate, AcpUpdates};
 use acp_runtime_accounting::AcpRuntimeAccounting;
 use anyhow::{Context, Result};
 use serde_json::{json, Value};
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc,
+    atomic::{AtomicBool, AtomicU64, Ordering},
+    Arc, Mutex,
 };
 use tenex_context::{
     CacheObservation, Message as CtxMessage, ModelProfile, ToolCall as CtxToolCall, ToolDef,
     TurnRecord,
 };
 use tenex_conversations::ConversationStore;
-use tenex_project::Project;
+use tenex_project::{Project, ProjectMetadata};
 use tenex_protocol::{
-    nostr::{read_one_from_stdin, NostrChannel},
+    nostr::{AcpStdinFrame, NostrChannel},
     Channel, CompletionIntent, ConversationIntent, ConversationRef, EncodingContext, Intent,
-    LlmMetadata, MessageRef, PrincipalKind, PrincipalRef, ProjectRef, StreamTextDeltaIntent,
-    ToolUseIntent,
+    LlmMetadata, MessageRef, PrincipalRef, ProjectRef, StreamTextDeltaIntent, ToolUseIntent,
 };
+use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::sync::mpsc;
+use tokio::task::JoinSet;
+use tracing::{info_span, Instrument};
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -138,6 +143,29 @@ async fn bounded_shutdown(telemetry: tenex_telemetry::TelemetryGuard) {
     telemetry.shutdown();
 }
 
+/// State established once at process startup and shared across every
+/// `session/prompt` invocation on this ACP child's single session.
+struct SessionContext {
+    project_id: String,
+    conversation_id: String,
+    pubkey_hex: String,
+    project_ref: ProjectRef,
+    conversation_root: Option<ConversationRef>,
+    working_dir: String,
+    current_branch: Option<String>,
+    project_meta: ProjectMetadata,
+    acp_config: AcpRuntimeConfig,
+    acp_model: String,
+    session_id: String,
+    system_prompt: String,
+    backend: String,
+    /// True once the first prompt has been sent. Subsequent prompts skip the
+    /// system-prompt and history block — the ACP backend retains that
+    /// context inside its `session.input` stream.
+    first_prompt_pending: std::sync::atomic::AtomicBool,
+    stdout_sink: SharedStdoutEventSink,
+}
+
 async fn run(
     args: Vec<String>,
     project_id: String,
@@ -154,17 +182,20 @@ async fn run(
     let acp_config = load_acp_config(&base_dir, default_model)
         .with_context(|| format!("loading ACP config '{default_model}'"))?;
 
-    let envelope = read_one_from_stdin()
-        .await
-        .context("Failed to parse triggering event from stdin")?;
-    let trigger_event_id = match &envelope.message {
+    // Read the bootstrap stdin frame (the first inbound event for this
+    // conversation). The persistent stdin loop kicks in once setup is done.
+    let mut stdin_lines = BufReader::new(tokio::io::stdin()).lines();
+    let bootstrap_frame = read_next_frame(&mut stdin_lines)
+        .await?
+        .context("no bootstrap event on stdin")?;
+    let bootstrap_envelope = tenex_protocol::nostr::decode(&bootstrap_frame.event)
+        .context("decoding bootstrap event")?;
+    let trigger_event_id = match &bootstrap_envelope.message {
         MessageRef::Nostr { event_id } => event_id.to_hex(),
     };
 
     let stdout_sink = SharedStdoutEventSink::new();
     let pending_external_work = Arc::new(AtomicBool::new(false));
-    // Telegram delivery used to live here via CompositeChannel; that path is
-    // now owned by `tenex-telegram`.
     let channel: Arc<dyn Channel> = Arc::new(
         NostrChannel::from_nsec(&agent_config.nsec, stdout_sink.clone())
             .context("Failed to initialize Nostr channel")?,
@@ -185,8 +216,8 @@ async fn run(
         });
     let (resolved_working_dir, current_branch) = tenex_project::resolve_working_dir(
         &project_root,
-        envelope.metadata.branch.as_deref(),
-        envelope.metadata.commit.as_deref(),
+        bootstrap_envelope.metadata.branch.as_deref(),
+        bootstrap_envelope.metadata.commit.as_deref(),
     );
     let working_dir = resolved_working_dir.display().to_string();
     let root_agents_md = project_instructions::read_root_agents_md(&project_root);
@@ -208,22 +239,15 @@ async fn run(
         d_tag: project_meta.d_tag.clone(),
     };
 
-    let envelope_conversation_id = match &envelope.root {
+    let envelope_conversation_id = match &bootstrap_envelope.root {
         MessageRef::Nostr { event_id } => event_id.to_hex(),
     };
     let conversation_id = std::env::var("TENEX_CONVERSATION_ID")
         .ok()
         .filter(|id| nostr::EventId::from_hex(id).is_ok())
         .unwrap_or(envelope_conversation_id);
-    let conv_store = open_conversation_store(&project_id, &conversation_id);
-    let completion_recipient = std::env::var("TENEX_COMPLETION_RECIPIENT_PUBKEY")
-        .ok()
-        .and_then(|pubkey| nostr::PublicKey::from_hex(&pubkey).ok())
-        .map(|pubkey| PrincipalRef::Nostr {
-            pubkey,
-            kind: PrincipalKind::Human,
-            display_name: None,
-        });
+    let conv_store: Option<Arc<Mutex<ConversationStore>>> =
+        open_conversation_store(&project_id, &conversation_id).map(|s| Arc::new(Mutex::new(s)));
     let conversation_root = nostr::EventId::from_hex(&conversation_id)
         .ok()
         .map(|root_event_id| ConversationRef::Nostr { root_event_id });
@@ -305,7 +329,7 @@ async fn run(
             agents: &project_agents,
             teams: &teams,
             agent_slug: agent_config.slug.as_deref().unwrap_or(""),
-            active_team: envelope.metadata.team.as_deref(),
+            active_team: bootstrap_envelope.metadata.team.as_deref(),
             home: &home_info,
             preloaded_skills_block: None,
             workflows_fragment: None,
@@ -315,16 +339,24 @@ async fn run(
             current_branch: current_branch.as_deref(),
             worktrees: &acp_worktrees,
         });
-    let history = render_history(
-        conv_store.as_ref(),
-        &conversation_id,
-        &pubkey_hex,
-        &system_prompt,
-        &acp_config.backend,
-        Some(&trigger_event_id),
-    )
-    .await;
-    let prompt = render_acp_prompt(&system_prompt, &history, &envelope.content);
+
+    // The MCP bridge is started once per ACP child and carries the
+    // bootstrap event's `triggering_message`/`completion_recipient`/
+    // `triggering_principal` for the lifetime of the session. Delegation
+    // tools invoked from any prompt-task (including ones injected mid-turn
+    // by later inbound events) will be tagged against the bootstrap event.
+    // See README — this is the v1 limitation; full per-prompt MCP context
+    // requires a dynamic-context follow-up.
+    let bootstrap_completion_recipient = bootstrap_frame
+        .completion_recipient_pubkey
+        .clone()
+        .or_else(|| std::env::var("TENEX_COMPLETION_RECIPIENT_PUBKEY").ok())
+        .and_then(|pubkey| nostr::PublicKey::from_hex(&pubkey).ok())
+        .map(|pubkey| PrincipalRef::Nostr {
+            pubkey,
+            kind: tenex_protocol::PrincipalKind::Human,
+            display_name: None,
+        });
     let mcp_bridge = AcpMcpBridge::start(AcpMcpBridgeInput {
         base_dir: base_dir.clone(),
         agent_config_path: args[1].clone(),
@@ -334,11 +366,11 @@ async fn run(
             .unwrap_or(true),
         project: project_ref.clone(),
         conversation_root: conversation_root.clone(),
-        triggering_message: Some(envelope.message.clone()),
-        completion_recipient: completion_recipient.clone(),
-        triggering_principal: envelope.principal.clone(),
+        triggering_message: Some(bootstrap_envelope.message.clone()),
+        completion_recipient: bootstrap_completion_recipient,
+        triggering_principal: bootstrap_envelope.principal.clone(),
         model: acp_model.clone(),
-        team: envelope.metadata.team.clone(),
+        team: bootstrap_envelope.metadata.team.clone(),
         stdout_sink: stdout_sink.clone(),
         pending_external_work: pending_external_work.clone(),
         project_root: project_root.clone(),
@@ -346,7 +378,7 @@ async fn run(
     .await?;
 
     eprintln!(
-        "[tenex-agent-acp] {} ({}) backend={} command={} model={}",
+        "[tenex-agent-acp] {} ({}) backend={} command={} model={} (persistent)",
         agent_config.identity_name(),
         &pubkey_hex[..8],
         acp_config.backend,
@@ -354,8 +386,7 @@ async fn run(
         acp_config.model.as_deref().unwrap_or("default")
     );
 
-    let mut acp = AcpProcess::spawn(&acp_config).await?;
-    let mut updates = AcpUpdates::default();
+    let acp = Arc::new(AcpProcess::spawn(&acp_config).await?);
     acp.request(
         "initialize",
         json!({
@@ -367,7 +398,6 @@ async fn run(
                 "version": env!("CARGO_PKG_VERSION")
             }
         }),
-        &mut updates,
     )
     .await?;
 
@@ -375,7 +405,6 @@ async fn run(
         .request(
             "session/new",
             session_new_params(&working_dir, mcp_bridge.as_ref(), resolved_category_enum)?,
-            &mut updates,
         )
         .await?;
     let session_id = session_result
@@ -394,7 +423,6 @@ async fn run(
                         "configId": config_id,
                         "value": model
                     }),
-                    &mut updates,
                 )
                 .await
             {
@@ -402,7 +430,244 @@ async fn run(
             }
         }
     }
-    let current_project_addr = project_ref.coordinate();
+
+    let history = render_history(
+        conv_store.clone(),
+        &conversation_id,
+        &pubkey_hex,
+        &system_prompt,
+        &acp_config.backend,
+        Some(&trigger_event_id),
+    )
+    .await;
+
+    let ctx = Arc::new(SessionContext {
+        project_id: project_id.clone(),
+        conversation_id: conversation_id.clone(),
+        pubkey_hex: pubkey_hex.clone(),
+        project_ref: project_ref.clone(),
+        conversation_root,
+        working_dir,
+        current_branch,
+        project_meta,
+        acp_config: acp_config.clone(),
+        acp_model,
+        session_id,
+        system_prompt,
+        backend: acp_config.backend.clone(),
+        first_prompt_pending: std::sync::atomic::AtomicBool::new(true),
+        stdout_sink: stdout_sink.clone(),
+    });
+
+    let mut tasks = JoinSet::new();
+    let stream_sequence = Arc::new(AtomicU64::new(0));
+
+    // Dispatch the bootstrap prompt with the rendered history. Subsequent
+    // prompts run with bare content (the SDK retains conversation context).
+    {
+        let acp = acp.clone();
+        let ctx = ctx.clone();
+        let channel = channel.clone();
+        let stream_sequence = stream_sequence.clone();
+        let pending_external_work = pending_external_work.clone();
+        let conv_store = conv_store.clone();
+        let history = Some(history);
+        let bootstrap_completion_recipient_pubkey = bootstrap_frame
+            .completion_recipient_pubkey
+            .clone()
+            .or_else(|| std::env::var("TENEX_COMPLETION_RECIPIENT_PUBKEY").ok());
+        tasks.spawn(async move {
+            handle_prompt(
+                acp,
+                ctx,
+                channel,
+                stream_sequence,
+                pending_external_work,
+                conv_store,
+                bootstrap_envelope,
+                bootstrap_frame.traceparent,
+                bootstrap_frame.tracestate,
+                bootstrap_frame.baggage,
+                bootstrap_completion_recipient_pubkey,
+                history,
+            )
+            .await
+        });
+    }
+
+    // Loop: read additional inbound frames until stdin closes, spawning a
+    // task per event.
+    loop {
+        match read_next_frame(&mut stdin_lines).await {
+            Ok(Some(frame)) => {
+                let envelope = match tenex_protocol::nostr::decode(&frame.event) {
+                    Ok(env) => env,
+                    Err(err) => {
+                        eprintln!("[tenex-agent-acp] warn: decoding stdin event: {err}");
+                        continue;
+                    }
+                };
+                let acp = acp.clone();
+                let ctx = ctx.clone();
+                let channel = channel.clone();
+                let stream_sequence = stream_sequence.clone();
+                let pending_external_work = pending_external_work.clone();
+                let conv_store = conv_store.clone();
+                let completion_recipient_pubkey = frame.completion_recipient_pubkey.clone();
+                tasks.spawn(async move {
+                    handle_prompt(
+                        acp,
+                        ctx,
+                        channel,
+                        stream_sequence,
+                        pending_external_work,
+                        conv_store,
+                        envelope,
+                        frame.traceparent,
+                        frame.tracestate,
+                        frame.baggage,
+                        completion_recipient_pubkey,
+                        None,
+                    )
+                    .await
+                });
+            }
+            Ok(None) => break,
+            Err(err) => {
+                eprintln!("[tenex-agent-acp] warn: reading stdin frame: {err}");
+                break;
+            }
+        }
+    }
+
+    // Drain all in-flight prompt tasks before tearing down the ACP session.
+    while let Some(joined) = tasks.join_next().await {
+        if let Err(err) = joined {
+            eprintln!("[tenex-agent-acp] warn: prompt task join failed: {err}");
+        }
+    }
+
+    acp.shutdown().await;
+    if let Some(bridge) = mcp_bridge {
+        bridge.shutdown().await;
+    }
+    Ok(())
+}
+
+async fn read_next_frame(
+    lines: &mut tokio::io::Lines<BufReader<tokio::io::Stdin>>,
+) -> Result<Option<AcpStdinFrame>> {
+    loop {
+        let line = lines.next_line().await.context("reading ACP stdin")?;
+        let Some(line) = line else {
+            return Ok(None);
+        };
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let frame: AcpStdinFrame = serde_json::from_str(trimmed)
+            .with_context(|| format!("parsing ACP stdin frame: {trimmed}"))?;
+        return Ok(Some(frame));
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn handle_prompt(
+    acp: Arc<AcpProcess>,
+    ctx: Arc<SessionContext>,
+    channel: Arc<dyn Channel>,
+    stream_sequence: Arc<AtomicU64>,
+    pending_external_work: Arc<AtomicBool>,
+    conv_store: Option<Arc<Mutex<ConversationStore>>>,
+    envelope: tenex_protocol::channel::InboundEnvelope,
+    traceparent: Option<String>,
+    tracestate: Option<String>,
+    baggage: Option<String>,
+    completion_recipient_pubkey: Option<String>,
+    rendered_history: Option<String>,
+) {
+    let trigger_event_id = match &envelope.message {
+        MessageRef::Nostr { event_id } => event_id.to_hex(),
+    };
+    let dispatch_span = info_span!(
+        "tenex.agent.prompt",
+        event.id = %trigger_event_id,
+        agent.pubkey = %ctx.pubkey_hex,
+        conversation.id = %ctx.conversation_id,
+    );
+    if let Some(trace) = build_trace_carrier(traceparent, tracestate, baggage) {
+        if let Some(parent_ctx) = tenex_telemetry::extract(&trace) {
+            if let Err(err) = dispatch_span.set_parent(parent_ctx) {
+                eprintln!("[tenex-agent-acp] warn: trace parent attach failed: {err}");
+            }
+        }
+    }
+
+    let stdout_sink = ctx.stdout_sink.clone();
+    if let Err(err) = run_prompt(
+        acp,
+        ctx,
+        channel,
+        stream_sequence,
+        pending_external_work,
+        conv_store,
+        envelope,
+        completion_recipient_pubkey,
+        rendered_history,
+    )
+    .instrument(dispatch_span)
+    .await
+    {
+        eprintln!("[tenex-agent-acp] prompt failed: {err:#}");
+    }
+    // Signal "this prompt task is done" to the parent daemon. Emitted on
+    // every prompt-task exit, regardless of completion vs pending-external
+    // disposition. The daemon's per-child stdout reader matches this to
+    // resolve the per-event dispatch span.
+    let sentinel = format!("{{\"{}\":\"{}\"}}", ACP_PROMPT_DONE_SENTINEL_KEY, trigger_event_id);
+    if let Err(err) = stdout_sink.write_line(&sentinel).await {
+        eprintln!("[tenex-agent-acp] warn: failed to emit prompt-done sentinel: {err}");
+    }
+}
+
+fn build_trace_carrier(
+    traceparent: Option<String>,
+    tracestate: Option<String>,
+    baggage: Option<String>,
+) -> Option<tenex_telemetry::TraceCarrier> {
+    let traceparent = traceparent?;
+    Some(tenex_telemetry::TraceCarrier {
+        traceparent,
+        tracestate,
+        baggage,
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn run_prompt(
+    acp: Arc<AcpProcess>,
+    ctx: Arc<SessionContext>,
+    channel: Arc<dyn Channel>,
+    stream_sequence: Arc<AtomicU64>,
+    pending_external_work: Arc<AtomicBool>,
+    conv_store: Option<Arc<Mutex<ConversationStore>>>,
+    envelope: tenex_protocol::channel::InboundEnvelope,
+    completion_recipient_pubkey: Option<String>,
+    rendered_history: Option<String>,
+) -> Result<()> {
+    let is_first = ctx.first_prompt_pending.swap(false, Ordering::AcqRel);
+
+    let completion_recipient = completion_recipient_pubkey
+        .as_deref()
+        .and_then(|pubkey| nostr::PublicKey::from_hex(pubkey).ok())
+        .map(|pubkey| PrincipalRef::Nostr {
+            pubkey,
+            kind: tenex_protocol::PrincipalKind::Human,
+            display_name: None,
+        })
+        .or_else(|| Some(envelope.principal.clone()));
+    let current_project_addr = ctx.project_ref.coordinate();
     let completion_project_a_tags: Vec<String> = envelope
         .metadata
         .project_a_tags
@@ -410,149 +675,87 @@ async fn run(
         .filter(|addr| *addr != &current_project_addr)
         .cloned()
         .collect();
+
     let stream_ctx = EncodingContext {
-        project: project_ref.clone(),
-        conversation_root: conversation_root.clone(),
+        project: ctx.project_ref.clone(),
+        conversation_root: ctx.conversation_root.clone(),
         triggering_message: Some(envelope.message.clone()),
         completion_recipient: completion_recipient.clone(),
         triggering_principal: envelope.principal.clone(),
         ral: 0,
-        model: Some(acp_model.clone()),
+        model: Some(ctx.acp_model.clone()),
         cost_usd: None,
         execution_time_ms: None,
         llm_runtime_ms: None,
         llm_runtime_total_ms: None,
         completion_project_a_tags: completion_project_a_tags.clone(),
-        branch: current_branch.clone(),
+        branch: ctx.current_branch.clone(),
         team: envelope.metadata.team.clone(),
     };
-    let mut stream_sequence = 0_u64;
-    let stream_session_id = session_id.clone();
-    // Carries the tool name from `ToolCallStarted` until `ToolCallArgs` arrives
-    // with the actual arguments. Cleared each time args are received; any name
-    // still set here after the loop gets emitted without args.
-    let mut pending_tool_name: Option<String> = None;
-    // Runtime accumulation for the ACP session/prompt call: each outbound
-    // event carries the delta in `llm-runtime`, and the final completion
-    // carries the full accumulated total in `llm-runtime-total`.
+
+    let prompt_text = if is_first {
+        let history = rendered_history.unwrap_or_default();
+        render_acp_prompt(&ctx.system_prompt, &history, &envelope.content)
+    } else {
+        format!("<current-task>\n{}\n</current-task>", envelope.content)
+    };
+
     let accounting = Arc::new(AcpRuntimeAccounting::started_now());
+    let updates = Arc::new(std::sync::Mutex::new(AcpUpdates::default()));
+    let pending_tool_name = Arc::new(std::sync::Mutex::new(Option::<String>::None));
+    let thread_id = ctx.session_id.clone();
+
+    let (notifications_tx, mut notifications_rx) = mpsc::unbounded_channel::<Value>();
+
+    let drain_handle = {
+        let stream_ctx = stream_ctx.clone();
+        let channel = channel.clone();
+        let stream_sequence = stream_sequence.clone();
+        let accounting = accounting.clone();
+        let updates = updates.clone();
+        let pending_tool_name = pending_tool_name.clone();
+        let thread_id = thread_id.clone();
+        tokio::spawn(async move {
+            while let Some(notification) = notifications_rx.recv().await {
+                let parsed = {
+                    let mut updates_state = updates.lock().unwrap();
+                    updates_state.apply(&notification)
+                };
+                let Some(update) = parsed else { continue };
+                handle_update(
+                    update,
+                    &channel,
+                    &stream_ctx,
+                    &stream_sequence,
+                    &accounting,
+                    &pending_tool_name,
+                    &thread_id,
+                )
+                .await;
+            }
+        })
+    };
+
     let prompt_result = acp
-        .request_with_update_handler(
+        .request_with_notifications(
             "session/prompt",
             json!({
-                "sessionId": session_id,
-                "prompt": [{"type": "text", "text": prompt}]
+                "sessionId": ctx.session_id,
+                "prompt": [{"type": "text", "text": prompt_text}]
             }),
-            &mut updates,
-            |update| {
-                stream_sequence += 1;
-                let sequence = stream_sequence;
-                let channel = channel.clone();
-                let stream_ctx = stream_ctx.clone();
-                let accounting = accounting.clone();
-                let thread_id = stream_session_id.clone();
-                // Sync: update pending state and decide what to emit.
-                let (flush_segment, tool_use): (Option<String>, Option<ToolUseIntent>) =
-                    match &update {
-                        AcpUpdate::AgentMessageChunk { .. } => (None, None),
-                        AcpUpdate::ToolCallStarted { segment_to_flush, tool_name } => {
-                            // If a previous tool never received args, emit it now without args.
-                            let stale = pending_tool_name.replace(tool_name.clone());
-                            let stale_intent = stale.filter(|n| !n.is_empty()).map(|n| {
-                                ToolUseIntent {
-                                    tool_name: n,
-                                    content: String::new(),
-                                    args_json: None,
-                                    referenced_messages: Vec::new(),
-                                    usage: None,
-                                    extra_tags: Vec::new(),
-                                }
-                            });
-                            (
-                                if segment_to_flush.is_empty() {
-                                    None
-                                } else {
-                                    Some(segment_to_flush.clone())
-                                },
-                                stale_intent,
-                            )
-                        }
-                        AcpUpdate::ToolCallArgs { tool_name, args_json } => {
-                            // Args arrived — clear pending and emit with full args.
-                            pending_tool_name.take();
-                            (
-                                None,
-                                Some(ToolUseIntent {
-                                    tool_name: tool_name.clone(),
-                                    content: String::new(),
-                                    args_json: Some(args_json.clone()),
-                                    referenced_messages: Vec::new(),
-                                    usage: None,
-                                    extra_tags: Vec::new(),
-                                }),
-                            )
-                        }
-                    };
-                async move {
-                    match update {
-                        AcpUpdate::AgentMessageChunk { text } => {
-                            let mut ctx = stream_ctx.clone();
-                            ctx.llm_runtime_ms = accounting.take_delta();
-                            let intent = StreamTextDeltaIntent { delta: text, sequence };
-                            if let Err(err) =
-                                channel.send(Intent::StreamTextDelta(intent), &ctx).await
-                            {
-                                eprintln!(
-                                    "[tenex-agent-acp] warn: stream delta emit failed: {err}"
-                                );
-                            }
-                        }
-                        AcpUpdate::ToolCallStarted { .. } | AcpUpdate::ToolCallArgs { .. } => {
-                            // Multi-event batch: attach the runtime delta
-                            // to the *first* event in the batch (the
-                            // boundary-flush Conversation when present,
-                            // otherwise the ToolUse) so downstream
-                            // summing sees each delta exactly once.
-                            let mut delta = accounting.take_delta();
-                            if let Some(segment) = flush_segment {
-                                let mut ctx = stream_ctx.clone();
-                                ctx.llm_runtime_ms = delta.take();
-                                let intent = ConversationIntent {
-                                    content: segment,
-                                    is_reasoning: false,
-                                    usage: None,
-                                    metadata: Some(LlmMetadata {
-                                        thread_id: Some(thread_id),
-                                        ..Default::default()
-                                    }),
-                                };
-                                if let Err(err) =
-                                    channel.send(Intent::Conversation(intent), &ctx).await
-                                {
-                                    eprintln!(
-                                        "[tenex-agent-acp] warn: tool-boundary flush failed: {err}"
-                                    );
-                                }
-                            }
-                            if let Some(intent) = tool_use {
-                                let mut ctx = stream_ctx.clone();
-                                ctx.llm_runtime_ms = delta.take();
-                                if let Err(err) =
-                                    channel.send(Intent::ToolUse(intent), &ctx).await
-                                {
-                                    eprintln!(
-                                        "[tenex-agent-acp] warn: tool-use emit failed: {err}"
-                                    );
-                                }
-                            }
-                        }
-                    }
-                }
-            },
+            notifications_tx,
         )
-        .await?;
+        .await;
+
+    // The mpsc sender is dropped now that request_with_notifications has
+    // returned. The drain task will see disconnect and exit.
+    drain_handle.await.ok();
+
+    let prompt_result = prompt_result?;
+
     // Any tool whose args never arrived (e.g. permission denied before tool_call_update).
-    if let Some(tool_name) = pending_tool_name.take().filter(|n| !n.is_empty()) {
+    let trailing_tool = pending_tool_name.lock().unwrap().take();
+    if let Some(tool_name) = trailing_tool.filter(|n| !n.is_empty()) {
         let intent = ToolUseIntent {
             tool_name,
             content: String::new(),
@@ -567,16 +770,21 @@ async fn run(
             eprintln!("[tenex-agent-acp] warn: post-loop tool-use emit failed: {err}");
         }
     }
+
     let (final_runtime_delta, session_total_ms) = accounting.take_final();
     let stop_reason = prompt_result
         .get("stopReason")
         .and_then(Value::as_str)
         .unwrap_or("unknown")
         .to_string();
-    acp.shutdown().await;
-    if let Some(bridge) = mcp_bridge {
-        bridge.shutdown().await;
-    }
+
+    let (visible_text, current_segment) = {
+        let updates_state = updates.lock().unwrap();
+        (
+            updates_state.visible_text.clone(),
+            updates_state.current_segment.clone(),
+        )
+    };
 
     if let Some(store) = conv_store.as_ref() {
         let turn = TurnRecord {
@@ -585,7 +793,7 @@ async fn run(
                     content: envelope.content.clone(),
                 },
                 CtxMessage::Assistant {
-                    content: updates.visible_text.clone(),
+                    content: visible_text.clone(),
                     tool_calls: Vec::<CtxToolCall>::new(),
                 },
             ],
@@ -594,58 +802,141 @@ async fn run(
             cache_observed: CacheObservation::default(),
             breakpoint_hints: Vec::new(),
         };
-        if let Err(err) = tenex_context::record_turn(store, &conversation_id, &pubkey_hex, turn) {
+        let result = {
+            let store = store.lock().unwrap();
+            tenex_context::record_turn(&store, &ctx.conversation_id, &ctx.pubkey_hex, turn)
+        };
+        if let Err(err) = result {
             eprintln!("[tenex-agent-acp] warn: failed to record ACP turn: {err}");
         }
     }
 
     let pending_external = pending_external_work.load(Ordering::Acquire);
-    let ctx = EncodingContext {
-        project: project_ref,
-        conversation_root,
+    let final_ctx = EncodingContext {
+        project: ctx.project_ref.clone(),
+        conversation_root: ctx.conversation_root.clone(),
         triggering_message: Some(envelope.message.clone()),
         completion_recipient,
         triggering_principal: envelope.principal.clone(),
         ral: 1,
-        model: Some(format!("acp:{}:{}", acp_config.backend, stop_reason)),
+        model: Some(format!("acp:{}:{}", ctx.backend, stop_reason)),
         cost_usd: None,
         execution_time_ms: None,
         llm_runtime_ms: final_runtime_delta,
-        // Only completion events carry the accumulated total per the
-        // protocol contract; conversation events emitted in pending-work
-        // mode leave the field unset.
         llm_runtime_total_ms: if !pending_external && session_total_ms > 0 {
             Some(session_total_ms)
         } else {
             None
         },
         completion_project_a_tags,
-        branch: current_branch,
+        branch: ctx.current_branch.clone(),
         team: envelope.metadata.team.clone(),
     };
     let metadata = Some(LlmMetadata {
-        thread_id: Some(session_id),
+        thread_id: Some(thread_id),
         ..Default::default()
     });
     let final_intent = if pending_external {
         Intent::Conversation(ConversationIntent {
-            content: updates.current_segment,
+            content: current_segment,
             is_reasoning: false,
             usage: None,
             metadata,
         })
     } else {
         Intent::Completion(CompletionIntent {
-            content: updates.current_segment,
+            content: current_segment,
             usage: None,
             metadata,
         })
     };
     channel
-        .send(final_intent, &ctx)
+        .send(final_intent, &final_ctx)
         .await
         .context("Failed to emit ACP completion")?;
+    // Suppress unused-field warning when the field is set but never read
+    // outside this struct.
+    let _ = &ctx.project_meta;
+    let _ = &ctx.acp_config;
+    let _ = &ctx.working_dir;
+    let _ = &ctx.project_id;
     Ok(())
+}
+
+async fn handle_update(
+    update: AcpUpdate,
+    channel: &Arc<dyn Channel>,
+    stream_ctx: &EncodingContext,
+    stream_sequence: &AtomicU64,
+    accounting: &Arc<AcpRuntimeAccounting>,
+    pending_tool_name: &Arc<std::sync::Mutex<Option<String>>>,
+    thread_id: &str,
+) {
+    match update {
+        AcpUpdate::AgentMessageChunk { text } => {
+            let sequence = stream_sequence.fetch_add(1, Ordering::Relaxed) + 1;
+            let mut ctx = stream_ctx.clone();
+            ctx.llm_runtime_ms = accounting.take_delta();
+            let intent = StreamTextDeltaIntent { delta: text, sequence };
+            if let Err(err) = channel.send(Intent::StreamTextDelta(intent), &ctx).await {
+                eprintln!("[tenex-agent-acp] warn: stream delta emit failed: {err}");
+            }
+        }
+        AcpUpdate::ToolCallStarted { segment_to_flush, tool_name } => {
+            let stale = {
+                let mut slot = pending_tool_name.lock().unwrap();
+                slot.replace(tool_name.clone())
+            };
+            let mut delta = accounting.take_delta();
+            if !segment_to_flush.is_empty() {
+                let mut ctx = stream_ctx.clone();
+                ctx.llm_runtime_ms = delta.take();
+                let intent = ConversationIntent {
+                    content: segment_to_flush,
+                    is_reasoning: false,
+                    usage: None,
+                    metadata: Some(LlmMetadata {
+                        thread_id: Some(thread_id.to_string()),
+                        ..Default::default()
+                    }),
+                };
+                if let Err(err) = channel.send(Intent::Conversation(intent), &ctx).await {
+                    eprintln!("[tenex-agent-acp] warn: tool-boundary flush failed: {err}");
+                }
+            }
+            if let Some(n) = stale.filter(|n| !n.is_empty()) {
+                let intent = ToolUseIntent {
+                    tool_name: n,
+                    content: String::new(),
+                    args_json: None,
+                    referenced_messages: Vec::new(),
+                    usage: None,
+                    extra_tags: Vec::new(),
+                };
+                let mut ctx = stream_ctx.clone();
+                ctx.llm_runtime_ms = delta.take();
+                if let Err(err) = channel.send(Intent::ToolUse(intent), &ctx).await {
+                    eprintln!("[tenex-agent-acp] warn: stale tool-use emit failed: {err}");
+                }
+            }
+        }
+        AcpUpdate::ToolCallArgs { tool_name, args_json } => {
+            pending_tool_name.lock().unwrap().take();
+            let mut ctx = stream_ctx.clone();
+            ctx.llm_runtime_ms = accounting.take_delta();
+            let intent = ToolUseIntent {
+                tool_name,
+                content: String::new(),
+                args_json: Some(args_json),
+                referenced_messages: Vec::new(),
+                usage: None,
+                extra_tags: Vec::new(),
+            };
+            if let Err(err) = channel.send(Intent::ToolUse(intent), &ctx).await {
+                eprintln!("[tenex-agent-acp] warn: tool-use emit failed: {err}");
+            }
+        }
+    }
 }
 
 fn open_conversation_store(project_id: &str, conversation_id: &str) -> Option<ConversationStore> {
@@ -667,7 +958,7 @@ fn open_conversation_store(project_id: &str, conversation_id: &str) -> Option<Co
 }
 
 async fn render_history(
-    store: Option<&ConversationStore>,
+    store: Option<Arc<Mutex<ConversationStore>>>,
     conversation_id: &str,
     agent_pubkey: &str,
     system_prompt: &str,
@@ -686,19 +977,28 @@ async fn render_history(
         max_context_tokens: 200_000,
     };
     let tool_defs: Vec<ToolDef> = Vec::new();
-    match tenex_context::project_with_excluded_event(
-        store,
-        conversation_id,
-        agent_pubkey,
-        system_prompt,
-        &profile,
-        &tool_defs,
-        None,
-        None,
-        exclude_nostr_event_id,
-    )
-    .await
-    {
+    // `project_with_excluded_event` is async but drives a synchronous
+    // SQLite read; held across `.await` only because `ConversationStore`
+    // is `!Send`, requiring `std::sync::Mutex` and locking before the
+    // future is awaited. render_history runs once at child startup before
+    // prompt-tasks are spawned, so contention is impossible.
+    #[allow(clippy::await_holding_lock)]
+    let projection_result = {
+        let store_guard = store.lock().unwrap();
+        tenex_context::project_with_excluded_event(
+            &store_guard,
+            conversation_id,
+            agent_pubkey,
+            system_prompt,
+            &profile,
+            &tool_defs,
+            None,
+            None,
+            exclude_nostr_event_id,
+        )
+        .await
+    };
+    match projection_result {
         Ok(projection) => projection
             .messages
             .into_iter()

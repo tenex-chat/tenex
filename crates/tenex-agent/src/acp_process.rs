@@ -1,9 +1,12 @@
 use anyhow::{anyhow, Context, Result};
 use serde_json::{json, Value};
-use std::future::Future;
+use std::collections::{HashMap, VecDeque};
 use std::process::Stdio;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter, Lines};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
+use tokio::sync::{mpsc, oneshot};
 
 use crate::acp_config::{AcpPermissionPolicy, AcpRuntimeConfig};
 
@@ -28,7 +31,8 @@ pub(crate) struct AcpUpdates {
 }
 
 impl AcpUpdates {
-    fn apply(&mut self, message: &Value) -> Option<AcpUpdate> {
+    /// Apply a raw `session/update` JSON-RPC notification.
+    pub(crate) fn apply(&mut self, message: &Value) -> Option<AcpUpdate> {
         let update = message
             .get("params")
             .and_then(|params| params.get("update"))?;
@@ -75,12 +79,30 @@ impl AcpUpdates {
     }
 }
 
-pub(crate) struct AcpProcess {
-    child: Child,
-    stdin: BufWriter<ChildStdin>,
-    stdout: Lines<BufReader<ChildStdout>>,
-    next_id: u64,
+/// One in-flight prompt-style request: notifications arriving while this
+/// request is at the head of the FIFO are routed to `notifications_tx`.
+struct InFlight {
+    id: u64,
+    notifications_tx: mpsc::UnboundedSender<Value>,
+}
+
+#[derive(Default)]
+struct MuxState {
+    pending_responses: HashMap<u64, oneshot::Sender<Result<Value>>>,
+    update_queue: VecDeque<InFlight>,
+}
+
+struct AcpInner {
+    writer: tokio::sync::Mutex<BufWriter<ChildStdin>>,
+    next_id: AtomicU64,
+    state: Mutex<MuxState>,
     permission_policy: AcpPermissionPolicy,
+}
+
+pub(crate) struct AcpProcess {
+    inner: Arc<AcpInner>,
+    child: Mutex<Option<Child>>,
+    reader: Mutex<Option<tokio::task::JoinHandle<()>>>,
 }
 
 impl AcpProcess {
@@ -108,114 +130,226 @@ impl AcpProcess {
             .with_context(|| format!("failed to spawn ACP backend '{}'", config.command))?;
         let stdin = child.stdin.take().context("ACP backend has no stdin")?;
         let stdout = child.stdout.take().context("ACP backend has no stdout")?;
-        Ok(Self {
-            child,
-            stdin: BufWriter::new(stdin),
-            stdout: BufReader::new(stdout).lines(),
-            next_id: 1,
+
+        let inner = Arc::new(AcpInner {
+            writer: tokio::sync::Mutex::new(BufWriter::new(stdin)),
+            next_id: AtomicU64::new(1),
+            state: Mutex::new(MuxState::default()),
             permission_policy: config.permission_policy,
+        });
+        let reader_inner = inner.clone();
+        let reader = tokio::spawn(async move {
+            reader_loop(reader_inner, stdout).await;
+        });
+
+        Ok(Self {
+            inner,
+            child: Mutex::new(Some(child)),
+            reader: Mutex::new(Some(reader)),
         })
     }
 
-    pub(crate) async fn request(
-        &mut self,
-        method: &str,
-        params: Value,
-        updates: &mut AcpUpdates,
-    ) -> Result<Value> {
-        self.request_with_update_handler(method, params, updates, |_| async {})
-            .await
+    /// Send a JSON-RPC request without a notification consumer. Useful for
+    /// `initialize`, `session/new`, and one-shot config calls that don't emit
+    /// `session/update` notifications.
+    pub(crate) async fn request(&self, method: &str, params: Value) -> Result<Value> {
+        self.send(method, params, None).await
     }
 
-    pub(crate) async fn request_with_update_handler<H, Fut>(
-        &mut self,
+    /// Send a JSON-RPC request and route `session/update` notifications
+    /// arriving while this request is at the head of the FIFO into
+    /// `notifications_tx`. Used for `session/prompt`.
+    pub(crate) async fn request_with_notifications(
+        &self,
         method: &str,
         params: Value,
-        updates: &mut AcpUpdates,
-        mut on_update: H,
-    ) -> Result<Value>
-    where
-        H: FnMut(AcpUpdate) -> Fut,
-        Fut: Future<Output = ()>,
-    {
-        let id = self.next_id;
-        self.next_id += 1;
-        self.write_json(&json!({
+        notifications_tx: mpsc::UnboundedSender<Value>,
+    ) -> Result<Value> {
+        self.send(method, params, Some(notifications_tx)).await
+    }
+
+    async fn send(
+        &self,
+        method: &str,
+        params: Value,
+        notifications_tx: Option<mpsc::UnboundedSender<Value>>,
+    ) -> Result<Value> {
+        let id = self.inner.next_id.fetch_add(1, Ordering::Relaxed);
+        let (response_tx, response_rx) = oneshot::channel();
+
+        // Register response + (optional) notification handle, then write the
+        // request body — all under the writer lock so the order in which
+        // we register matches the order in which the ACP backend receives
+        // (and therefore the SDK's pendingMessages.order).
+        let mut writer = self.inner.writer.lock().await;
+        {
+            let mut state = self.inner.state.lock().unwrap();
+            state.pending_responses.insert(id, response_tx);
+            if let Some(tx) = notifications_tx {
+                state.update_queue.push_back(InFlight {
+                    id,
+                    notifications_tx: tx,
+                });
+            }
+        }
+        let body = json!({
             "jsonrpc": "2.0",
             "id": id,
             "method": method,
-            "params": params
-        }))
-        .await?;
-
-        loop {
-            let message = self.read_json().await?;
-            if message.get("method").is_some() && message.get("id").is_some() {
-                self.handle_client_request(&message).await?;
-                continue;
-            }
-            if message.get("method").and_then(Value::as_str) == Some("session/update") {
-                if let Some(update) = updates.apply(&message) {
-                    on_update(update).await;
-                }
-                continue;
-            }
-            if message.get("id") == Some(&json!(id)) {
-                if let Some(error) = message.get("error") {
-                    return Err(anyhow!("ACP request {method} failed: {error}"));
-                }
-                return Ok(message.get("result").cloned().unwrap_or(Value::Null));
-            }
-        }
-    }
-
-    async fn handle_client_request(&mut self, request: &Value) -> Result<()> {
-        let id = request.get("id").cloned().unwrap_or(Value::Null);
-        match request.get("method").and_then(Value::as_str) {
-            Some("session/request_permission") => {
-                let option = choose_permission_option(request, self.permission_policy);
-                self.write_json(&json!({
-                    "jsonrpc": "2.0",
-                    "id": id,
-                    "result": {"outcome": option}
-                }))
-                .await
-            }
-            Some(method) => {
-                self.write_json(&json!({
-                    "jsonrpc": "2.0",
-                    "id": id,
-                    "error": {"code": -32601, "message": format!("TENEX ACP client does not implement {method}")}
-                }))
-                .await
-            }
-            None => Ok(()),
-        }
-    }
-
-    async fn write_json(&mut self, value: &Value) -> Result<()> {
-        let mut line = serde_json::to_vec(value)?;
+            "params": params,
+        });
+        let mut line = serde_json::to_vec(&body)?;
         line.push(b'\n');
-        self.stdin.write_all(&line).await?;
-        self.stdin.flush().await?;
-        Ok(())
-    }
-
-    async fn read_json(&mut self) -> Result<Value> {
-        let line = self
-            .stdout
-            .next_line()
-            .await?
-            .context("ACP backend closed stdout")?;
-        serde_json::from_str(&line).with_context(|| format!("invalid ACP JSON-RPC line: {line}"))
-    }
-
-    pub(crate) async fn shutdown(&mut self) {
-        if let Ok(Some(_)) = self.child.try_wait() {
-            return;
+        if let Err(err) = writer.write_all(&line).await {
+            self.cleanup_failed_send(id);
+            return Err(err.into());
         }
-        let _ = self.child.kill().await;
+        if let Err(err) = writer.flush().await {
+            self.cleanup_failed_send(id);
+            return Err(err.into());
+        }
+        drop(writer);
+
+        match response_rx.await {
+            Ok(result) => result,
+            Err(_) => Err(anyhow!("ACP backend closed before responding to {method}")),
+        }
     }
+
+    fn cleanup_failed_send(&self, id: u64) {
+        let mut state = self.inner.state.lock().unwrap();
+        state.pending_responses.remove(&id);
+        state.update_queue.retain(|in_flight| in_flight.id != id);
+    }
+
+    pub(crate) async fn shutdown(&self) {
+        let child = self.child.lock().unwrap().take();
+        if let Some(mut child) = child {
+            if let Ok(Some(_)) = child.try_wait() {
+                // already exited
+            } else {
+                let _ = child.kill().await;
+            }
+            let _ = child.wait().await;
+        }
+        let reader = self.reader.lock().unwrap().take();
+        if let Some(handle) = reader {
+            let _ = handle.await;
+        }
+    }
+}
+
+async fn reader_loop(inner: Arc<AcpInner>, stdout: ChildStdout) {
+    let mut lines = BufReader::new(stdout).lines();
+    loop {
+        let line = match lines.next_line().await {
+            Ok(Some(line)) => line,
+            Ok(None) => break,
+            Err(err) => {
+                eprintln!("[tenex-agent-acp] ACP read error: {err}");
+                break;
+            }
+        };
+        let message: Value = match serde_json::from_str(&line) {
+            Ok(v) => v,
+            Err(err) => {
+                eprintln!("[tenex-agent-acp] invalid ACP JSON-RPC line: {err}: {line}");
+                continue;
+            }
+        };
+        dispatch_message(&inner, message).await;
+    }
+    fail_all_pending(&inner, "ACP backend stdout closed");
+}
+
+async fn dispatch_message(inner: &Arc<AcpInner>, message: Value) {
+    // Client-initiated request: has both `method` and `id`. The ACP backend
+    // is asking us something (e.g. permission). We answer inline.
+    if message.get("method").is_some() && message.get("id").is_some() {
+        if let Err(err) = handle_client_request(inner, &message).await {
+            eprintln!("[tenex-agent-acp] ACP client request handler failed: {err}");
+        }
+        return;
+    }
+
+    // Server-initiated notification: `method` present, no `id`.
+    if let Some(method) = message.get("method").and_then(Value::as_str) {
+        if method == "session/update" {
+            let head_tx = {
+                let state = inner.state.lock().unwrap();
+                state
+                    .update_queue
+                    .front()
+                    .map(|in_flight| in_flight.notifications_tx.clone())
+            };
+            if let Some(tx) = head_tx {
+                let _ = tx.send(message);
+            }
+        }
+        return;
+    }
+
+    // Response: has `id`, has `result` or `error`.
+    if let Some(id) = message.get("id").and_then(Value::as_u64) {
+        let response_tx = {
+            let mut state = inner.state.lock().unwrap();
+            state.update_queue.retain(|in_flight| in_flight.id != id);
+            state.pending_responses.remove(&id)
+        };
+        let Some(response_tx) = response_tx else {
+            return;
+        };
+        if let Some(error) = message.get("error") {
+            let _ = response_tx.send(Err(anyhow!("ACP request failed: {error}")));
+        } else {
+            let result = message.get("result").cloned().unwrap_or(Value::Null);
+            let _ = response_tx.send(Ok(result));
+        }
+    }
+}
+
+async fn handle_client_request(inner: &Arc<AcpInner>, request: &Value) -> Result<()> {
+    let id = request.get("id").cloned().unwrap_or(Value::Null);
+    let method = request.get("method").and_then(Value::as_str);
+    let response = match method {
+        Some("session/request_permission") => {
+            let option = choose_permission_option(request, inner.permission_policy);
+            json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "result": {"outcome": option},
+            })
+        }
+        Some(other) => json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "error": {
+                "code": -32601,
+                "message": format!("TENEX ACP client does not implement {other}"),
+            },
+        }),
+        None => return Ok(()),
+    };
+    let mut writer = inner.writer.lock().await;
+    let mut line = serde_json::to_vec(&response)?;
+    line.push(b'\n');
+    writer.write_all(&line).await?;
+    writer.flush().await?;
+    Ok(())
+}
+
+fn fail_all_pending(inner: &Arc<AcpInner>, reason: &str) {
+    let (pending, queue) = {
+        let mut state = inner.state.lock().unwrap();
+        let pending: Vec<(u64, oneshot::Sender<Result<Value>>)> =
+            state.pending_responses.drain().collect();
+        let queue: Vec<InFlight> = state.update_queue.drain(..).collect();
+        (pending, queue)
+    };
+    for (_, tx) in pending {
+        let _ = tx.send(Err(anyhow!("{reason}")));
+    }
+    drop(queue); // dropping closes mpsc senders → receivers see disconnect
 }
 
 fn choose_permission_option(request: &Value, policy: AcpPermissionPolicy) -> Value {

@@ -15,12 +15,14 @@ type McpServerConfig = {
     env?: Array<{ name?: string; value?: string }> | Record<string, string>;
 };
 
-const sessionId = "probe-acp-session";
+let sessionCounter = 0;
+let promptCounter = 0;
 let model = process.env.ANTHROPIC_MODEL ?? process.env.TENEX_PROBE_ACP_MODEL ?? "haiku";
 let mcpServers: McpServerConfig[] = [];
 const responseText =
     process.env.TENEX_PROBE_ACP_RESPONSE ??
     `haiku acp worker completed with model ${model}`;
+const promptDelayMs = Number(process.env.TENEX_PROBE_ACP_PROMPT_DELAY_MS ?? "0");
 
 const rl = readline.createInterface({
     input: process.stdin,
@@ -66,11 +68,13 @@ async function handle(msg: JsonRpc): Promise<void> {
         mcpServers = Array.isArray(msg.params?.mcpServers)
             ? (msg.params.mcpServers as McpServerConfig[])
             : [];
+        sessionCounter += 1;
+        const newSessionId = `probe-acp-session-${sessionCounter}`;
         send({
             jsonrpc: "2.0",
             id: msg.id,
             result: {
-                sessionId,
+                sessionId: newSessionId,
                 configOptions: configOptions(),
             },
         });
@@ -93,14 +97,21 @@ async function handle(msg: JsonRpc): Promise<void> {
         if (process.env.TENEX_PROBE_ACP_DELEGATE_PROMPT) {
             await delegateViaMcp();
         }
+        promptCounter += 1;
+        const promptNumber = promptCounter;
+        const promptSessionId = (msg.params?.sessionId as string | undefined) ?? "";
+        if (promptDelayMs > 0) {
+            await new Promise((resolve) => setTimeout(resolve, promptDelayMs));
+        }
+        const text = `${responseText} [prompt #${promptNumber}]`;
         send({
             jsonrpc: "2.0",
             method: "session/update",
             params: {
-                sessionId,
+                sessionId: promptSessionId,
                 update: {
                     sessionUpdate: "agent_message_chunk",
-                    content: { type: "text", text: responseText },
+                    content: { type: "text", text },
                 },
             },
         });

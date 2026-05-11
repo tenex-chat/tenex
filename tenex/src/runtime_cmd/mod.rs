@@ -1,3 +1,4 @@
+mod acp_child;
 mod agent_config_publish;
 mod agent_config_reload;
 mod agent_config_update;
@@ -95,6 +96,12 @@ struct RuntimeShared {
     coordinator: Arc<Mutex<DispatchCoordinator>>,
     control: Arc<RuntimeControlState>,
     seen: Arc<Mutex<HashSet<EventId>>>,
+    /// One persistent `tenex-agent-acp` child per `(agent, conversation)`
+    /// for ACP-runtime agents. The Tenex runtime uses one-shot subprocesses
+    /// per inbound event; ACP needs persistence so a second inbound event
+    /// can be injected mid-turn into the ACP backend's running stream.
+    acp_children:
+        Arc<Mutex<HashMap<dispatch_coordinator::DispatchKey, Arc<acp_child::AcpChildHandle>>>>,
     /// Process-local kind:0 publish gate — dedupes equivalent payloads and
     /// caps the publish rate. All per-agent kind:0 republishes (startup
     /// catch-up, fs-watcher reload, agent add/remove) route through it so
@@ -363,6 +370,7 @@ pub async fn run(args: RuntimeArgs) -> Result<()> {
         control: control.clone(),
         seen: Arc::new(Mutex::new(HashSet::new())),
         kind0_throttle: Arc::new(Kind0Throttle::default()),
+        acp_children: Arc::new(Mutex::new(HashMap::new())),
     });
     shared
         .mcp_subscriptions

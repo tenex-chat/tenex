@@ -265,6 +265,56 @@ mod tests {
     }
 
     #[test]
+    fn acp_path_dispatches_both_events_without_queueing_via_parallel_flag() {
+        // Regression for the parallel-ACP-runs bug: when a second event for
+        // the same (agent, conversation) key arrives mid-flight, the ACP
+        // dispatch path passes `allow_parallel_when_busy=true` so the
+        // coordinator hands BOTH events to `run_agent` instead of queueing
+        // the second one. `run_agent` then funnels both into the same
+        // persistent ACP child, where the backend's `session.input` queue
+        // does the mid-turn injection.
+        //
+        // The earlier bug was: ACP runs went through the tenex-style
+        // `mark_driver_free` path (tool-tag stdout signal flipped the
+        // coordinator out of busy state), so the second event WAS
+        // dispatched — but as a SECOND PROCESS, not into the existing one.
+        // The structural fix is "always pass allow_parallel_when_busy=true
+        // for ACP" + "persistent child reuses one process". This test
+        // covers the coordinator half.
+        let mut coordinator = DispatchCoordinator::default();
+        let first = dispatch_job("agent1", "conv1", "first");
+        let second = dispatch_job("agent1", "conv1", "second");
+        let key = DispatchKey::new("agent1", "conv1");
+
+        let first_started = coordinator.dispatch_inbound(first, true);
+        assert!(first_started.is_some());
+        // No `mark_driver_free` between the two — driver stays busy, but
+        // ACP passes `allow_parallel_when_busy=true` regardless.
+        let second_started = coordinator.dispatch_inbound(second, true);
+        assert!(
+            second_started.is_some(),
+            "ACP path must dispatch the second event without queueing"
+        );
+
+        // Both runs are simultaneously active for status purposes.
+        assert_eq!(
+            coordinator.active_agent_pubkeys_for_conversation("conv1"),
+            vec!["agent1".to_string()]
+        );
+
+        // Finishing one of them leaves the other active and the queue empty.
+        assert!(coordinator.finish_run(&key).is_none());
+        assert_eq!(
+            coordinator.active_agent_pubkeys_for_conversation("conv1"),
+            vec!["agent1".to_string()]
+        );
+        assert!(coordinator.finish_run(&key).is_none());
+        assert!(coordinator
+            .active_agent_pubkeys_for_conversation("conv1")
+            .is_empty());
+    }
+
+    #[test]
     fn dispatch_queues_when_persisted_driver_was_reacquired() {
         let mut coordinator = DispatchCoordinator::default();
         let first = dispatch_job("agent1", "conv1", "first");

@@ -5,6 +5,7 @@
 //! [`channel::NostrChannel`] (encoder + signer + sink), and a
 //! [`decoder`] (`Event` → `InboundEnvelope`).
 
+pub mod acp_stdin_frame;
 pub mod channel;
 pub mod decoder;
 pub mod encoder;
@@ -12,6 +13,7 @@ pub mod kinds;
 pub mod stdin_source;
 pub mod tags;
 
+pub use acp_stdin_frame::{AcpStdinFrame, ACP_PROMPT_DONE_SENTINEL_KEY};
 pub use channel::NostrChannel;
 pub use decoder::{decode, DecodeError};
 pub use encoder::{EncodeError, NostrEncoder};

@@ -67,7 +67,7 @@ pub(super) struct DispatchJob {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum AgentRuntimeKind {
+pub(super) enum AgentRuntimeKind {
     Tenex,
     Acp,
 }
@@ -160,10 +160,13 @@ async fn run_agent(shared: Arc<RuntimeShared>, job: DispatchJob, key: DispatchKe
     }
 
     let runtime_kind = agent_runtime_kind(&job.agent, &shared.base_dir)?;
-    let binary = match runtime_kind {
-        AgentRuntimeKind::Tenex => &shared.agent_binary,
-        AgentRuntimeKind::Acp => &shared.agent_acp_binary,
-    };
+    if runtime_kind == AgentRuntimeKind::Acp {
+        // ACP runs against a persistent per-conversation child. Each
+        // inbound event is streamed into that child as an `AcpStdinFrame`;
+        // this task awaits the child's prompt-done sentinel.
+        return super::acp_child::dispatch_to_acp_child(shared, &job, &key).await;
+    }
+    let binary = &shared.agent_binary;
     let execution_id = uuid::Uuid::new_v4().to_string();
     let mut command = tokio::process::Command::new(binary);
     command
@@ -200,11 +203,9 @@ async fn run_agent(shared: Arc<RuntimeShared>, job: DispatchJob, key: DispatchKe
             command.env("BAGGAGE", baggage);
         }
     }
-    let mcp_bridge = if runtime_kind == AgentRuntimeKind::Tenex {
-        start_mcp_bridge_for_run(&shared, &job, &execution_id, &mut command).await?
-    } else {
-        None
-    };
+    // Tenex-runtime only path from here down. ACP returned above.
+    let mcp_bridge =
+        start_mcp_bridge_for_run(&shared, &job, &execution_id, &mut command).await?;
 
     let agent_result: Result<()> = async {
         let mut child = command
@@ -350,7 +351,7 @@ fn refresh_job_agent(shared: &RuntimeShared, mut job: DispatchJob) -> Result<Dis
     Ok(job)
 }
 
-fn agent_runtime_kind(agent: &Agent, base_dir: &std::path::Path) -> Result<AgentRuntimeKind> {
+pub(super) fn agent_runtime_kind(agent: &Agent, base_dir: &std::path::Path) -> Result<AgentRuntimeKind> {
     let Some(default_json) = agent.default_config_json.as_deref() else {
         return Ok(AgentRuntimeKind::Tenex);
     };

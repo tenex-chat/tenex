@@ -115,6 +115,7 @@ const llmModelName =
 const usesAcp =
     scenarioName === "acp-worker-basic" ||
     scenarioName === "acp-delegation-mcp" ||
+    scenarioName === "acp-mid-turn-injection" ||
     scenarioName === "agent-config-reload";
 
 mkdirSync(relayDir, { recursive: true });
@@ -164,7 +165,13 @@ const mcpProbe =
         : undefined;
 const acpProbe =
     usesAcp
-        ? buildAcpProbeRuntime({ delegateViaMcp: scenarioName === "acp-delegation-mcp" })
+        ? buildAcpProbeRuntime({
+              delegateViaMcp: scenarioName === "acp-delegation-mcp",
+              promptDelayMs:
+                  scenarioName === "acp-mid-turn-injection"
+                      ? Number(process.env.TENEX_PROBE_ACP_PROMPT_DELAY_MS ?? 5_000)
+                      : undefined,
+          })
         : undefined;
 
 const relayPort = await freePort();
@@ -324,8 +331,15 @@ writeJson(path.join(agentsDir, `${worker.pubkey}.json`), {
     description: "Completes delegated probe tasks",
     instructions:
         "Complete delegated probe tasks with a concise result. If asked to choose a random color, never call no_response; reply with exactly one lowercase color word and no punctuation.",
-    default: { model: scenarioName === "acp-worker-basic" ? acpProbeModelName : llmModelName },
-    ...(scenarioName === "acp-worker-basic" && acpProbe ? { runtime: acpProbe } : {}),
+    default: {
+        model:
+            scenarioName === "acp-worker-basic" || scenarioName === "acp-mid-turn-injection"
+                ? acpProbeModelName
+                : llmModelName,
+    },
+    ...((scenarioName === "acp-worker-basic" || scenarioName === "acp-mid-turn-injection") && acpProbe
+        ? { runtime: acpProbe }
+        : {}),
 });
 
 let projectBEvent: Event | null = null;
@@ -697,7 +711,9 @@ function describeLlm(options: ProbeLlmOptions): string {
     return "mock";
 }
 
-function buildAcpProbeRuntime(options: { delegateViaMcp?: boolean } = {}): Record<string, unknown> {
+function buildAcpProbeRuntime(
+    options: { delegateViaMcp?: boolean; promptDelayMs?: number } = {}
+): Record<string, unknown> {
     const backend = process.env.TENEX_PROBE_ACP_BACKEND ?? "fake";
     const model = process.env.TENEX_PROBE_ACP_MODEL ?? "haiku";
     if (backend === "claude") {
@@ -735,6 +751,9 @@ function buildAcpProbeRuntime(options: { delegateViaMcp?: boolean } = {}): Recor
         env.TENEX_PROBE_ACP_DELEGATE_RECIPIENT = "worker";
         env.TENEX_PROBE_ACP_DELEGATE_PROMPT = delegationWorkerPrompt;
         env.TENEX_PROBE_ACP_RESPONSE = "Delegation started.";
+    }
+    if (options.promptDelayMs && options.promptDelayMs > 0) {
+        env.TENEX_PROBE_ACP_PROMPT_DELAY_MS = String(options.promptDelayMs);
     }
     return {
         provider: "acp",
