@@ -149,21 +149,6 @@ pub(super) fn p_tag_pubkeys(event: &Event) -> Vec<String> {
         .collect()
 }
 
-pub(super) fn e_tag_event_ids(event: &Event) -> Vec<String> {
-    event
-        .tags
-        .iter()
-        .filter_map(|tag| {
-            let parts = tag.as_slice();
-            if parts.first().is_some_and(|head| head == "e") {
-                parts.get(1).cloned()
-            } else {
-                None
-            }
-        })
-        .collect()
-}
-
 pub(super) fn is_completion_event(event: &Event) -> bool {
     event.kind == Kind::TextNote && has_tag(event, "status", "completed")
 }

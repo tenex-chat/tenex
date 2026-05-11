@@ -37,8 +37,8 @@ use super::dispatch_coordinator::DispatchKey;
 use tenex_protocol::event_filter::conversation_id_from_event;
 
 use super::event_routing::{
-    e_tag_event_ids, event_matches_project_scope, mark_seen, p_tag_pubkeys,
-    select_dispatch_target, targets_project_agent,
+    event_matches_project_scope, mark_seen, p_tag_pubkeys, select_dispatch_target,
+    targets_project_agent,
 };
 use super::runtime_state_store::{
     conversation_trace_root, is_agent_blocked, persisted_driver_busy,
@@ -555,36 +555,37 @@ pub(super) async fn accept_dispatch(
 }
 
 pub(super) async fn handle_stop_command(shared: Arc<RuntimeShared>, event: &Event) -> Result<()> {
-    let conversation_ids = e_tag_event_ids(event);
+    let has_e_tag = event
+        .tags
+        .iter()
+        .any(|tag| tag.as_slice().first().is_some_and(|head| head == "e"));
     let agent_pubkeys = p_tag_pubkeys(event);
-    if conversation_ids.is_empty() || agent_pubkeys.is_empty() {
+    if !has_e_tag || agent_pubkeys.is_empty() {
         warn!(
             event_id = %event.id.to_hex()[..8],
-            e_tags = conversation_ids.len(),
+            has_e_tag,
             p_tags = agent_pubkeys.len(),
             "stop command missing target tags"
         );
         return Ok(());
     }
 
+    let conversation_id = conversation_id_from_event(event);
     let reason = format!("stop signal from {}", &event.pubkey.to_hex()[..8]);
-    for conversation_id in conversation_ids {
-        for agent_pubkey in &agent_pubkeys {
-            set_agent_blocked(&shared.store, &conversation_id, agent_pubkey)?;
-            let result = shared.control.kill_agent_conversation(
-                &conversation_id,
-                Some(agent_pubkey),
-                &reason,
-            );
-            info!(
-                conversation_id = %conversation_id,
-                agent_pubkey = %agent_pubkey,
-                killed_count = result.killed_count,
-                "processed stop command"
-            );
-        }
-        publish_active_status(&shared, &conversation_id).await;
+    for agent_pubkey in &agent_pubkeys {
+        set_agent_blocked(&shared.store, &conversation_id, agent_pubkey)?;
+        let result =
+            shared
+                .control
+                .kill_agent_conversation(&conversation_id, Some(agent_pubkey), &reason);
+        info!(
+            conversation_id = %conversation_id,
+            agent_pubkey = %agent_pubkey,
+            killed_count = result.killed_count,
+            "processed stop command"
+        );
     }
+    publish_active_status(&shared, &conversation_id).await;
     Ok(())
 }
 

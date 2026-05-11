@@ -341,6 +341,7 @@ pub(super) fn set_agent_blocked(
     agent_pubkey: &str,
 ) -> Result<()> {
     let store = store.lock().unwrap();
+    store.ensure_conversation(conversation_id)?;
     let existing = store.get_agent_context_state(conversation_id, agent_pubkey)?;
     let state = AgentContextState {
         conversation_id: conversation_id.to_string(),
