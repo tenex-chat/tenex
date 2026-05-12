@@ -335,10 +335,11 @@ pub(super) fn is_agent_blocked(
         .is_some_and(|state| state.is_blocked)
 }
 
-pub(super) fn set_agent_blocked(
+fn upsert_agent_blocked_flag(
     store: &Arc<Mutex<ConversationStore>>,
     conversation_id: &str,
     agent_pubkey: &str,
+    is_blocked: bool,
 ) -> Result<()> {
     let store = store.lock().unwrap();
     store.ensure_conversation(conversation_id)?;
@@ -365,12 +366,28 @@ pub(super) fn set_agent_blocked(
             .as_ref()
             .and_then(|s| s.self_applied_skills.clone()),
         meta_model_variant: existing.as_ref().and_then(|s| s.meta_model_variant.clone()),
-        is_blocked: true,
+        is_blocked,
         todo_nudged: existing.as_ref().is_some_and(|s| s.todo_nudged),
         updated_at: super::runtime_setup::now_ms(),
     };
     store.upsert_agent_context_state(&state)?;
     Ok(())
+}
+
+pub(super) fn set_agent_blocked(
+    store: &Arc<Mutex<ConversationStore>>,
+    conversation_id: &str,
+    agent_pubkey: &str,
+) -> Result<()> {
+    upsert_agent_blocked_flag(store, conversation_id, agent_pubkey, true)
+}
+
+pub(super) fn clear_agent_blocked(
+    store: &Arc<Mutex<ConversationStore>>,
+    conversation_id: &str,
+    agent_pubkey: &str,
+) -> Result<()> {
+    upsert_agent_blocked_flag(store, conversation_id, agent_pubkey, false)
 }
 
 fn ensure_json_object(value: &mut Value) -> &mut Map<String, Value> {

@@ -41,7 +41,7 @@ use super::event_routing::{
     targets_project_agent, NotForRuntime,
 };
 use super::runtime_state_store::{
-    conversation_trace_root, is_agent_blocked, persisted_driver_busy,
+    clear_agent_blocked, conversation_trace_root, is_agent_blocked, persisted_driver_busy,
     register_delegation_route_if_needed, remember_conversation_trace_root, set_agent_blocked,
 };
 use super::{control, RuntimeShared, PROJECT_KIND};
@@ -255,6 +255,11 @@ async fn process_relay_event_inner(
                     is_external,
                     "dispatching",
                 );
+                if author_trusted {
+                    if let Err(e) = clear_agent_blocked(&shared.store, &conv_id, &agent.pubkey) {
+                        warn!(event_id = short, error = %e, "failed to clear agent block");
+                    }
+                }
                 if is_agent_blocked(&shared.store, &conv_id, &agent.pubkey) {
                     event_received_span.record("outcome", "dropped_blocked");
                     tracing::event!(
@@ -358,12 +363,8 @@ pub(super) async fn handle_transport_dispatch(
             }
         };
 
-    if is_agent_blocked(&shared.store, &conv_id, &agent.pubkey) {
-        tee.send_error(format!(
-            "agent {} is blocked in conversation {conv_id}",
-            agent.slug
-        ));
-        return;
+    if let Err(e) = clear_agent_blocked(&shared.store, &conv_id, &agent.pubkey) {
+        warn!(error = %e, "failed to clear agent block on transport dispatch");
     }
 
     if let Err(e) = persist_user_message(&shared.store, &event, &conv_id) {
