@@ -18,9 +18,25 @@
 //! routes and pass through [`super::dispatch_pipeline::accept_dispatch`].
 
 use std::collections::HashSet;
+use std::fmt;
 use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result};
+
+/// Returned by routing functions when an event simply isn't addressed to any
+/// agent in this runtime. This is normal — events on a shared Nostr relay will
+/// target agents in other runtimes. Callers use this type to distinguish
+/// "not for us" from genuine errors so they can suppress telemetry exceptions.
+#[derive(Debug)]
+pub(super) struct NotForRuntime(pub &'static str);
+
+impl fmt::Display for NotForRuntime {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.0)
+    }
+}
+
+impl std::error::Error for NotForRuntime {}
 use nostr_sdk::prelude::*;
 use opentelemetry::baggage::BaggageExt;
 use opentelemetry::{Context as OtelContext, KeyValue};
@@ -66,11 +82,11 @@ pub(super) fn select_dispatch_target(
     }
 
     if !event_matches_project_scope(event, &shared.project_addr) {
-        anyhow::bail!("event project a-tag does not match this runtime");
+        return Err(NotForRuntime("event project a-tag does not match this runtime").into());
     }
 
     if has_p_tags(event) && !targets_project_agent(event, &snapshot.agent_pubkeys) {
-        anyhow::bail!("directed event does not target a current project agent");
+        return Err(NotForRuntime("directed event does not target a current project agent").into());
     }
 
     let agent = select_agent(event, &snapshot.agents, &snapshot.project_agents)?.clone();
@@ -218,7 +234,7 @@ pub(super) fn select_agent<'a>(
     }
 
     if !p_tags.is_empty() {
-        anyhow::bail!("directed event does not target a current project agent");
+        return Err(NotForRuntime("directed event does not target a current project agent").into());
     }
 
     // PM fallback only fires for fresh top-level events (no `e` tag). An
@@ -226,7 +242,7 @@ pub(super) fn select_agent<'a>(
     // dragging the PM in by default pulls it into every conversation in the
     // project — including replies between a remote agent and a user.
     if has_any_tag(event, "e") {
-        anyhow::bail!("untargeted reply does not name a project agent");
+        return Err(NotForRuntime("untargeted reply does not name a project agent").into());
     }
 
     // No #p tags and no #e tags: project-wide event. Fall back to the PM.

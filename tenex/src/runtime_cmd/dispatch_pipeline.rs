@@ -38,7 +38,7 @@ use tenex_protocol::event_filter::conversation_id_from_event;
 
 use super::event_routing::{
     event_matches_project_scope, mark_seen, p_tag_pubkeys, select_dispatch_target,
-    targets_project_agent,
+    targets_project_agent, NotForRuntime,
 };
 use super::runtime_state_store::{
     conversation_trace_root, is_agent_blocked, persisted_driver_busy,
@@ -302,7 +302,9 @@ async fn process_relay_event_inner(
                 warn!(event_id = short, error = %perr, "no-target persist failed");
             }
             event_received_span.record("outcome", "persisted_no_target");
-            tenex_telemetry::record_current_error(&e);
+            if e.downcast_ref::<NotForRuntime>().is_none() {
+                tenex_telemetry::record_current_error(&e);
+            }
             tracing::event!(
                 parent: event_received_span,
                 tracing::Level::INFO,
