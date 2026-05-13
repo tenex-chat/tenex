@@ -214,6 +214,118 @@ fn select_codex_model() -> Result<Option<(String, Option<String>)>> {
     Ok(Some((model, effort)))
 }
 
+// ── Live provider model fetchers ──────────────────────────────────────────────
+
+#[derive(serde::Deserialize)]
+struct AnthropicModelsResponse {
+    data: Vec<AnthropicModelEntry>,
+}
+
+#[derive(serde::Deserialize)]
+struct AnthropicModelEntry {
+    id: String,
+    display_name: String,
+}
+
+fn fetch_anthropic_models(providers_doc: &ProvidersDoc) -> Result<Vec<(String, String)>> {
+    let key = providers_doc
+        .get("anthropic")
+        .and_then(|e| e.api_keys().into_iter().next())
+        .ok_or_else(|| anyhow!("no anthropic api key"))?;
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(8))
+        .build()?;
+    let resp = client
+        .get("https://api.anthropic.com/v1/models")
+        .header("x-api-key", &key)
+        .header("anthropic-version", "2023-06-01")
+        .send()?
+        .error_for_status()?;
+    let body: AnthropicModelsResponse = resp.json()?;
+    Ok(body
+        .data
+        .into_iter()
+        .map(|m| (m.id, m.display_name))
+        .collect())
+}
+
+#[derive(serde::Deserialize)]
+struct OpenAiModelsResponse {
+    data: Vec<OpenAiModelEntry>,
+}
+
+#[derive(serde::Deserialize)]
+struct OpenAiModelEntry {
+    id: String,
+    #[serde(default)]
+    owned_by: String,
+}
+
+fn fetch_openai_models(providers_doc: &ProvidersDoc) -> Result<Vec<(String, String)>> {
+    let key = providers_doc
+        .get("openai")
+        .and_then(|e| e.api_keys().into_iter().next())
+        .ok_or_else(|| anyhow!("no openai api key"))?;
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(8))
+        .build()?;
+    let resp = client
+        .get("https://api.openai.com/v1/models")
+        .bearer_auth(&key)
+        .send()?
+        .error_for_status()?;
+    let body: OpenAiModelsResponse = resp.json()?;
+    let mut models: Vec<(String, String)> = body
+        .data
+        .into_iter()
+        .filter(|m| {
+            m.owned_by.starts_with("openai")
+                && (m.id.starts_with("gpt-")
+                    || m.id.starts_with("o1")
+                    || m.id.starts_with("o3")
+                    || m.id.starts_with("o4"))
+        })
+        .map(|m| (m.id.clone(), m.id))
+        .collect();
+    models.sort_by(|a, b| a.0.cmp(&b.0));
+    Ok(models)
+}
+
+/// Show a picker from `models` (`(id, display_name)` pairs). A "Custom model…"
+/// entry is appended so the user can type a model ID not in the list. Falls
+/// through to text input when the user picks Custom.
+fn select_from_fetched_models(
+    models: Vec<(String, String)>,
+    provider: &str,
+) -> Result<Option<(String, String)>> {
+    const CUSTOM: &str = "\0custom";
+    let mut choices: Vec<ModelChoice> = models
+        .into_iter()
+        .map(|(id, display)| ModelChoice {
+            label: if display != id {
+                format!(
+                    "{} {}",
+                    display,
+                    crate::tui::theme::chalk_dim(&format!("({})", id))
+                )
+            } else {
+                id.clone()
+            },
+            id,
+        })
+        .collect();
+    choices.push(ModelChoice {
+        id: CUSTOM.to_owned(),
+        label: "Custom model…".to_owned(),
+    });
+    match prompts::select("Select model:", choices).prompt() {
+        Ok(c) if c.id == CUSTOM => select_model_text_input(provider),
+        Ok(c) => Ok(Some((c.id.clone(), c.id))),
+        Err(InquireError::OperationCanceled | InquireError::OperationInterrupted) => Ok(None),
+        Err(e) => Err(anyhow!("model select: {e}")),
+    }
+}
+
 /// Prompt to pick from a models.dev cache list for `provider`.
 /// Returns `(model_id, display_name)`.
 /// Falls back to text input when the cache is empty for this provider.
@@ -480,10 +592,36 @@ pub fn run(base_dir: &Path) -> Result<()> {
             Some((id, effort)) => (id.clone(), id, effort),
             None => return Ok(()),
         },
-        "anthropic" | "openai" => match select_models_dev_model(&provider, base_dir)? {
-            Some((id, disp)) => (id, disp, None),
-            None => return Ok(()),
-        },
+        "anthropic" => {
+            let models_result = fetch_anthropic_models(&providers_doc);
+            match models_result {
+                Ok(models) if !models.is_empty() => {
+                    match select_from_fetched_models(models, "anthropic")? {
+                        Some((id, disp)) => (id, disp, None),
+                        None => return Ok(()),
+                    }
+                }
+                _ => match select_models_dev_model("anthropic", base_dir)? {
+                    Some((id, disp)) => (id, disp, None),
+                    None => return Ok(()),
+                },
+            }
+        }
+        "openai" => {
+            let models_result = fetch_openai_models(&providers_doc);
+            match models_result {
+                Ok(models) if !models.is_empty() => {
+                    match select_from_fetched_models(models, "openai")? {
+                        Some((id, disp)) => (id, disp, None),
+                        None => return Ok(()),
+                    }
+                }
+                _ => match select_models_dev_model("openai", base_dir)? {
+                    Some((id, disp)) => (id, disp, None),
+                    None => return Ok(()),
+                },
+            }
+        }
         "ollama" => match select_ollama_model(&providers_doc)? {
             Some((id, disp)) => (id, disp, None),
             None => return Ok(()),
