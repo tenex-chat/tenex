@@ -170,6 +170,40 @@ impl<M: CompletionModel> PromptHook<M> for EmitHook {
         }
     }
 
+    fn on_tool_result(
+        &self,
+        tool_name: &str,
+        _tool_call_id: Option<String>,
+        _internal_call_id: &str,
+        _args: &str,
+        result: &str,
+    ) -> impl std::future::Future<Output = HookAction> + Send {
+        let is_mcp_error = tool_name.starts_with("mcp__") && result.starts_with("Error: ");
+        let state = self.state.clone();
+        let channel = self.state.channel.clone();
+        let tool_name = tool_name.to_string();
+        let result = result.to_string();
+        async move {
+            if !is_mcp_error {
+                return HookAction::cont();
+            }
+            let ral = state.meta.lock().unwrap().ral;
+            let ctx = state.build_ctx(ral);
+            let intent = ToolUseIntent {
+                tool_name,
+                content: result,
+                args_json: None,
+                referenced_messages: Vec::new(),
+                usage: None,
+                extra_tags: vec![vec!["tool-error".to_string(), "true".to_string()]],
+            };
+            if let Err(e) = channel.send(Intent::ToolUse(intent), &ctx).await {
+                eprintln!("[tenex-agent] warn: failed to emit MCP tool error event: {e}");
+            }
+            HookAction::cont()
+        }
+    }
+
     fn on_tool_call(
         &self,
         tool_name: &str,

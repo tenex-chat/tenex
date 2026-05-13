@@ -70,7 +70,10 @@ impl ToolDyn for McpProxyTool {
             let response: tenex_mcp::McpToolCallResponse =
                 serde_json::from_str(&line).map_err(|e| tool_error(format!("{e}")))?;
             if let Some(error) = response.error {
-                return Err(tool_error(error));
+                // Return Ok so the LLM receives the verbatim error text without
+                // rig's "ToolCallError: " prefix wrapping, and so on_tool_result
+                // fires and can emit an observable Nostr event for the failure.
+                return Ok(format!("Error: {error}"));
             }
             Ok(response.result.unwrap_or_default())
         })
