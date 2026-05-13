@@ -62,9 +62,20 @@ impl ProjectMcpRuntime {
                 warn!(server = %slug, "agent requests unknown project MCP server; skipping");
                 continue;
             }
-            let handle = self.ensure_server(slug).await?;
+            let handle = match self.ensure_server(slug).await {
+                Ok(h) => h,
+                Err(e) => {
+                    warn!(server = %slug, error = %e, "MCP server failed to start; agent will run without it");
+                    continue;
+                }
+            };
             let mut client = handle.client.lock().await;
-            manifest.tools.extend(client.list_tools().await?);
+            match client.list_tools().await {
+                Ok(tools) => manifest.tools.extend(tools),
+                Err(e) => {
+                    warn!(server = %slug, error = %e, "MCP server failed to list tools; agent will run without it");
+                }
+            }
         }
 
         Ok(manifest)
