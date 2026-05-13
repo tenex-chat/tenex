@@ -370,7 +370,6 @@ impl<'a> LlmConfigEntry<'a> {
     }
 
     /// For meta configs: borrowed view of one variant.
-    #[cfg(test)]
     pub fn variant(&self, name: &str) -> Option<MetaVariantEntry<'a>> {
         if self.kind() != LlmConfigKind::Meta {
             return None;
@@ -385,7 +384,6 @@ impl<'a> LlmConfigEntry<'a> {
     }
 
     /// For meta configs: the `default` variant name (required by schema).
-    #[cfg(test)]
     pub fn meta_default_variant(&self) -> Option<&str> {
         if self.kind() != LlmConfigKind::Meta {
             return None;
@@ -395,12 +393,10 @@ impl<'a> LlmConfigEntry<'a> {
 }
 
 /// Borrowed view of one meta-model variant.
-#[cfg(test)]
 pub struct MetaVariantEntry<'a> {
     obj: &'a Map<String, Value>,
 }
 
-#[cfg(test)]
 impl<'a> MetaVariantEntry<'a> {
     pub fn model(&self) -> Option<&'a str> {
         self.obj.get("model").and_then(Value::as_str)

@@ -101,12 +101,12 @@ pub fn route(base_dir: &std::path::Path, value: &str) -> Result<bool> {
             Ok(true)
         }
         v if v.starts_with("config:") => {
-            // TS behaviour: pressing Enter on a config item produces
-            // `config:<name>` as the action, but `showMainMenu` matches
-            // only against `delete:`, `add`, `addMultiModal`, and `done`.
-            // No handler matches `config:` — the function falls through
-            // and the menu re-renders. Match that exactly: silent recurse.
-            // (`LLMConfigEditor.ts:221-232`).
+            let name = &v["config:".len()..];
+            let doc = LlmsDoc::load(base_dir)?;
+            if doc.get(name).map(|e| e.kind()) == Some(LlmConfigKind::Meta) {
+                super::add_multi_modal::edit(base_dir, name)?;
+            }
+            // Standard configs have no edit UI — re-render the menu.
             Ok(true)
         }
         _ => {
@@ -580,16 +580,29 @@ mod tests {
     }
 
     #[test]
-    fn route_config_prefix_is_silent_noop_and_continues() {
-        // TS `LLMConfigEditor.ts:221-232` only handles `delete:`, `add`,
-        // `addMultiModal`, and `done`. Selecting a config (Enter on a
-        // config row) emits `config:<name>` which matches none of those
-        // — the function falls through and the menu re-renders. Match
-        // that exactly: route returns continue=true, no side effects.
+    fn route_config_prefix_on_standard_config_is_silent_noop_and_continues() {
+        // Selecting a standard config (Enter on a non-meta row) emits
+        // `config:<name>`. No edit UI exists for standard configs — the
+        // route re-renders the menu without side effects.
         let base = fresh_temp();
-        assert!(route(&base, "config:Whatever").unwrap());
-        // No llms.json should be written (silent noop).
-        assert!(!base.join("llms.json").exists());
+        let mut doc = LlmsDoc::new();
+        doc.set_standard_config("Sonnet", StandardConfig::new("anthropic", "x"));
+        doc.save(&base).unwrap();
+        assert!(route(&base, "config:Sonnet").unwrap());
+        // llms.json unchanged — no meta editor ran.
+        let reloaded = LlmsDoc::load(&base).unwrap();
+        assert!(reloaded.get("Sonnet").is_some());
+        std::fs::remove_dir_all(&base).ok();
+    }
+
+    #[test]
+    fn route_config_prefix_on_missing_config_is_silent_noop_and_continues() {
+        // When the named config doesn't exist the route still returns
+        // continue=true without crashing.
+        let base = fresh_temp();
+        let doc = LlmsDoc::new();
+        doc.save(&base).unwrap();
+        assert!(route(&base, "config:Ghost").unwrap());
         std::fs::remove_dir_all(&base).ok();
     }
 }

@@ -265,6 +265,53 @@ fn edit_variant_detail(
     }
 }
 
+/// Inner variant-list loop shared by `run` and `edit`.
+///
+/// Drives the add/edit/done cycle for `state` under `meta_name`. Returns
+/// `Some(MetaConfig)` when the user commits (Done), `None` on cancel.
+fn run_variant_loop(
+    state: &mut VariantListState,
+    meta_name: &str,
+    standard_configs: &[String],
+) -> Result<Option<MetaConfig>> {
+    loop {
+        let outcome = variant_list_run(state, meta_name)
+            .map_err(|e| anyhow!("variant list prompt: {e}"))?;
+
+        match outcome {
+            VariantOutcome::Continue => unreachable!("run() never returns Continue"),
+            VariantOutcome::Cancel => return Ok(None),
+            VariantOutcome::Add => {
+                add_variant(state, standard_configs)?;
+            }
+            VariantOutcome::Edit { variant_name } => {
+                edit_variant_detail(&variant_name, state, standard_configs)?;
+            }
+            VariantOutcome::Done => {
+                let variants: Vec<MetaVariant> = state
+                    .variants
+                    .iter()
+                    .map(|(name, v)| MetaVariant {
+                        name: name.clone(),
+                        model: v.model.clone(),
+                        keywords: if v.keywords.is_empty() {
+                            None
+                        } else {
+                            Some(v.keywords.clone())
+                        },
+                        description: v.description.clone(),
+                        system_prompt: v.system_prompt.clone(),
+                    })
+                    .collect();
+                return Ok(Some(MetaConfig {
+                    variants,
+                    default: state.default_variant.clone(),
+                }));
+            }
+        }
+    }
+}
+
 /// Run the multi-modal configuration wizard against `<base_dir>/llms.json`.
 ///
 /// Returns `Ok(())` on success or user cancellation. Source:
@@ -308,57 +355,67 @@ pub fn run(base_dir: &Path) -> Result<()> {
         return Ok(());
     }
 
-    loop {
-        let outcome = variant_list_run(&mut state, &meta_name)
-            .map_err(|e| anyhow!("variant list prompt: {e}"))?;
+    if let Some(config) = run_variant_loop(&mut state, &meta_name, &standard_configs)? {
+        let variant_count = config.variants.len();
+        let mut doc = LlmsDoc::load(base_dir)?;
+        doc.set_meta_config(&meta_name, config);
+        if doc.default_config().is_none() {
+            doc.set_default_config(Some(meta_name.clone()));
+        }
+        doc.save(base_dir)?;
+        display::blank();
+        display::success(&format!(
+            "Multi-modal configuration \"{meta_name}\" created with {variant_count} variants"
+        ));
+    }
+    Ok(())
+}
 
-        match outcome {
-            VariantOutcome::Continue => unreachable!("run() never returns Continue"),
-            VariantOutcome::Cancel => return Ok(()),
-            VariantOutcome::Add => {
-                // User may cancel add_variant — just show the list again.
-                add_variant(&mut state, &standard_configs)?;
-            }
-            VariantOutcome::Edit { variant_name } => {
-                edit_variant_detail(&variant_name, &mut state, &standard_configs)?;
-            }
-            VariantOutcome::Done => {
-                let variants: Vec<MetaVariant> = state
-                    .variants
-                    .iter()
-                    .map(|(name, v)| MetaVariant {
-                        name: name.clone(),
-                        model: v.model.clone(),
-                        keywords: if v.keywords.is_empty() {
-                            None
-                        } else {
-                            Some(v.keywords.clone())
-                        },
-                        description: v.description.clone(),
-                        system_prompt: v.system_prompt.clone(),
-                    })
-                    .collect();
+/// Edit an existing meta-model configuration in `<base_dir>/llms.json`.
+///
+/// Loads the named config's current variants into a `VariantListState` and
+/// runs the variant-list loop. On Done the config is overwritten in place;
+/// on Cancel the disk state is left unchanged.
+pub fn edit(base_dir: &Path, meta_name: &str) -> Result<()> {
+    let doc = LlmsDoc::load(base_dir)?;
+    let standard_configs = standard_config_names(&doc);
 
-                let mut doc = LlmsDoc::load(base_dir)?;
-                doc.set_meta_config(
-                    &meta_name,
-                    MetaConfig {
-                        variants,
-                        default: state.default_variant.clone(),
-                    },
-                );
-                if doc.default_config().is_none() {
-                    doc.set_default_config(Some(meta_name.clone()));
-                }
-                doc.save(base_dir)?;
+    let entry = match doc.get(meta_name) {
+        Some(e) => e,
+        None => return Ok(()),
+    };
 
-                let variant_count = state.variants.len();
-                display::blank();
-                display::success(&format!(
-                    "Multi-modal configuration \"{meta_name}\" created with {variant_count} variants"
-                ));
-                return Ok(());
-            }
+    let default_variant = entry.meta_default_variant().unwrap_or("").to_owned();
+    let mut variants: IndexMap<String, crate::tui::custom_prompts::variant_list_prompt::MetaVariantData> = IndexMap::new();
+    for name in entry.variant_names() {
+        if let Some(v) = entry.variant(&name) {
+            variants.insert(
+                name,
+                crate::tui::custom_prompts::variant_list_prompt::MetaVariantData {
+                    model: v.model().unwrap_or("").to_owned(),
+                    keywords: v.keywords(),
+                    description: v.description().map(str::to_owned),
+                    system_prompt: v.system_prompt().map(str::to_owned),
+                },
+            );
         }
     }
+
+    let mut state = VariantListState::new(variants, default_variant);
+
+    display::blank();
+    display::step(0, 0, &format!("Edit Multi-Modal Configuration: {meta_name}"));
+    display::blank();
+
+    if let Some(config) = run_variant_loop(&mut state, meta_name, &standard_configs)? {
+        let variant_count = config.variants.len();
+        let mut doc = LlmsDoc::load(base_dir)?;
+        doc.set_meta_config(meta_name, config);
+        doc.save(base_dir)?;
+        display::blank();
+        display::success(&format!(
+            "Multi-modal configuration \"{meta_name}\" updated with {variant_count} variants"
+        ));
+    }
+    Ok(())
 }
