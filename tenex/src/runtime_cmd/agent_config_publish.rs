@@ -47,7 +47,12 @@ pub(super) fn agent_pubkey_from_path(path: &Path) -> Option<String> {
     if path.extension().and_then(|e| e.to_str()) != Some("json") {
         return None;
     }
-    path.file_stem().and_then(|s| s.to_str()).map(str::to_owned)
+    let stem = path.file_stem().and_then(|s| s.to_str())?;
+    if stem.len() == 64 && stem.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')) {
+        Some(stem.to_owned())
+    } else {
+        None
+    }
 }
 
 /// Two kind:0 events carry equivalent state when their canonical
@@ -216,6 +221,14 @@ mod tests {
     fn agent_pubkey_from_path_rejects_non_json_files() {
         let path = PathBuf::from("/tmp/agents/deadbeef.swp");
         assert_eq!(agent_pubkey_from_path(&path), None);
+    }
+
+    #[test]
+    fn agent_pubkey_from_path_rejects_non_pubkey_stems() {
+        for name in &["index.json", "README.json", "deadbeef.json", "GGGG1111GGGG1111GGGG1111GGGG1111GGGG1111GGGG1111GGGG1111GGGG1111.json"] {
+            let path = PathBuf::from(format!("/tmp/agents/{name}"));
+            assert_eq!(agent_pubkey_from_path(&path), None, "{name} should be rejected");
+        }
     }
 
     #[test]
