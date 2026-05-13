@@ -81,7 +81,7 @@ pub(crate) fn log_unavailable_agent(pubkey: &str, names: &dyn UnavailableAgentNa
     let display_name = names
         .display_name(pubkey)
         .unwrap_or_else(|| short_pubkey(pubkey));
-    tracing::warn!(
+    tracing::debug!(
         pubkey = %pubkey,
         agent = %display_name,
         "Skipping unavailable agent {display_name}"
