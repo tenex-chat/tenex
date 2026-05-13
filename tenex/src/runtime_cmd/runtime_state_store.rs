@@ -26,7 +26,7 @@ use super::agent_subprocess::DispatchJob;
 use super::dispatch_coordinator::DispatchKey;
 use tenex_protocol::event_filter::conversation_id_from_event;
 
-use super::event_routing::{has_any_tag, is_completion_event, p_tag_pubkeys};
+use super::event_routing::{has_any_tag, p_tag_pubkeys};
 
 pub(super) const DRIVER_STALE_AFTER_MS: i64 = 10 * 60 * 1000;
 
@@ -134,11 +134,20 @@ fn fresh_delegation_target(
     }
 }
 
-pub(super) fn delegation_route_for_completion(
+/// Identify a reply from the delegated child agent that should resume the
+/// parent agent in the parent conversation. Identity is established by the
+/// triple (`route exists for this conversation`, `author == registered child`,
+/// `parent agent in p-tags`); no out-of-band marker tag is required.
+///
+/// Routing semantics: every matching child reply pops the parent back to the
+/// parent conversation context with the child's reply as input. To continue
+/// the dialogue with the child after that, the parent posts another message
+/// targeting the child in the delegation thread (or delegates again).
+pub(super) fn delegation_route_for_child_reply(
     store: &Arc<Mutex<ConversationStore>>,
     event: &Event,
 ) -> Result<Option<DelegationRoute>> {
-    if !is_completion_event(event) {
+    if event.kind != Kind::TextNote {
         return Ok(None);
     }
 
@@ -581,6 +590,8 @@ mod tests {
         assert_eq!(route.child_agent_pubkey, child_pubkey);
         assert_eq!(route.child_conversation_id, delegation.id.to_hex());
 
+        // A child reply that carries the on-wire turn-end marker
+        // (`status: completed`) routes back to the parent.
         let completion = signed_event_from(
             &child_keys,
             Kind::TextNote,
@@ -591,7 +602,7 @@ mod tests {
                 tag(&["status", "completed"]),
             ],
         );
-        let completion_route = delegation_route_for_completion(&store, &completion)
+        let completion_route = delegation_route_for_child_reply(&store, &completion)
             .unwrap()
             .expect("completion route");
 
@@ -603,6 +614,43 @@ mod tests {
             completion_route.child_conversation_id,
             delegation.id.to_hex()
         );
+
+        // Regression: a child reply WITHOUT `status: completed` must also
+        // resume the parent. The triple identity (route exists for this
+        // conversation, author == registered child, parent in p-tags) is the
+        // sole gate. Remote agents (e.g. the iPhone podcast player) don't
+        // emit the tag, and we still need their replies to pop the parent
+        // back into the parent conversation.
+        let bare_reply = signed_event_from(
+            &child_keys,
+            Kind::TextNote,
+            "Worker picked blue.",
+            vec![
+                tag(&["e", &delegation.id.to_hex(), "", "root"]),
+                tag(&["p", &route.parent_agent_pubkey]),
+            ],
+        );
+        let bare_route = delegation_route_for_child_reply(&store, &bare_reply)
+            .unwrap()
+            .expect("bare reply must route to parent");
+        assert_eq!(bare_route.parent_conversation_id, parent_conversation_id);
+        assert_eq!(bare_route.child_conversation_id, delegation.id.to_hex());
+
+        // A reply in the delegation thread authored by the *parent* (not the
+        // child) must NOT trigger resumption — the parent is following up
+        // with the child, not completing the delegation back to itself.
+        let parent_followup_in_thread = signed_event_from(
+            &parent_keys,
+            Kind::TextNote,
+            "@worker any progress?",
+            vec![
+                tag(&["e", &delegation.id.to_hex(), "", "root"]),
+                tag(&["p", &child_pubkey]),
+            ],
+        );
+        assert!(delegation_route_for_child_reply(&store, &parent_followup_in_thread)
+            .unwrap()
+            .is_none());
 
         let followup = signed_event_from(
             &parent_keys,

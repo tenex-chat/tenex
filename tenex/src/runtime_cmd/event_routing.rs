@@ -48,7 +48,7 @@ use tenex_project::{models::ProjectAgent, Agent};
 use super::agent_subprocess::DispatchJob;
 use super::dispatch_pipeline::{accept_dispatch, persist_user_message};
 use super::runtime_state_store::{
-    delegation_route_for_completion, register_delegation_route_if_needed,
+    delegation_route_for_child_reply, register_delegation_route_if_needed,
 };
 use super::RuntimeShared;
 
@@ -62,7 +62,7 @@ pub(super) fn select_dispatch_target(
     event: &Event,
 ) -> Result<(Agent, String, Option<String>)> {
     let snapshot = shared.agent_snapshot();
-    if let Some(route) = delegation_route_for_completion(&shared.store, event)? {
+    if let Some(route) = delegation_route_for_child_reply(&shared.store, event)? {
         if let Some(agent) = snapshot
             .agents
             .iter()
@@ -163,18 +163,6 @@ pub(super) fn p_tag_pubkeys(event: &Event) -> Vec<String> {
             }
         })
         .collect()
-}
-
-pub(super) fn is_completion_event(event: &Event) -> bool {
-    event.kind == Kind::TextNote && has_tag(event, "status", "completed")
-}
-
-fn has_tag(event: &Event, tag_name: &str, tag_value: &str) -> bool {
-    event.tags.iter().any(|tag| {
-        let parts = tag.as_slice();
-        parts.first().is_some_and(|head| head == tag_name)
-            && parts.get(1).is_some_and(|value| value == tag_value)
-    })
 }
 
 pub(super) fn has_any_tag(event: &Event, tag_name: &str) -> bool {
