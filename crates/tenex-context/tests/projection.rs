@@ -3,8 +3,8 @@
 
 use serde_json::json;
 use tenex_context::{
-    BreakpointKind, CacheObservation, DisplayNameResolver, Message, ModelProfile, ToolDef,
-    TurnRecord, project, project_with_excluded_event, record_turn,
+    BreakpointKind, CacheObservation, DisplayNameResolver, Message, ModelProfile,
+    ProjectionOptions, ToolDef, TurnRecord, project, project_with_options, record_turn,
 };
 use tenex_conversations::{ConversationStore, NewMessage, NewToolMessage};
 
@@ -149,6 +149,58 @@ async fn basic_projection_emits_system_prompt_and_anchor() {
         .iter()
         .any(|b| b.kind == BreakpointKind::SystemAnchor);
     assert!(has_system_anchor, "system anchor must be emitted");
+}
+
+#[tokio::test]
+async fn projection_appends_in_turn_tail_before_cache_breakpoints() {
+    let store = open_store();
+    append_user(&store, "stored-user", "stored user");
+
+    let projection = project_with_options(
+        &store,
+        CONVO_ID,
+        AGENT_PUBKEY,
+        "system",
+        &cacheable_profile(),
+        &[],
+        None,
+        None,
+        ProjectionOptions {
+            excluded_event_id: None,
+            in_turn_tail: vec![
+                Message::User {
+                    content: "tail user".into(),
+                },
+                Message::Assistant {
+                    content: "tail assistant".into(),
+                    reasoning: Vec::new(),
+                    tool_calls: Vec::new(),
+                },
+            ],
+        },
+    )
+    .await
+    .expect("project");
+
+    assert!(matches!(
+        &projection.messages[1],
+        Message::User { content } if content == "stored user"
+    ));
+    assert!(matches!(
+        &projection.messages[2],
+        Message::User { content } if content == "tail user"
+    ));
+    assert!(matches!(
+        &projection.messages[3],
+        Message::Assistant { content, .. } if content == "tail assistant"
+    ));
+    assert!(
+        projection
+            .cache_breakpoints
+            .iter()
+            .any(|hint| hint.kind == BreakpointKind::MessageStream && hint.position == 3),
+        "tail should be visible to strategies and cache breakpoint computation"
+    );
 }
 
 #[tokio::test]
@@ -451,7 +503,7 @@ async fn projection_can_exclude_live_trigger_event_from_history() {
         "current user message",
     );
 
-    let projection = project_with_excluded_event(
+    let projection = project_with_options(
         &store,
         CONVO_ID,
         AGENT_PUBKEY,
@@ -460,7 +512,10 @@ async fn projection_can_exclude_live_trigger_event_from_history() {
         &[],
         None,
         None,
-        Some("current-event"),
+        ProjectionOptions {
+            excluded_event_id: Some("current-event".into()),
+            in_turn_tail: Vec::new(),
+        },
     )
     .await
     .expect("project");

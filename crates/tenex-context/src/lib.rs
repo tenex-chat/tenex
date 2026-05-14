@@ -28,7 +28,7 @@ pub use strategies::{
 };
 pub use types::{
     BreakpointHint, BreakpointKind, CacheObservation, Message, ModelProfile, Projection,
-    ProjectionTelemetry, ReasoningBlock, ToolCall, ToolDef, TurnRecord,
+    ProjectionOptions, ProjectionTelemetry, ReasoningBlock, ToolCall, ToolDef, TurnRecord,
 };
 
 use tenex_conversations::ConversationStore;
@@ -53,7 +53,7 @@ pub async fn project(
     summarizer: Option<std::sync::Arc<dyn CompactionSummarizer>>,
     name_resolver: Option<&dyn DisplayNameResolver>,
 ) -> anyhow::Result<Projection> {
-    project_with_excluded_event(
+    project_with_options(
         store,
         conversation_id,
         agent_pubkey,
@@ -62,19 +62,20 @@ pub async fn project(
         tool_defs,
         summarizer,
         name_resolver,
-        None,
+        ProjectionOptions::default(),
     )
     .await
 }
 
-/// Like [`project`], but omits one materialized Nostr event from history.
+/// Like [`project`], but can omit one materialized Nostr event from history
+/// and append unpersisted in-turn messages before strategies run.
 ///
 /// Agent runners pass the triggering user event separately as the live prompt;
 /// when the runtime has already materialized that same event into the
 /// conversation DB, excluding it here prevents the current user message from
 /// appearing twice in the provider request.
 #[allow(clippy::too_many_arguments)]
-pub async fn project_with_excluded_event(
+pub async fn project_with_options(
     store: &ConversationStore,
     conversation_id: &str,
     agent_pubkey: &str,
@@ -83,7 +84,7 @@ pub async fn project_with_excluded_event(
     tool_defs: &[ToolDef],
     summarizer: Option<std::sync::Arc<dyn CompactionSummarizer>>,
     name_resolver: Option<&dyn DisplayNameResolver>,
-    exclude_nostr_event_id: Option<&str>,
+    options: ProjectionOptions,
 ) -> anyhow::Result<Projection> {
     tracing::trace!(
         conversation_id,
@@ -93,14 +94,15 @@ pub async fn project_with_excluded_event(
         "projecting conversation"
     );
 
-    let messages = projection::project_messages(
+    let mut messages = projection::project_messages(
         store,
         conversation_id,
         agent_pubkey,
         system_prompt,
         name_resolver,
-        exclude_nostr_event_id,
+        options.excluded_event_id.as_deref(),
     )?;
+    messages.extend(options.in_turn_tail);
     let telemetry = ProjectionTelemetry::default();
     let agent_todos = store
         .get_agent_context_state(conversation_id, agent_pubkey)

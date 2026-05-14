@@ -190,6 +190,16 @@ pub struct Projection {
     pub telemetry: ProjectionTelemetry,
 }
 
+/// Options for projecting persisted conversation history plus any in-flight
+/// messages accumulated inside the current turn.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ProjectionOptions {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub excluded_event_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub in_turn_tail: Vec<Message>,
+}
+
 /// Per-turn write-back payload. The agent runner reports what was actually
 /// sent and what the provider observed; [`crate::record_turn`] persists it
 /// into `tenex-conversations`.

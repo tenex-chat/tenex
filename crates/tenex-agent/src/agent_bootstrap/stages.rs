@@ -8,7 +8,7 @@
 use std::sync::Arc;
 
 use rig::completion::Message as RigMessage;
-use tenex_context::{Message as CtxMessage, ModelProfile, ToolDef};
+use tenex_context::{Message as CtxMessage, ModelProfile, ProjectionOptions, ToolDef};
 use tenex_conversations::ConversationStore;
 use tenex_protocol::ProjectRef;
 use tenex_rag::RagStore;
@@ -99,16 +99,15 @@ pub(super) async fn project_history(
         ),
         max_context_tokens: 200_000,
     };
-    let summarizer: Option<Arc<dyn tenex_context::CompactionSummarizer>> = Some(Arc::new(
-        compaction::LlmCompactionSummarizer::new(
+    let summarizer: Option<Arc<dyn tenex_context::CompactionSummarizer>> =
+        Some(Arc::new(compaction::LlmCompactionSummarizer::new(
             Arc::new(resolved.clone()),
             pubkey_hex.to_string(),
             conversation_id.to_string(),
             Some(project_id.to_string()),
-        ),
-    ));
+        )));
     let name_resolver = identity_resolver::IdentityServiceResolver::new(base_dir);
-    match tenex_context::project_with_excluded_event(
+    match tenex_context::project_with_options(
         store,
         conversation_id,
         pubkey_hex,
@@ -117,7 +116,10 @@ pub(super) async fn project_history(
         tool_defs,
         summarizer,
         Some(&name_resolver),
-        exclude_nostr_event_id,
+        ProjectionOptions {
+            excluded_event_id: exclude_nostr_event_id.map(str::to_string),
+            in_turn_tail: Vec::new(),
+        },
     )
     .await
     {
@@ -394,7 +396,7 @@ pub(super) async fn proactive_context_block(
     conversation_id: &str,
     resolved: &ResolvedModel,
 ) -> Option<String> {
-    use tracing::{info_span, Instrument};
+    use tracing::{Instrument, info_span};
 
     const SCORE_THRESHOLD: f64 = 0.65;
     const MAX_RESULTS: i64 = 5;
