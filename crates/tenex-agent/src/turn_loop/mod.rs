@@ -49,7 +49,8 @@ pub(crate) async fn run_turn_loop(boot: &mut AgentBootstrap) -> Result<()> {
         // Fresh recorder per turn. RecordingTool clones forward into every
         // tool call so the inner loop's invocations all land here.
         let recorder = ToolRecorder::new();
-        let tools = boot.tool_set.build_for_turn(recorder.clone());
+        let tool_registry = boot.tool_set.build_for_turn(recorder.clone());
+        let tools = tool_registry.into_rig_tools();
         let injected = boot.injection_tracker.lock().unwrap().take_new_messages();
         let turn_message = if let Some(ref injected) = injected {
             format!("{current_message}\n\n{injected}")

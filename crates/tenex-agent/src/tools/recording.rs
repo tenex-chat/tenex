@@ -17,6 +17,7 @@ use std::sync::{Arc, Mutex};
 use rig::completion::ToolDefinition;
 use rig::tool::{ToolDyn, ToolError};
 use rig::wasm_compat::WasmBoxedFuture;
+use tenex_context::ToolDef as ProjectionToolDef;
 use tracing::{field, info_span, Instrument, Span};
 
 use crate::injections::MessageInjectionTracker;
@@ -25,11 +26,12 @@ use crate::runtime_state::RuntimeStateHandle;
 /// One captured tool invocation for a single agent turn.
 #[derive(Debug, Clone)]
 pub struct ToolCallRecord {
-    /// Synthetic call id minted at recording time. Rig's `ToolDyn::call`
-    /// signature does not surface the provider's tool_use id, so the agent
-    /// links call ↔ result via this minted id end-to-end (assistant
-    /// `tool_calls[].id` and `tool_messages.tool_call_id`).
+    /// Internal call id used to link assistant tool calls to tool results.
+    /// The TENEX step loop supplies the provider tool id here; the legacy rig
+    /// `ToolDyn` path still mints one because `ToolDyn::call` has no id input.
     pub call_id: String,
+    /// Provider-native call id when the API carries a second id field.
+    pub provider_call_id: Option<String>,
     pub tool_name: String,
     pub args: serde_json::Value,
     pub result: serde_json::Value,
@@ -67,20 +69,163 @@ pub(crate) struct RecordingTool {
 }
 
 impl RecordingTool {
-    /// Wrap an erased tool so its calls are captured into `recorder`.
-    pub(crate) fn wrap_dyn(
+    pub(crate) fn new(
         tool: Box<dyn ToolDyn>,
         recorder: Arc<ToolRecorder>,
         runtime_state: Option<RuntimeStateHandle>,
         message_injections: Option<Arc<Mutex<MessageInjectionTracker>>>,
-    ) -> Box<dyn ToolDyn> {
-        Box::new(Self {
+    ) -> Self {
+        Self {
             inner: tool,
             recorder,
             runtime_state,
             message_injections,
-        })
+        }
     }
+
+    pub(crate) fn name(&self) -> String {
+        self.inner.name()
+    }
+
+    pub(crate) async fn provider_definition(&self, prompt: String) -> ToolDefinition {
+        self.inner.definition(prompt).await
+    }
+
+    pub(crate) fn projection_tool_def(&self) -> ProjectionToolDef {
+        let name = self.name();
+        ProjectionToolDef {
+            preserve_results: preserve_results_for_tool(&name),
+            name,
+        }
+    }
+
+    #[allow(dead_code)]
+    pub(crate) async fn execute_with_ids(
+        &self,
+        args: serde_json::Value,
+        tool_call_id: Option<String>,
+        provider_call_id: Option<String>,
+    ) -> Result<String, ToolError> {
+        let tool_name = self.name();
+        self.execute_json_string(
+            args.to_string(),
+            tool_call_id,
+            provider_call_id,
+            &tool_name,
+            "turn_tool_registry",
+        )
+        .await
+    }
+
+    async fn execute_json_string(
+        &self,
+        args: String,
+        tool_call_id: Option<String>,
+        provider_call_id: Option<String>,
+        tool_name: &str,
+        source: &str,
+    ) -> Result<String, ToolError> {
+        let call_id = resolve_tool_call_id(tool_name, tool_call_id, source);
+        let (result, record) = self
+            .call_recorded(call_id, clean_provider_call_id(provider_call_id), args)
+            .await;
+        self.recorder.push(record);
+        result
+    }
+
+    pub(crate) fn into_dyn(self) -> Box<dyn ToolDyn> {
+        Box::new(self)
+    }
+
+    async fn call_recorded(
+        &self,
+        call_id: String,
+        provider_call_id: Option<String>,
+        args: String,
+    ) -> (Result<String, ToolError>, ToolCallRecord) {
+        let tool_name = self.inner.name();
+        let args_json: serde_json::Value =
+            serde_json::from_str(&args).unwrap_or_else(|_| serde_json::Value::String(args.clone()));
+        let timestamp_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0);
+
+        if let Some(state) = &self.runtime_state {
+            state.start_tool(&call_id, &tool_name, &args_json);
+        }
+
+        let span = info_span!(
+            "execute_tool",
+            otel.name = format!("execute_tool {}", tool_name),
+            otel.kind = "internal",
+            "gen_ai.tool.name" = %tool_name,
+            "gen_ai.tool.call.id" = %call_id,
+            "gen_ai.tool.provider_call.id" = provider_call_id.as_deref().unwrap_or(""),
+            "gen_ai.tool.type" = "function",
+            "gen_ai.tool.call.arguments" = %args_json,
+            "gen_ai.tool.call.result" = field::Empty,
+            "gen_ai.tool.is_error" = field::Empty,
+            "error.type" = field::Empty,
+            "delegated.conversation.id" = field::Empty,
+            "delegated.agent.pubkey" = field::Empty,
+            "delegated.event.id" = field::Empty,
+        );
+
+        let mut result = self.inner.call(args).instrument(span.clone()).await;
+
+        if let Some(state) = &self.runtime_state {
+            state.finish_tool(&call_id);
+            if let Ok(output) = &mut result {
+                if let Some(reminder) = state.render_active_tools_reminder() {
+                    append_tool_result_reminder(output, &reminder);
+                }
+            }
+        }
+        if let Some(injections) = &self.message_injections {
+            if let Ok(output) = &mut result {
+                let reminder = injections.lock().unwrap().take_new_messages();
+                if let Some(reminder) = reminder {
+                    append_tool_result_reminder(output, &reminder);
+                }
+            }
+        }
+
+        let (result_json, is_error) = match &result {
+            Ok(s) => {
+                let v = serde_json::from_str::<serde_json::Value>(s)
+                    .unwrap_or_else(|_| serde_json::Value::String(s.clone()));
+                (v, false)
+            }
+            Err(e) => (serde_json::Value::String(e.to_string()), true),
+        };
+
+        record_tool_outcome(&span, &result_json, &result);
+
+        let record = ToolCallRecord {
+            call_id,
+            provider_call_id,
+            tool_name,
+            args: args_json,
+            result: result_json,
+            is_error,
+            timestamp_ms,
+        };
+
+        (result, record)
+    }
+}
+
+fn preserve_results_for_tool(name: &str) -> bool {
+    matches!(
+        name,
+        "delegate"
+            | "delegate_crossproject"
+            | "delegate_followup"
+            | "self_delegate"
+            | "load_skill"
+            | "skills_set"
+    )
 }
 
 impl ToolDyn for RecordingTool {
@@ -89,82 +234,34 @@ impl ToolDyn for RecordingTool {
     }
 
     fn definition<'a>(&'a self, prompt: String) -> WasmBoxedFuture<'a, ToolDefinition> {
-        self.inner.definition(prompt)
+        Box::pin(self.provider_definition(prompt))
     }
 
     fn call<'a>(&'a self, args: String) -> WasmBoxedFuture<'a, Result<String, ToolError>> {
         Box::pin(async move {
-            let call_id = uuid::Uuid::new_v4().to_string();
             let tool_name = self.inner.name();
-            let args_json: serde_json::Value = serde_json::from_str(&args)
-                .unwrap_or_else(|_| serde_json::Value::String(args.clone()));
-            let timestamp_ms = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_millis() as i64)
-                .unwrap_or(0);
-
-            if let Some(state) = &self.runtime_state {
-                state.start_tool(&call_id, &tool_name, &args_json);
-            }
-
-            let span = info_span!(
-                "execute_tool",
-                otel.name = format!("execute_tool {}", tool_name),
-                otel.kind = "internal",
-                "gen_ai.tool.name" = %tool_name,
-                "gen_ai.tool.call.id" = %call_id,
-                "gen_ai.tool.type" = "function",
-                "gen_ai.tool.call.arguments" = %args_json,
-                "gen_ai.tool.call.result" = field::Empty,
-                "gen_ai.tool.is_error" = field::Empty,
-                "error.type" = field::Empty,
-                "delegated.conversation.id" = field::Empty,
-                "delegated.agent.pubkey" = field::Empty,
-                "delegated.event.id" = field::Empty,
-            );
-
-            let mut result = self.inner.call(args).instrument(span.clone()).await;
-
-            if let Some(state) = &self.runtime_state {
-                state.finish_tool(&call_id);
-                if let Ok(output) = &mut result {
-                    if let Some(reminder) = state.render_active_tools_reminder() {
-                        append_tool_result_reminder(output, &reminder);
-                    }
-                }
-            }
-            if let Some(injections) = &self.message_injections {
-                if let Ok(output) = &mut result {
-                    let reminder = injections.lock().unwrap().take_new_messages();
-                    if let Some(reminder) = reminder {
-                        append_tool_result_reminder(output, &reminder);
-                    }
-                }
-            }
-
-            let (result_json, is_error) = match &result {
-                Ok(s) => {
-                    let v = serde_json::from_str::<serde_json::Value>(s)
-                        .unwrap_or_else(|_| serde_json::Value::String(s.clone()));
-                    (v, false)
-                }
-                Err(e) => (serde_json::Value::String(e.to_string()), true),
-            };
-
-            record_tool_outcome(&span, &result_json, &result);
-
-            self.recorder.push(ToolCallRecord {
-                call_id,
-                tool_name,
-                args: args_json,
-                result: result_json,
-                is_error,
-                timestamp_ms,
-            });
-
-            result
+            self.execute_json_string(args, None, None, &tool_name, "rig_tool_dyn")
+                .await
         })
     }
+}
+
+fn resolve_tool_call_id(tool_name: &str, tool_call_id: Option<String>, source: &str) -> String {
+    if let Some(id) = tool_call_id.filter(|id| !id.is_empty()) {
+        return id;
+    }
+    let synthetic = uuid::Uuid::new_v4().to_string();
+    tracing::debug!(
+        tool_name,
+        source,
+        synthetic_call_id = %synthetic,
+        "minted synthetic tool call id"
+    );
+    synthetic
+}
+
+fn clean_provider_call_id(provider_call_id: Option<String>) -> Option<String> {
+    provider_call_id.filter(|id| !id.is_empty())
 }
 
 fn record_tool_outcome(

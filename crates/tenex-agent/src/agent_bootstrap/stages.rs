@@ -81,6 +81,7 @@ pub(super) async fn project_history(
     system_prompt: &str,
     resolved: &ResolvedModel,
     base_dir: &std::path::Path,
+    tool_defs: &[ToolDef],
     exclude_nostr_event_id: Option<&str>,
 ) -> Vec<RigMessage> {
     let Some(store) = conv_store else {
@@ -98,7 +99,6 @@ pub(super) async fn project_history(
         ),
         max_context_tokens: 200_000,
     };
-    let tool_defs: Vec<ToolDef> = Vec::new();
     let summarizer: Option<Arc<dyn tenex_context::CompactionSummarizer>> = Some(Arc::new(
         compaction::LlmCompactionSummarizer::new(
             Arc::new(resolved.clone()),
@@ -114,7 +114,7 @@ pub(super) async fn project_history(
         pubkey_hex,
         system_prompt,
         &model_profile,
-        &tool_defs,
+        tool_defs,
         summarizer,
         Some(&name_resolver),
         exclude_nostr_event_id,

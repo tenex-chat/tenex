@@ -11,6 +11,7 @@ use crate::config::ResolvedModel;
 use crate::emit::EmitState;
 use crate::injections::MessageInjectionTracker;
 use crate::runtime_state::RuntimeStateHandle;
+use crate::tools::TurnToolRegistry;
 
 use super::agents_md::AgentsMdReminderState;
 use super::agents_write::AgentsWriteTool;
@@ -92,11 +93,11 @@ pub(crate) struct ToolSet {
 impl ToolSet {
     fn push_tool(
         &self,
-        tools: &mut Vec<Box<dyn ToolDyn>>,
+        tools: &mut TurnToolRegistry,
         recorder: &Arc<ToolRecorder>,
         t: Box<dyn ToolDyn>,
     ) {
-        tools.push(RecordingTool::wrap_dyn(
+        tools.push(RecordingTool::new(
             t,
             recorder.clone(),
             self.runtime_state.clone(),
@@ -112,7 +113,7 @@ impl ToolSet {
 
     fn push_fs(
         &self,
-        tools: &mut Vec<Box<dyn ToolDyn>>,
+        tools: &mut TurnToolRegistry,
         recorder: &Arc<ToolRecorder>,
         granted_name: &str,
         project_tool: Box<dyn ToolDyn>,
@@ -128,8 +129,8 @@ impl ToolSet {
         self.push_tool(tools, recorder, tool);
     }
 
-    pub(crate) fn build_for_turn(&self, recorder: Arc<ToolRecorder>) -> Vec<Box<dyn ToolDyn>> {
-        let mut tools: Vec<Box<dyn ToolDyn>> = Vec::new();
+    pub(crate) fn build_for_turn(&self, recorder: Arc<ToolRecorder>) -> TurnToolRegistry {
+        let mut tools = TurnToolRegistry::new();
         let agent_home_str = self.agent_home.display().to_string();
         let workspace_restricted = self.workspace_access_restricted();
 

@@ -31,6 +31,7 @@ pub mod sign_as_user;
 pub mod skill_list;
 pub mod skills_set;
 pub mod todo;
+pub(crate) mod turn_tool_registry;
 
 pub(crate) use agent_tool_set::ToolSet;
 pub use delegate::DelegateTool;
@@ -41,3 +42,4 @@ pub use recording::ToolRecorder;
 pub use skill_list::SkillListTool;
 pub use skills_set::SkillsSetTool;
 pub use todo::{format_todos_reminder, TodoItem, TodoStatus};
+pub(crate) use turn_tool_registry::TurnToolRegistry;

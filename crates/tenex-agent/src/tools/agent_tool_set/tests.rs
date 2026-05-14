@@ -7,6 +7,7 @@ use tenex_protocol::{
 
 use crate::emit::EmitStateArgs;
 use crate::skills::SkillLookupCtx;
+use serde_json::json;
 
 struct FakeChannel {
     identity: PrincipalRef,
@@ -128,14 +129,66 @@ fn make_test_tool_set(category: Option<AgentCategory>, granted: HashSet<String>)
 
 fn tool_names(set: &ToolSet) -> HashSet<String> {
     let recorder = ToolRecorder::new();
-    set.build_for_turn(recorder)
+    set.build_for_turn(recorder).tool_names().collect()
+}
+
+#[tokio::test]
+async fn registry_provider_and_projection_defs_have_matching_names() {
+    let set = make_test_tool_set(None, HashSet::new());
+    let recorder = ToolRecorder::new();
+    let registry = set.build_for_turn(recorder);
+
+    let provider_names: HashSet<String> = registry
+        .provider_definitions("test prompt".into())
+        .await
         .into_iter()
-        .map(|t| t.name())
-        .collect()
+        .map(|definition| definition.name)
+        .collect();
+    let projection_defs = registry.projection_tool_defs();
+    let projection_names: HashSet<String> = projection_defs
+        .iter()
+        .map(|definition| definition.name.clone())
+        .collect();
+
+    assert_eq!(provider_names, projection_names);
+    assert!(
+        projection_defs
+            .iter()
+            .any(|definition| definition.name == "skills_set" && definition.preserve_results),
+        "skills_set results should be preserved because they carry skill bodies"
+    );
+}
+
+#[tokio::test]
+async fn registry_execute_records_provider_tool_ids() {
+    let set = make_test_tool_set(None, HashSet::new());
+    let recorder = ToolRecorder::new();
+    let registry = set.build_for_turn(recorder.clone());
+
+    let output = registry
+        .execute(
+            "no_response",
+            json!({}),
+            Some("provider-tool-1".into()),
+            Some("provider-call-1".into()),
+        )
+        .await
+        .expect("tool executes");
+    assert!(output.contains("silent-complete"));
+
+    let records = recorder.take_records();
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0].call_id, "provider-tool-1");
+    assert_eq!(
+        records[0].provider_call_id.as_deref(),
+        Some("provider-call-1")
+    );
 }
 
 fn assert_workspace_restricted(names: &HashSet<String>) {
-    for absent in ["shell", "fs_read", "fs_write", "fs_edit", "fs_glob", "fs_grep"] {
+    for absent in [
+        "shell", "fs_read", "fs_write", "fs_edit", "fs_glob", "fs_grep",
+    ] {
         assert!(
             !names.contains(absent),
             "{absent} must be absent for workspace-restricted category, names: {names:?}"

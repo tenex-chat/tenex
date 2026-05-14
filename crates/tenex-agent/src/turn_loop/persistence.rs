@@ -111,7 +111,7 @@ pub(super) async fn record_turn_outcome(
         .iter()
         .map(|r| CtxToolCall {
             id: r.call_id.clone(),
-            provider_call_id: None,
+            provider_call_id: r.provider_call_id.clone(),
             name: r.tool_name.clone(),
             arguments: r.args.clone(),
         })

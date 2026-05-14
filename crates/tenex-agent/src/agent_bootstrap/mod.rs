@@ -33,7 +33,8 @@ use crate::injections::MessageInjectionTracker;
 use crate::runtime_state::RuntimeStateHandle;
 use crate::shell_task_reminder::render_active_shell_tasks_reminder;
 use crate::tools::{
-    self, RagAddDocumentsTool, RagSearchTool, SkillListTool, SkillsSetTool, TodoItem, ToolSet,
+    self, RagAddDocumentsTool, RagSearchTool, SkillListTool, SkillsSetTool, TodoItem,
+    ToolRecorder, ToolSet,
 };
 use crate::{escalation, home, stdio_home, workflows};
 
@@ -442,25 +443,6 @@ pub(crate) async fn build(
         system_prompt.push_str(&active_shell_tasks);
     }
 
-    // Project conversation history. The projection produces interleaved
-    // assistant + tool-result messages; the system prompt is dropped here
-    // because rig handles it via `preamble`.
-    let initial_history: Vec<RigMessage> = stages::project_history(
-        conv_store.as_ref(),
-        &conversation_id,
-        &pubkey_hex,
-        &project_id,
-        &system_prompt,
-        &resolved,
-        &base_dir,
-        Some(&trigger_event_id),
-    )
-    .await;
-    eprintln!(
-        "[tenex-agent] Running agent (history: {} messages)...",
-        initial_history.len()
-    );
-
     let escalation_pubkey = escalation::resolve_escalation_pubkey(&base_dir, &project_agents)
         .filter(|pk| pk != &pubkey_hex);
     let blossom_url = helpers::read_blossom_server_url(&base_dir)
@@ -506,6 +488,30 @@ pub(crate) async fn build(
         blossom_url,
         agent_keys,
     };
+    let projection_tool_defs = tool_set
+        .build_for_turn(ToolRecorder::new())
+        .projection_tool_defs()
+        .to_vec();
+
+    // Project conversation history. The projection produces interleaved
+    // assistant + tool-result messages; the system prompt is dropped here
+    // because rig handles it via `preamble`.
+    let initial_history: Vec<RigMessage> = stages::project_history(
+        conv_store.as_ref(),
+        &conversation_id,
+        &pubkey_hex,
+        &project_id,
+        &system_prompt,
+        &resolved,
+        &base_dir,
+        &projection_tool_defs,
+        Some(&trigger_event_id),
+    )
+    .await;
+    eprintln!(
+        "[tenex-agent] Running agent (history: {} messages)...",
+        initial_history.len()
+    );
 
     // Keep a handle with shared Arc refs so we can read the pending final turn
     // after the stream ends, even after `hook` is moved into the agent builder.
