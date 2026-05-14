@@ -135,7 +135,7 @@ async fn spawn_child(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .process_group(0)
-        .kill_on_drop(false);
+        .kill_on_drop(true);
     if let Some(recipient) = job.completion_recipient_pubkey.as_deref() {
         command.env("TENEX_COMPLETION_RECIPIENT_PUBKEY", recipient);
     }

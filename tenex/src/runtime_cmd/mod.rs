@@ -28,7 +28,7 @@ use anyhow::{Context, Result};
 use clap::Parser;
 use nostr_sdk::prelude::*;
 use notify::{
-    Config as NotifyConfig, Event as NotifyEvent, RecommendedWatcher, RecursiveMode, Watcher,
+    Config as NotifyConfig, Event as NotifyEvent, PollWatcher, RecursiveMode, Watcher,
 };
 use tracing::{info, warn};
 
@@ -383,11 +383,11 @@ pub async fn run(args: RuntimeArgs) -> Result<()> {
     let agents_dir = base_dir.join("agents");
     let (agent_fs_tx, mut agent_fs_rx) =
         tokio::sync::mpsc::channel::<Result<NotifyEvent, notify::Error>>(64);
-    let mut agent_config_watcher = RecommendedWatcher::new(
+    let mut agent_config_watcher = PollWatcher::new(
         move |res| {
             agent_fs_tx.blocking_send(res).ok();
         },
-        NotifyConfig::default(),
+        NotifyConfig::default().with_poll_interval(Duration::from_secs(2)),
     )
     .context("create agent config watcher")?;
     agent_config_watcher
