@@ -4,6 +4,7 @@
 //! in-flight messages, telemetry, and access to `tool_defs`. The default
 //! pipeline is fixed: compaction → decay → reminders.
 
+use crate::CompactionOverride;
 use crate::types::{Message, ModelProfile, ProjectionTelemetry, ToolDef};
 use async_trait::async_trait;
 use std::sync::Arc;
@@ -65,8 +66,21 @@ pub trait Strategy: Send + Sync {
 /// summaries. If `None`, compaction falls back to a deterministic
 /// placeholder.
 pub fn default_stack(summarizer: Option<Arc<dyn CompactionSummarizer>>) -> Vec<Box<dyn Strategy>> {
+    stack_with_compaction_override(summarizer, None)
+}
+
+pub fn stack_with_compaction_override(
+    summarizer: Option<Arc<dyn CompactionSummarizer>>,
+    compaction_override: Option<&CompactionOverride>,
+) -> Vec<Box<dyn Strategy>> {
+    let compaction = match compaction_override {
+        Some(override_) => {
+            CompactionToolStrategy::with_threshold_ratio(summarizer, override_.threshold_ratio)
+        }
+        None => CompactionToolStrategy::new(summarizer),
+    };
     vec![
-        Box::new(CompactionToolStrategy::new(summarizer)),
+        Box::new(compaction),
         Box::new(ToolResultDecayStrategy),
         Box::new(RemindersStrategy),
     ]

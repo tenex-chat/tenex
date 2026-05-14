@@ -4,8 +4,8 @@ use std::time::{Duration, Instant};
 use crate::emit::EmitState;
 use crate::runtime_state::RuntimeStateHandle;
 use crate::tools::{TodoItem, TodoStatus};
-use rig::agent::{HookAction, PromptHook, ToolCallHookAction};
-use rig::completion::{CompletionModel, Message};
+use rig::agent::{HookAction, ToolCallHookAction};
+use rig::completion::Message;
 use tenex_protocol::{ConversationIntent, Intent, StreamTextDeltaIntent, ToolUseIntent};
 use tenex_supervision::{
     supervisor::Supervisor,
@@ -85,12 +85,8 @@ impl EmitHook {
     }
 }
 
-impl<M: CompletionModel> PromptHook<M> for EmitHook {
-    fn on_text_delta(
-        &self,
-        text_delta: &str,
-        _aggregated_text: &str,
-    ) -> impl std::future::Future<Output = HookAction> + Send {
+impl EmitHook {
+    pub async fn on_text_delta(&self, text_delta: &str, _aggregated_text: &str) -> HookAction {
         {
             let mut acc = self.accumulated_text.lock().unwrap();
             acc.push_str(text_delta);
@@ -98,32 +94,41 @@ impl<M: CompletionModel> PromptHook<M> for EmitHook {
         let _ = self
             .delta_tx
             .send(DeltaSignal::Delta(text_delta.to_string()));
-        async { HookAction::cont() }
+        HookAction::cont()
     }
 
-    fn on_completion_call(
+    pub async fn on_completion_call(&self, _prompt: &Message, _history: &[Message]) -> HookAction {
+        if let Some(driver) = self.runtime_state.clone() {
+            driver.acquire_driver().await;
+        }
+        // Start the runtime timer only after we hold the driver lock,
+        // so cross-agent wait time is not billed as LLM runtime.
+        self.state.start_llm_stream();
+        HookAction::cont()
+    }
+
+    pub async fn on_stream_completion_response_finish<R>(
         &self,
         _prompt: &Message,
-        _history: &[Message],
-    ) -> impl std::future::Future<Output = HookAction> + Send {
-        let runtime_state = self.runtime_state.clone();
-        let state = self.state.clone();
-        async move {
-            if let Some(driver) = runtime_state {
-                driver.acquire_driver().await;
-            }
-            // Start the runtime timer only after we hold the driver lock,
-            // so cross-agent wait time is not billed as LLM runtime.
-            state.start_llm_stream();
-            HookAction::cont()
+        _response: &R,
+    ) -> HookAction {
+        self.finish_stream().await
+    }
+
+    pub async fn on_stream_end_without_response(&self, _prompt: &Message) -> HookAction {
+        self.finish_stream().await
+    }
+
+    pub fn abort_stream(&self) {
+        self.state.end_llm_stream();
+        let _ = std::mem::take(&mut *self.accumulated_text.lock().unwrap());
+        let _ = self.delta_tx.send(DeltaSignal::EndTurn);
+        if let Some(state) = self.runtime_state.clone() {
+            state.release_driver();
         }
     }
 
-    fn on_stream_completion_response_finish(
-        &self,
-        _prompt: &Message,
-        _response: &<M as CompletionModel>::StreamingResponse,
-    ) -> impl std::future::Future<Output = HookAction> + Send {
+    async fn finish_stream(&self) -> HookAction {
         self.state.end_llm_stream();
         let content = std::mem::take(&mut *self.accumulated_text.lock().unwrap());
         let _ = self.delta_tx.send(DeltaSignal::EndTurn);
@@ -145,72 +150,65 @@ impl<M: CompletionModel> PromptHook<M> for EmitHook {
             },
         );
 
-        let state = self.state.clone();
-        let channel = self.state.channel.clone();
-        let runtime_state = self.runtime_state.clone();
-
-        async move {
-            if let Some(state) = runtime_state {
-                state.release_driver();
-            }
-            if let Some((prev_content, prev_ral)) = prev_pending {
-                let mut ctx = state.build_ctx(prev_ral);
-                ctx.llm_runtime_ms = state.take_runtime_delta();
-                let intent = ConversationIntent {
-                    content: prev_content,
-                    is_reasoning: false,
-                    usage: None,
-                    metadata: None,
-                };
-                if let Err(e) = channel.send(Intent::Conversation(intent), &ctx).await {
-                    eprintln!("[tenex-agent] warn: conversation emit failed: {e}");
-                }
-            }
-            HookAction::cont()
+        if let Some(state) = self.runtime_state.clone() {
+            state.release_driver();
         }
+        if let Some((prev_content, prev_ral)) = prev_pending {
+            let mut ctx = self.state.build_ctx(prev_ral);
+            ctx.llm_runtime_ms = self.state.take_runtime_delta();
+            let intent = ConversationIntent {
+                content: prev_content,
+                is_reasoning: false,
+                usage: None,
+                metadata: None,
+            };
+            if let Err(e) = self
+                .state
+                .channel
+                .send(Intent::Conversation(intent), &ctx)
+                .await
+            {
+                eprintln!("[tenex-agent] warn: conversation emit failed: {e}");
+            }
+        }
+        HookAction::cont()
     }
 
-    fn on_tool_result(
+    pub async fn on_tool_result(
         &self,
         tool_name: &str,
         _tool_call_id: Option<String>,
         _internal_call_id: &str,
         _args: &str,
         result: &str,
-    ) -> impl std::future::Future<Output = HookAction> + Send {
+    ) -> HookAction {
         let is_mcp_error = tool_name.starts_with("mcp__") && result.starts_with("Error: ");
-        let state = self.state.clone();
-        let channel = self.state.channel.clone();
-        let tool_name = tool_name.to_string();
-        let result = result.to_string();
-        async move {
-            if !is_mcp_error {
-                return HookAction::cont();
-            }
-            let ral = state.meta.lock().unwrap().ral;
-            let ctx = state.build_ctx(ral);
-            let intent = ToolUseIntent {
-                tool_name,
-                content: result,
-                args_json: None,
-                referenced_messages: Vec::new(),
-                usage: None,
-                extra_tags: vec![vec!["tool-error".to_string(), "true".to_string()]],
-            };
-            if let Err(e) = channel.send(Intent::ToolUse(intent), &ctx).await {
-                eprintln!("[tenex-agent] warn: failed to emit MCP tool error event: {e}");
-            }
-            HookAction::cont()
+        if !is_mcp_error {
+            return HookAction::cont();
         }
+        let ral = self.state.meta.lock().unwrap().ral;
+        let ctx = self.state.build_ctx(ral);
+        let intent = ToolUseIntent {
+            tool_name: tool_name.to_string(),
+            content: result.to_string(),
+            args_json: None,
+            referenced_messages: Vec::new(),
+            usage: None,
+            extra_tags: vec![vec!["tool-error".to_string(), "true".to_string()]],
+        };
+        if let Err(e) = self.state.channel.send(Intent::ToolUse(intent), &ctx).await {
+            eprintln!("[tenex-agent] warn: failed to emit MCP tool error event: {e}");
+        }
+        HookAction::cont()
     }
 
-    fn on_tool_call(
+    pub async fn on_tool_call(
         &self,
         tool_name: &str,
         _tool_call_id: Option<String>,
         _internal_call_id: &str,
         args: &str,
-    ) -> impl std::future::Future<Output = ToolCallHookAction> + Send {
+    ) -> ToolCallHookAction {
         let emits_delayed_tool_use = matches!(
             tool_name,
             "delegate" | "delegate_followup" | "self_delegate" | "delegate_crossproject"
@@ -237,45 +235,50 @@ impl<M: CompletionModel> PromptHook<M> for EmitHook {
         // idempotent so the later `on_stream_completion_response_finish`
         // hook is a safe no-op when timing was already stopped here.
         self.state.end_llm_stream();
-        let state = self.state.clone();
-        let channel = self.state.channel.clone();
-        let runtime_state = self.runtime_state.clone();
 
-        async move {
-            if let Some(reason) = block_reason {
-                // Skip path: leave the runtime delta unconsumed. The
-                // supervisor-blocked tool emits no ToolUse here, and a
-                // subsequent event (the next stream chunk, conversation
-                // emit, or the next tool call) will claim the delta.
-                return ToolCallHookAction::skip(reason);
-            }
-            if let Some(rs) = runtime_state {
-                rs.release_driver();
-            }
-            if !emits_delayed_tool_use {
-                // Only consume the runtime delta when we are actually
-                // sending the generic ToolUse event. Delayed-emit tools
-                // (delegate, delegate_followup, self_delegate,
-                // delegate_crossproject) emit their own events later and
-                // consume the delta themselves; consuming it here would
-                // silently drop it.
-                let ral = state.meta.lock().unwrap().ral;
-                let mut ctx = state.build_ctx(ral);
-                ctx.llm_runtime_ms = state.take_runtime_delta();
-                let intent = ToolUseIntent {
-                    tool_name: name,
-                    content: String::new(),
-                    args_json: Some(args_string),
-                    referenced_messages: Vec::new(),
-                    usage: None,
-                    extra_tags: Vec::new(),
-                };
-                if let Err(e) = channel.send(Intent::ToolUse(intent), &ctx).await {
-                    eprintln!("[tenex-agent] warn: failed to emit tool-use event: {e}");
-                }
-            }
-            ToolCallHookAction::cont()
+        if let Some(reason) = block_reason {
+            // Skip path: leave the runtime delta unconsumed. The
+            // supervisor-blocked tool emits no ToolUse here, and a
+            // subsequent event (the next stream chunk, conversation
+            // emit, or the next tool call) will claim the delta.
+            return ToolCallHookAction::skip(reason);
         }
+        if let Some(rs) = self.runtime_state.clone() {
+            rs.release_driver();
+        }
+        if !emits_delayed_tool_use {
+            // Only consume the runtime delta when we are actually
+            // sending the generic ToolUse event. Delayed-emit tools
+            // (delegate, delegate_followup, self_delegate,
+            // delegate_crossproject) emit their own events later and
+            // consume the delta themselves; consuming it here would
+            // silently drop it.
+            let ral = self.state.meta.lock().unwrap().ral;
+            let mut ctx = self.state.build_ctx(ral);
+            ctx.llm_runtime_ms = self.state.take_runtime_delta();
+            let intent = ToolUseIntent {
+                tool_name: name,
+                content: String::new(),
+                args_json: Some(args_string),
+                referenced_messages: Vec::new(),
+                usage: None,
+                extra_tags: Vec::new(),
+            };
+            if let Err(e) = self.state.channel.send(Intent::ToolUse(intent), &ctx).await {
+                eprintln!("[tenex-agent] warn: failed to emit tool-use event: {e}");
+            }
+        }
+        ToolCallHookAction::cont()
+    }
+
+    pub async fn on_tool_call_delta(
+        &self,
+        _tool_call_id: &str,
+        _internal_call_id: &str,
+        _tool_name: Option<&str>,
+        _tool_call_delta: &str,
+    ) -> HookAction {
+        HookAction::cont()
     }
 }
 

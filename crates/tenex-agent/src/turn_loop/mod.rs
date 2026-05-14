@@ -5,26 +5,30 @@
 //! [`crate::agent_bootstrap::build`] and consumes its mutable handles
 //! (recorders, supervisor lock, runtime-state release_driver) until the
 //! supervisor accepts the response. Loop-local working values
-//! (`current_message`, accumulated `re_engage_history`) live as locals
-//! here; everything else flows through `&mut AgentBootstrap`.
+//! (`current_message`, accumulated re-engagement tail) live as locals here;
+//! everything else flows through `&mut AgentBootstrap`.
 
+mod error_classify;
 mod persistence;
+mod step;
 
 use std::sync::atomic::Ordering;
 
 use anyhow::{Context, Result};
+use rig::client::CompletionClient as _;
 use rig::completion::Message as RigMessage;
 use rig::providers::{anthropic, ollama, openai, openrouter};
 use tenex_accounting::{
-    finish_trace, flush as flush_accounting, open_trace, with_trace, RecordLlmCall, RootKind,
+    RecordLlmCall, RootKind, finish_trace, flush as flush_accounting, open_trace, with_trace,
 };
+use tenex_context::Message as CtxMessage;
 use tenex_protocol::{CompletionIntent, ConversationIntent, Intent, LlmUsage};
 use tenex_supervision::supervisor::PostCompletionOutcome;
 use tenex_supervision::types::{TodoEntry as SupTodoEntry, TodoStatus as SupTodoStatus};
-use tracing::{info_span, Instrument};
+use tracing::{Instrument, info_span};
 
 use crate::agent_bootstrap::AgentBootstrap;
-use crate::cassette_client::{RecordingClient, RecordingModel};
+use crate::cassette_client::RecordingClient;
 use crate::mock_llm;
 use crate::oauth_client;
 use crate::tools::{TodoStatus, ToolRecorder};
@@ -33,24 +37,17 @@ pub(crate) async fn run_turn_loop(boot: &mut AgentBootstrap) -> Result<()> {
     // current_message starts as the inbound user prompt; supervision may replace it with a
     // re-engagement prompt after each turn if pending todos remain.
     let mut current_message = std::mem::take(&mut boot.user_message);
-    // extra history accumulated from re-engagement turns (user + assistant pairs).
-    let mut re_engage_history: Vec<RigMessage> = Vec::new();
+    let mut re_engage_tail: Vec<CtxMessage> = Vec::new();
     let mut iteration: u64 = 0;
 
     'agent_loop: loop {
         iteration += 1;
         boot.suppress_response.store(false, Ordering::Release);
-        let current_history: Vec<RigMessage> = {
-            let mut h = boot.initial_history.clone();
-            h.extend(re_engage_history.iter().cloned());
-            h
-        };
 
         // Fresh recorder per turn. RecordingTool clones forward into every
         // tool call so the inner loop's invocations all land here.
         let recorder = ToolRecorder::new();
         let tool_registry = boot.tool_set.build_for_turn(recorder.clone());
-        let tools = tool_registry.into_rig_tools();
         let injected = boot.injection_tracker.lock().unwrap().take_new_messages();
         let turn_message = if let Some(ref injected) = injected {
             format!("{current_message}\n\n{injected}")
@@ -63,8 +60,8 @@ pub(crate) async fn run_turn_loop(boot: &mut AgentBootstrap) -> Result<()> {
         // before the text (preferred order). This applies to every turn, including
         // re-engagement, so the original images remain visible as context.
         let turn_prompt: RigMessage = {
-            use rig::completion::message::{Text, UserContent};
             use rig::OneOrMany;
+            use rig::completion::message::{Text, UserContent};
             match &boot.envelope_image_parts {
                 Some(image_parts) => {
                     let mut parts: Vec<UserContent> = image_parts.clone();
@@ -106,11 +103,9 @@ pub(crate) async fn run_turn_loop(boot: &mut AgentBootstrap) -> Result<()> {
             ..Default::default()
         })
         .await;
-        let resolved = &boot.resolved;
-        let cassette_recorder = &boot.cassette_recorder;
-        let system_prompt = &boot.system_prompt;
-        let hook = &boot.hook;
-        let agent_slug = &boot.agent_slug;
+        let resolved = boot.resolved.clone();
+        let cassette_recorder = boot.cassette_recorder.clone();
+        let agent_slug = boot.agent_slug.clone();
         let turn_body = async {
             let response = match resolved.provider.as_str() {
                 "openrouter" => {
@@ -123,15 +118,16 @@ pub(crate) async fn run_turn_loop(boot: &mut AgentBootstrap) -> Result<()> {
                         cassette_recorder.clone(),
                         "openrouter",
                     );
-                    run_agent!(
-                        client,
-                        &resolved.model,
-                        system_prompt,
+                    step::run_step_loop(
+                        boot,
+                        client.completion_model(resolved.model.clone()),
                         turn_prompt.clone(),
-                        current_history,
-                        hook.clone(),
-                        tools
+                        &turn_message,
+                        &re_engage_tail,
+                        tool_registry,
+                        recorder.clone(),
                     )
+                    .await?
                 }
                 "openai" => {
                     let key = resolved
@@ -143,15 +139,16 @@ pub(crate) async fn run_turn_loop(boot: &mut AgentBootstrap) -> Result<()> {
                         cassette_recorder.clone(),
                         "openai",
                     );
-                    run_agent!(
-                        client,
-                        &resolved.model,
-                        system_prompt,
+                    step::run_step_loop(
+                        boot,
+                        client.completion_model(resolved.model.clone()),
                         turn_prompt.clone(),
-                        current_history,
-                        hook.clone(),
-                        tools
+                        &turn_message,
+                        &re_engage_tail,
+                        tool_registry,
+                        recorder.clone(),
                     )
+                    .await?
                 }
                 "ollama" => {
                     let mut builder = ollama::Client::builder().api_key(rig::client::Nothing);
@@ -160,31 +157,33 @@ pub(crate) async fn run_turn_loop(boot: &mut AgentBootstrap) -> Result<()> {
                     }
                     let client =
                         RecordingClient::new(builder.build()?, cassette_recorder.clone(), "ollama");
-                    run_agent!(
-                        client,
-                        &resolved.model,
-                        system_prompt,
+                    step::run_step_loop(
+                        boot,
+                        client.completion_model(resolved.model.clone()),
                         turn_prompt.clone(),
-                        current_history,
-                        hook.clone(),
-                        tools
+                        &turn_message,
+                        &re_engage_tail,
+                        tool_registry,
+                        recorder.clone(),
                     )
+                    .await?
                 }
                 "mock" => {
                     let client = RecordingClient::new(
-                        mock_llm::MockClient::from_env(agent_slug)?,
+                        mock_llm::MockClient::from_env(&agent_slug)?,
                         cassette_recorder.clone(),
                         "mock",
                     );
-                    run_agent!(
-                        client,
-                        &resolved.model,
-                        system_prompt,
+                    step::run_step_loop(
+                        boot,
+                        client.completion_model(resolved.model.clone()),
                         turn_prompt.clone(),
-                        current_history,
-                        hook.clone(),
-                        tools
+                        &turn_message,
+                        &re_engage_tail,
+                        tool_registry,
+                        recorder.clone(),
                     )
+                    .await?
                 }
                 _ => {
                     let key = resolved.api_key.clone().with_context(|| {
@@ -204,39 +203,38 @@ pub(crate) async fn run_turn_loop(boot: &mut AgentBootstrap) -> Result<()> {
                             cassette_recorder.clone(),
                             "anthropic",
                         );
-                        run_agent!(
-                            client,
-                            &resolved.model,
-                            system_prompt,
+                        let model = client
+                            .completion_model(resolved.model.clone())
+                            .map_inner(|inner| inner.with_prompt_caching());
+                        step::run_step_loop(
+                            boot,
+                            model,
                             turn_prompt.clone(),
-                            current_history,
-                            hook.clone(),
-                            tools,
-                            |m: RecordingModel<
-                                anthropic::completion::CompletionModel<
-                                    reqwest_middleware::ClientWithMiddleware,
-                                >,
-                            >| m
-                                .map_inner(|inner| inner.with_prompt_caching())
+                            &turn_message,
+                            &re_engage_tail,
+                            tool_registry,
+                            recorder.clone(),
                         )
+                        .await?
                     } else {
                         let client = RecordingClient::new(
                             anthropic::Client::new(&key)?,
                             cassette_recorder.clone(),
                             "anthropic",
                         );
-                        run_agent!(
-                            client,
-                            &resolved.model,
-                            system_prompt,
+                        let model = client
+                            .completion_model(resolved.model.clone())
+                            .map_inner(|inner| inner.with_prompt_caching());
+                        step::run_step_loop(
+                            boot,
+                            model,
                             turn_prompt.clone(),
-                            current_history,
-                            hook.clone(),
-                            tools,
-                            |m: RecordingModel<anthropic::completion::CompletionModel>| {
-                                m.map_inner(|inner| inner.with_prompt_caching())
-                            }
+                            &turn_message,
+                            &re_engage_tail,
+                            tool_registry,
+                            recorder.clone(),
                         )
+                        .await?
                     }
                 }
             };
@@ -273,8 +271,6 @@ pub(crate) async fn run_turn_loop(boot: &mut AgentBootstrap) -> Result<()> {
             state.release_driver();
         }
 
-        let recorded_calls = recorder.take_records();
-
         if let Some(ref store) = boot.conv_store {
             {
                 let final_todos = boot.todos.lock().unwrap();
@@ -287,32 +283,24 @@ pub(crate) async fn run_turn_loop(boot: &mut AgentBootstrap) -> Result<()> {
                     &final_skills,
                 );
             }
-            persistence::record_tool_messages(
-                store,
-                &boot.conversation_id,
-                &boot.pubkey_hex,
-                &recorded_calls,
-            );
-            with_trace(
-                accounting_trace.clone(),
-                persistence::record_turn_outcome(
-                    boot,
-                    store,
-                    &current_message,
-                    final_response.response(),
-                    &recorded_calls,
-                    &final_response.usage(),
-                ),
-            )
-            .await;
         }
+        with_trace(
+            accounting_trace.clone(),
+            persistence::record_turn_accounting(
+                boot,
+                &current_message,
+                &final_response.response,
+                &final_response.usage,
+            ),
+        )
+        .await;
 
         finish_trace(accounting_trace).await;
         flush_accounting().await;
 
         eprintln!("[tenex-agent] Agent completed.");
 
-        let stream_usage = final_response.usage();
+        let stream_usage = final_response.usage;
         let pending_final = boot.hook_handle.take_pending();
 
         // Post-completion supervision: check if pending todos warrant re-engagement.
@@ -421,8 +409,7 @@ pub(crate) async fn run_turn_loop(boot: &mut AgentBootstrap) -> Result<()> {
                 break 'agent_loop;
             }
             PostCompletionOutcome::ReEngage { message } => {
-                re_engage_history
-                    .extend(final_response.history().unwrap_or_default().iter().cloned());
+                re_engage_tail = final_response.tail;
                 current_message = message;
                 eprintln!("[tenex-agent] Supervision: pending todos — re-engaging...");
             }

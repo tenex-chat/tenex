@@ -198,6 +198,14 @@ pub struct ProjectionOptions {
     pub excluded_event_id: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub in_turn_tail: Vec<Message>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compaction_override: Option<CompactionOverride>,
+}
+
+/// One-shot override for reactive compaction retry paths.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CompactionOverride {
+    pub threshold_ratio: f64,
 }
 
 /// Per-turn write-back payload. The agent runner reports what was actually

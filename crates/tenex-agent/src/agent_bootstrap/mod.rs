@@ -2,9 +2,8 @@
 //!
 //! [`build`] reads the triggering envelope from stdin, opens the project and
 //! conversation store, resolves the LLM provider/model, constructs the system
-//! prompt, builds the tool set, and projects the conversation history. The
-//! result is an [`AgentBootstrap`] containing every value the turn loop in
-//! [`crate::turn_loop`] consumes.
+//! prompt, and builds the tool set. The result is an [`AgentBootstrap`]
+//! containing every value the turn loop in [`crate::turn_loop`] consumes.
 //!
 //! Only `pub(crate)` items leave this module. Helper sub-modules
 //! ([`helpers`]) hold pure-function bootstrap stages.
@@ -14,14 +13,13 @@ mod helpers;
 mod stages;
 
 use anyhow::{Context, Result};
-use std::sync::{atomic::AtomicBool, Arc, Mutex};
+use std::sync::{Arc, Mutex, atomic::AtomicBool};
 
-use rig::completion::Message as RigMessage;
 use tenex_conversations::ConversationStore;
 use tenex_protocol::{
-    nostr::{read_one_from_stdin, NostrChannel},
-    sink::StdoutNdjsonSink,
     Channel, MessageRef, PrincipalRef,
+    nostr::{NostrChannel, read_one_from_stdin},
+    sink::StdoutNdjsonSink,
 };
 use tenex_supervision::supervisor::Supervisor;
 
@@ -33,14 +31,13 @@ use crate::injections::MessageInjectionTracker;
 use crate::runtime_state::RuntimeStateHandle;
 use crate::shell_task_reminder::render_active_shell_tasks_reminder;
 use crate::tools::{
-    self, RagAddDocumentsTool, RagSearchTool, SkillListTool, SkillsSetTool, TodoItem,
-    ToolRecorder, ToolSet,
+    self, RagAddDocumentsTool, RagSearchTool, SkillListTool, SkillsSetTool, TodoItem, ToolSet,
 };
 use crate::{escalation, home, stdio_home, workflows};
 
 /// All state assembled by [`build`] that the turn loop subsequently reads or
-/// mutates. Loop-local working values (`current_message`, accumulated
-/// `re_engage_history`) live as locals inside `run_turn_loop`.
+/// mutates. Loop-local working values such as `current_message` live as locals
+/// inside `run_turn_loop`.
 pub(crate) struct AgentBootstrap {
     pub channel: Arc<dyn Channel>,
     pub conv_store: Option<ConversationStore>,
@@ -48,11 +45,12 @@ pub(crate) struct AgentBootstrap {
     pub pubkey_hex: String,
     pub agent_slug: String,
     pub project_id: String,
+    pub base_dir: std::path::PathBuf,
     pub resolved: ResolvedModel,
     pub cassette_recorder: Option<CassetteRecorder>,
     pub system_prompt: String,
     pub user_message: String,
-    pub initial_history: Vec<RigMessage>,
+    pub trigger_event_id: String,
     pub envelope_image_parts: Option<Vec<rig::completion::message::UserContent>>,
     pub envelope_content: String,
     pub tool_set: ToolSet,
@@ -170,8 +168,8 @@ pub(crate) async fn build(
         "[tenex-agent] provider: {} | model: {}",
         resolved.provider, resolved.model
     );
-    let summarization_model =
-        Arc::new(match ResolvedModel::resolve_role(&base_dir, "summarization") {
+    let summarization_model = Arc::new(
+        match ResolvedModel::resolve_role(&base_dir, "summarization") {
             Ok(model) => {
                 eprintln!(
                     "[tenex-agent] summarization model: {} | {}",
@@ -185,7 +183,8 @@ pub(crate) async fn build(
                 );
                 resolved.clone()
             }
-        });
+        },
+    );
     let trigger_pubkey_hex = match &envelope.principal {
         PrincipalRef::Nostr { pubkey, .. } => pubkey.to_hex(),
     };
@@ -398,7 +397,8 @@ pub(crate) async fn build(
 
     let skill_list_tool = SkillListTool::new(skill_ctx.clone());
     let skills_set_tool = SkillsSetTool::new(skill_ctx.clone(), self_applied_skills.clone());
-    let image_support = helpers::detect_image_support(&base_dir, &resolved.provider, &resolved.model);
+    let image_support =
+        helpers::detect_image_support(&base_dir, &resolved.provider, &resolved.model);
     let mcp_proxy_tools = helpers::load_mcp_proxy_tools(image_support)?;
 
     // Initialize RAG store for the embedding tools.
@@ -488,30 +488,7 @@ pub(crate) async fn build(
         blossom_url,
         agent_keys,
     };
-    let projection_tool_defs = tool_set
-        .build_for_turn(ToolRecorder::new())
-        .projection_tool_defs()
-        .to_vec();
-
-    // Project conversation history. The projection produces interleaved
-    // assistant + tool-result messages; the system prompt is dropped here
-    // because rig handles it via `preamble`.
-    let initial_history: Vec<RigMessage> = stages::project_history(
-        conv_store.as_ref(),
-        &conversation_id,
-        &pubkey_hex,
-        &project_id,
-        &system_prompt,
-        &resolved,
-        &base_dir,
-        &projection_tool_defs,
-        Some(&trigger_event_id),
-    )
-    .await;
-    eprintln!(
-        "[tenex-agent] Running agent (history: {} messages)...",
-        initial_history.len()
-    );
+    eprintln!("[tenex-agent] Running agent...");
 
     // Keep a handle with shared Arc refs so we can read the pending final turn
     // after the stream ends, even after `hook` is moved into the agent builder.
@@ -531,11 +508,12 @@ pub(crate) async fn build(
         pubkey_hex,
         agent_slug,
         project_id,
+        base_dir,
         resolved,
         cassette_recorder,
         system_prompt,
         user_message,
-        initial_history,
+        trigger_event_id,
         envelope_image_parts,
         envelope_content: envelope.content,
         tool_set,

@@ -23,12 +23,13 @@ pub mod types;
 
 pub use projection::DisplayNameResolver;
 pub use strategies::{
-    default_stack, CompactionSummarizer, CompactionToolStrategy, ProjectionContext,
-    RemindersStrategy, Strategy, ToolResultDecayStrategy,
+    default_stack, stack_with_compaction_override, CompactionSummarizer, CompactionToolStrategy,
+    ProjectionContext, RemindersStrategy, Strategy, ToolResultDecayStrategy,
 };
 pub use types::{
-    BreakpointHint, BreakpointKind, CacheObservation, Message, ModelProfile, Projection,
-    ProjectionOptions, ProjectionTelemetry, ReasoningBlock, ToolCall, ToolDef, TurnRecord,
+    BreakpointHint, BreakpointKind, CacheObservation, CompactionOverride, Message, ModelProfile,
+    Projection, ProjectionOptions, ProjectionTelemetry, ReasoningBlock, ToolCall, ToolDef,
+    TurnRecord,
 };
 
 use tenex_conversations::ConversationStore;
@@ -94,15 +95,21 @@ pub async fn project_with_options(
         "projecting conversation"
     );
 
+    let ProjectionOptions {
+        excluded_event_id,
+        in_turn_tail,
+        compaction_override,
+    } = options;
+
     let mut messages = projection::project_messages(
         store,
         conversation_id,
         agent_pubkey,
         system_prompt,
         name_resolver,
-        options.excluded_event_id.as_deref(),
+        excluded_event_id.as_deref(),
     )?;
-    messages.extend(options.in_turn_tail);
+    messages.extend(in_turn_tail);
     let telemetry = ProjectionTelemetry::default();
     let agent_todos = store
         .get_agent_context_state(conversation_id, agent_pubkey)
@@ -118,7 +125,7 @@ pub async fn project_with_options(
         agent_todos,
     };
 
-    for strat in default_stack(summarizer) {
+    for strat in stack_with_compaction_override(summarizer, compaction_override.as_ref()) {
         strat.apply(&mut ctx).await?;
     }
 

@@ -177,6 +177,7 @@ async fn projection_appends_in_turn_tail_before_cache_breakpoints() {
                     tool_calls: Vec::new(),
                 },
             ],
+            compaction_override: None,
         },
     )
     .await
@@ -515,6 +516,7 @@ async fn projection_can_exclude_live_trigger_event_from_history() {
         ProjectionOptions {
             excluded_event_id: Some("current-event".into()),
             in_turn_tail: Vec::new(),
+            compaction_override: None,
         },
     )
     .await

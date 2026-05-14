@@ -998,6 +998,7 @@ async fn render_history(
             ProjectionOptions {
                 excluded_event_id: exclude_nostr_event_id.map(str::to_string),
                 in_turn_tail: Vec::new(),
+                compaction_override: None,
             },
         )
         .await

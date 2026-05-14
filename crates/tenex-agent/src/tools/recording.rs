@@ -99,7 +99,6 @@ impl RecordingTool {
         }
     }
 
-    #[allow(dead_code)]
     pub(crate) async fn execute_with_ids(
         &self,
         args: serde_json::Value,
@@ -131,10 +130,6 @@ impl RecordingTool {
             .await;
         self.recorder.push(record);
         result
-    }
-
-    pub(crate) fn into_dyn(self) -> Box<dyn ToolDyn> {
-        Box::new(self)
     }
 
     async fn call_recorded(

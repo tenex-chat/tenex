@@ -1,14 +1,13 @@
+use rig::OneOrMany;
 use rig::completion::message::{
     Reasoning, Text, ToolCall as RigToolCall, ToolFunction, ToolResult,
 };
 use rig::completion::message::{ToolResultContent, UserContent};
 use rig::completion::{AssistantContent, Message as RigMessage};
-use rig::OneOrMany;
 use tenex_context::Message as CtxMessage;
 
-/// Convert a `tenex_context::Message` to `rig::completion::Message` for passing
-/// as history to `stream_chat`. System messages are excluded at the call site
-/// because the preamble handles them.
+/// Convert a `tenex_context::Message` to `rig::completion::Message` for the
+/// provider request assembled by the TENEX step loop.
 pub fn ctx_msg_to_rig(msg: CtxMessage) -> RigMessage {
     match msg {
         CtxMessage::System { content } => RigMessage::System { content },

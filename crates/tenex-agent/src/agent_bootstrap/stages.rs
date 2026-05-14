@@ -7,17 +7,12 @@
 
 use std::sync::Arc;
 
-use rig::completion::Message as RigMessage;
-use tenex_context::{Message as CtxMessage, ModelProfile, ProjectionOptions, ToolDef};
 use tenex_conversations::ConversationStore;
 use tenex_protocol::ProjectRef;
 use tenex_rag::RagStore;
 
-use crate::compaction;
 use crate::config::{AgentConfig, ResolvedModel};
 use crate::context_discovery;
-use crate::context_rig::ctx_msg_to_rig;
-use crate::identity_resolver;
 
 /// Outputs of [`open_project`].
 pub(super) struct OpenedProject {
@@ -68,72 +63,6 @@ pub(super) fn open_project(project_id: &str, agent_pubkey: &str) -> anyhow::Resu
         project_ref,
         owner_pubkey_hex,
     })
-}
-
-/// Project the persisted conversation history into rig messages for this
-/// turn. Returns an empty vector when the store is absent or projection
-/// fails (with a log line).
-pub(super) async fn project_history(
-    conv_store: Option<&ConversationStore>,
-    conversation_id: &str,
-    pubkey_hex: &str,
-    project_id: &str,
-    system_prompt: &str,
-    resolved: &ResolvedModel,
-    base_dir: &std::path::Path,
-    tool_defs: &[ToolDef],
-    exclude_nostr_event_id: Option<&str>,
-) -> Vec<RigMessage> {
-    let Some(store) = conv_store else {
-        return Vec::new();
-    };
-    let model_profile = ModelProfile {
-        provider: resolved.provider.clone(),
-        model_id: resolved.model.clone(),
-        prompt_cache: resolved.provider == "anthropic",
-        ephemeral_reminders: false,
-        image_support: super::helpers::detect_image_support(
-            base_dir,
-            &resolved.provider,
-            &resolved.model,
-        ),
-        max_context_tokens: 200_000,
-    };
-    let summarizer: Option<Arc<dyn tenex_context::CompactionSummarizer>> =
-        Some(Arc::new(compaction::LlmCompactionSummarizer::new(
-            Arc::new(resolved.clone()),
-            pubkey_hex.to_string(),
-            conversation_id.to_string(),
-            Some(project_id.to_string()),
-        )));
-    let name_resolver = identity_resolver::IdentityServiceResolver::new(base_dir);
-    match tenex_context::project_with_options(
-        store,
-        conversation_id,
-        pubkey_hex,
-        system_prompt,
-        &model_profile,
-        tool_defs,
-        summarizer,
-        Some(&name_resolver),
-        ProjectionOptions {
-            excluded_event_id: exclude_nostr_event_id.map(str::to_string),
-            in_turn_tail: Vec::new(),
-        },
-    )
-    .await
-    {
-        Ok(projection) => projection
-            .messages
-            .into_iter()
-            .filter(|m| !matches!(m, CtxMessage::System { .. }))
-            .map(ctx_msg_to_rig)
-            .collect(),
-        Err(e) => {
-            eprintln!("[tenex-agent] Context projection failed: {e}");
-            Vec::new()
-        }
-    }
 }
 
 /// Outputs of [`resolve_workspace`].

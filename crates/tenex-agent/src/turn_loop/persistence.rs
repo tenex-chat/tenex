@@ -4,16 +4,15 @@
 //! database does not abort an in-flight agent turn — the rig response has
 //! already been emitted by the time these run.
 
-use tenex_accounting::{record_llm_call, LlmUsage, RecordLlmCall, RootKind};
+use tenex_accounting::{LlmUsage, RecordLlmCall, RootKind, record_llm_call};
 use tenex_context::{
-    BreakpointHint, BreakpointKind, CacheObservation, Message as CtxMessage,
-    ToolCall as CtxToolCall, TurnRecord,
+    BreakpointHint, BreakpointKind, CacheObservation, Message as CtxMessage, TurnRecord,
 };
 use tenex_conversations::{AgentContextState, ConversationStore, NewToolMessage};
 
 use crate::agent_bootstrap::AgentBootstrap;
-use crate::tools::recording::ToolCallRecord;
 use crate::tools::TodoItem;
+use crate::tools::recording::ToolCallRecord;
 
 /// Unified save for both todos and self_applied_skills in a single
 /// read-modify-write. Keeping these in one call prevents the second writer
@@ -72,15 +71,44 @@ pub(super) fn save_context_state(
     }
 }
 
-/// Persist the tool calls captured during this turn into `tool_messages`.
-/// Pairs with the assistant prompt-history entry recorded by [`record_turn`].
-pub(super) fn record_tool_messages(
+pub(super) fn record_step_user(
+    store: &ConversationStore,
+    conversation_id: &str,
+    agent_pubkey: &str,
+    content: &str,
+) {
+    let turn = TurnRecord {
+        messages_visible: vec![CtxMessage::User {
+            content: content.to_string(),
+        }],
+        reminders_applied: Vec::new(),
+        compaction_decisions: Vec::new(),
+        cache_observed: CacheObservation::default(),
+        breakpoint_hints: Vec::new(),
+    };
+    if let Err(e) = tenex_context::record_turn(store, conversation_id, agent_pubkey, turn) {
+        eprintln!("[tenex-agent] Failed to record user step: {e}");
+    }
+}
+
+/// Persist the tool calls captured during one provider step into
+/// `tool_messages`. Pairs with the assistant prompt-history entry recorded for
+/// the same step.
+pub(super) fn record_step_tool_messages(
     store: &ConversationStore,
     conversation_id: &str,
     agent_pubkey: &str,
     recorded_calls: &[ToolCallRecord],
 ) {
     for rec in recorded_calls {
+        if let Some(provider_call_id) = rec.provider_call_id.as_deref() {
+            tracing::debug!(
+                tool_call_id = %rec.call_id,
+                provider_call_id,
+                tool_name = %rec.tool_name,
+                "persisting tool message with provider call id"
+            );
+        }
         let new_tool = NewToolMessage {
             tool_call_id: rec.call_id.clone(),
             parent_message_id: None,
@@ -97,41 +125,19 @@ pub(super) fn record_tool_messages(
     }
 }
 
-/// Record this turn's assistant + tool messages into the conversation store
-/// and run the accounting hook.
-pub(super) async fn record_turn_outcome(
+pub(super) fn record_step_assistant(
     boot: &AgentBootstrap,
     store: &ConversationStore,
-    current_message: &str,
-    response: &str,
-    recorded_calls: &[ToolCallRecord],
+    assistant_message: CtxMessage,
     stream_usage: &rig::completion::Usage,
 ) {
-    let assistant_tool_calls: Vec<CtxToolCall> = recorded_calls
-        .iter()
-        .map(|r| CtxToolCall {
-            id: r.call_id.clone(),
-            provider_call_id: r.provider_call_id.clone(),
-            name: r.tool_name.clone(),
-            arguments: r.args.clone(),
-        })
-        .collect();
     let hit_tokens = stream_usage.cached_input_tokens;
-    let messages_visible = vec![
-        CtxMessage::User {
-            content: current_message.to_string(),
-        },
-        CtxMessage::Assistant {
-            content: response.to_string(),
-            reasoning: Vec::new(),
-            tool_calls: assistant_tool_calls,
-        },
-    ];
+    let messages_visible = vec![assistant_message];
     // When the provider reports a cache hit, record the position of
     // the assistant response as the live cache anchor for this turn.
     let breakpoint_hints = if hit_tokens > 0 {
         vec![BreakpointHint {
-            position: 1,
+            position: 0,
             kind: BreakpointKind::MessageStream,
         }]
     } else {
@@ -150,8 +156,17 @@ pub(super) async fn record_turn_outcome(
     };
     if let Err(e) = tenex_context::record_turn(store, &boot.conversation_id, &boot.pubkey_hex, turn)
     {
-        eprintln!("[tenex-agent] Failed to record turn: {e}");
+        eprintln!("[tenex-agent] Failed to record assistant step: {e}");
     }
+}
+
+/// Record this turn's accounting row after the step loop has completed.
+pub(super) async fn record_turn_accounting(
+    boot: &AgentBootstrap,
+    current_message: &str,
+    response: &str,
+    stream_usage: &rig::completion::Usage,
+) {
     record_llm_call(RecordLlmCall {
         root_kind: RootKind::UserMessage.into(),
         provider: boot.resolved.provider.clone(),

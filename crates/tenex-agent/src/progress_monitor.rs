@@ -1,6 +1,6 @@
 use std::sync::{Arc, Mutex};
 
-use rig::agent::{HookAction, PromptHook};
+use rig::agent::HookAction;
 use rig::completion::{AssistantContent, CompletionModel, CompletionResponse, Message};
 
 pub const RIG_AGENT_TURN_FUSE: usize = 1_000_000;
@@ -111,50 +111,43 @@ where
     }
 }
 
-impl<M> PromptHook<M> for ProgressMonitor<M>
+impl<M> ProgressMonitor<M>
 where
     M: CompletionModel,
 {
-    fn on_completion_call(
-        &self,
-        _prompt: &Message,
-        _history: &[Message],
-    ) -> impl std::future::Future<Output = HookAction> + Send {
+    pub async fn on_completion_call(&self, _prompt: &Message, _history: &[Message]) -> HookAction {
         let review_tool_names = {
             let mut state = self.state.lock().unwrap();
             state.prepare_review(self.threshold)
         };
-        let monitor = self.clone();
 
-        async move {
-            let Some(tool_names) = review_tool_names else {
-                return HookAction::cont();
-            };
+        let Some(tool_names) = review_tool_names else {
+            return HookAction::cont();
+        };
 
-            if monitor.review_progress(tool_names).await {
-                HookAction::cont()
-            } else {
-                HookAction::terminate(
-                    "progress monitor stopped the agent because recent tool use appears stuck",
-                )
-            }
+        if self.review_progress(tool_names).await {
+            HookAction::cont()
+        } else {
+            HookAction::terminate(
+                "progress monitor stopped the agent because recent tool use appears stuck",
+            )
         }
     }
 
-    fn on_tool_result(
+    pub async fn on_tool_result(
         &self,
         tool_name: &str,
         _tool_call_id: Option<String>,
         _internal_call_id: &str,
         _args: &str,
         _result: &str,
-    ) -> impl std::future::Future<Output = HookAction> + Send {
+    ) -> HookAction {
         {
             let mut state = self.state.lock().unwrap();
             state.record_tool_result(tool_name);
         }
 
-        async { HookAction::cont() }
+        HookAction::cont()
     }
 }
 
@@ -171,10 +164,10 @@ fn completion_text<T>(response: CompletionResponse<T>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rig::OneOrMany;
     use rig::completion::{CompletionError, CompletionRequest, Usage};
     use rig::message::Text;
     use rig::streaming::StreamingCompletionResponse;
-    use rig::OneOrMany;
 
     #[derive(Clone)]
     struct TestModel {

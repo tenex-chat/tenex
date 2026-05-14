@@ -1,8 +1,7 @@
 use std::collections::HashMap;
 
-use rig::tool::{ToolDyn, ToolError};
-#[cfg(test)]
 use rig::completion::ToolDefinition;
+use rig::tool::ToolError;
 use tenex_context::ToolDef as ProjectionToolDef;
 
 use super::recording::RecordingTool;
@@ -43,7 +42,6 @@ impl TurnToolRegistry {
             .map(|definition| definition.name.clone())
     }
 
-    #[cfg(test)]
     pub(crate) async fn provider_definitions(&self, prompt: String) -> Vec<ToolDefinition> {
         let mut definitions = Vec::with_capacity(self.tools.len());
         for tool in &self.tools {
@@ -52,7 +50,6 @@ impl TurnToolRegistry {
         definitions
     }
 
-    #[allow(dead_code)]
     pub(crate) async fn execute(
         &self,
         tool_name: &str,
@@ -67,21 +64,12 @@ impl TurnToolRegistry {
             .execute_with_ids(args, tool_call_id, provider_call_id)
             .await
     }
-
-    pub(crate) fn into_rig_tools(self) -> Vec<Box<dyn ToolDyn>> {
-        self.tools
-            .into_iter()
-            .map(RecordingTool::into_dyn)
-            .collect()
-    }
 }
 
 #[derive(Debug, thiserror::Error)]
-#[allow(dead_code)]
 #[error("unknown tool: {0}")]
 struct UnknownToolError(String);
 
-#[allow(dead_code)]
 fn tool_call_error(error: impl std::error::Error + Send + Sync + 'static) -> ToolError {
     ToolError::ToolCallError(Box::new(error))
 }

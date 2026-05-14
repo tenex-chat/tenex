@@ -1,9 +1,5 @@
-#[macro_use]
-mod main_macro;
-
 mod agent_bootstrap;
 mod llm_accounting;
-mod agent_loop_hook;
 mod cassette;
 mod cassette_client;
 mod cassette_request;
@@ -153,7 +149,6 @@ async fn run(
         let span = tracing::Span::current();
         span.record("llm.provider", boot.resolved.provider.as_str());
         span.record("llm.model", boot.resolved.model.as_str());
-        span.record("history.messages", boot.initial_history.len() as i64);
         turn_loop::run_turn_loop(&mut boot).await
     }
     .instrument(turn_span)
