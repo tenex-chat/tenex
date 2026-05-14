@@ -1,0 +1,9 @@
+[package]
+name = "tenex-models-dev"
+version = "0.1.0"
+edition = "2021"
+description = "Pure-data types and lookup helpers for the models.dev cache. Shared between the supervisor (which fetches/writes the cache) and agent runtimes (which read it to derive model capabilities)."
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }

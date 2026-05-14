@@ -501,6 +501,7 @@ mod tests {
                     context: 200_000,
                     output: 8192,
                 }),
+                modalities: None,
                 last_updated: None,
             },
         );
@@ -541,6 +542,7 @@ mod tests {
                     context: 1000,
                     output: 100,
                 }),
+                modalities: None,
                 last_updated: None,
             },
         );
@@ -572,6 +574,7 @@ mod tests {
                     context: 100_000,
                     output: 4096,
                 }),
+                modalities: None,
                 last_updated: None,
             },
         );
@@ -656,6 +659,7 @@ mod tests {
                     context: 200_000,
                     output: 8192,
                 }),
+                modalities: None,
                 last_updated: None,
             },
         );

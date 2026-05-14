@@ -3215,6 +3215,7 @@ dependencies = [
  "tenex-identity",
  "tenex-llm-config",
  "tenex-mcp",
+ "tenex-models-dev",
  "tenex-project",
  "tenex-protocol",
  "tenex-telemetry",
@@ -3281,6 +3282,7 @@ dependencies = [
  "tenex-identity",
  "tenex-llm-config",
  "tenex-mcp",
+ "tenex-models-dev",
  "tenex-project",
  "tenex-protocol",
  "tenex-rag",
@@ -3472,6 +3474,14 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "tenex-models-dev"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

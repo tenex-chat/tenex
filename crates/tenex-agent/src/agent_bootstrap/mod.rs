@@ -397,7 +397,8 @@ pub(crate) async fn build(
 
     let skill_list_tool = SkillListTool::new(skill_ctx.clone());
     let skills_set_tool = SkillsSetTool::new(skill_ctx.clone(), self_applied_skills.clone());
-    let mcp_proxy_tools = helpers::load_mcp_proxy_tools()?;
+    let image_support = helpers::detect_image_support(&base_dir, &resolved.provider, &resolved.model);
+    let mcp_proxy_tools = helpers::load_mcp_proxy_tools(image_support)?;
 
     // Initialize RAG store for the embedding tools.
     let rag_store = stages::open_rag_store(&base_dir);

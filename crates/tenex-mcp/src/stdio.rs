@@ -455,18 +455,141 @@ fn default_schema() -> Value {
     })
 }
 
+/// Serialise an MCP `tools/call` response into a string the agent runtime
+/// can hand to the LLM.
+///
+/// When the response is purely textual, the joined text is returned
+/// verbatim. When any [`McpContent::Image`] is present, the output is a
+/// structured JSON envelope matching the shape that
+/// [`rig::completion::message::ToolResultContent::from_tool_output`]
+/// parses:
+///
+/// - **Single image, no text** → `{"type":"image","data":"<base64>","mimeType":"<mime>"}`.
+/// - **Mixed text + image(s) or multiple images** →
+///   `{"response":"<joined text>","parts":[{"type":"image",…}, …]}`.
+///
+/// rig converts the parsed envelope into native image content blocks on
+/// the provider request, so vision-capable models see the screenshot as
+/// an image instead of a wall of base64. The historical
+/// `data:<mime>;base64,<blob>` text path is gone: that path filled the
+/// context window with bytes the model could not actually perceive, and
+/// was the proximate cause of the 264k-token overflow we hit on the iOS
+/// tester agent.
+///
+/// Audio is dropped to a placeholder (rig has no audio tool-result
+/// content type); resource and unknown content stringify as text.
 fn format_call_tool_result(result: &CallToolResult) -> String {
-    let mut chunks = Vec::new();
+    let mut texts: Vec<String> = Vec::new();
+    let mut image_parts: Vec<Value> = Vec::new();
     for content in &result.content {
         match content {
-            McpContent::Text { text } => chunks.push(text.clone()),
-            McpContent::Image { data, mime_type } => {
-                chunks.push(format!("data:{mime_type};base64,{data}"));
-            }
-            McpContent::Audio { .. } => chunks.push("[MCP audio content omitted]".to_string()),
-            McpContent::Resource { resource } => chunks.push(resource.to_string()),
-            McpContent::Unknown => chunks.push("[Unsupported MCP content]".to_string()),
+            McpContent::Text { text } => texts.push(text.clone()),
+            McpContent::Image { data, mime_type } => image_parts.push(json!({
+                "type": "image",
+                "data": data,
+                "mimeType": mime_type,
+            })),
+            McpContent::Audio { .. } => texts.push("[MCP audio content omitted]".to_string()),
+            McpContent::Resource { resource } => texts.push(resource.to_string()),
+            McpContent::Unknown => texts.push("[Unsupported MCP content]".to_string()),
         }
     }
-    chunks.join("\n")
+
+    if image_parts.is_empty() {
+        return texts.join("\n");
+    }
+
+    if texts.is_empty() && image_parts.len() == 1 {
+        return image_parts.into_iter().next().unwrap().to_string();
+    }
+
+    json!({
+        "response": texts.join("\n"),
+        "parts": image_parts,
+    })
+    .to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn text(s: &str) -> McpContent {
+        McpContent::Text { text: s.into() }
+    }
+
+    fn image(data: &str, mime: &str) -> McpContent {
+        McpContent::Image {
+            data: data.into(),
+            mime_type: mime.into(),
+        }
+    }
+
+    fn result(content: Vec<McpContent>) -> CallToolResult {
+        CallToolResult {
+            content,
+            is_error: None,
+        }
+    }
+
+    #[test]
+    fn text_only_result_returns_joined_text() {
+        let out = format_call_tool_result(&result(vec![text("hello"), text("world")]));
+        assert_eq!(out, "hello\nworld");
+    }
+
+    #[test]
+    fn single_image_returns_rig_image_envelope() {
+        let out = format_call_tool_result(&result(vec![image("AAAA", "image/png")]));
+        let parsed: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(parsed["type"], "image");
+        assert_eq!(parsed["data"], "AAAA");
+        assert_eq!(parsed["mimeType"], "image/png");
+    }
+
+    #[test]
+    fn mixed_text_and_image_returns_hybrid_envelope() {
+        let out = format_call_tool_result(&result(vec![
+            text("describing image:"),
+            image("BBBB", "image/jpeg"),
+        ]));
+        let parsed: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(parsed["response"], "describing image:");
+        assert_eq!(parsed["parts"][0]["type"], "image");
+        assert_eq!(parsed["parts"][0]["data"], "BBBB");
+        assert_eq!(parsed["parts"][0]["mimeType"], "image/jpeg");
+    }
+
+    #[test]
+    fn multiple_images_use_hybrid_envelope_even_without_text() {
+        let out = format_call_tool_result(&result(vec![
+            image("AAAA", "image/png"),
+            image("BBBB", "image/png"),
+        ]));
+        let parsed: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(parsed["response"], "");
+        assert_eq!(parsed["parts"].as_array().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn does_not_emit_legacy_data_url_for_images() {
+        // The historical format `data:<mime>;base64,<blob>` is what
+        // caused the iOS-tester context overflow: bytes the model could
+        // not actually perceive, padding the chat history. Lock the fix
+        // in so a future revert is caught by tests.
+        let out = format_call_tool_result(&result(vec![image("ZZ", "image/png")]));
+        assert!(
+            !out.contains("data:image/png;base64,"),
+            "format must not emit the legacy data: URL form; got {out}"
+        );
+    }
+
+    #[test]
+    fn audio_emits_textual_placeholder() {
+        let out = format_call_tool_result(&result(vec![McpContent::Audio {
+            data: "ignored".into(),
+            mime_type: "audio/mpeg".into(),
+        }]));
+        assert_eq!(out, "[MCP audio content omitted]");
+    }
 }

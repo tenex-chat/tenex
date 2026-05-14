@@ -91,7 +91,11 @@ pub(super) async fn project_history(
         model_id: resolved.model.clone(),
         prompt_cache: resolved.provider == "anthropic",
         ephemeral_reminders: false,
-        image_support: false,
+        image_support: super::helpers::detect_image_support(
+            base_dir,
+            &resolved.provider,
+            &resolved.model,
+        ),
         max_context_tokens: 200_000,
     };
     let tool_defs: Vec<ToolDef> = Vec::new();

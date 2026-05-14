@@ -15,6 +15,34 @@ use crate::categorize;
 use crate::config::{AgentConfig, ResolvedModel};
 use crate::tools::{McpProxyTool, TodoItem};
 
+/// Whether the active `(provider, model)` accepts image input, per the
+/// on-disk `models.dev` cache at `<base_dir>/cache/models-dev.json`.
+///
+/// Conservative: returns `false` when the cache is missing, malformed,
+/// or has no entry for the model. Local providers (`ollama`, `codex`)
+/// fall through the lookup table to a global scan; if their model ID
+/// happens to match an entry under another provider (e.g. when running
+/// a cloud-hosted Qwen via Ollama's cloud proxy), the upstream
+/// modalities apply. Otherwise the agent is told the model is
+/// text-only, and MCP tool results carrying image bytes get downgraded
+/// to a placeholder before reaching the LLM.
+pub(super) fn detect_image_support(
+    base_dir: &std::path::Path,
+    provider: &str,
+    model: &str,
+) -> bool {
+    match tenex_models_dev::load_from_disk(base_dir) {
+        Ok(Some(cache)) => tenex_models_dev::image_support_for(&cache.data, provider, model),
+        Ok(None) => false,
+        Err(e) => {
+            eprintln!(
+                "[tenex-agent] models.dev cache unreadable ({e}); assuming no image support for {provider}/{model}",
+            );
+            false
+        }
+    }
+}
+
 /// Read persisted todos for `(conversation, agent)` from the conversation store.
 pub(super) fn load_todos_from_store(
     store: &ConversationStore,
@@ -46,7 +74,11 @@ pub(super) fn read_blossom_server_url(base_dir: &std::path::Path) -> Option<Stri
 /// Load the MCP proxy tool list from the manifest path declared in the
 /// `TENEX_MCP_MANIFEST` environment variable. Returns an empty list when the
 /// variable is unset or empty.
-pub(super) fn load_mcp_proxy_tools() -> Result<Vec<McpProxyTool>> {
+///
+/// `image_support` flows into each constructed [`McpProxyTool`] so MCP
+/// results carrying image content can be downgraded to text placeholders
+/// before they reach the LLM when the active model can't see them.
+pub(super) fn load_mcp_proxy_tools(image_support: bool) -> Result<Vec<McpProxyTool>> {
     let manifest_path = match std::env::var("TENEX_MCP_MANIFEST") {
         Ok(path) if !path.is_empty() => std::path::PathBuf::from(path),
         Ok(_) => return Ok(Vec::new()),
@@ -63,7 +95,7 @@ pub(super) fn load_mcp_proxy_tools() -> Result<Vec<McpProxyTool>> {
     Ok(manifest
         .tools
         .into_iter()
-        .map(|entry| McpProxyTool::new(entry, socket_path.clone()))
+        .map(|entry| McpProxyTool::new(entry, socket_path.clone(), image_support))
         .collect())
 }
 

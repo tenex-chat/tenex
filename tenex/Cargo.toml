@@ -37,6 +37,7 @@ sha2 = "0.10"
 regex = "1"
 tenex-llm-config = { path = "../crates/tenex-llm-config" }
 tenex-mcp = { path = "../crates/tenex-mcp" }
+tenex-models-dev = { path = "../crates/tenex-models-dev" }
 tenex-identity = { path = "../crates/tenex-identity" }
 tenex-project = { path = "../crates/tenex-project", features = ["nip46"] }
 tenex-conversations = { path = "../crates/tenex-conversations" }

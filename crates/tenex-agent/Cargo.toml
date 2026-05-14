@@ -21,6 +21,7 @@ tenex-identity = { path = "../tenex-identity" }
 tenex-protocol = { path = "../tenex-protocol", default-features = false }
 tenex-llm-config = { path = "../tenex-llm-config" }
 tenex-mcp = { path = "../tenex-mcp" }
+tenex-models-dev = { path = "../tenex-models-dev" }
 tenex-rag = { path = "../tenex-rag" }
 tenex-supervision = { path = "../tenex-supervision" }
 tenex-scheduler = { path = "../tenex-scheduler" }

@@ -245,6 +245,7 @@ fn fake_mcp_tool() -> super::McpProxyTool {
             input_schema: serde_json::json!({}),
         },
         std::path::PathBuf::from("/tmp/test-mcp.sock"),
+        false,
     )
 }
 
