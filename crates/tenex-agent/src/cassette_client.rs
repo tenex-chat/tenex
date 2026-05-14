@@ -21,6 +21,8 @@ use crate::cassette_request::request_debug;
 const TRACE_TOOL_ARGS_ENV: &str = "TENEX_TRACE_STREAM_TOOL_ARGS";
 const TRACE_ARGS_CONTEXT_CHARS: usize = 128;
 const CASSETTE_TOOL_ARGS_MAX_CHARS: usize = 8 * 1024;
+const STREAM_STOP_UNAVAILABLE_FROM_RIG: &str = "unavailable_from_rig";
+const STREAM_STOP_ENDED_WITHOUT_FINAL: &str = "stream_ended_without_final";
 
 #[derive(Clone)]
 pub struct RecordingClient<C> {
@@ -250,6 +252,12 @@ where
                 }
                 None => {
                     if !state.recorded {
+                        record_streaming_end_without_final(
+                            &span,
+                            &state.content,
+                            &state.tool_calls,
+                            &state.diagnostics,
+                        );
                         record_once(
                             &state.recorder,
                             state.turn,
@@ -325,19 +333,43 @@ fn record_streaming_final<R>(
             usage.cache_creation_input_tokens as i64,
         );
     }
-    span.record("gen_ai.stream.chunk_count", diagnostics.chunk_count as i64);
+    let attrs = terminal_stream_attrs(
+        content,
+        tool_calls,
+        diagnostics,
+        STREAM_STOP_UNAVAILABLE_FROM_RIG,
+    );
+    span.record("gen_ai.stream.chunk_count", attrs.chunk_count as i64);
     span.record(
         "gen_ai.stream.tool_delta_count",
-        diagnostics.tool_delta_count as i64,
+        attrs.tool_delta_count as i64,
     );
-    span.record(
-        "gen_ai.response.finish_reasons",
-        inferred_finish_reason(content, tool_calls),
-    );
+    span.record("gen_ai.response.finish_reasons", attrs.finish_reason);
     // Rig 0.35 does not expose Anthropic's message_delta.stop_reason through
     // its provider-neutral streaming response, so record the availability gap
     // explicitly instead of leaving future trace readers guessing.
-    span.record("gen_ai.stream.stop_reason", "unavailable_from_rig");
+    span.record("gen_ai.stream.stop_reason", attrs.stop_reason);
+}
+
+fn record_streaming_end_without_final(
+    span: &Span,
+    content: &str,
+    tool_calls: &[CassetteToolCall],
+    diagnostics: &StreamDiagnostics,
+) {
+    let attrs = terminal_stream_attrs(
+        content,
+        tool_calls,
+        diagnostics,
+        STREAM_STOP_ENDED_WITHOUT_FINAL,
+    );
+    span.record("gen_ai.stream.chunk_count", attrs.chunk_count as i64);
+    span.record(
+        "gen_ai.stream.tool_delta_count",
+        attrs.tool_delta_count as i64,
+    );
+    span.record("gen_ai.response.finish_reasons", attrs.finish_reason);
+    span.record("gen_ai.stream.stop_reason", attrs.stop_reason);
 }
 
 fn finish_reasons<T>(response: &CompletionResponse<T>) -> &'static str {
@@ -413,7 +445,10 @@ fn record_streaming_error(
         "gen_ai.stream.tool_delta_count",
         diagnostics.tool_delta_count as i64,
     );
-    span.record("gen_ai.stream.stop_reason", "unavailable_from_rig");
+    span.record(
+        "gen_ai.stream.stop_reason",
+        STREAM_STOP_UNAVAILABLE_FROM_RIG,
+    );
 
     if let Some(column) = failure.parse_column {
         span.record("gen_ai.stream.error.parse_column", column as i64);
@@ -680,6 +715,28 @@ fn inferred_finish_reason(content: &str, tool_calls: &[CassetteToolCall]) -> &'s
     }
 }
 
+#[derive(Debug, PartialEq, Eq)]
+struct TerminalStreamAttrs {
+    chunk_count: usize,
+    tool_delta_count: usize,
+    finish_reason: &'static str,
+    stop_reason: &'static str,
+}
+
+fn terminal_stream_attrs(
+    content: &str,
+    tool_calls: &[CassetteToolCall],
+    diagnostics: &StreamDiagnostics,
+    stop_reason: &'static str,
+) -> TerminalStreamAttrs {
+    TerminalStreamAttrs {
+        chunk_count: diagnostics.chunk_count,
+        tool_delta_count: diagnostics.tool_delta_count,
+        finish_reason: inferred_finish_reason(content, tool_calls),
+        stop_reason,
+    }
+}
+
 fn trace_tool_args_enabled() -> bool {
     std::env::var(TRACE_TOOL_ARGS_ENV)
         .map(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"))
@@ -801,5 +858,42 @@ mod tests {
             CASSETTE_TOOL_ARGS_MAX_CHARS
         );
         assert!(partials[0].args_truncated);
+    }
+
+    #[test]
+    fn terminal_attrs_for_stream_without_final_include_explicit_gap() {
+        let mut diagnostics = StreamDiagnostics::new(false);
+        diagnostics.chunk_count = 4;
+        diagnostics.observe_tool_call_delta(
+            "toolu_1",
+            "internal_1",
+            &ToolCallDeltaContent::Name("describe_ui".to_string()),
+        );
+        diagnostics.observe_tool_call_delta(
+            "toolu_1",
+            "internal_1",
+            &ToolCallDeltaContent::Delta("{\"screen\":\"main\"}".to_string()),
+        );
+
+        let tool_calls = vec![CassetteToolCall {
+            name: "describe_ui".to_string(),
+            args: serde_json::json!({"screen": "main"}),
+        }];
+        let attrs = terminal_stream_attrs(
+            "",
+            &tool_calls,
+            &diagnostics,
+            STREAM_STOP_ENDED_WITHOUT_FINAL,
+        );
+
+        assert_eq!(
+            attrs,
+            TerminalStreamAttrs {
+                chunk_count: 4,
+                tool_delta_count: 2,
+                finish_reason: "tool_calls",
+                stop_reason: STREAM_STOP_ENDED_WITHOUT_FINAL,
+            }
+        );
     }
 }
