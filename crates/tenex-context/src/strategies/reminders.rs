@@ -355,6 +355,7 @@ mod tests {
                     tool_call_id: "call-1".into(),
                     tool_name: "shell".into(),
                     content: "output".into(),
+                    provider_call_id: None,
                     is_error: false,
                 },
             ],

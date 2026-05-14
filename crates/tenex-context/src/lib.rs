@@ -28,7 +28,7 @@ pub use strategies::{
 };
 pub use types::{
     BreakpointHint, BreakpointKind, CacheObservation, Message, ModelProfile, Projection,
-    ProjectionTelemetry, ToolCall, ToolDef, TurnRecord,
+    ProjectionTelemetry, ReasoningBlock, ToolCall, ToolDef, TurnRecord,
 };
 
 use tenex_conversations::ConversationStore;

@@ -1,7 +1,7 @@
 //! Projection tests for in-flight runtime tools.
 
 use serde_json::json;
-use tenex_context::{project, Message, ModelProfile};
+use tenex_context::{Message, ModelProfile, project};
 use tenex_conversations::{ConversationStore, NewMessage};
 
 const CONVO_ID: &str = "conv-active-tools";
@@ -94,7 +94,7 @@ async fn active_tool_projects_as_pending_tool_pair_before_later_user_message() {
     );
     assert!(matches!(
         &projection.messages[2],
-        Message::Assistant { content, tool_calls }
+        Message::Assistant { content, tool_calls, .. }
             if content.is_empty()
                 && tool_calls.len() == 1
                 && tool_calls[0].id == "tool-call-1"
@@ -103,7 +103,7 @@ async fn active_tool_projects_as_pending_tool_pair_before_later_user_message() {
     ));
     assert!(matches!(
         &projection.messages[3],
-        Message::ToolResult { tool_call_id, tool_name, content, is_error }
+        Message::ToolResult { tool_call_id, tool_name, content, is_error, .. }
             if tool_call_id == "tool-call-1"
                 && tool_name == "shell"
                 && !is_error

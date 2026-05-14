@@ -39,6 +39,7 @@ fn build_transcript(messages: &[CtxMessage]) -> String {
             CtxMessage::Assistant {
                 content,
                 tool_calls,
+                ..
             } => {
                 let mut parts = vec![format!("[assistant]\n{content}")];
                 for tc in tool_calls {
@@ -56,6 +57,7 @@ fn build_transcript(messages: &[CtxMessage]) -> String {
                 tool_name,
                 content,
                 is_error,
+                ..
             } => Some(format!(
                 "[tool_result id={tool_call_id} name={tool_name} error={is_error}]\n{content}"
             )),

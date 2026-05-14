@@ -3,8 +3,8 @@
 
 use serde_json::json;
 use tenex_context::{
-    project, project_with_excluded_event, record_turn, BreakpointKind, CacheObservation,
-    DisplayNameResolver, Message, ModelProfile, ToolDef, TurnRecord,
+    BreakpointKind, CacheObservation, DisplayNameResolver, Message, ModelProfile, ToolDef,
+    TurnRecord, project, project_with_excluded_event, record_turn,
 };
 use tenex_conversations::{ConversationStore, NewMessage, NewToolMessage};
 
@@ -353,6 +353,7 @@ fn record_turn_round_trip_writes_prompt_history() {
             },
             Message::Assistant {
                 content: "hi back".into(),
+                reasoning: Vec::new(),
                 tool_calls: Vec::new(),
             },
         ],

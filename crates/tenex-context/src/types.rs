@@ -54,6 +54,10 @@ pub enum Message {
     },
     Assistant {
         content: String,
+        /// Provider reasoning blocks that must be replayed before later tool
+        /// calls for providers with strict ordering requirements.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        reasoning: Vec<ReasoningBlock>,
         /// Tool calls emitted by the assistant on this turn, if any.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         tool_calls: Vec<ToolCall>,
@@ -67,20 +71,83 @@ pub enum Message {
         /// storage during projection.
         tool_name: String,
         content: String,
+        /// Provider-native call identifier, distinct from TENEX's internal
+        /// `tool_call_id`. Some APIs require this on the result message.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        provider_call_id: Option<String>,
         #[serde(default, skip_serializing_if = "is_false")]
         is_error: bool,
     },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReasoningBlock {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    pub text: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signature: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ToolCall {
     pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_call_id: Option<String>,
     pub name: String,
     pub arguments: serde_json::Value,
 }
 
 fn is_false(b: &bool) -> bool {
     !b
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn message_deserializes_without_provider_fields() {
+        let assistant: Message = serde_json::from_value(serde_json::json!({
+            "role": "assistant",
+            "content": "done",
+            "tool_calls": [{
+                "id": "call-1",
+                "name": "shell",
+                "arguments": { "command": "true" }
+            }]
+        }))
+        .expect("old assistant message shape");
+
+        let Message::Assistant {
+            reasoning,
+            tool_calls,
+            ..
+        } = assistant
+        else {
+            panic!("expected assistant");
+        };
+        assert!(reasoning.is_empty());
+        assert_eq!(tool_calls.len(), 1);
+        assert_eq!(tool_calls[0].provider_call_id, None);
+
+        let tool_result: Message = serde_json::from_value(serde_json::json!({
+            "role": "toolresult",
+            "tool_call_id": "call-1",
+            "tool_name": "shell",
+            "content": "ok",
+            "is_error": false
+        }))
+        .expect("old tool result message shape");
+
+        let Message::ToolResult {
+            provider_call_id, ..
+        } = tool_result
+        else {
+            panic!("expected tool result");
+        };
+        assert_eq!(provider_call_id, None);
+    }
 }
 
 /// Cache breakpoint hint at a position in the projected `messages` array.

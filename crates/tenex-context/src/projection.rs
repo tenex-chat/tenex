@@ -135,6 +135,7 @@ pub(crate) fn project_messages(
                     .iter()
                     .map(|t| ToolCall {
                         id: t.tool_call_id.clone(),
+                        provider_call_id: None,
                         name: t.tool_name.clone(),
                         arguments: t.call_input.clone(),
                     })
@@ -142,6 +143,7 @@ pub(crate) fn project_messages(
 
                 out.push(Message::Assistant {
                     content: record.content.clone(),
+                    reasoning: Vec::new(),
                     tool_calls,
                 });
                 for tool in paired {
@@ -256,8 +258,10 @@ fn push_active_tool(out: &mut Vec<Message>, tool: ActiveTool) {
     let content = pending_tool_result_content(&tool);
     out.push(Message::Assistant {
         content: String::new(),
+        reasoning: Vec::new(),
         tool_calls: vec![ToolCall {
             id: tool.tool_call_id.clone(),
+            provider_call_id: None,
             name: tool.tool_name.clone(),
             arguments: tool.args.clone(),
         }],
@@ -266,6 +270,7 @@ fn push_active_tool(out: &mut Vec<Message>, tool: ActiveTool) {
         tool_call_id: tool.tool_call_id,
         tool_name: tool.tool_name,
         content,
+        provider_call_id: None,
         is_error: false,
     });
 }
@@ -329,6 +334,7 @@ fn push_tool_result(out: &mut Vec<Message>, tool: ToolMessage) {
         tool_call_id: tool.tool_call_id,
         tool_name: tool.tool_name,
         content,
+        provider_call_id: None,
         is_error: tool.is_error,
     });
 }

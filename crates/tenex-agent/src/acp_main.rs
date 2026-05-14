@@ -794,6 +794,7 @@ async fn run_prompt(
                 },
                 CtxMessage::Assistant {
                     content: visible_text.clone(),
+                    reasoning: Vec::new(),
                     tool_calls: Vec::<CtxToolCall>::new(),
                 },
             ],

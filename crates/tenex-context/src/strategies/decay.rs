@@ -65,6 +65,7 @@ impl Strategy for ToolResultDecayStrategy {
                         "[tool result decayed: {} (call {})]",
                         tool_name, tool_call_id
                     ),
+                    provider_call_id: None,
                     is_error: false,
                 };
                 ctx.messages[idx] = marker;

@@ -111,6 +111,7 @@ pub(super) async fn record_turn_outcome(
         .iter()
         .map(|r| CtxToolCall {
             id: r.call_id.clone(),
+            provider_call_id: None,
             name: r.tool_name.clone(),
             arguments: r.args.clone(),
         })
@@ -122,6 +123,7 @@ pub(super) async fn record_turn_outcome(
         },
         CtxMessage::Assistant {
             content: response.to_string(),
+            reasoning: Vec::new(),
             tool_calls: assistant_tool_calls,
         },
     ];
