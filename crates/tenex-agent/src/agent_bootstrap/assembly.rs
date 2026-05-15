@@ -268,9 +268,20 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn worker_cannot_delegate() {
+    async fn worker_can_delegate() {
         let components = run(Some(AgentCategory::Worker));
         assert_eq!(components.agent_category, Some(AgentCategory::Worker));
+        assert!(components.allows_delegation);
+        assert!(components.delegate_tool.is_some());
+    }
+
+    #[tokio::test]
+    async fn domain_expert_cannot_delegate() {
+        let components = run(Some(AgentCategory::DomainExpert));
+        assert_eq!(
+            components.agent_category,
+            Some(AgentCategory::DomainExpert)
+        );
         assert!(!components.allows_delegation);
         assert!(components.delegate_tool.is_none());
     }

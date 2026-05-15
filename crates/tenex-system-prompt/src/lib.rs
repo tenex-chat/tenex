@@ -513,18 +513,12 @@ Creating a todo list helps you stay organized, shows your progress to observers,
         parts.push(DOMAIN_EXPERT_GUIDANCE.to_string());
     }
 
-    if !matches!(
-        category,
-        Some(AgentCategory::DomainExpert) | Some(AgentCategory::Worker)
-    ) {
+    if !matches!(category, Some(AgentCategory::DomainExpert)) {
         parts.push(DELEGATION_TIPS.to_string());
         parts.push(TODO_BEFORE_DELEGATION.to_string());
     }
 
-    if !matches!(
-        category,
-        Some(AgentCategory::DomainExpert) | Some(AgentCategory::Worker)
-    ) {
+    if !matches!(category, Some(AgentCategory::DomainExpert)) {
         parts.push(AGENT_DIRECTED_MONITORING.to_string());
     }
 

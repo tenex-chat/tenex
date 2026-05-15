@@ -12,10 +12,10 @@ pub enum AgentCategory {
 }
 
 impl AgentCategory {
-    /// Orchestrators, reviewers, generalists, and principals can delegate.
-    /// Workers and domain-experts cannot.
+    /// All categories can delegate except domain-experts, who are intended to
+    /// answer focused questions rather than coordinate other agents.
     pub fn allows_delegation(self) -> bool {
-        !matches!(self, Self::DomainExpert | Self::Worker)
+        !matches!(self, Self::DomainExpert)
     }
 
     /// Orchestrators and principals coordinate work rather than touching the
