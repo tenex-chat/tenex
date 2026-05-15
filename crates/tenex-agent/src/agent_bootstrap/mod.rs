@@ -30,8 +30,9 @@ use crate::hook::EmitHook;
 use crate::injections::MessageInjectionTracker;
 use crate::runtime_state::RuntimeStateHandle;
 use crate::shell_task_reminder::render_active_shell_tasks_reminder;
+use crate::tools::agent_tool_set::ToolSet;
 use crate::tools::{
-    self, RagAddDocumentsTool, RagSearchTool, SkillListTool, SkillsSetTool, TodoItem, ToolSet,
+    self, RagAddDocumentsTool, RagSearchTool, SkillListTool, SkillsSetTool, TodoItem,
 };
 use crate::{escalation, home, stdio_home, workflows};
 

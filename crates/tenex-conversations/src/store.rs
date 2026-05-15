@@ -753,6 +753,39 @@ impl ConversationStore {
             .map_err(ConversationsError::from)
     }
 
+    /// Atomic, column-scoped upsert for the `todos_json` and
+    /// `self_applied_skills_json` fields. Unlike `upsert_agent_context_state`,
+    /// this only writes the columns it owns, so concurrent writers updating
+    /// orthogonal fields (prompt sequence, compaction state, etc.) cannot lose
+    /// updates. On insert, all other columns fall back to their schema
+    /// defaults.
+    pub fn patch_agent_context_todos(
+        &self,
+        conversation_id: &str,
+        agent_pubkey: &str,
+        todos_json: &serde_json::Value,
+        self_applied_skills_json: &serde_json::Value,
+        updated_at: i64,
+    ) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO agent_context_state (
+                conversation_id, agent_pubkey, todos_json, self_applied_skills_json, updated_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT(conversation_id, agent_pubkey) DO UPDATE SET
+                todos_json = excluded.todos_json,
+                self_applied_skills_json = excluded.self_applied_skills_json,
+                updated_at = excluded.updated_at",
+            params![
+                conversation_id,
+                agent_pubkey,
+                todos_json.to_string(),
+                self_applied_skills_json.to_string(),
+                updated_at,
+            ],
+        )?;
+        Ok(())
+    }
+
     pub fn upsert_agent_context_state(&self, state: &AgentContextState) -> Result<()> {
         let seen_json = serde_json::to_string(&state.seen_message_ids)?;
         self.conn.execute(

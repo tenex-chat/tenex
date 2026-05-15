@@ -364,13 +364,15 @@ pub(crate) async fn run_turn_loop(boot: &mut AgentBootstrap) -> Result<()> {
             {
                 let final_todos = boot.todos.lock().unwrap();
                 let final_skills = boot.self_applied_skills.lock().unwrap();
-                persistence::save_context_state(
+                if let Err(e) = persistence::save_context_state(
                     store,
                     &boot.conversation_id,
                     &boot.pubkey_hex,
                     &final_todos,
                     &final_skills,
-                );
+                ) {
+                    eprintln!("[tenex-agent] Failed to save agent context state: {e:#}");
+                }
             }
         }
         with_trace(

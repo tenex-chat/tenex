@@ -8,68 +8,13 @@ use tenex_accounting::{LlmUsage, RecordLlmCall, RootKind, record_llm_call};
 use tenex_context::{
     BreakpointHint, BreakpointKind, CacheObservation, Message as CtxMessage, TurnRecord,
 };
-use tenex_conversations::{AgentContextState, ConversationStore, NewToolMessage};
+use tenex_conversations::{ConversationStore, NewToolMessage};
 
 use crate::agent_bootstrap::AgentBootstrap;
 use crate::tools::TodoItem;
 use crate::tools::recording::ToolCallRecord;
 
-/// Unified save for both todos and self_applied_skills in a single
-/// read-modify-write. Keeping these in one call prevents the second writer
-/// from overwriting the first's changes.
-pub(super) fn save_context_state(
-    store: &ConversationStore,
-    conversation_id: &str,
-    agent_pubkey: &str,
-    todos: &[TodoItem],
-    self_applied_skills: &[String],
-) {
-    let todos_json = match serde_json::to_value(todos) {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!("[tenex-agent] Failed to serialize todos: {e}");
-            return;
-        }
-    };
-    // Serialize as explicit empty array (not None) so future reads can distinguish
-    // "never set" (None) from "user cleared all" (Some([])).
-    let skills_json = serde_json::to_value(self_applied_skills).ok();
-
-    let existing = store
-        .get_agent_context_state(conversation_id, agent_pubkey)
-        .ok()
-        .flatten();
-
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |d| d.as_millis() as i64);
-
-    let state = AgentContextState {
-        conversation_id: conversation_id.to_string(),
-        agent_pubkey: agent_pubkey.to_string(),
-        next_prompt_sequence: existing.as_ref().map_or(0, |s| s.next_prompt_sequence),
-        cache_anchored: existing.as_ref().is_some_and(|s| s.cache_anchored),
-        seen_message_ids: existing
-            .as_ref()
-            .map(|s| s.seen_message_ids.clone())
-            .unwrap_or_default(),
-        compaction_state: existing.as_ref().and_then(|s| s.compaction_state.clone()),
-        reminder_state: existing.as_ref().and_then(|s| s.reminder_state.clone()),
-        reminder_delta_state: existing
-            .as_ref()
-            .and_then(|s| s.reminder_delta_state.clone()),
-        todos: Some(todos_json),
-        self_applied_skills: skills_json,
-        meta_model_variant: None,
-        is_blocked: existing.as_ref().is_some_and(|s| s.is_blocked),
-        todo_nudged: existing.as_ref().is_some_and(|s| s.todo_nudged),
-        updated_at: now,
-    };
-
-    if let Err(e) = store.upsert_agent_context_state(&state) {
-        eprintln!("[tenex-agent] Failed to save agent context state: {e}");
-    }
-}
+pub(super) use crate::tools::agent_context_state::save_context_state;
 
 pub(super) fn record_step_user(
     store: &ConversationStore,

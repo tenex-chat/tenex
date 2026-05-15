@@ -6,8 +6,6 @@ use anyhow::{Context, Result};
 use rig::completion::ToolDefinition;
 use rig::tool::{ToolDyn, ToolError};
 use rig::wasm_compat::WasmBoxedFuture;
-use serde::Deserialize;
-use serde_json::{json, Value};
 use tenex_protocol::{nostr::NostrChannel, sink::EventSink, Channel, Intent, ToolUseIntent};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, Stdout};
 use tokio::net::UnixStream;

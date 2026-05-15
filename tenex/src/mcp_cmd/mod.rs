@@ -23,6 +23,8 @@ use serde_json::{Map, Value};
 
 use crate::store::atomic;
 
+mod agent_server;
+
 const FILE_NAME: &str = ".mcp.json";
 const SERVERS_KEY: &str = "mcpServers";
 
@@ -51,6 +53,25 @@ enum McpCommand {
     },
     /// Remove an MCP server.
     Remove(RemoveArgs),
+    /// Spin up an MCP stdio server exposing TENEX built-in tools scoped to
+    /// the given agent identity and conversation context.
+    Agent(AgentArgs),
+}
+
+#[derive(Parser)]
+pub struct AgentArgs {
+    /// Agent public key (hex).
+    pub pubkey: String,
+    /// Conversation ID (hex Nostr event ID) to bind this server to.
+    #[arg(long = "conversation")]
+    pub conversation_id: String,
+    /// Project ID — either a bare dTag (`my-project`) or a full NIP-33
+    /// coordinate (`31933:<pubkey-hex>:<dTag>`); the coordinate form is
+    /// normalized to its dTag before membership lookup. Required when the
+    /// agent belongs to multiple projects; auto-detected when membership is
+    /// unambiguous.
+    #[arg(long = "project")]
+    pub project_id: Option<String>,
 }
 
 #[derive(Parser)]
@@ -111,6 +132,7 @@ pub async fn run(args: McpArgs) -> Result<()> {
         McpCommand::List(a) => cmd_list(a),
         McpCommand::Get { name, agent } => cmd_get(&name, agent.as_deref()),
         McpCommand::Remove(a) => cmd_remove(a),
+        McpCommand::Agent(a) => agent_server::run(a).await,
     }
 }
 

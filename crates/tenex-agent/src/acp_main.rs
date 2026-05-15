@@ -2,6 +2,8 @@ mod acp_config;
 mod acp_mcp;
 mod acp_process;
 mod acp_runtime_accounting;
+#[path = "mcp_stdio.rs"]
+mod mcp_stdio;
 #[path = "categorize.rs"]
 mod categorize;
 #[path = "llm_accounting.rs"]

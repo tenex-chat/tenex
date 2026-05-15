@@ -42,7 +42,10 @@ tenex-identity = { path = "../crates/tenex-identity" }
 tenex-project = { path = "../crates/tenex-project", features = ["nip46"] }
 tenex-conversations = { path = "../crates/tenex-conversations" }
 tenex-agent-registry = { path = "../crates/tenex-agent-registry" }
-tenex-protocol = { path = "../crates/tenex-protocol" }
+tenex-protocol = { path = "../crates/tenex-protocol", features = ["relay"] }
+tenex-agent = { path = "../crates/tenex-agent" }
+tenex-rag = { path = "../crates/tenex-rag" }
+tenex-supervision = { path = "../crates/tenex-supervision" }
 tenex-firewall = { path = "../crates/tenex-firewall" }
 tenex-backend-keys = { path = "../crates/tenex-backend-keys" }
 tenex-builtin-skills = { path = "../crates/tenex-builtin-skills" }

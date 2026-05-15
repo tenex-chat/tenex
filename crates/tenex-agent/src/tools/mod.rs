@@ -33,7 +33,6 @@ pub mod skills_set;
 pub mod todo;
 pub(crate) mod turn_tool_registry;
 
-pub(crate) use agent_tool_set::ToolSet;
 pub use delegate::DelegateTool;
 pub use mcp::McpProxyTool;
 pub use rag_add_documents::RagAddDocumentsTool;
