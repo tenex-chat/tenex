@@ -78,7 +78,12 @@ pub struct BuildSystemPromptInput<'a> {
 /// description/role, then a `Use when:` line when `use_criteria` is set.
 fn render_agent_bullet(a: &tenex_project::Agent) -> String {
     let short_pubkey = &a.pubkey[..8.min(a.pubkey.len())];
-    let mut line = format!("  - {} ({})", a.slug, short_pubkey);
+    let mut line = match a.category.as_deref() {
+        Some(cat) if !cat.is_empty() => {
+            format!("  - {} ({}, {})", a.slug, short_pubkey, cat)
+        }
+        _ => format!("  - {} ({})", a.slug, short_pubkey),
+    };
     if !a.is_local {
         if let Some(backend) = &a.backend_name {
             line.push_str(&format!(" [remote agent running on {backend}]"));
