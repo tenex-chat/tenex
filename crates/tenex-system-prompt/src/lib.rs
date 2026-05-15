@@ -11,7 +11,7 @@ mod telegram;
 
 use guidance::{
     AGENT_DIRECTED_MONITORING, DELEGATION_TIPS, DOMAIN_EXPERT_GUIDANCE, ORCHESTRATOR_GUIDANCE,
-    PRINCIPAL_GUIDANCE, TODO_BEFORE_DELEGATION,
+    PRINCIPAL_GUIDANCE, REJECT_DONT_REDELEGATE, TODO_BEFORE_DELEGATION,
 };
 use home::render_home_directory;
 pub use home::{HomeDirectoryInfo, InjectedFile};
@@ -515,6 +515,7 @@ Creating a todo list helps you stay organized, shows your progress to observers,
 
     if !matches!(category, Some(AgentCategory::DomainExpert)) {
         parts.push(DELEGATION_TIPS.to_string());
+        parts.push(REJECT_DONT_REDELEGATE.to_string());
         parts.push(TODO_BEFORE_DELEGATION.to_string());
     }
 

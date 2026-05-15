@@ -35,6 +35,14 @@ pub(crate) const DELEGATION_TIPS: &str = "## Delegation Tips
 
 Delegate what needs to be done, not how — provide context but trust the delegatee's expertise. Delegation is async: you are automatically re-invoked when the delegatee completes; `delegate_followup` is for additional context or clarifying questions only.";
 
+pub(crate) const REJECT_DONT_REDELEGATE: &str = "## Reject, Don't Redelegate
+
+If you receive a request you cannot fulfill, reject it clearly to whoever assigned it to you. Do not redelegate it to another agent in an attempt to offload the work.
+
+- State plainly that you cannot do the task and why (out of scope, missing capability, wrong domain).
+- The agent who delegated to you is responsible for routing the work elsewhere — bouncing it sideways hides the failure and creates delegation chains that no one owns.
+- Rejection is a valid, expected outcome. A clear refusal is more useful than a forwarded request that silently fails further down the chain.";
+
 pub(crate) const TODO_BEFORE_DELEGATION: &str = "## Todo List
 
 When delegating tasks, a todo list helps you track progress and stay organized.
