@@ -48,14 +48,24 @@ pub(super) async fn project_step_messages(
         messages
     };
 
-    let live_prompt_index = projected.iter().rposition(
-        |message| matches!(message, CtxMessage::User { content } if content == turn_text),
-    );
+    let live_prompt_index = projected
+        .iter()
+        .rposition(|message| {
+            matches!(message, CtxMessage::User { content } if is_live_prompt(content, turn_text))
+        });
     let mut rig_messages: Vec<RigMessage> = projected.drain(..).map(ctx_msg_to_rig).collect();
     if let Some(index) = live_prompt_index {
         rig_messages[index] = turn_prompt.clone();
     }
     Ok(rig_messages)
+}
+
+fn is_live_prompt(content: &str, turn_text: &str) -> bool {
+    content == turn_text
+        || (!turn_text.is_empty()
+            && content
+                .strip_prefix(turn_text)
+                .is_some_and(|suffix| suffix.starts_with("\n\n<system-reminder")))
 }
 
 fn model_profile(boot: &AgentBootstrap) -> tenex_context::ModelProfile {

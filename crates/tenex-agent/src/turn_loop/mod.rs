@@ -409,7 +409,15 @@ pub(crate) async fn run_turn_loop(boot: &mut AgentBootstrap) -> Result<()> {
                 break 'agent_loop;
             }
             PostCompletionOutcome::ReEngage { message } => {
-                re_engage_tail = final_response.tail;
+                re_engage_tail = if final_response.response.trim().is_empty() {
+                    Vec::new()
+                } else {
+                    vec![CtxMessage::Assistant {
+                        content: final_response.response.clone(),
+                        reasoning: Vec::new(),
+                        tool_calls: Vec::new(),
+                    }]
+                };
                 current_message = message;
                 eprintln!("[tenex-agent] Supervision: pending todos — re-engaging...");
             }

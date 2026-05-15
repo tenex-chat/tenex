@@ -21,7 +21,6 @@ use super::persistence;
 pub(super) struct StepLoopResult {
     pub response: String,
     pub usage: Usage,
-    pub tail: Vec<CtxMessage>,
 }
 
 pub(super) struct StepOutput {
@@ -144,7 +143,6 @@ where
             return Ok(StepLoopResult {
                 response: output.text,
                 usage: total_usage,
-                tail: in_turn_tail,
             });
         }
 

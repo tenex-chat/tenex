@@ -153,9 +153,7 @@ fn image_placeholder(image_obj: &serde_json::Map<String, Value>) -> String {
         .and_then(Value::as_str)
         .map(estimate_base64_bytes)
         .unwrap_or(0);
-    format!(
-        "[image omitted: {bytes} bytes, {mime} — model has no vision capability]",
-    )
+    format!("[image omitted: {bytes} bytes, {mime} — model has no vision capability]")
 }
 
 /// Estimate the decoded byte length of a base64 string without actually
@@ -167,7 +165,7 @@ fn estimate_base64_bytes(b64: &str) -> usize {
         return 0;
     }
     let padding = b64.bytes().rev().take_while(|c| *c == b'=').count();
-    (len / 4) * 3 - padding
+    ((len / 4) * 3).saturating_sub(padding)
 }
 
 #[cfg(test)]
@@ -228,5 +226,12 @@ mod tests {
         let raw = r#"{"type":"image","data":"QQ==","mimeType":"image/png"}"#;
         let out = strip_images_for_text_only_model(raw);
         assert!(out.starts_with("[image omitted: 1 bytes,"), "got: {out}");
+    }
+
+    #[test]
+    fn malformed_short_base64_padding_does_not_underflow() {
+        assert_eq!(estimate_base64_bytes("=="), 0);
+        assert_eq!(estimate_base64_bytes("Q=="), 0);
+        assert_eq!(estimate_base64_bytes("==="), 0);
     }
 }

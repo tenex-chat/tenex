@@ -48,8 +48,8 @@ where
         .cloned()
         .context("projected request must have at least one message")?;
     let history = rig_messages[..rig_messages.len().saturating_sub(1)].to_vec();
-    ensure_continue(emit.on_completion_call(&prompt, &history).await)?;
     ensure_continue(progress.on_completion_call(&prompt, &history).await)?;
+    ensure_continue(emit.on_completion_call(&prompt, &history).await)?;
 
     let request = CompletionRequest {
         model: None,
