@@ -150,6 +150,14 @@ pub(super) fn delegation_route_for_child_reply(
     if event.kind != Kind::TextNote {
         return Ok(None);
     }
+    // A delegation event starts a new task — it cannot be a child reply.
+    // Without this guard, when delegator and delegatee share the same pubkey
+    // (same agent in two projects), the delegation event matches its own
+    // freshly-registered route and gets dispatched into the parent
+    // conversation instead of opening the new delegation thread.
+    if has_any_tag(event, "delegation") {
+        return Ok(None);
+    }
 
     let child_conversation_id = conversation_id_from_event(event);
     let Some(route) = read_delegation_route(store, &child_conversation_id)? else {
@@ -430,6 +438,7 @@ mod tests {
     fn signed_event_from(keys: &Keys, kind: Kind, content: &str, tags: Vec<Tag>) -> Event {
         EventBuilder::new(kind, content)
             .tags(tags)
+            .allow_self_tagging()
             .sign_with_keys(keys)
             .unwrap()
     }
@@ -733,5 +742,64 @@ mod tests {
         assert_eq!(route.parent_conversation_id, parent_conversation_id);
         assert_eq!(route.child_agent_pubkey, external_child_pubkey);
         assert_eq!(route.child_conversation_id, delegation.id.to_hex());
+    }
+
+    /// Regression: when the delegating agent and the delegatee share the same
+    /// Nostr keypair (the same agent configured in two different projects),
+    /// the delegation event used to match its own freshly-registered route and
+    /// get re-dispatched into the parent conversation, causing an infinite loop.
+    ///
+    /// The fix: `delegation_route_for_child_reply` must reject events that
+    /// carry a `["delegation", ...]` tag — those are task starters, not replies.
+    #[test]
+    fn delegation_event_is_not_matched_as_child_reply_when_delegator_and_delegatee_share_pubkey() {
+        use std::collections::HashSet;
+        use std::sync::Mutex;
+
+        let store = Arc::new(Mutex::new(ConversationStore::open_in_memory().unwrap()));
+        let user_keys = Keys::generate();
+        // One keypair shared between the "source" and "target" project's agent.
+        let shared_keys = Keys::generate();
+        let shared_pubkey = shared_keys.public_key().to_hex();
+
+        let parent_conversation_id =
+            signed_event_from(&user_keys, Kind::TextNote, "root task", Vec::new())
+                .id
+                .to_hex();
+
+        // Delegation event: delegator == delegatee (same pubkey), no `e` root tag.
+        // `conversation_id_from_event` falls back to `event.id`.
+        let delegation = signed_event_from(
+            &shared_keys,
+            Kind::TextNote,
+            "@self do the cross-project task",
+            vec![
+                tag(&["p", &shared_pubkey]),
+                tag(&["delegation", &parent_conversation_id]),
+            ],
+        );
+
+        let agent_pubkeys = HashSet::from([shared_pubkey.clone()]);
+
+        // Simulate what the source runtime does: register the delegation route
+        // (with parent_job=None, as happens in the relay/ACP path).
+        let route = register_delegation_route_if_needed(
+            &store,
+            &delegation,
+            &agent_pubkeys,
+            None,
+        )
+        .unwrap()
+        .expect("route registered");
+        assert_eq!(route.child_conversation_id, delegation.id.to_hex());
+
+        // The delegation event itself must NOT be treated as a child reply,
+        // even though pubkey and conversation checks would otherwise match.
+        assert!(
+            delegation_route_for_child_reply(&store, &delegation)
+                .unwrap()
+                .is_none(),
+            "delegation event must not match as a child reply"
+        );
     }
 }
