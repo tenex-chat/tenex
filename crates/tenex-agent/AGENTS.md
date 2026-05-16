@@ -39,6 +39,14 @@ Canonical spec: `docs/RUST-AGENT-SPEC.md`. Fleet context: `docs/plans/2026-04-28
 4. Model/provider resolution: `src/config.rs` delegates to `tenex-llm-config`.
 5. Any change to the stdout frame format must be coordinated with the Rust runtime orchestrator.
 
+## ACP variant (`tenex-agent-acp`)
+
+The `tenex-agent-acp` binary in `src/acp_main.rs` runs a persistent ACP backend (e.g. Claude Code) instead of the native rig loop. ACP backends bring their own filesystem/shell tools; TENEX coordination tools are exposed back to the backend through a per-session MCP child process at `src/acp_mcp_server.rs`, configured by `src/acp_mcp.rs`.
+
+That MCP server exposes a static set of always-on TENEX tools (delegation, `project_list`, `ask`, `conversation_get/list/search`, `rag_search/add_documents`, `skill_list`, `skills_set`) and a skill-gated set keyed by the grant name in skill frontmatter `tools:` (`agents_write`, `create_workflow`, `run_workflow`, `sign_as_user`, `mcp_*`). Workspace fs grants are intentionally not bridged — the ACP backend already provides those.
+
+Active skills are tracked in-process for the lifetime of the session: initial state is `default.skills` from the agent config + the inbound envelope's `skills` + persisted self-applied skills from the conversation store + the orchestrator/principal `workflows` auto-enable. When `skills_set` mutates the set, the server emits `notifications/tools/list_changed` so the ACP backend re-queries `tools/list` and sees the updated skill-gated surface. `initialize` therefore advertises `tools.listChanged: true`.
+
 ## Intentionally absent
 
 - No streaming intermediate events (roadmap; not in v1).

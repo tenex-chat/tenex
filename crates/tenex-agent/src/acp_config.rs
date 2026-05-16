@@ -20,6 +20,7 @@ pub(crate) struct AcpAgentConfig {
 #[derive(Debug, Deserialize)]
 pub(crate) struct AgentDefaultConfig {
     pub model: Option<String>,
+    pub skills: Option<Vec<String>>,
 }
 
 impl AcpAgentConfig {
@@ -40,6 +41,13 @@ impl AcpAgentConfig {
 
     pub(crate) fn default_model(&self) -> Option<&str> {
         self.default.as_ref()?.model.as_deref()
+    }
+
+    pub(crate) fn default_skills(&self) -> Vec<String> {
+        self.default
+            .as_ref()
+            .and_then(|d| d.skills.clone())
+            .unwrap_or_default()
     }
 }
 

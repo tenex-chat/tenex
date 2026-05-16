@@ -1,5 +1,6 @@
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result};
 use rig::completion::ToolDefinition;
@@ -8,16 +9,36 @@ use rig::wasm_compat::WasmBoxedFuture;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use tenex_protocol::{nostr::NostrChannel, sink::EventSink, Channel, Intent, ToolUseIntent};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, Stdout};
 use tokio::net::UnixStream;
+use tokio::sync::Mutex as AsyncMutex;
 
 use crate::acp_config::AcpAgentConfig;
-use crate::acp_mcp::{agent_allows_delegation, AcpMcpContext, MCP_PROTOCOL_VERSION, SERVER_NAME};
+use crate::acp_mcp::{AcpMcpContext, MCP_PROTOCOL_VERSION, SERVER_NAME};
+use crate::config::ResolvedModel;
 use crate::emit::{EmitState, EmitStateArgs};
+use crate::skills::{self, SkillLookupCtx};
+use crate::tools::agents_write::AgentsWriteTool;
+use crate::tools::ask::AskTool;
+use crate::tools::conversation_get::ConversationGetTool;
+use crate::tools::conversation_list::ConversationListTool;
+use crate::tools::conversation_search::ConversationSearchTool;
+use crate::tools::create_workflow::CreateWorkflowTool;
 use crate::tools::delegate::DelegateTool;
 use crate::tools::delegate_crossproject::DelegateCrossProjectTool;
 use crate::tools::delegate_followup::DelegateFollowupTool;
+use crate::tools::mcp_resources::{
+    McpListResourcesTool, McpResourceReadTool, McpSubscribeTool, McpSubscriptionStopTool,
+};
+use crate::tools::project_list::ProjectListTool;
+use crate::tools::rag_add_documents::RagAddDocumentsTool;
+use crate::tools::rag_search::RagSearchTool;
+use crate::tools::run_workflow::RunWorkflowTool;
 use crate::tools::self_delegate::SelfDelegateTool;
+use crate::tools::sign_as_user::SignAsUserTool;
+use crate::tools::skill_list::SkillListTool;
+use crate::tools::skills_set::SkillsSetTool;
+use crate::tools::todo::TodoItem;
 
 #[derive(Clone)]
 struct SocketEventSink {
@@ -45,8 +66,21 @@ impl EventSink for SocketEventSink {
 
 pub(super) async fn run_stdio_server(context_path: &str) -> Result<()> {
     let context = read_context(context_path)?;
-    let tools = build_tools(&context)?;
-    serve_stdio(tools).await
+    let stdout = Arc::new(AsyncMutex::new(tokio::io::stdout()));
+    let server = build_server(&context, stdout.clone()).await?;
+    serve_stdio(server, stdout).await
+}
+
+fn open_rag_store(base_dir: &std::path::Path) -> Option<Arc<tenex_rag::RagStore>> {
+    let cfg = tenex_rag::EmbedConfig::load_from_base_dir(base_dir)?;
+    let db_path = base_dir.join("embeddings.db");
+    match tenex_rag::RagStore::open(&db_path, &cfg) {
+        Ok(store) => Some(Arc::new(store)),
+        Err(e) => {
+            eprintln!("[tenex-agent-acp-mcp] RAG store unavailable: {e}");
+            None
+        }
+    }
 }
 
 fn read_context(path: &str) -> Result<AcpMcpContext> {
@@ -54,11 +88,22 @@ fn read_context(path: &str) -> Result<AcpMcpContext> {
     serde_json::from_slice(&bytes).with_context(|| format!("parsing ACP MCP context {path}"))
 }
 
-fn build_tools(context: &AcpMcpContext) -> Result<Vec<Box<dyn ToolDyn>>> {
+/// Tools that any ACP agent can invoke regardless of active skills.
+/// Skill-gated tools (`grant_name -> tool`) are advertised only when an active
+/// skill's frontmatter `tools:` list contains the grant name.
+struct McpServer {
+    always_on: Vec<Box<dyn ToolDyn>>,
+    skill_gated: HashMap<String, Box<dyn ToolDyn>>,
+    skill_ctx: Arc<SkillLookupCtx>,
+    active_skills: Arc<Mutex<Vec<String>>>,
+    stdout: Arc<AsyncMutex<Stdout>>,
+}
+
+async fn build_server(
+    context: &AcpMcpContext,
+    stdout: Arc<AsyncMutex<Stdout>>,
+) -> Result<McpServer> {
     let agent_config = AcpAgentConfig::load(&context.agent_config_path)?;
-    if !agent_allows_delegation(&agent_config) {
-        return Ok(Vec::new());
-    }
 
     let channel: Arc<dyn Channel> = Arc::new(
         NostrChannel::from_nsec(
@@ -89,14 +134,32 @@ fn build_tools(context: &AcpMcpContext) -> Result<Vec<Box<dyn ToolDyn>>> {
         &context.base_dir,
         Some(&context.project_id),
     ));
-    let conv_db_path = {
-        let d_tag = tenex_conversations::normalize_project_id(&context.project_id)
-            .map_err(|err| anyhow::anyhow!("{err}"))?;
-        tenex_conversations::paths::conversation_db_path(&context.base_dir, &d_tag)
-    };
+    let project_d_tag = tenex_conversations::normalize_project_id(&context.project_id)
+        .map_err(|err| anyhow::anyhow!("{err}"))?;
+    let conv_db_path =
+        tenex_conversations::paths::conversation_db_path(&context.base_dir, &project_d_tag);
 
-    Ok(vec![
-        expose_tool(
+    let rag_store = open_rag_store(&context.base_dir);
+    let summarization_model = Arc::new(ResolvedModel::resolve(
+        &context.base_dir,
+        None,
+        Arc::new(tenex_llm_config::key_health::KeyHealthTracker::new()),
+    )?);
+
+    let skill_ctx = Arc::new(SkillLookupCtx {
+        agent_pubkey: context.agent_pubkey.clone(),
+        project_path: context.working_dir.clone(),
+        base_dir: context.base_dir.clone(),
+        agent_config_path: context.agent_config_path.clone(),
+    });
+
+    let active_skills = Arc::new(Mutex::new(initial_active_skills(context, &conv_db_path)));
+    let todos: Arc<Mutex<Vec<TodoItem>>> = Arc::new(Mutex::new(Vec::new()));
+
+    let mut always_on: Vec<Box<dyn ToolDyn>> = Vec::new();
+
+    if context.expose_delegation_tools {
+        always_on.push(expose_tool(
             Box::new(DelegateTool::new(
                 state.clone(),
                 project_agents.clone(),
@@ -105,28 +168,224 @@ fn build_tools(context: &AcpMcpContext) -> Result<Vec<Box<dyn ToolDyn>>> {
             )),
             state.clone(),
             true,
-        ),
-        expose_tool(
+        ));
+        always_on.push(expose_tool(
             Box::new(SelfDelegateTool::new(state.clone())),
             state.clone(),
             true,
-        ),
-        expose_tool(
+        ));
+        always_on.push(expose_tool(
             Box::new(DelegateCrossProjectTool::new(state.clone())),
             state.clone(),
             true,
-        ),
-        expose_tool(
+        ));
+        always_on.push(expose_tool(
             Box::new(DelegateFollowupTool::new(
                 state.clone(),
-                project_agents,
-                teams,
-                conv_db_path,
+                project_agents.clone(),
+                teams.clone(),
+                conv_db_path.clone(),
             )),
-            state,
+            state.clone(),
             true,
+        ));
+    }
+
+    always_on.push(expose_tool(
+        Box::new(ProjectListTool::new(context.base_dir.clone())),
+        state.clone(),
+        false,
+    ));
+    always_on.push(expose_tool(
+        Box::new(AskTool::new(
+            state.clone(),
+            context.owner_pubkey.clone(),
+            context.escalation_pubkey.clone(),
+        )),
+        state.clone(),
+        false,
+    ));
+    always_on.push(expose_tool(
+        Box::new(ConversationGetTool::new(
+            state.clone(),
+            conv_db_path.clone(),
+            summarization_model.clone(),
+        )),
+        state.clone(),
+        true,
+    ));
+    always_on.push(expose_tool(
+        Box::new(ConversationListTool::new(
+            state.clone(),
+            conv_db_path.clone(),
+            context.base_dir.clone(),
+            project_d_tag.clone(),
+            project_agents.clone(),
+        )),
+        state.clone(),
+        true,
+    ));
+    always_on.push(expose_tool(
+        Box::new(ConversationSearchTool::new(
+            rag_store.clone(),
+            project_d_tag.clone(),
+        )),
+        state.clone(),
+        false,
+    ));
+    always_on.push(expose_tool(
+        Box::new(RagSearchTool::new(
+            rag_store.clone(),
+            project_d_tag.clone(),
+            context.agent_pubkey.clone(),
+            summarization_model.clone(),
+        )),
+        state.clone(),
+        false,
+    ));
+    always_on.push(expose_tool(
+        Box::new(RagAddDocumentsTool::new(
+            rag_store.clone(),
+            project_d_tag.clone(),
+            context.agent_pubkey.clone(),
+        )),
+        state.clone(),
+        false,
+    ));
+    always_on.push(expose_tool(
+        Box::new(SkillListTool::new(skill_ctx.clone())),
+        state.clone(),
+        false,
+    ));
+    always_on.push(expose_tool(
+        Box::new(SkillsSetTool::new(skill_ctx.clone(), active_skills.clone())),
+        state.clone(),
+        false,
+    ));
+
+    let mut skill_gated: HashMap<String, Box<dyn ToolDyn>> = HashMap::new();
+    skill_gated.insert(
+        "agents_write".to_string(),
+        expose_tool(
+            Box::new(AgentsWriteTool::new(context.base_dir.clone())),
+            state.clone(),
+            false,
         ),
-    ])
+    );
+    skill_gated.insert(
+        "create_workflow".to_string(),
+        expose_tool(
+            Box::new(CreateWorkflowTool::new(context.agent_home.clone())),
+            state.clone(),
+            false,
+        ),
+    );
+    skill_gated.insert(
+        "run_workflow".to_string(),
+        expose_tool(
+            Box::new(RunWorkflowTool::new(
+                context.agent_home.clone(),
+                summarization_model.clone(),
+                todos.clone(),
+                context.agent_pubkey.clone(),
+                context.conversation_id.clone(),
+            )),
+            state.clone(),
+            false,
+        ),
+    );
+    skill_gated.insert(
+        "sign_as_user".to_string(),
+        expose_tool(
+            Box::new(SignAsUserTool::new(
+                context.owner_pubkey.clone(),
+                agent_config.nsec.clone(),
+            )),
+            state.clone(),
+            false,
+        ),
+    );
+    skill_gated.insert(
+        "mcp_list_resources".to_string(),
+        expose_tool(
+            Box::new(McpListResourcesTool::new(context.agent_pubkey.clone())),
+            state.clone(),
+            false,
+        ),
+    );
+    skill_gated.insert(
+        "mcp_resource_read".to_string(),
+        expose_tool(
+            Box::new(McpResourceReadTool::new(context.agent_pubkey.clone())),
+            state.clone(),
+            false,
+        ),
+    );
+    skill_gated.insert(
+        "mcp_subscribe".to_string(),
+        expose_tool(
+            Box::new(McpSubscribeTool::new(
+                context.agent_pubkey.clone(),
+                context.agent_slug.clone(),
+                context.conversation_id.clone(),
+                project_d_tag.clone(),
+            )),
+            state.clone(),
+            false,
+        ),
+    );
+    skill_gated.insert(
+        "mcp_subscription_stop".to_string(),
+        expose_tool(
+            Box::new(McpSubscriptionStopTool::new(context.agent_pubkey.clone())),
+            state,
+            false,
+        ),
+    );
+
+    Ok(McpServer {
+        always_on,
+        skill_gated,
+        skill_ctx,
+        active_skills,
+        stdout,
+    })
+}
+
+/// Compute the initial active-skill set: agent default skills + envelope
+/// skills + previously self-applied skills from the conversation store +
+/// category auto-enables. Mirrors `agent_bootstrap::stages::build_skill_context`.
+fn initial_active_skills(context: &AcpMcpContext, conv_db_path: &PathBuf) -> Vec<String> {
+    let mut ids: Vec<String> = context.default_skills.clone();
+    for id in &context.envelope_skills {
+        if !ids.contains(id) {
+            ids.push(id.clone());
+        }
+    }
+    if let Ok(store) = tenex_conversations::ConversationStore::open(conv_db_path) {
+        if let Ok(Some(state)) =
+            store.get_agent_context_state(&context.conversation_id, &context.agent_pubkey)
+        {
+            if let Some(persisted) = state
+                .self_applied_skills
+                .and_then(|v| serde_json::from_value::<Vec<String>>(v).ok())
+            {
+                for id in persisted {
+                    if !ids.contains(&id) {
+                        ids.push(id);
+                    }
+                }
+            }
+        }
+    }
+    let auto_workflow = matches!(
+        context.agent_category.as_deref(),
+        Some("orchestrator") | Some("principal")
+    );
+    if auto_workflow && !ids.iter().any(|id| id == "workflows") {
+        ids.push("workflows".to_string());
+    }
+    ids
 }
 
 fn expose_tool(
@@ -195,17 +454,17 @@ struct JsonRpcRequest {
     params: Value,
 }
 
-async fn serve_stdio(tools: Vec<Box<dyn ToolDyn>>) -> Result<()> {
+async fn serve_stdio(server: McpServer, stdout: Arc<AsyncMutex<Stdout>>) -> Result<()> {
     let stdin = tokio::io::stdin();
     let mut lines = BufReader::new(stdin).lines();
-    let mut stdout = tokio::io::stdout();
+    let server = Arc::new(server);
 
     while let Some(line) = lines.next_line().await? {
         if line.trim().is_empty() {
             continue;
         }
         let response = match serde_json::from_str::<JsonRpcRequest>(&line) {
-            Ok(request) => handle_request(request, &tools).await,
+            Ok(request) => handle_request(request, &server).await,
             Err(error) => Some(json_rpc_error(
                 Value::Null,
                 -32700,
@@ -213,16 +472,22 @@ async fn serve_stdio(tools: Vec<Box<dyn ToolDyn>>) -> Result<()> {
             )),
         };
         if let Some(response) = response {
-            let mut bytes = serde_json::to_vec(&response)?;
-            bytes.push(b'\n');
-            stdout.write_all(&bytes).await?;
-            stdout.flush().await?;
+            write_line(&stdout, &response).await?;
         }
     }
     Ok(())
 }
 
-async fn handle_request(request: JsonRpcRequest, tools: &[Box<dyn ToolDyn>]) -> Option<Value> {
+async fn write_line(stdout: &Arc<AsyncMutex<Stdout>>, value: &Value) -> Result<()> {
+    let mut bytes = serde_json::to_vec(value)?;
+    bytes.push(b'\n');
+    let mut out = stdout.lock().await;
+    out.write_all(&bytes).await?;
+    out.flush().await?;
+    Ok(())
+}
+
+async fn handle_request(request: JsonRpcRequest, server: &Arc<McpServer>) -> Option<Value> {
     let id = request.id.clone().unwrap_or(Value::Null);
     let Some(method) = request.method.as_deref() else {
         return Some(json_rpc_error(id, -32600, "missing method"));
@@ -234,7 +499,7 @@ async fn handle_request(request: JsonRpcRequest, tools: &[Box<dyn ToolDyn>]) -> 
             id,
             json!({
                 "protocolVersion": MCP_PROTOCOL_VERSION,
-                "capabilities": {"tools": {}},
+                "capabilities": {"tools": {"listChanged": true}},
                 "serverInfo": {
                     "name": SERVER_NAME,
                     "version": env!("CARGO_PKG_VERSION")
@@ -242,8 +507,8 @@ async fn handle_request(request: JsonRpcRequest, tools: &[Box<dyn ToolDyn>]) -> 
             }),
         )),
         "ping" => Some(json_rpc_result(id, json!({}))),
-        "tools/list" => Some(json_rpc_result(id, list_tools(tools).await)),
-        "tools/call" => Some(json_rpc_result(id, call_tool(request.params, tools).await)),
+        "tools/list" => Some(json_rpc_result(id, server.list_tools().await)),
+        "tools/call" => Some(json_rpc_result(id, server.call_tool(request.params).await)),
         _ => Some(json_rpc_error(
             id,
             -32601,
@@ -252,13 +517,92 @@ async fn handle_request(request: JsonRpcRequest, tools: &[Box<dyn ToolDyn>]) -> 
     }
 }
 
-async fn list_tools(tools: &[Box<dyn ToolDyn>]) -> Value {
-    let mut out = Vec::new();
-    for tool in tools {
-        let definition = tool.definition(String::new()).await;
-        out.push(tool_definition_to_mcp(definition));
+impl McpServer {
+    /// Tools granted by the currently active skills (union of every active
+    /// skill's frontmatter `tools:` list).
+    fn granted_tool_names(&self) -> HashSet<String> {
+        let active = self.active_skills.lock().unwrap().clone();
+        if active.is_empty() {
+            return HashSet::new();
+        }
+        let resolved = skills::fetch_skills(&active, &self.skill_ctx);
+        resolved
+            .iter()
+            .filter_map(|s| s.frontmatter.as_ref())
+            .flat_map(|fm| fm.tools.iter().cloned())
+            .collect()
     }
-    json!({ "tools": out })
+
+    async fn list_tools(&self) -> Value {
+        let granted = self.granted_tool_names();
+        let mut out = Vec::new();
+        for tool in &self.always_on {
+            let def = tool.definition(String::new()).await;
+            out.push(tool_definition_to_mcp(def));
+        }
+        for (grant, tool) in &self.skill_gated {
+            if granted.contains(grant) {
+                let def = tool.definition(String::new()).await;
+                out.push(tool_definition_to_mcp(def));
+            }
+        }
+        json!({ "tools": out })
+    }
+
+    async fn call_tool(self: &Arc<Self>, params: Value) -> Value {
+        let name = params
+            .get("name")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string();
+        let arguments = params
+            .get("arguments")
+            .cloned()
+            .unwrap_or_else(|| json!({}));
+        if name.is_empty() {
+            return tool_result("missing tool name", true);
+        }
+
+        let tool: Option<&Box<dyn ToolDyn>> = self
+            .always_on
+            .iter()
+            .find(|t| t.name() == name)
+            .or_else(|| self.skill_gated.values().find(|t| t.name() == name));
+
+        let Some(tool) = tool else {
+            return tool_result(format!("unknown TENEX tool '{name}'"), true);
+        };
+
+        let active_before = if name == "skills_set" {
+            Some(self.active_skills.lock().unwrap().clone())
+        } else {
+            None
+        };
+
+        let result = tool.call(arguments.to_string()).await;
+
+        if let Some(before) = active_before {
+            let after = self.active_skills.lock().unwrap().clone();
+            if result.is_ok() && before != after {
+                if let Err(err) = self.notify_tools_list_changed().await {
+                    eprintln!("[tenex-agent-acp-mcp] warn: tools/list_changed failed: {err}");
+                }
+            }
+        }
+
+        match result {
+            Ok(output) => tool_result(output, false),
+            Err(error) => tool_result(error.to_string(), true),
+        }
+    }
+
+    async fn notify_tools_list_changed(&self) -> Result<()> {
+        let payload = json!({
+            "jsonrpc": "2.0",
+            "method": "notifications/tools/list_changed"
+        });
+        write_line(&self.stdout, &payload).await
+    }
 }
 
 fn tool_definition_to_mcp(definition: ToolDefinition) -> Value {
@@ -267,26 +611,6 @@ fn tool_definition_to_mcp(definition: ToolDefinition) -> Value {
         "description": definition.description,
         "inputSchema": definition.parameters,
     })
-}
-
-async fn call_tool(params: Value, tools: &[Box<dyn ToolDyn>]) -> Value {
-    let name = params.get("name").and_then(Value::as_str).unwrap_or("");
-    let arguments = params
-        .get("arguments")
-        .cloned()
-        .unwrap_or_else(|| json!({}));
-    if name.is_empty() {
-        return tool_result("missing tool name", true);
-    }
-
-    let Some(tool) = tools.iter().find(|tool| tool.name() == name) else {
-        return tool_result(format!("unknown TENEX tool '{name}'"), true);
-    };
-
-    match tool.call(arguments.to_string()).await {
-        Ok(output) => tool_result(output, false),
-        Err(error) => tool_result(error.to_string(), true),
-    }
 }
 
 fn tool_result(text: impl Into<String>, is_error: bool) -> Value {

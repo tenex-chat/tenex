@@ -13,22 +13,41 @@ mod llm_accounting;
 #[path = "config.rs"]
 mod config;
 mod emit;
+#[path = "escalation.rs"]
+mod escalation;
 #[path = "home.rs"]
 mod home;
 mod project_instructions;
+#[path = "runtime_control.rs"]
+mod runtime_control;
 #[path = "runtime_tracker.rs"]
 mod runtime_tracker;
+#[path = "skills.rs"]
+mod skills;
+#[path = "workflows.rs"]
+mod workflows;
+#[path = "tools"]
 mod tools {
-    #[path = "../tools/delegate.rs"]
+    pub mod agents_write;
+    pub mod ask;
+    pub mod conversation_get;
+    pub mod conversation_list;
+    pub mod conversation_search;
+    pub mod create_workflow;
     pub mod delegate;
-    #[path = "../tools/delegate_crossproject.rs"]
     pub mod delegate_crossproject;
-    #[path = "../tools/delegate_followup.rs"]
     pub mod delegate_followup;
-    #[path = "../tools/delegate_followup_resolution.rs"]
     pub mod delegate_followup_resolution;
-    #[path = "../tools/self_delegate.rs"]
+    pub mod mcp_resources;
+    pub mod project_list;
+    pub mod rag_add_documents;
+    pub mod rag_search;
+    pub mod run_workflow;
     pub mod self_delegate;
+    pub mod sign_as_user;
+    pub mod skill_list;
+    pub mod skills_set;
+    pub mod todo;
 }
 
 use acp_config::{load_acp_config, AcpAgentConfig, AcpRuntimeConfig};
@@ -288,7 +307,11 @@ async fn run(
     let resolved_category_string: Option<String> = match agent_config.category.clone() {
         Some(c) => Some(c),
         None => {
-            let resolved = config::ResolvedModel::resolve(&base_dir, None)?;
+            let resolved = config::ResolvedModel::resolve(
+                &base_dir,
+                None,
+                Arc::new(tenex_llm_config::key_health::KeyHealthTracker::new()),
+            )?;
             let metadata = tenex_agent_registry::AgentMetadata {
                 name: agent_config.name.clone(),
                 role: String::new(),
@@ -357,6 +380,7 @@ async fn run(
             kind: tenex_protocol::PrincipalKind::Human,
             display_name: None,
         });
+    let escalation_pubkey = escalation::resolve_escalation_pubkey(&base_dir, &project_agents);
     let mcp_bridge = AcpMcpBridge::start(AcpMcpBridgeInput {
         base_dir: base_dir.clone(),
         agent_config_path: args[1].clone(),
@@ -366,6 +390,7 @@ async fn run(
             .unwrap_or(true),
         project: project_ref.clone(),
         conversation_root: conversation_root.clone(),
+        conversation_id: conversation_id.clone(),
         triggering_message: Some(bootstrap_envelope.message.clone()),
         completion_recipient: bootstrap_completion_recipient,
         triggering_principal: bootstrap_envelope.principal.clone(),
@@ -374,6 +399,16 @@ async fn run(
         stdout_sink: stdout_sink.clone(),
         pending_external_work: pending_external_work.clone(),
         project_root: project_root.clone(),
+        agent_pubkey: pubkey_hex.clone(),
+        agent_nsec: agent_config.nsec.clone(),
+        agent_slug: agent_config.identity_name().to_string(),
+        owner_pubkey: owner_pubkey_hex.clone(),
+        escalation_pubkey,
+        agent_home: agent_home.clone(),
+        working_dir: working_dir.clone(),
+        agent_category: resolved_category_string.clone(),
+        default_skills: agent_config.default_skills(),
+        envelope_skills: bootstrap_envelope.metadata.skills.clone(),
     })
     .await?;
 
@@ -404,7 +439,7 @@ async fn run(
     let session_result = acp
         .request(
             "session/new",
-            session_new_params(&working_dir, mcp_bridge.as_ref(), resolved_category_enum)?,
+            session_new_params(&working_dir, &mcp_bridge, resolved_category_enum)?,
         )
         .await?;
     let session_id = session_result
@@ -548,9 +583,7 @@ async fn run(
     }
 
     acp.shutdown().await;
-    if let Some(bridge) = mcp_bridge {
-        bridge.shutdown().await;
-    }
+    mcp_bridge.shutdown().await;
     Ok(())
 }
 

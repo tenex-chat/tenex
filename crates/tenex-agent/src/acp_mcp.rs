@@ -14,8 +14,6 @@ use tokio::sync::Mutex;
 
 use tenex_supervision::types::AgentCategory;
 
-use crate::acp_config::AcpAgentConfig;
-
 const SERVER_NAME: &str = "tenex";
 const MCP_PROTOCOL_VERSION: &str = "2025-11-25";
 
@@ -59,20 +57,32 @@ impl EventSink for SharedStdoutEventSink {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct AcpMcpContext {
-    base_dir: PathBuf,
-    agent_config_path: String,
-    project_id: String,
-    project: ProjectRef,
-    conversation_root: Option<ConversationRef>,
-    triggering_message: Option<MessageRef>,
-    completion_recipient: Option<PrincipalRef>,
-    triggering_principal: PrincipalRef,
-    model: String,
-    team: Option<String>,
-    event_socket_path: PathBuf,
+    pub(crate) base_dir: PathBuf,
+    pub(crate) agent_config_path: String,
+    pub(crate) project_id: String,
+    pub(crate) project: ProjectRef,
+    pub(crate) conversation_root: Option<ConversationRef>,
+    pub(crate) conversation_id: String,
+    pub(crate) triggering_message: Option<MessageRef>,
+    pub(crate) completion_recipient: Option<PrincipalRef>,
+    pub(crate) triggering_principal: PrincipalRef,
+    pub(crate) model: String,
+    pub(crate) team: Option<String>,
+    pub(crate) event_socket_path: PathBuf,
     /// Git project root (the main worktree, parent of `.worktrees/`). Used by
     /// the delegate tool to drive cross-host branch coordination.
-    project_root: PathBuf,
+    pub(crate) project_root: PathBuf,
+    pub(crate) agent_pubkey: String,
+    pub(crate) agent_nsec: String,
+    pub(crate) agent_slug: String,
+    pub(crate) owner_pubkey: String,
+    pub(crate) escalation_pubkey: Option<String>,
+    pub(crate) agent_home: PathBuf,
+    pub(crate) working_dir: String,
+    pub(crate) agent_category: Option<String>,
+    pub(crate) default_skills: Vec<String>,
+    pub(crate) envelope_skills: Vec<String>,
+    pub(crate) expose_delegation_tools: bool,
 }
 
 pub(crate) struct AcpMcpBridge {
@@ -89,6 +99,7 @@ pub(crate) struct AcpMcpBridgeInput {
     pub(crate) expose_delegation_tools: bool,
     pub(crate) project: ProjectRef,
     pub(crate) conversation_root: Option<ConversationRef>,
+    pub(crate) conversation_id: String,
     pub(crate) triggering_message: Option<MessageRef>,
     pub(crate) completion_recipient: Option<PrincipalRef>,
     pub(crate) triggering_principal: PrincipalRef,
@@ -97,14 +108,20 @@ pub(crate) struct AcpMcpBridgeInput {
     pub(crate) stdout_sink: SharedStdoutEventSink,
     pub(crate) pending_external_work: Arc<AtomicBool>,
     pub(crate) project_root: PathBuf,
+    pub(crate) agent_pubkey: String,
+    pub(crate) agent_nsec: String,
+    pub(crate) agent_slug: String,
+    pub(crate) owner_pubkey: String,
+    pub(crate) escalation_pubkey: Option<String>,
+    pub(crate) agent_home: PathBuf,
+    pub(crate) working_dir: String,
+    pub(crate) agent_category: Option<String>,
+    pub(crate) default_skills: Vec<String>,
+    pub(crate) envelope_skills: Vec<String>,
 }
 
 impl AcpMcpBridge {
-    pub(crate) async fn start(input: AcpMcpBridgeInput) -> Result<Option<Self>> {
-        if !input.expose_delegation_tools {
-            return Ok(None);
-        }
-
+    pub(crate) async fn start(input: AcpMcpBridgeInput) -> Result<Self> {
         let run_id = std::env::var("TENEX_EXECUTION_ID")
             .ok()
             .map(|id| {
@@ -126,6 +143,7 @@ impl AcpMcpBridge {
             project_id: input.project_id,
             project: input.project,
             conversation_root: input.conversation_root,
+            conversation_id: input.conversation_id,
             triggering_message: input.triggering_message,
             completion_recipient: input.completion_recipient,
             triggering_principal: input.triggering_principal,
@@ -133,6 +151,17 @@ impl AcpMcpBridge {
             team: input.team,
             event_socket_path: socket_path.clone(),
             project_root: input.project_root,
+            agent_pubkey: input.agent_pubkey,
+            agent_nsec: input.agent_nsec,
+            agent_slug: input.agent_slug,
+            owner_pubkey: input.owner_pubkey,
+            escalation_pubkey: input.escalation_pubkey,
+            agent_home: input.agent_home,
+            working_dir: input.working_dir,
+            agent_category: input.agent_category,
+            default_skills: input.default_skills,
+            envelope_skills: input.envelope_skills,
+            expose_delegation_tools: input.expose_delegation_tools,
         };
 
         write_private_json(&context_path, &context)?;
@@ -143,12 +172,12 @@ impl AcpMcpBridge {
         )
         .await?;
 
-        Ok(Some(Self {
+        Ok(Self {
             base_dir: input.base_dir,
             context_path,
             socket_path,
             forwarder,
-        }))
+        })
     }
 
     pub(crate) fn session_server_config(&self) -> Result<Value> {
@@ -174,21 +203,11 @@ impl AcpMcpBridge {
 
 pub(crate) fn session_new_params(
     working_dir: &str,
-    bridge: Option<&AcpMcpBridge>,
+    bridge: &AcpMcpBridge,
     agent_category: Option<AgentCategory>,
 ) -> Result<Value> {
-    let mcp_servers = match bridge {
-        Some(bridge) => vec![bridge.session_server_config()?],
-        None => Vec::new(),
-    };
+    let mcp_servers = vec![bridge.session_server_config()?];
     let disallowed_tools = claude_code_disallowed_tools(agent_category);
-    if mcp_servers.is_empty() && disallowed_tools.is_empty() {
-        return Ok(json!({
-            "cwd": working_dir,
-            "mcpServers": []
-        }));
-    }
-
     Ok(json!({
         "cwd": working_dir,
         "mcpServers": mcp_servers,
@@ -228,13 +247,6 @@ fn claude_code_disallowed_tools(agent_category: Option<AgentCategory>) -> Vec<&'
         ]);
     }
     disallowed
-}
-
-fn agent_allows_delegation(agent_config: &AcpAgentConfig) -> bool {
-    agent_config
-        .resolved_category()
-        .map(|category| category.allows_delegation())
-        .unwrap_or(true)
 }
 
 fn write_private_json(path: &Path, value: &impl Serialize) -> Result<()> {
