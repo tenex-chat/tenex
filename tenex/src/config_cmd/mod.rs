@@ -36,6 +36,8 @@ pub mod identity;
 pub mod intervention;
 pub mod logging;
 pub mod paths;
+pub mod projects;
+pub mod provider_advanced;
 pub mod relays;
 pub mod summarization;
 pub mod system_prompt;
@@ -115,6 +117,11 @@ pub enum ConfigCommand {
     Logging,
     /// Configure OpenTelemetry tracing and analysis telemetry
     Telemetry,
+    /// Configure per-backend project filters and external-author routing
+    Projects,
+    /// Configure advanced per-provider fields (baseUrl, timeout, options)
+    #[command(name = "provider-advanced")]
+    ProviderAdvanced,
 }
 
 impl ConfigCommand {
@@ -139,6 +146,8 @@ impl ConfigCommand {
             ConfigCommand::Paths => "paths",
             ConfigCommand::Logging => "logging",
             ConfigCommand::Telemetry => "telemetry",
+            ConfigCommand::Projects => "projects",
+            ConfigCommand::ProviderAdvanced => "provider-advanced",
         }
     }
 }
@@ -270,8 +279,8 @@ async fn dispatch_inner(base_dir: &std::path::Path, value: &str) -> Result<()> {
         "system-prompt" => system_prompt::run(base_dir),
         "context-management" => context_management::run(base_dir),
         "telegram" => telegram::run(base_dir),
-        // All 16 config submenus are wired. Anything else here is an
-        // unknown menu token; surface a hint and recurse.
+        "projects" => projects::run(base_dir),
+        "provider-advanced" => provider_advanced::run(base_dir),
         _ => {
             display::hint(&format!("Unknown config submenu '{value}'.",));
             Ok(())
@@ -308,6 +317,8 @@ fn failure_message_prefix(value: &str) -> Option<&'static str> {
         "telemetry" => Some("Failed to configure telemetry"),
         "system-prompt" => Some("Failed to configure global system prompt"),
         "telegram" => Some("Failed to configure Telegram"),
+        "projects" => Some("Failed to configure project filters"),
+        "provider-advanced" => Some("Failed to configure provider advanced options"),
         "paths" | "context-management" => None,
         _ => None,
     }
@@ -469,6 +480,16 @@ pub fn build_menu_sections() -> Vec<MenuSection> {
                 ("Paths", "paths", "File paths and storage"),
                 ("Logging", "logging", "Log level and file path"),
                 ("Telemetry", "telemetry", "OpenTelemetry tracing"),
+                (
+                    "Projects",
+                    "projects",
+                    "Project filters and external-author routing",
+                ),
+                (
+                    "Provider Advanced",
+                    "provider-advanced",
+                    "Per-provider baseUrl, timeout, options",
+                ),
             ][..],
         ),
     ];
@@ -609,18 +630,24 @@ mod tests {
     }
 
     #[test]
-    fn config_subcommands_count_matches_ts() {
-        // Spec doc 02 §2.4 / TS commands/config/index.ts:137-151 — 15
-        // subcommands attached after the NIP-46 cutover (was 16 before).
+    fn config_subcommands_count_matches_ts_plus_rust_extensions() {
+        // TS source (commands/config/index.ts:137-151) has 15 subcommands.
+        // The Rust port adds Rust-only extensions that expose config fields
+        // the TS source never exposed:
+        //   - `projects` — ignoredProjects / onlyProjects / routeUnauthorizedAuthors
+        //   - `provider-advanced` — per-provider baseUrl / timeout / options
+        // These have no TS counterpart, so the total subcommand count is
+        // 15 (TS-parity) + 2 (Rust extensions) = 17.
         use clap::CommandFactory;
         let cmd = ConfigArgs::command();
-        // Real subcommands plus the auto-generated `help`.
         let names: Vec<&str> = cmd
             .get_subcommands()
             .map(|s| s.get_name())
             .filter(|n| *n != "help")
             .collect();
-        assert_eq!(names.len(), 15, "got: {names:?}");
+        assert_eq!(names.len(), 17, "got: {names:?}");
+        assert!(names.contains(&"projects"));
+        assert!(names.contains(&"provider-advanced"));
     }
 
     #[test]

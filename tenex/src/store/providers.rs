@@ -180,7 +180,6 @@ impl ProvidersDoc {
 
     /// Set or clear `baseUrl` for a provider. The provider must exist (set
     /// API keys first).
-    #[cfg(test)]
     pub fn set_base_url(&mut self, provider_id: &str, base_url: Option<String>) -> Result<()> {
         let entry = self
             .ensure_providers_obj_mut()
@@ -193,6 +192,49 @@ impl ProvidersDoc {
             }
             None => {
                 entry.shift_remove("baseUrl");
+            }
+        }
+        Ok(())
+    }
+
+    /// Set or clear `timeout` (in milliseconds) for a provider. The provider
+    /// must exist (set API keys first).
+    pub fn set_timeout(&mut self, provider_id: &str, timeout_ms: Option<u64>) -> Result<()> {
+        let entry = self
+            .ensure_providers_obj_mut()
+            .get_mut(provider_id)
+            .and_then(Value::as_object_mut)
+            .ok_or_else(|| anyhow!("provider {provider_id} not found; set api keys first"))?;
+        match timeout_ms {
+            Some(t) => {
+                entry.insert("timeout".into(), Value::Number(t.into()));
+            }
+            None => {
+                entry.shift_remove("timeout");
+            }
+        }
+        Ok(())
+    }
+
+    /// Replace or clear the free-form `options` object for a provider. The
+    /// provider must exist (set API keys first). `None` removes the field;
+    /// `Some(empty map)` also removes it so an empty object never persists.
+    pub fn set_options(
+        &mut self,
+        provider_id: &str,
+        options: Option<Map<String, Value>>,
+    ) -> Result<()> {
+        let entry = self
+            .ensure_providers_obj_mut()
+            .get_mut(provider_id)
+            .and_then(Value::as_object_mut)
+            .ok_or_else(|| anyhow!("provider {provider_id} not found; set api keys first"))?;
+        match options {
+            Some(map) if !map.is_empty() => {
+                entry.insert("options".into(), Value::Object(map));
+            }
+            _ => {
+                entry.shift_remove("options");
             }
         }
         Ok(())
@@ -257,14 +299,16 @@ impl ProviderEntry<'_> {
         self.obj.get("apiKey")
     }
 
-    #[cfg(test)]
-    fn base_url(&self) -> Option<&str> {
+    pub fn base_url(&self) -> Option<&str> {
         self.obj.get("baseUrl").and_then(Value::as_str)
     }
 
-    #[cfg(test)]
-    fn timeout(&self) -> Option<u64> {
+    pub fn timeout(&self) -> Option<u64> {
         self.obj.get("timeout").and_then(Value::as_u64)
+    }
+
+    pub fn options(&self) -> Option<&Map<String, Value>> {
+        self.obj.get("options").and_then(Value::as_object)
     }
 
     /// Raw access for fields the typed view doesn't expose.

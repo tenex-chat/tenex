@@ -175,6 +175,34 @@ impl TenexConfigDoc {
             .unwrap_or(false)
     }
 
+    /// Replace the `ignoredProjects` list. Empty input removes the field
+    /// so the on-disk shape stays minimal (the daemon-side default is
+    /// "no exclusions").
+    pub fn set_ignored_projects(&mut self, projects: Vec<String>) {
+        if projects.is_empty() {
+            self.raw.shift_remove("ignoredProjects");
+        } else {
+            set_string_array(&mut self.raw, "ignoredProjects", projects);
+        }
+    }
+
+    /// Replace the `onlyProjects` list. Empty input removes the field so
+    /// the daemon falls back to its "serve every matching project" default.
+    pub fn set_only_projects(&mut self, projects: Vec<String>) {
+        if projects.is_empty() {
+            self.raw.shift_remove("onlyProjects");
+        } else {
+            set_string_array(&mut self.raw, "onlyProjects", projects);
+        }
+    }
+
+    /// Set `routeUnauthorizedAuthors`. Writes the literal bool so the
+    /// daemon-side default (false) is overridable in both directions.
+    pub fn set_route_unauthorized_authors(&mut self, enabled: bool) {
+        self.raw
+            .insert("routeUnauthorizedAuthors".into(), Value::Bool(enabled));
+    }
+
     /// Read `logging.level`. Source: `TenexConfigSchema:149-153`.
     pub fn logging_level(&self) -> Option<String> {
         self.raw
