@@ -143,12 +143,14 @@ pub fn run(base_dir: &std::path::Path) -> Result<Option<String>> {
         .filter(|s| !s.is_empty())
         .collect();
 
-    // Step 5: Model ID (optional). When the models.dev disk cache is
-    // populated, present a structured picker for the underlying provider
-    // (Claude Code → anthropic, Codex → openai). For Custom backends and
-    // empty/missing caches, fall back to freeform text input. In every
-    // case the user may skip the selection — model is optional and the
-    // backend then uses its own default.
+    // Step 5: Model ID (optional). Each backend has a canonical list of
+    // model IDs it accepts:
+    //   - claude-code: the 3 aliases (sonnet / opus / haiku) the ACP
+    //     package resolves to real Claude versions.
+    //   - codex / custom: no static list — fall back to models.dev for
+    //     codex (when cached) or freeform text input otherwise.
+    // In every case the user may skip — model is optional and the backend
+    // then uses its own default.
     let model = match select_acp_model(backend, base_dir)? {
         Some(m) => m,
         None => return Ok(None),
@@ -181,38 +183,67 @@ pub fn run(base_dir: &std::path::Path) -> Result<Option<String>> {
     Ok(Some(name))
 }
 
-/// Map an ACP backend to the TENEX provider whose models.dev section
-/// holds the relevant model IDs. Returns `None` for `Custom`, which
-/// has no canonical model list.
-fn provider_for_backend(backend: AcpBackend) -> Option<&'static str> {
-    match backend {
-        AcpBackend::ClaudeCode => Some("anthropic"),
-        AcpBackend::Codex => Some("openai"),
-        AcpBackend::Custom => None,
-    }
-}
-
 /// Outer `Option`: `None` = user cancelled the wizard.
 /// Inner `Option`: `None` = user skipped (no model set).
 fn select_acp_model(
     backend: AcpBackend,
     base_dir: &std::path::Path,
 ) -> Result<Option<Option<String>>> {
-    use crate::store::models_dev;
+    match backend {
+        AcpBackend::ClaudeCode => select_claude_code_acp_model(),
+        AcpBackend::Codex => select_codex_acp_model(base_dir),
+        AcpBackend::Custom => acp_model_text_input(),
+    }
+}
 
-    // Try the structured picker when the backend has a known provider
-    // and the cache is populated for that provider.
-    if let Some(provider) = provider_for_backend(backend) {
-        let cache_opt = models_dev::load_from_disk(base_dir).ok().flatten();
-        if let Some(cache) = cache_opt {
-            let models = models_dev::get_provider_models(&cache.data, provider);
-            if !models.is_empty() {
-                return select_from_models_dev(models);
-            }
-        }
+/// Picker over the 3 Claude Code aliases. Includes a synthetic skip row.
+fn select_claude_code_acp_model() -> Result<Option<Option<String>>> {
+    use crate::onboard::claude_code_models::CLAUDE_CODE_MODELS;
+
+    let mut choices: Vec<AcpModelChoice> = Vec::with_capacity(CLAUDE_CODE_MODELS.len() + 1);
+    choices.push(AcpModelChoice {
+        id: None,
+        label: format!(
+            "(skip {})",
+            crate::tui::theme::chalk_dim("— use backend default"),
+        ),
+    });
+    for m in CLAUDE_CODE_MODELS {
+        choices.push(AcpModelChoice {
+            id: Some(m.id.to_owned()),
+            label: format!(
+                "{} {} {}",
+                m.display_name,
+                crate::tui::theme::chalk_dim(&format!("({})", m.id)),
+                crate::tui::theme::chalk_dim(&format!("— {}", m.description)),
+            ),
+        });
     }
 
-    // Fallback: freeform skippable text input.
+    match prompts::select("Select model:", choices).prompt() {
+        Ok(c) => Ok(Some(c.id)),
+        Err(InquireError::OperationCanceled | InquireError::OperationInterrupted) => Ok(None),
+        Err(e) => Err(anyhow!("model select: {e}")),
+    }
+}
+
+/// Codex ACP has no static list yet (TS uses live CLI IPC). When the
+/// models.dev cache is populated for `openai`, use it as a picker;
+/// otherwise fall back to freeform input.
+fn select_codex_acp_model(base_dir: &std::path::Path) -> Result<Option<Option<String>>> {
+    use crate::store::models_dev;
+
+    let cache_opt = models_dev::load_from_disk(base_dir).ok().flatten();
+    if let Some(cache) = cache_opt {
+        let models = models_dev::get_provider_models(&cache.data, "openai");
+        if !models.is_empty() {
+            return select_from_models_dev(models);
+        }
+    }
+    acp_model_text_input()
+}
+
+fn acp_model_text_input() -> Result<Option<Option<String>>> {
     match prompts::input("Model ID (press Enter to skip)")
         .with_help_message("e.g. claude-haiku-4-5-20251001 or gpt-5.4")
         .prompt_skippable()

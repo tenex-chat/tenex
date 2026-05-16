@@ -22,7 +22,11 @@
 //! - `ollama`: live `GET <base>/api/tags` picker against the configured
 //!   Ollama host, with a "Custom model…" entry that drops to text input.
 //!   Falls through to text input when the host is unreachable.
-//! - `openrouter`, others: text-input with provider-specific help.
+//! - `openrouter`: live `GET https://openrouter.ai/api/v1/models` picker
+//!   with context length + pricing metadata. Falls through to text input
+//!   when the endpoint is unreachable or returns no models, and on the
+//!   appended "Custom model…" entry.
+//! - others: text-input with provider-specific help.
 
 use std::path::Path;
 
@@ -523,7 +527,147 @@ fn select_ollama_model(providers_doc: &ProvidersDoc) -> Result<Option<(String, S
     }
 }
 
-/// Prompt for a model ID via free-text input (used for openrouter, ollama
+// ── OpenRouter live model picker ──────────────────────────────────────────────
+
+#[derive(serde::Deserialize)]
+struct OpenRouterModelsResponse {
+    data: Vec<OpenRouterModelEntry>,
+}
+
+#[derive(serde::Deserialize)]
+struct OpenRouterModelEntry {
+    id: String,
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    context_length: Option<u64>,
+    #[serde(default)]
+    pricing: Option<OpenRouterPricing>,
+}
+
+#[derive(serde::Deserialize)]
+struct OpenRouterPricing {
+    /// USD per input token, as a decimal string (e.g. "0.0000025").
+    #[serde(default)]
+    prompt: Option<String>,
+    /// USD per output token, as a decimal string.
+    #[serde(default)]
+    completion: Option<String>,
+}
+
+/// `GET https://openrouter.ai/api/v1/models`. The endpoint is public; an
+/// API key (when configured) is sent so per-account model filtering applies.
+fn fetch_openrouter_models(providers_doc: &ProvidersDoc) -> Result<Vec<OpenRouterModelEntry>> {
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(8))
+        .build()?;
+    let mut req = client.get("https://openrouter.ai/api/v1/models");
+    if let Some(key) = providers_doc
+        .get("openrouter")
+        .and_then(|e| e.api_keys().into_iter().next())
+    {
+        req = req.bearer_auth(key);
+    }
+    let resp = req.send()?.error_for_status()?;
+    let body: OpenRouterModelsResponse = resp.json()?;
+    Ok(body.data)
+}
+
+fn format_openrouter_label(entry: &OpenRouterModelEntry) -> String {
+    let dim = |s: &str| crate::tui::theme::chalk_dim(s);
+    let name = if entry.name.is_empty() {
+        entry.id.clone()
+    } else {
+        entry.name.clone()
+    };
+    let mut meta: Vec<String> = Vec::new();
+    if let Some(ctx) = entry.context_length {
+        let k = (ctx as f64 / 1000.0).round() as u64;
+        meta.push(format!("{k}k ctx"));
+    }
+    if let Some(p) = entry.pricing.as_ref() {
+        let to_per_m = |s: &str| -> Option<String> {
+            s.parse::<f64>()
+                .ok()
+                .filter(|v| v.is_finite())
+                .map(|v| format_per_million(v * 1_000_000.0))
+        };
+        let pin = p.prompt.as_deref().and_then(to_per_m);
+        let pout = p.completion.as_deref().and_then(to_per_m);
+        if let (Some(i), Some(o)) = (pin, pout) {
+            meta.push(format!("${i}/${o}/M"));
+        }
+    }
+    let id_seg = dim(&format!("({})", entry.id));
+    if meta.is_empty() {
+        format!("{name} {id_seg}").trim_end().to_owned()
+    } else {
+        let meta_seg = dim(&format!("— {}", meta.join(", ")));
+        format!("{name} {id_seg} {meta_seg}").trim_end().to_owned()
+    }
+}
+
+/// Format a $/M-token figure with the minimum number of decimal places
+/// that doesn't collapse to "0" (so cheap-but-nonzero prices stay visible).
+fn format_per_million(v: f64) -> String {
+    if v == 0.0 {
+        return "0".to_owned();
+    }
+    if v >= 1.0 {
+        format!("{v:.2}")
+    } else if v >= 0.1 {
+        format!("{v:.2}")
+    } else if v >= 0.01 {
+        format!("{v:.3}")
+    } else {
+        format!("{v:.4}")
+    }
+}
+
+/// Live picker against the OpenRouter model catalogue. Falls back to text
+/// input when the endpoint is unreachable, returns no models, or the user
+/// picks the appended "Custom model…" entry.
+fn select_openrouter_model(providers_doc: &ProvidersDoc) -> Result<Option<(String, String)>> {
+    const CUSTOM_SENTINEL: &str = "\0custom";
+    match fetch_openrouter_models(providers_doc) {
+        Ok(models) if !models.is_empty() => {
+            let mut choices: Vec<ModelChoice> = models
+                .iter()
+                .map(|m| ModelChoice {
+                    id: m.id.clone(),
+                    label: format_openrouter_label(m),
+                })
+                .collect();
+            choices.push(ModelChoice {
+                id: CUSTOM_SENTINEL.to_owned(),
+                label: "Custom model…".to_owned(),
+            });
+            match prompts::select("Select model:", choices)
+                .with_page_size(15)
+                .prompt()
+            {
+                Ok(c) if c.id == CUSTOM_SENTINEL => select_model_text_input("openrouter"),
+                Ok(c) => Ok(Some((c.id.clone(), c.id))),
+                Err(InquireError::OperationCanceled | InquireError::OperationInterrupted) => {
+                    Ok(None)
+                }
+                Err(e) => Err(anyhow!("model select: {e}")),
+            }
+        }
+        Ok(_) => {
+            display::hint("OpenRouter returned no models — falling back to manual entry.");
+            select_model_text_input("openrouter")
+        }
+        Err(e) => {
+            display::hint(&format!(
+                "Could not reach OpenRouter model catalogue: {e}. Falling back to manual entry."
+            ));
+            select_model_text_input("openrouter")
+        }
+    }
+}
+
+/// Prompt for a model ID via free-text input (used for ollama / openrouter
 /// fallback, and any provider that doesn't have a structured picker).
 fn select_model_text_input(provider: &str) -> Result<Option<(String, String)>> {
     use crate::store::models_dev::default_model_for_provider;
@@ -623,6 +767,10 @@ pub fn run(base_dir: &Path) -> Result<()> {
             }
         }
         "ollama" => match select_ollama_model(&providers_doc)? {
+            Some((id, disp)) => (id, disp, None),
+            None => return Ok(()),
+        },
+        "openrouter" => match select_openrouter_model(&providers_doc)? {
             Some((id, disp)) => (id, disp, None),
             None => return Ok(()),
         },
