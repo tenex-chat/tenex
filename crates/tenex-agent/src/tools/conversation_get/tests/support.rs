@@ -13,8 +13,9 @@ pub(super) fn resolved() -> Arc<ResolvedModel> {
     Arc::new(ResolvedModel {
         provider: "anthropic".to_string(),
         model: "claude-3-sonnet".to_string(),
-        api_key: None,
+        api_keys: Vec::new(),
         base_url: None,
+        key_health: Arc::new(tenex_llm_config::key_health::KeyHealthTracker::new()),
     })
 }
 

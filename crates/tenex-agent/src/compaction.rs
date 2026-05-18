@@ -93,86 +93,82 @@ impl LlmCompactionSummarizer {
 
         let history: Vec<Message> = Vec::new();
 
-        let (text, usage) = match self.resolved.provider.as_str() {
-            "openrouter" => {
-                let key = self
-                    .resolved
-                    .api_key
-                    .as_deref()
-                    .ok_or_else(|| anyhow::anyhow!("no OpenRouter API key"))?;
-                let resp = openrouter::Client::new(key)?
-                    .agent(&self.resolved.model)
-                    .preamble(SYSTEM_PROMPT)
-                    .max_tokens(1400)
-                    .build()
-                    .completion(user_prompt.clone(), history.clone())
-                    .await
-                    .map_err(|e| anyhow::anyhow!("{e:?}"))?
-                    .send()
-                    .await
-                    .map_err(|e| anyhow::anyhow!("{e:?}"))?;
-                (assistant_text(&resp.choice), resp.usage)
+        let (text, usage) = crate::llm_retry::with_key_retry(&self.resolved, |key| {
+            let user_prompt = user_prompt.clone();
+            let history = history.clone();
+            let provider = self.resolved.provider.clone();
+            let model = self.resolved.model.clone();
+            let base_url = self.resolved.base_url.clone();
+            async move {
+                let (text, usage) = match provider.as_str() {
+                    "openrouter" => {
+                        let resp = openrouter::Client::new(&key)?
+                            .agent(&model)
+                            .preamble(SYSTEM_PROMPT)
+                            .max_tokens(1400)
+                            .build()
+                            .completion(user_prompt, history)
+                            .await
+                            .map_err(|e| anyhow::anyhow!("{e:?}"))?
+                            .send()
+                            .await
+                            .map_err(|e| anyhow::anyhow!("{e:?}"))?;
+                        (assistant_text(&resp.choice), resp.usage)
+                    }
+                    "openai" => {
+                        let resp = openai::CompletionsClient::builder()
+                            .api_key(&key)
+                            .build()?
+                            .agent(&model)
+                            .preamble(SYSTEM_PROMPT)
+                            .max_tokens(1400)
+                            .build()
+                            .completion(user_prompt, history)
+                            .await
+                            .map_err(|e| anyhow::anyhow!("{e:?}"))?
+                            .send()
+                            .await
+                            .map_err(|e| anyhow::anyhow!("{e:?}"))?;
+                        (assistant_text(&resp.choice), resp.usage)
+                    }
+                    "ollama" => {
+                        let mut builder = ollama::Client::builder().api_key(Nothing);
+                        if let Some(url) = base_url.as_deref() {
+                            builder = builder.base_url(url);
+                        }
+                        let resp = builder
+                            .build()?
+                            .agent(&model)
+                            .preamble(SYSTEM_PROMPT)
+                            .max_tokens(1400)
+                            .build()
+                            .completion(user_prompt, history)
+                            .await
+                            .map_err(|e| anyhow::anyhow!("{e:?}"))?
+                            .send()
+                            .await
+                            .map_err(|e| anyhow::anyhow!("{e:?}"))?;
+                        (assistant_text(&resp.choice), resp.usage)
+                    }
+                    _ => {
+                        let resp = anthropic::Client::new(&key)?
+                            .agent(&model)
+                            .preamble(SYSTEM_PROMPT)
+                            .max_tokens(1400)
+                            .build()
+                            .completion(user_prompt, history)
+                            .await
+                            .map_err(|e| anyhow::anyhow!("{e:?}"))?
+                            .send()
+                            .await
+                            .map_err(|e| anyhow::anyhow!("{e:?}"))?;
+                        (assistant_text(&resp.choice), resp.usage)
+                    }
+                };
+                Ok((text, usage))
             }
-            "openai" => {
-                let key = self
-                    .resolved
-                    .api_key
-                    .as_deref()
-                    .ok_or_else(|| anyhow::anyhow!("no OpenAI API key"))?;
-                let resp = openai::CompletionsClient::builder()
-                    .api_key(key)
-                    .build()?
-                    .agent(&self.resolved.model)
-                    .preamble(SYSTEM_PROMPT)
-                    .max_tokens(1400)
-                    .build()
-                    .completion(user_prompt.clone(), history.clone())
-                    .await
-                    .map_err(|e| anyhow::anyhow!("{e:?}"))?
-                    .send()
-                    .await
-                    .map_err(|e| anyhow::anyhow!("{e:?}"))?;
-                (assistant_text(&resp.choice), resp.usage)
-            }
-            "ollama" => {
-                let mut builder = ollama::Client::builder().api_key(Nothing);
-                if let Some(url) = self.resolved.base_url.as_deref() {
-                    builder = builder.base_url(url);
-                }
-                let resp = builder
-                    .build()?
-                    .agent(&self.resolved.model)
-                    .preamble(SYSTEM_PROMPT)
-                    .max_tokens(1400)
-                    .build()
-                    .completion(user_prompt.clone(), history.clone())
-                    .await
-                    .map_err(|e| anyhow::anyhow!("{e:?}"))?
-                    .send()
-                    .await
-                    .map_err(|e| anyhow::anyhow!("{e:?}"))?;
-                (assistant_text(&resp.choice), resp.usage)
-            }
-            _ => {
-                let key = self
-                    .resolved
-                    .api_key
-                    .as_deref()
-                    .ok_or_else(|| anyhow::anyhow!("no Anthropic API key"))?;
-                let resp = anthropic::Client::new(key)?
-                    .agent(&self.resolved.model)
-                    .preamble(SYSTEM_PROMPT)
-                    .max_tokens(1400)
-                    .build()
-                    .completion(user_prompt.clone(), history.clone())
-                    .await
-                    .map_err(|e| anyhow::anyhow!("{e:?}"))?
-                    .send()
-                    .await
-                    .map_err(|e| anyhow::anyhow!("{e:?}"))?;
-                (assistant_text(&resp.choice), resp.usage)
-            }
-        };
+        })
+        .await?;
 
         record_llm_call(RecordLlmCall {
             root_kind: RootKindOrStr::Other("compaction".into()),

@@ -60,8 +60,9 @@ fn make_test_tool_set(category: Option<AgentCategory>, granted: HashSet<String>)
     let resolved_model = Arc::new(ResolvedModel {
         provider: "test".into(),
         model: "test".into(),
-        api_key: None,
+        api_keys: Vec::new(),
         base_url: None,
+        key_health: std::sync::Arc::new(tenex_llm_config::key_health::KeyHealthTracker::new()),
     });
 
     let tmp = std::env::temp_dir();
