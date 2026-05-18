@@ -2,9 +2,10 @@ use anyhow::{Context, Result};
 use serde::Deserialize;
 use std::fs;
 use std::path::Path;
+use std::sync::Arc;
 use tenex_llm_config::key_health::KeyHealthTracker;
 use tenex_llm_config::resolver::{resolved_config_default_standard, ConfigStore};
-use tenex_llm_config::{ResolvedConfig, StandardConfig};
+use tenex_llm_config::{ApiKey, ResolvedConfig, StandardConfig};
 use tenex_telegram::config::TelegramAgentConfig;
 
 #[derive(Debug, Deserialize)]
@@ -49,21 +50,33 @@ impl AgentConfig {
 pub struct ResolvedModel {
     pub provider: String,
     pub model: String,
-    pub api_key: Option<String>,
+    /// Every API key configured for this provider that was healthy at the
+    /// moment of resolution. Each entry carries its original index in the
+    /// provider's credential array so retry callers can report per-key
+    /// failures back to [`Self::key_health`].
+    pub api_keys: Vec<ApiKey>,
     /// Base URL override, used by Ollama and OpenAI-compatible providers.
     pub base_url: Option<String>,
+    /// Shared per-process health tracker. Clones of `ResolvedModel` share the
+    /// same tracker so a key marked failed during one LLM call is skipped on
+    /// the next one — including calls made through cloned models in tools.
+    pub key_health: Arc<KeyHealthTracker>,
 }
 
 impl ResolvedModel {
-    /// Resolve the effective provider, model ID, API key, and base URL.
+    /// Resolve the effective provider, model ID, API keys, and base URL.
     ///
     /// `tenex-llm-config` owns interpretation of `llms.json` and
     /// `providers.json`; the agent only passes the raw model reference from
     /// agent config or conversation state.
-    pub fn resolve(base_dir: &Path, raw_model: Option<&str>) -> Result<Self> {
+    pub fn resolve(
+        base_dir: &Path,
+        raw_model: Option<&str>,
+        key_health: Arc<KeyHealthTracker>,
+    ) -> Result<Self> {
         let store = ConfigStore::load(base_dir)?;
-        let config = store.resolve_model_reference(raw_model, &KeyHealthTracker::new())?;
-        Ok(Self::from_standard(config))
+        let config = store.resolve_model_reference(raw_model, &key_health)?;
+        Ok(Self::from_standard(config, key_health))
     }
 
     /// Resolve the agent's base config and select a specific variant from a
@@ -74,13 +87,13 @@ impl ResolvedModel {
         base_dir: &Path,
         raw_model: Option<&str>,
         variant_override: Option<&str>,
+        key_health: Arc<KeyHealthTracker>,
     ) -> Result<Self> {
         let Some(variant_name) = variant_override else {
-            return Self::resolve(base_dir, raw_model);
+            return Self::resolve(base_dir, raw_model, key_health);
         };
 
         let store = ConfigStore::load(base_dir)?;
-        let key_health = KeyHealthTracker::new();
         let resolved_config = resolve_to_resolved_config(&store, raw_model, &key_health)?;
 
         match resolved_config {
@@ -96,7 +109,7 @@ impl ResolvedModel {
                             .join(", ")
                     )
                 })?;
-                Ok(Self::from_standard(variant.resolved.clone()))
+                Ok(Self::from_standard(variant.resolved.clone(), key_health))
             }
             _ => Err(anyhow::anyhow!(
                 "variant override '{}' specified but the agent's base model is not a meta configuration",
@@ -107,20 +120,51 @@ impl ResolvedModel {
 
     /// Resolve a named role from `llms.json`, falling back to the `default`
     /// role when the requested role isn't assigned.
-    pub fn resolve_role(base_dir: &Path, role: &str) -> Result<Self> {
+    pub fn resolve_role(
+        base_dir: &Path,
+        role: &str,
+        key_health: Arc<KeyHealthTracker>,
+    ) -> Result<Self> {
         let store = ConfigStore::load(base_dir)?;
-        let resolved =
-            store.resolve_role_or_default(role, &KeyHealthTracker::new())?;
+        let resolved = store.resolve_role_or_default(role, &key_health)?;
         let standard = resolved_config_default_standard(resolved)?;
-        Ok(Self::from_standard(standard))
+        Ok(Self::from_standard(standard, key_health))
     }
 
-    fn from_standard(config: StandardConfig) -> Self {
+    /// Subset of `api_keys` that are currently healthy according to the
+    /// shared tracker — `api_keys` was filtered once at resolution time, but
+    /// further keys may have been marked failed since.
+    ///
+    /// Cooldown is a *preference*, not a hard exclusion: when every
+    /// configured key is in cooldown, we return the full set anyway so the
+    /// caller retries them rather than failing with no attempt. Marking a
+    /// key bad only helps when there's an alternative; with no alternative
+    /// it would just lock the agent out for the cooldown window.
+    pub fn healthy_api_keys(&self) -> Vec<ApiKey> {
+        let healthy: Vec<ApiKey> = self
+            .api_keys
+            .iter()
+            .filter(|k| self.key_health.is_healthy(&self.provider, k.original_index))
+            .cloned()
+            .collect();
+        if healthy.is_empty() && !self.api_keys.is_empty() {
+            tracing::warn!(
+                provider = %self.provider,
+                key_count = self.api_keys.len(),
+                "all API keys for provider are in cooldown; retrying anyway"
+            );
+            return self.api_keys.clone();
+        }
+        healthy
+    }
+
+    fn from_standard(config: StandardConfig, key_health: Arc<KeyHealthTracker>) -> Self {
         Self {
             provider: config.provider,
             model: config.model,
-            api_key: config.api_keys.first().map(|key| key.key.clone()),
+            api_keys: config.api_keys,
             base_url: config.base_url,
+            key_health,
         }
     }
 }

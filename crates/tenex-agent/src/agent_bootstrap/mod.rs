@@ -147,10 +147,16 @@ pub(crate) async fn build(
     //    against the agent's base meta config.
     // 2. Agent's static default model.
     // 3. Global default in llms.json (resolved by ConfigStore).
+    // One health tracker per agent process — shared by every ResolvedModel
+    // built during this invocation (main model, summarization role, any
+    // future role resolutions) so a key failure observed by one call site
+    // is honoured by every subsequent LLM request.
+    let key_health = Arc::new(tenex_llm_config::key_health::KeyHealthTracker::new());
     let resolved = ResolvedModel::resolve_with_variant(
         &base_dir,
         agent_config.raw_model(),
         envelope.metadata.variant_override.as_deref(),
+        key_health.clone(),
     )?;
     let cassette_recorder = CassetteRecorder::from_env(
         agent_config.identity_name(),
@@ -169,7 +175,7 @@ pub(crate) async fn build(
         resolved.provider, resolved.model
     );
     let summarization_model = Arc::new(
-        match ResolvedModel::resolve_role(&base_dir, "summarization") {
+        match ResolvedModel::resolve_role(&base_dir, "summarization", key_health.clone()) {
             Ok(model) => {
                 eprintln!(
                     "[tenex-agent] summarization model: {} | {}",
