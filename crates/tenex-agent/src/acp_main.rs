@@ -12,6 +12,9 @@ mod llm_accounting;
 #[allow(dead_code)]
 #[path = "config.rs"]
 mod config;
+#[allow(dead_code)]
+#[path = "llm_retry.rs"]
+mod llm_retry;
 mod emit;
 #[path = "escalation.rs"]
 mod escalation;

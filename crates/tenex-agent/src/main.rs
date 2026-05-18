@@ -14,6 +14,7 @@ mod home;
 mod hook;
 mod identity_resolver;
 mod injections;
+mod llm_retry;
 mod mock_llm;
 mod multimodal;
 mod oauth_client;
