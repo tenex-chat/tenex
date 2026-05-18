@@ -18,7 +18,7 @@ async fn probe_real_database() {
     let copy = dir.path().join("conversation.db");
     std::fs::copy(&src, &copy).expect("copy db");
 
-    let tool = ConversationGetTool::new(emit_state(), copy, resolved());
+    let tool = ConversationGetTool::new(emit_state(), copy, dir.path().to_path_buf(), resolved());
     let out = tool
         .call(ConversationGetArgs {
             conversation_id: cid,

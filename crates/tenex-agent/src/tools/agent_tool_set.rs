@@ -294,6 +294,7 @@ impl ToolSet {
             Box::new(ConversationGetTool::new(
                 self.emit_state.clone(),
                 self.conv_db_path.clone(),
+                self.base_dir.clone(),
                 self.summarization_model.clone(),
             )),
         );

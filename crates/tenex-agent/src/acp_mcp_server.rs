@@ -209,6 +209,7 @@ async fn build_server(
         Box::new(ConversationGetTool::new(
             state.clone(),
             conv_db_path.clone(),
+            context.base_dir.clone(),
             summarization_model.clone(),
         )),
         state.clone(),

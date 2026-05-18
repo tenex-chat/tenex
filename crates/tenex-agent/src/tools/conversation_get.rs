@@ -14,7 +14,9 @@ use serde_json::json;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tenex_accounting::{record_llm_call, RecordLlmCall, RootKindOrStr};
-use tenex_conversations::{ConversationListFilter, ConversationStore, MessageQuery};
+use tenex_conversations::{
+    paths::CONVERSATION_DB_FILENAME, ConversationListFilter, ConversationStore, MessageQuery,
+};
 use tenex_protocol::intent::{Intent, ToolUseIntent};
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -24,6 +26,7 @@ pub struct ConversationGetArgs {
     pub description: String,
     #[serde(alias = "untilId")]
     pub until_id: Option<String>,
+    pub limit: Option<usize>,
     pub prompt: Option<String>,
     #[serde(default, alias = "includeToolCalls")]
     pub include_tool_calls: bool,
@@ -37,16 +40,83 @@ pub struct ConversationGetError(String);
 pub struct ConversationGetTool {
     state: Arc<EmitState>,
     db_path: PathBuf,
+    base_dir: PathBuf,
     resolved: Arc<ResolvedModel>,
 }
 
 impl ConversationGetTool {
-    pub fn new(state: Arc<EmitState>, db_path: PathBuf, resolved: Arc<ResolvedModel>) -> Self {
+    pub fn new(
+        state: Arc<EmitState>,
+        db_path: PathBuf,
+        base_dir: PathBuf,
+        resolved: Arc<ResolvedModel>,
+    ) -> Self {
         Self {
             state,
             db_path,
+            base_dir,
             resolved,
         }
+    }
+
+    fn find_store(
+        &self,
+        raw_id: &str,
+    ) -> Result<(ConversationStore, String), ConversationGetError> {
+        let open_current = || {
+            ConversationStore::open(&self.db_path).map_err(|e| {
+                ConversationGetError(format!("failed to open conversation store: {e}"))
+            })
+        };
+
+        let current = open_current()?;
+        let resolved_id = resolve_conversation_id(&current, raw_id)?;
+
+        let in_current = current.get_conversation(&resolved_id).ok().flatten().is_some()
+            || !current
+                .list_messages(
+                    &resolved_id,
+                    MessageQuery {
+                        limit: Some(1),
+                        ..Default::default()
+                    },
+                )
+                .unwrap_or_default()
+                .is_empty();
+        if in_current {
+            return Ok((current, resolved_id));
+        }
+        drop(current);
+
+        let projects_dir = self.base_dir.join("projects");
+        if let Ok(entries) = std::fs::read_dir(&projects_dir) {
+            for entry in entries.flatten() {
+                let db_path = entry.path().join(CONVERSATION_DB_FILENAME);
+                if db_path == self.db_path {
+                    continue;
+                }
+                if let Ok(store) = ConversationStore::open(&db_path) {
+                    if let Ok(id) = resolve_conversation_id(&store, raw_id) {
+                        let found = store.get_conversation(&id).ok().flatten().is_some()
+                            || !store
+                                .list_messages(
+                                    &id,
+                                    MessageQuery {
+                                        limit: Some(1),
+                                        ..Default::default()
+                                    },
+                                )
+                                .unwrap_or_default()
+                                .is_empty();
+                        if found {
+                            return Ok((store, id));
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok((open_current()?, resolved_id))
     }
 
     async fn call_llm(
@@ -227,6 +297,10 @@ impl Tool for ConversationGetTool {
                         "type": "string",
                         "description": "Optional stored message/event/tool-call ID. Returns the transcript up to and including this entry; unique 8+ character prefixes are accepted."
                     },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Optional maximum number of messages to return (earliest first)."
+                    },
                     "prompt": {
                         "type": "string",
                         "description": "Optional prompt to analyze the retrieved conversation with an LLM."
@@ -268,15 +342,19 @@ impl Tool for ConversationGetTool {
             .await
             .map_err(|e| ConversationGetError(format!("failed to emit tool-use event: {e}")))?;
 
-        let store = ConversationStore::open(&self.db_path)
-            .map_err(|e| ConversationGetError(format!("failed to open conversation store: {e}")))?;
-        let conversation_id = resolve_conversation_id(&store, &args.conversation_id)?;
+        let (store, conversation_id) = self.find_store(&args.conversation_id)?;
         let conversation = store
             .get_conversation(&conversation_id)
             .map_err(|e| ConversationGetError(format!("failed to read conversation: {e}")))?;
 
         let mut messages = store
-            .list_messages(&conversation_id, MessageQuery::default())
+            .list_messages(
+                &conversation_id,
+                MessageQuery {
+                    limit: args.limit.map(|n| n as i64),
+                    ..Default::default()
+                },
+            )
             .map_err(|e| ConversationGetError(format!("failed to list messages: {e}")))?;
         let mut tool_messages = store
             .list_tool_messages(&conversation_id)
