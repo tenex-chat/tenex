@@ -60,6 +60,7 @@ pub fn resolve_standard(
             .into_iter()
             .map(|i| ApiKey {
                 key: all_keys[i].key.clone(),
+                original_index: i,
                 alias: all_keys[i].alias.clone(),
             })
             .collect()

@@ -47,4 +47,16 @@ impl KeyHealthTracker {
             })
             .collect()
     }
+
+    /// Check whether a single key (identified by its original 0-based index in
+    /// the provider's key array) is currently healthy. Used by per-request
+    /// retry helpers that need to skip keys marked failed earlier in the
+    /// process lifetime.
+    pub fn is_healthy(&self, provider: &str, key_index: usize) -> bool {
+        let map = self.failures.lock().unwrap();
+        match map.get(&(provider.to_string(), key_index)) {
+            Some(failed_at) => Instant::now().duration_since(*failed_at) >= COOLDOWN,
+            None => true,
+        }
+    }
 }

@@ -4,9 +4,15 @@ use serde_json::{Map, Value};
 use std::collections::HashMap;
 
 /// A single API key, optionally tagged with a human-readable alias.
+///
+/// `original_index` is the 0-based position this key occupies in the
+/// provider's credential array (in `providers.json`). It is preserved so
+/// that callers can report per-key failures back to the shared
+/// [`crate::key_health::KeyHealthTracker`] using a stable identifier.
 #[derive(Clone, Debug, Serialize)]
 pub struct ApiKey {
     pub key: String,
+    pub original_index: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub alias: Option<String>,
 }

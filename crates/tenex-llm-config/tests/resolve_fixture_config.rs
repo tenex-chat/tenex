@@ -140,6 +140,10 @@ fn resolves_standard_config() {
     );
 
     assert_eq!(first.alias.as_deref(), Some("pfer@example.com"));
+    assert_eq!(
+        first.original_index, 0,
+        "first key should carry its original-array index"
+    );
 }
 
 #[test]
