@@ -10,7 +10,6 @@ use rig::streaming::{StreamedAssistantContent, ToolCallDeltaContent};
 use tenex_context::{CompactionOverride, Message as CtxMessage, ReasoningBlock};
 
 use crate::agent_bootstrap::AgentBootstrap;
-use crate::cassette_client::RecordingModel;
 use crate::hook::EmitHook;
 use crate::progress_monitor::ProgressMonitor;
 use crate::tools::TurnToolRegistry;
@@ -20,9 +19,9 @@ use super::{StepOutput, StepToolCall, ensure_continue};
 
 pub(super) async fn run_provider_step<M>(
     boot: &AgentBootstrap,
-    model: RecordingModel<M>,
+    model: M,
     emit: &EmitHook,
-    progress: &ProgressMonitor<RecordingModel<M>>,
+    progress: &ProgressMonitor<M>,
     registry: &TurnToolRegistry,
     provider_tools: &[rig::completion::ToolDefinition],
     turn_prompt: &RigMessage,
@@ -31,7 +30,7 @@ pub(super) async fn run_provider_step<M>(
     compaction_override: Option<CompactionOverride>,
 ) -> Result<StepOutput>
 where
-    M: CompletionModel + Send + Sync + 'static,
+    M: CompletionModel + Clone + Send + Sync + 'static,
     M::StreamingResponse: GetTokenUsage + Clone + Send + Sync + Unpin + 'static,
 {
     let rig_messages = project_step_messages(

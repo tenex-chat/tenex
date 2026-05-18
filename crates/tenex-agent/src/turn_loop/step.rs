@@ -11,7 +11,6 @@ use tracing::{Instrument, info_span};
 use tenex_context::{Message as CtxMessage, ReasoningBlock, ToolCall as CtxToolCall};
 
 use crate::agent_bootstrap::AgentBootstrap;
-use crate::cassette_client::RecordingModel;
 use crate::progress_monitor::ProgressMonitor;
 use crate::tools::TurnToolRegistry;
 use crate::tools::recording::ToolRecorder;
@@ -54,7 +53,7 @@ impl StepToolCall {
 
 pub(super) async fn run_step_loop<M>(
     boot: &mut AgentBootstrap,
-    model: RecordingModel<M>,
+    model: M,
     turn_prompt: RigMessage,
     turn_text: &str,
     prefix_tail: &[CtxMessage],
@@ -62,7 +61,7 @@ pub(super) async fn run_step_loop<M>(
     recorder: std::sync::Arc<ToolRecorder>,
 ) -> Result<StepLoopResult>
 where
-    M: CompletionModel + Send + Sync + 'static,
+    M: CompletionModel + Clone + Send + Sync + 'static,
     M::StreamingResponse: GetTokenUsage + Clone + Send + Sync + Unpin + 'static,
 {
     let progress = ProgressMonitor::new(model.clone());

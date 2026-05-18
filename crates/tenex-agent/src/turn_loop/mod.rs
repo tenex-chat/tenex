@@ -29,6 +29,7 @@ use tracing::{Instrument, info_span};
 
 use crate::agent_bootstrap::AgentBootstrap;
 use crate::cassette_client::RecordingClient;
+use crate::llm_retry::RotatingModel;
 use crate::mock_llm;
 use crate::oauth_client;
 use crate::tools::{TodoStatus, ToolRecorder};
@@ -107,20 +108,34 @@ pub(crate) async fn run_turn_loop(boot: &mut AgentBootstrap) -> Result<()> {
         let cassette_recorder = boot.cassette_recorder.clone();
         let agent_slug = boot.agent_slug.clone();
         let turn_body = async {
+            let healthy_keys = resolved.healthy_api_keys();
             let response = match resolved.provider.as_str() {
                 "openrouter" => {
-                    let key = resolved
-                        .api_key
-                        .clone()
-                        .context("No OpenRouter API key available from LLM config")?;
-                    let client = RecordingClient::new(
-                        openrouter::Client::new(&key)?,
-                        cassette_recorder.clone(),
-                        "openrouter",
+                    if resolved.api_keys.is_empty() {
+                        anyhow::bail!("No OpenRouter API key available from LLM config");
+                    }
+                    let keyed_models = healthy_keys
+                        .iter()
+                        .map(|k| {
+                            let client = RecordingClient::new(
+                                openrouter::Client::new(&k.key)?,
+                                cassette_recorder.clone(),
+                                "openrouter",
+                            );
+                            Ok::<_, anyhow::Error>((
+                                k.original_index,
+                                client.completion_model(resolved.model.clone()),
+                            ))
+                        })
+                        .collect::<Result<Vec<_>, _>>()?;
+                    let model = RotatingModel::new(
+                        resolved.provider.clone(),
+                        resolved.key_health.clone(),
+                        keyed_models,
                     );
                     step::run_step_loop(
                         boot,
-                        client.completion_model(resolved.model.clone()),
+                        model,
                         turn_prompt.clone(),
                         &turn_message,
                         &re_engage_tail,
@@ -130,18 +145,31 @@ pub(crate) async fn run_turn_loop(boot: &mut AgentBootstrap) -> Result<()> {
                     .await?
                 }
                 "openai" => {
-                    let key = resolved
-                        .api_key
-                        .clone()
-                        .context("No OpenAI API key available from LLM config")?;
-                    let client = RecordingClient::new(
-                        openai::CompletionsClient::builder().api_key(&key).build()?,
-                        cassette_recorder.clone(),
-                        "openai",
+                    if resolved.api_keys.is_empty() {
+                        anyhow::bail!("No OpenAI API key available from LLM config");
+                    }
+                    let keyed_models = healthy_keys
+                        .iter()
+                        .map(|k| {
+                            let client = RecordingClient::new(
+                                openai::CompletionsClient::builder().api_key(&k.key).build()?,
+                                cassette_recorder.clone(),
+                                "openai",
+                            );
+                            Ok::<_, anyhow::Error>((
+                                k.original_index,
+                                client.completion_model(resolved.model.clone()),
+                            ))
+                        })
+                        .collect::<Result<Vec<_>, _>>()?;
+                    let model = RotatingModel::new(
+                        resolved.provider.clone(),
+                        resolved.key_health.clone(),
+                        keyed_models,
                     );
                     step::run_step_loop(
                         boot,
-                        client.completion_model(resolved.model.clone()),
+                        model,
                         turn_prompt.clone(),
                         &turn_message,
                         &re_engage_tail,
@@ -186,26 +214,63 @@ pub(crate) async fn run_turn_loop(boot: &mut AgentBootstrap) -> Result<()> {
                     .await?
                 }
                 _ => {
-                    let key = resolved.api_key.clone().with_context(|| {
-                        format!(
+                    if resolved.api_keys.is_empty() {
+                        anyhow::bail!(
                             "No API key available from LLM config for provider '{}'",
                             resolved.provider
-                        )
-                    })?;
-                    if oauth_client::is_oauth_token(&key) {
-                        let http_client = oauth_client::build_oauth_http_client(&key);
-                        let client = RecordingClient::new(
-                            anthropic::Client::builder()
-                                .api_key(&key)
-                                .anthropic_betas(oauth_client::OAUTH_BETAS)
-                                .http_client(http_client)
-                                .build()?,
-                            cassette_recorder.clone(),
-                            "anthropic",
                         );
-                        let model = client
-                            .completion_model(resolved.model.clone())
-                            .map_inner(|inner| inner.with_prompt_caching());
+                    }
+                    // Anthropic keys come in two flavours: standard API keys
+                    // (`sk-ant-*`) and Claude OAuth bearer tokens. Each
+                    // builds a `Client<H>` parameterised by a *different*
+                    // `H`, so a single `RotatingModel` can only hold one
+                    // flavour. Mixing within one provider is rejected at
+                    // resolve time rather than silently using only some
+                    // keys; users should split mixed credentials into
+                    // separate provider configs.
+                    let any_oauth = healthy_keys
+                        .iter()
+                        .any(|k| oauth_client::is_oauth_token(&k.key));
+                    let all_oauth = healthy_keys
+                        .iter()
+                        .all(|k| oauth_client::is_oauth_token(&k.key));
+                    if any_oauth && !all_oauth {
+                        anyhow::bail!(
+                            "anthropic provider '{}' mixes OAuth tokens and standard API keys. \
+                             Split them into two provider entries in providers.json (e.g. \
+                             `anthropic` for standard keys and `anthropic-oauth` for OAuth tokens) \
+                             and point each llms.json config at the appropriate provider.",
+                            resolved.provider
+                        );
+                    }
+                    if all_oauth {
+                        let keyed_models = healthy_keys
+                            .iter()
+                            .map(|k| {
+                                let http_client =
+                                    oauth_client::build_oauth_http_client(&k.key);
+                                let client = RecordingClient::new(
+                                    anthropic::Client::builder()
+                                        .api_key(&k.key)
+                                        .anthropic_betas(oauth_client::OAUTH_BETAS)
+                                        .http_client(http_client)
+                                        .build()?,
+                                    cassette_recorder.clone(),
+                                    "anthropic",
+                                );
+                                Ok::<_, anyhow::Error>((
+                                    k.original_index,
+                                    client
+                                        .completion_model(resolved.model.clone())
+                                        .map_inner(|inner| inner.with_prompt_caching()),
+                                ))
+                            })
+                            .collect::<Result<Vec<_>, _>>()?;
+                        let model = RotatingModel::new(
+                            resolved.provider.clone(),
+                            resolved.key_health.clone(),
+                            keyed_models,
+                        );
                         step::run_step_loop(
                             boot,
                             model,
@@ -217,14 +282,27 @@ pub(crate) async fn run_turn_loop(boot: &mut AgentBootstrap) -> Result<()> {
                         )
                         .await?
                     } else {
-                        let client = RecordingClient::new(
-                            anthropic::Client::new(&key)?,
-                            cassette_recorder.clone(),
-                            "anthropic",
+                        let keyed_models = healthy_keys
+                            .iter()
+                            .map(|k| {
+                                let client = RecordingClient::new(
+                                    anthropic::Client::new(&k.key)?,
+                                    cassette_recorder.clone(),
+                                    "anthropic",
+                                );
+                                Ok::<_, anyhow::Error>((
+                                    k.original_index,
+                                    client
+                                        .completion_model(resolved.model.clone())
+                                        .map_inner(|inner| inner.with_prompt_caching()),
+                                ))
+                            })
+                            .collect::<Result<Vec<_>, _>>()?;
+                        let model = RotatingModel::new(
+                            resolved.provider.clone(),
+                            resolved.key_health.clone(),
+                            keyed_models,
                         );
-                        let model = client
-                            .completion_model(resolved.model.clone())
-                            .map_inner(|inner| inner.with_prompt_caching());
                         step::run_step_loop(
                             boot,
                             model,
