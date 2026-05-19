@@ -425,6 +425,9 @@ pub(crate) async fn run_turn_loop(boot: &mut AgentBootstrap) -> Result<()> {
                             output_tokens: Some(stream_usage.output_tokens),
                             total_tokens: Some(stream_usage.total_tokens),
                             cached_input_tokens: Some(stream_usage.cached_input_tokens),
+                            cache_creation_tokens: Some(
+                                stream_usage.cache_creation_input_tokens,
+                            ),
                             ..Default::default()
                         });
                         if boot.emit_state.has_pending_external_work() {
@@ -466,6 +469,9 @@ pub(crate) async fn run_turn_loop(boot: &mut AgentBootstrap) -> Result<()> {
                             output_tokens: Some(stream_usage.output_tokens),
                             total_tokens: Some(stream_usage.total_tokens),
                             cached_input_tokens: Some(stream_usage.cached_input_tokens),
+                            cache_creation_tokens: Some(
+                                stream_usage.cache_creation_input_tokens,
+                            ),
                             ..Default::default()
                         });
                         if boot.emit_state.has_pending_external_work() {

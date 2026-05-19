@@ -136,6 +136,9 @@ pub fn add_llm_usage_tags(
     if let Some(n) = usage.cached_input_tokens {
         builder = builder.tag(tag(["llm-cached-input-tokens", &n.to_string()])?);
     }
+    if let Some(n) = usage.cache_creation_tokens {
+        builder = builder.tag(tag(["llm-cache-creation-tokens", &n.to_string()])?);
+    }
     if let Some(n) = usage.context_window {
         builder = builder.tag(tag(["llm-context-window", &n.to_string()])?);
     }

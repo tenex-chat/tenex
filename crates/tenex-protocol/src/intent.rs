@@ -13,6 +13,7 @@ pub struct LlmUsage {
     pub output_tokens: Option<u64>,
     pub total_tokens: Option<u64>,
     pub cached_input_tokens: Option<u64>,
+    pub cache_creation_tokens: Option<u64>,
     pub reasoning_tokens: Option<u64>,
     pub context_window: Option<u64>,
     pub cost_usd: Option<f64>,
