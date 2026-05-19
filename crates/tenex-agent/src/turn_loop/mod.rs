@@ -22,7 +22,7 @@ use tenex_accounting::{
     RecordLlmCall, RootKind, finish_trace, flush as flush_accounting, open_trace, with_trace,
 };
 use tenex_context::Message as CtxMessage;
-use tenex_protocol::{CompletionIntent, ConversationIntent, Intent, LlmUsage};
+use tenex_protocol::{CompletionIntent, ConversationIntent, ErrorIntent, Intent, LlmUsage};
 use tenex_supervision::supervisor::PostCompletionOutcome;
 use tenex_supervision::types::{TodoEntry as SupTodoEntry, TodoStatus as SupTodoStatus};
 use tracing::{Instrument, info_span};
@@ -341,6 +341,17 @@ pub(crate) async fn run_turn_loop(boot: &mut AgentBootstrap) -> Result<()> {
             Err(e) => {
                 finish_trace(accounting_trace).await;
                 flush_accounting().await;
+                let ral = boot.emit_state.meta.lock().unwrap().ral;
+                let ctx = boot.emit_state.build_ctx(ral);
+                let intent = Intent::Error(ErrorIntent {
+                    message: e.to_string(),
+                    error_type: Some("system".to_string()),
+                });
+                if let Err(emit_err) = boot.emit_state.channel.send(intent, &ctx).await {
+                    eprintln!(
+                        "[tenex-agent] warn: failed to emit terminal ErrorIntent: {emit_err}"
+                    );
+                }
                 return Err(e);
             }
         };

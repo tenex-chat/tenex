@@ -2,6 +2,8 @@ mod projection;
 mod stream;
 mod tools;
 
+use std::time::Duration;
+
 use anyhow::{Result, anyhow};
 use rig::agent::HookAction;
 use rig::completion::message::ToolCall as RigToolCall;
@@ -11,6 +13,8 @@ use tracing::{Instrument, info_span};
 use tenex_context::{Message as CtxMessage, ReasoningBlock, ToolCall as CtxToolCall};
 
 use crate::agent_bootstrap::AgentBootstrap;
+use crate::hook::EmitHook;
+use crate::llm_retry::is_transient_server_error;
 use crate::progress_monitor::ProgressMonitor;
 use crate::tools::TurnToolRegistry;
 use crate::tools::recording::ToolRecorder;
@@ -122,6 +126,25 @@ where
                 .instrument(retry_span)
                 .await?
             }
+            Err(error) if is_transient_server_error(&error) => {
+                tracing::warn!(
+                    error = %error,
+                    step = step_index,
+                    "transient provider error on first attempt; entering retry loop"
+                );
+                run_step_with_transient_retry(
+                    boot,
+                    &boot.hook,
+                    model.clone(),
+                    &progress,
+                    &registry,
+                    &provider_tools,
+                    &turn_prompt,
+                    turn_text,
+                    &in_turn_tail,
+                )
+                .await?
+            }
             Err(error) => return Err(error),
         };
 
@@ -168,6 +191,70 @@ where
         "agent exceeded max provider steps ({})",
         crate::progress_monitor::RIG_AGENT_TURN_FUSE
     ))
+}
+
+/// Retry `run_provider_step` on transient server errors with exponential
+/// backoff. Publishes a `StreamTextDeltaIntent` status message between
+/// each attempt so the user can see what is happening. If all retries are
+/// exhausted the last transient error is returned.
+async fn run_step_with_transient_retry<M>(
+    boot: &AgentBootstrap,
+    hook: &EmitHook,
+    model: M,
+    progress: &ProgressMonitor<M>,
+    registry: &TurnToolRegistry,
+    provider_tools: &[rig::completion::ToolDefinition],
+    turn_prompt: &RigMessage,
+    turn_text: &str,
+    in_turn_tail: &[CtxMessage],
+) -> Result<StepOutput>
+where
+    M: CompletionModel + Clone + Send + Sync + 'static,
+    M::StreamingResponse: GetTokenUsage + Clone + Send + Sync + Unpin + 'static,
+{
+    const DELAYS_SECS: &[u64] = &[10, 20, 40, 80, 80];
+    let max = DELAYS_SECS.len();
+    let mut last_err: Option<anyhow::Error> = None;
+
+    for (attempt, &delay_secs) in DELAYS_SECS.iter().enumerate() {
+        let attempt_num = attempt + 1;
+        let status = format!(
+            "\u{26a0}\u{fe0f} Model temporarily unavailable, retrying in {delay_secs}s \
+             (attempt {attempt_num}/{max})\u{2026}"
+        );
+        hook.publish_status(&status).await;
+        tracing::warn!(
+            delay_secs,
+            attempt = attempt_num,
+            max_attempts = max,
+            "transient provider error; retrying after backoff"
+        );
+        tokio::time::sleep(Duration::from_secs(delay_secs)).await;
+
+        match stream::run_provider_step(
+            boot,
+            model.clone(),
+            hook,
+            progress,
+            registry,
+            provider_tools,
+            turn_prompt,
+            turn_text,
+            in_turn_tail,
+            None,
+        )
+        .await
+        {
+            Ok(output) => return Ok(output),
+            Err(e) if attempt_num < max && is_transient_server_error(&e) => {
+                tracing::warn!(error = %e, attempt = attempt_num, "transient error persists");
+                last_err = Some(e);
+            }
+            Err(e) => return Err(e),
+        }
+    }
+
+    Err(last_err.unwrap_or_else(|| anyhow::anyhow!("transient error retry exhausted")))
 }
 
 fn assistant_message_from_step(output: &StepOutput) -> CtxMessage {

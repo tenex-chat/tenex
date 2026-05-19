@@ -65,6 +65,23 @@ pub fn is_rotatable_key_error<E: std::fmt::Display>(err: &E) -> bool {
     false
 }
 
+/// Returns true when an error reflects a transient server-side overload that
+/// the same key is likely to succeed on after a short wait. Unlike
+/// [`is_rotatable_key_error`], these errors are not key-specific — rotating
+/// to a different key would not help. The caller should back off and retry
+/// against the same endpoint.
+pub fn is_transient_server_error<E: std::fmt::Display>(err: &E) -> bool {
+    let lower = err.to_string().to_ascii_lowercase();
+    lower.contains("503")
+        || lower.contains("service unavailable")
+        || lower.contains("overloaded")
+        || lower.contains("502")
+        || lower.contains("bad gateway")
+        || lower.contains("504")
+        || lower.contains("gateway timeout")
+        || (lower.contains("temporarily") && lower.contains("unavailable"))
+}
+
 /// Run `op` once per healthy API key, rotating on key-specific failures.
 ///
 /// `op` receives the API key string for each attempt. For providers that
@@ -296,6 +313,33 @@ mod tests {
     fn does_not_rotate_on_transport_failure() {
         let err = anyhow::anyhow!("HttpError: connection reset by peer");
         assert!(!is_rotatable_key_error(&err));
+    }
+
+    #[test]
+    fn classifies_503_service_unavailable() {
+        let err =
+            anyhow::anyhow!("HttpError: Invalid status code 503 Service Unavailable");
+        assert!(is_transient_server_error(&err));
+    }
+
+    #[test]
+    fn classifies_kimi_overloaded() {
+        let err = anyhow::anyhow!(
+            "model 'kimi-k2.6' is temporarily overloaded, please retry shortly"
+        );
+        assert!(is_transient_server_error(&err));
+    }
+
+    #[test]
+    fn does_not_classify_401_as_transient() {
+        let err = anyhow::anyhow!("401 unauthorized");
+        assert!(!is_transient_server_error(&err));
+    }
+
+    #[test]
+    fn does_not_classify_500_as_transient() {
+        let err = anyhow::anyhow!("500 Internal Server Error");
+        assert!(!is_transient_server_error(&err));
     }
 
     fn make_resolved(provider: &str, api_keys: Vec<ApiKey>) -> ResolvedModel {

@@ -128,6 +128,25 @@ impl EmitHook {
         }
     }
 
+    /// Publish a synthetic status delta directly to the channel, bypassing
+    /// the token buffer. Used to show retry/error status to the conversation.
+    pub async fn publish_status(&self, text: &str) {
+        let ral = self.state.meta.lock().unwrap().ral;
+        let ctx = self.state.build_ctx(ral);
+        let intent = StreamTextDeltaIntent {
+            delta: text.to_string(),
+            sequence: 0,
+        };
+        if let Err(e) = self
+            .state
+            .channel
+            .send(Intent::StreamTextDelta(intent), &ctx)
+            .await
+        {
+            eprintln!("[tenex-agent] warn: status delta emit failed: {e}");
+        }
+    }
+
     async fn finish_stream(&self) -> HookAction {
         self.state.end_llm_stream();
         let content = std::mem::take(&mut *self.accumulated_text.lock().unwrap());
