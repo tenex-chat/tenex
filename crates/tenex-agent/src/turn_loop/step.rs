@@ -168,6 +168,8 @@ where
             });
         }
 
+        ensure_continue(boot.hook.flush_pending_text().await)?;
+
         let tool_results = tools::execute_step_tools(
             &registry,
             &boot.hook,

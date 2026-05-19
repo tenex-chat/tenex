@@ -83,6 +83,29 @@ impl EmitHook {
     pub fn take_pending(&self) -> Option<(String, u32)> {
         self.pending.lock().unwrap().take()
     }
+
+    /// Emit the pending text as a `ConversationIntent` immediately.
+    ///
+    /// Called before executing tools so the accumulated text is published as
+    /// a kind:1 *before* the tool-use event, rather than deferred until the
+    /// next stream finishes or the turn ends.
+    pub async fn flush_pending_text(&self) -> HookAction {
+        let pending = self.pending.lock().unwrap().take();
+        if let Some((content, ral)) = pending {
+            let mut ctx = self.state.build_ctx(ral);
+            ctx.llm_runtime_ms = self.state.take_runtime_delta();
+            let intent = ConversationIntent {
+                content,
+                is_reasoning: false,
+                usage: None,
+                metadata: None,
+            };
+            if let Err(e) = self.state.channel.send(Intent::Conversation(intent), &ctx).await {
+                eprintln!("[tenex-agent] warn: flush-pending emit failed: {e}");
+            }
+        }
+        HookAction::cont()
+    }
 }
 
 impl EmitHook {
