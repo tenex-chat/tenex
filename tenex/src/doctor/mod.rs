@@ -432,6 +432,8 @@ fn preview_conversations_status() -> Result<()> {
 /// while the daemon is also writing to the same store (WAL mode + 5s
 /// busy_timeout serialises concurrent writers).
 async fn run_conversations_backfill(project_id: String, since: Option<u64>) -> Result<()> {
+    use std::collections::HashMap;
+
     use nostr_sdk::prelude::*;
     use tenex_conversations::{NewMessage, Project as ConversationsProject};
     use tenex_project::Project;
@@ -464,30 +466,64 @@ async fn run_conversations_backfill(project_id: String, since: Option<u64>) -> R
 
     let thirty_days_ago = Timestamp::now().as_secs().saturating_sub(30 * 24 * 60 * 60);
     let since_ts = Timestamp::from(since.unwrap_or(thirty_days_ago));
-    let until_ts = Timestamp::now();
+    let fetch_timeout = Duration::from_secs(30);
 
     println!("Fetching kind:1 events for {project_addr} since {since_ts} ...");
 
-    let filter = Filter::new()
-        .kind(Kind::TextNote)
-        .custom_tags(
-            SingleLetterTag::lowercase(Alphabet::A),
-            [project_addr.as_str()],
-        )
-        .since(since_ts)
-        .until(until_ts);
+    // Paginate oldest-first by walking `until` backwards. Each batch sets
+    // `until` to the oldest event's timestamp, allowing the next page to
+    // pick up earlier events. Dedup by event ID guards against re-fetching
+    // events that share a timestamp boundary with the previous page.
+    let mut all_events: HashMap<EventId, Event> = HashMap::new();
+    let mut until_ts = Timestamp::now();
 
-    let events = client
-        .fetch_events(filter, Duration::from_secs(30))
-        .await
-        .context("fetching events from relay")?;
+    loop {
+        let filter = Filter::new()
+            .kind(Kind::TextNote)
+            .custom_tags(
+                SingleLetterTag::lowercase(Alphabet::A),
+                [project_addr.as_str()],
+            )
+            .since(since_ts)
+            .until(until_ts);
+
+        let batch = client
+            .fetch_events(filter, fetch_timeout)
+            .await
+            .context("fetching events from relay")?;
+
+        if batch.is_empty() {
+            break;
+        }
+
+        let oldest_ts = batch.iter().map(|e| e.created_at).min().unwrap();
+        let batch_size = batch.len();
+        let mut any_new = false;
+        for event in batch {
+            if all_events.insert(event.id, event).is_none() {
+                any_new = true;
+            }
+        }
+
+        println!("  page: {batch_size} events (total so far: {})", all_events.len());
+
+        if !any_new {
+            // Entire batch was duplicate — stuck at a timestamp boundary.
+            break;
+        }
+
+        until_ts = oldest_ts;
+        if oldest_ts <= since_ts {
+            break;
+        }
+    }
 
     client.disconnect().await;
 
-    let mut events: Vec<Event> = events.into_iter().collect();
+    let mut events: Vec<Event> = all_events.into_values().collect();
     events.sort_by_key(|e| e.created_at);
 
-    println!("Fetched {} events", events.len());
+    println!("Fetched {} total events", events.len());
 
     let mut ingested = 0usize;
     let mut already_seen = 0usize;
