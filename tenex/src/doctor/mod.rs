@@ -13,6 +13,7 @@
 //! | `migrate` | state migration registry | reports current vs latest version; honest hint when behind (substrates pending) |
 //! | `conversations status` | conversation-index DB | pending — honest hint |
 //! | `conversations reindex [--confirm]` | conversation-index DB | pending — honest hint |
+//! | `conversations backfill <project> [--since N]` | conversation store + Nostr relay | wired |
 //!
 //! Note: spec 11 §1 listed an `agents refetch` subcommand. That was removed
 //! during the kind:4199 / Nostr-event-driven agent install cutover; there's
@@ -22,7 +23,9 @@
 //! subcommand surfaces a clear hint identifying which subsystem is
 //! required and exits cleanly. None of them silently pretend to succeed.
 
-use anyhow::Result;
+use std::time::Duration;
+
+use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 
 use crate::tui::display;
@@ -80,6 +83,17 @@ pub enum ConversationsCommand {
         /// Skip confirmation prompt
         #[arg(long)]
         confirm: bool,
+    },
+    /// Fetch and ingest historical kind:1 events from Nostr relays into the
+    /// conversation store. Idempotent — events already in the store are
+    /// skipped. Runs to completion and exits; the daemon continues normally.
+    Backfill {
+        /// Project d-tag or NIP-33 coordinate (31933:<pubkey>:<dTag>).
+        project_id: String,
+        /// Unix timestamp lower bound. Defaults to 30 days ago.
+        /// Pass 0 to fetch from the beginning of time.
+        #[arg(long, value_name = "UNIX_TIMESTAMP")]
+        since: Option<u64>,
     },
 }
 
@@ -333,6 +347,9 @@ async fn run_conversations(args: ConversationsArgs) -> Result<()> {
     match args.command {
         ConversationsCommand::Status => preview_conversations_status(),
         ConversationsCommand::Reindex { confirm } => reindex_conversations(confirm),
+        ConversationsCommand::Backfill { project_id, since } => {
+            run_conversations_backfill(project_id, since).await
+        }
     }
 }
 
@@ -403,6 +420,132 @@ fn preview_conversations_status() -> Result<()> {
          The local file enumeration above is faithful; the DB-backed \
          lines are gated.",
     );
+    Ok(())
+}
+
+/// Fetch and ingest historical kind:1 events for the given project.
+///
+/// Connects to the configured relays, queries kind:1 events tagged with the
+/// project coordinate (`#a = 31933:<owner>:<d-tag>`) from `since` to now,
+/// then persists each unseen event into the conversation store. Already-stored
+/// events (checked via `has_seen_event`) are skipped, making this safe to run
+/// while the daemon is also writing to the same store (WAL mode + 5s
+/// busy_timeout serialises concurrent writers).
+async fn run_conversations_backfill(project_id: String, since: Option<u64>) -> Result<()> {
+    use nostr_sdk::prelude::*;
+    use tenex_conversations::{NewMessage, Project as ConversationsProject};
+    use tenex_project::Project;
+
+    let base_dir = crate::store::resolve_base_dir(None);
+    let cfg = crate::daemon::config::load(&base_dir).context("loading config")?;
+
+    let project = Project::open(&project_id, &base_dir)
+        .with_context(|| format!("opening project '{project_id}'"))?;
+    let meta = project
+        .metadata()?
+        .with_context(|| format!("project '{project_id}' has no event.json"))?;
+    let owner_pubkey = meta
+        .owner_pubkey
+        .as_deref()
+        .context("project metadata has no owner_pubkey")?;
+    let project_addr = format!("31933:{}:{}", owner_pubkey, meta.d_tag);
+
+    let store = ConversationsProject::open_conversations(&meta.d_tag, &base_dir)
+        .context("opening conversation store")?;
+
+    let keys = Keys::generate();
+    let client = Client::new(keys);
+    for relay in &cfg.relays {
+        if let Err(e) = client.add_relay(relay.as_str()).await {
+            eprintln!("warn: add_relay {relay}: {e}");
+        }
+    }
+    client.connect().await;
+
+    let thirty_days_ago = Timestamp::now().as_secs().saturating_sub(30 * 24 * 60 * 60);
+    let since_ts = Timestamp::from(since.unwrap_or(thirty_days_ago));
+    let until_ts = Timestamp::now();
+
+    println!("Fetching kind:1 events for {project_addr} since {since_ts} ...");
+
+    let filter = Filter::new()
+        .kind(Kind::TextNote)
+        .custom_tags(
+            SingleLetterTag::lowercase(Alphabet::A),
+            [project_addr.as_str()],
+        )
+        .since(since_ts)
+        .until(until_ts);
+
+    let events = client
+        .fetch_events(filter, Duration::from_secs(30))
+        .await
+        .context("fetching events from relay")?;
+
+    client.disconnect().await;
+
+    let mut events: Vec<Event> = events.into_iter().collect();
+    events.sort_by_key(|e| e.created_at);
+
+    println!("Fetched {} events", events.len());
+
+    let mut ingested = 0usize;
+    let mut already_seen = 0usize;
+
+    for event in &events {
+        let event_id_hex = event.id.to_hex();
+        if store.has_seen_event(&event_id_hex)? {
+            already_seen += 1;
+            continue;
+        }
+
+        let conv_id = tenex_protocol::event_filter::conversation_id_from_event(event);
+        let ts = event.created_at.as_secs() as i64;
+
+        let targeted_pubkeys: Vec<String> = event
+            .tags
+            .iter()
+            .filter_map(|tag| {
+                let parts = tag.as_slice();
+                if parts.first().is_some_and(|h| h == "p") {
+                    parts.get(1).cloned()
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        store.ensure_conversation(&conv_id)?;
+        store.append_message(
+            &conv_id,
+            &NewMessage {
+                record_id: format!("event:{event_id_hex}"),
+                nostr_event_id: Some(event_id_hex),
+                author_pubkey: event.pubkey.to_hex(),
+                sender_pubkey: None,
+                ral: None,
+                message_type: "text".to_string(),
+                role: Some("user".to_string()),
+                content: event.content.clone(),
+                timestamp: Some(ts),
+                targeted_pubkeys: if targeted_pubkeys.is_empty() {
+                    None
+                } else {
+                    Some(targeted_pubkeys)
+                },
+                sender_principal: None,
+                targeted_principals: None,
+                tool_data: None,
+                delegation_marker: None,
+                human_readable: None,
+                transcript_tool_attributes: None,
+            },
+        )?;
+
+        ingested += 1;
+    }
+
+    println!("Done: {ingested} ingested, {already_seen} already present");
     Ok(())
 }
 
@@ -493,11 +636,10 @@ mod tests {
     }
 
     #[test]
-    fn conversations_has_two_leaf_subcommands_in_canonical_order() {
-        // Source: spec doc 11 §1 — `status`, `reindex`.
+    fn conversations_has_three_leaf_subcommands_in_canonical_order() {
         let cmd = ConversationsArgs::command();
         let names: Vec<&str> = cmd.get_subcommands().map(|s| s.get_name()).collect();
-        assert_eq!(names, vec!["status", "reindex"]);
+        assert_eq!(names, vec!["status", "reindex", "backfill"]);
     }
 
     #[test]
