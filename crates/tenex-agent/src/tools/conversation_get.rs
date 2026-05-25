@@ -6,9 +6,9 @@ mod tests;
 use crate::config::ResolvedModel;
 use crate::emit::EmitState;
 use crate::llm_accounting::{assistant_text, usage_from_rig};
-use rig::completion::{Completion, Message};
-use rig::providers::{anthropic, ollama, openai, openrouter};
-use rig::{client::CompletionClient, completion::ToolDefinition, tool::Tool};
+use rig_core::completion::{Completion, Message};
+use rig_core::providers::{anthropic, ollama, openai, openrouter};
+use rig_core::{client::CompletionClient, completion::ToolDefinition, tool::Tool};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::path::PathBuf;
@@ -125,7 +125,7 @@ impl ConversationGetTool {
         user: String,
         conversation_id: &str,
     ) -> anyhow::Result<String> {
-        use rig::client::Nothing;
+        use rig_core::client::Nothing;
 
         let history: Vec<Message> = Vec::new();
 

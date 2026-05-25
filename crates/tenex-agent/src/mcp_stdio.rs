@@ -7,8 +7,8 @@
 //! since `env!("CARGO_PKG_VERSION")` resolves at the call site.
 
 use anyhow::Result;
-use rig::completion::ToolDefinition;
-use rig::tool::ToolDyn;
+use rig_core::completion::ToolDefinition;
+use rig_core::tool::ToolDyn;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};

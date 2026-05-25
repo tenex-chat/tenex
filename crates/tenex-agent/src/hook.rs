@@ -4,8 +4,8 @@ use std::time::{Duration, Instant};
 use crate::emit::EmitState;
 use crate::runtime_state::RuntimeStateHandle;
 use crate::tools::{TodoItem, TodoStatus};
-use rig::agent::{HookAction, ToolCallHookAction};
-use rig::completion::Message;
+use rig_core::agent::{HookAction, ToolCallHookAction};
+use rig_core::completion::Message;
 use tenex_protocol::{ConversationIntent, Intent, StreamTextDeltaIntent, ToolUseIntent};
 use tenex_supervision::{
     supervisor::Supervisor,

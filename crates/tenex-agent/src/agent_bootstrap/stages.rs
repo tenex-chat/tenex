@@ -227,7 +227,7 @@ pub(super) async fn prepare_envelope_image_parts(
     provider: &str,
     base_dir: &std::path::Path,
     envelope_content: &str,
-) -> Option<Vec<rig::completion::message::UserContent>> {
+) -> Option<Vec<rig_core::completion::message::UserContent>> {
     let supports_vision = matches!(provider, "anthropic" | "openai" | "openrouter");
     if !supports_vision {
         return None;

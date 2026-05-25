@@ -30,4 +30,4 @@ pub use tools::agent_context_state::save_context_state;
 pub use tools::mcp_agent_tools::{build_mcp_agent_tools, McpAgentContext};
 pub use tools::TodoItem;
 
-pub use rig;
+pub use rig_core;

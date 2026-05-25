@@ -52,7 +52,7 @@ pub(crate) struct AgentBootstrap {
     pub system_prompt: String,
     pub user_message: String,
     pub trigger_event_id: String,
-    pub envelope_image_parts: Option<Vec<rig::completion::message::UserContent>>,
+    pub envelope_image_parts: Option<Vec<rig_core::completion::message::UserContent>>,
     pub envelope_content: String,
     pub tool_set: ToolSet,
     pub emit_state: Arc<EmitState>,

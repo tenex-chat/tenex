@@ -1,8 +1,8 @@
 use std::path::PathBuf;
 
-use rig::completion::ToolDefinition;
-use rig::tool::{ToolDyn, ToolError};
-use rig::wasm_compat::WasmBoxedFuture;
+use rig_core::completion::ToolDefinition;
+use rig_core::tool::{ToolDyn, ToolError};
+use rig_core::wasm_compat::WasmBoxedFuture;
 use serde_json::Value;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixStream;

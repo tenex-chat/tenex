@@ -11,9 +11,9 @@
 
 use anyhow::{Context, Result};
 use futures::StreamExt;
-use rig::client::CompletionClient;
-use rig::completion::CompletionRequestBuilder;
-use rig::providers::anthropic;
+use rig_core::client::CompletionClient;
+use rig_core::completion::CompletionRequestBuilder;
+use rig_core::providers::anthropic;
 use serde_json::Value;
 
 #[path = "../oauth_client.rs"]
@@ -125,7 +125,7 @@ async fn run_call(key: &str, preamble: &str, prompt: &str) -> Result<CallUsage> 
 
     let mut final_response = None;
     while let Some(item) = stream.next().await {
-        if let rig::streaming::StreamedAssistantContent::Final(response) =
+        if let rig_core::streaming::StreamedAssistantContent::Final(response) =
             item.context("anthropic streaming item failed")?
         {
             final_response = Some(response);

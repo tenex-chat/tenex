@@ -1,5 +1,5 @@
 use crate::skills::{self, SkillLookupCtx};
-use rig::{completion::ToolDefinition, tool::Tool};
+use rig_core::{completion::ToolDefinition, tool::Tool};
 use serde::Deserialize;
 use serde_json::json;
 use std::sync::{Arc, Mutex};

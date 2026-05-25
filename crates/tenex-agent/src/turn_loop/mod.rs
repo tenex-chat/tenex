@@ -15,9 +15,9 @@ mod step;
 use std::sync::atomic::Ordering;
 
 use anyhow::{Context, Result};
-use rig::client::CompletionClient as _;
-use rig::completion::Message as RigMessage;
-use rig::providers::{anthropic, ollama, openai, openrouter};
+use rig_core::client::CompletionClient as _;
+use rig_core::completion::Message as RigMessage;
+use rig_core::providers::{anthropic, ollama, openai, openrouter};
 use tenex_accounting::{
     RecordLlmCall, RootKind, finish_trace, flush as flush_accounting, open_trace, with_trace,
 };
@@ -61,8 +61,8 @@ pub(crate) async fn run_turn_loop(boot: &mut AgentBootstrap) -> Result<()> {
         // before the text (preferred order). This applies to every turn, including
         // re-engagement, so the original images remain visible as context.
         let turn_prompt: RigMessage = {
-            use rig::OneOrMany;
-            use rig::completion::message::{Text, UserContent};
+            use rig_core::OneOrMany;
+            use rig_core::completion::message::{Text, UserContent};
             match &boot.envelope_image_parts {
                 Some(image_parts) => {
                     let mut parts: Vec<UserContent> = image_parts.clone();
@@ -179,7 +179,7 @@ pub(crate) async fn run_turn_loop(boot: &mut AgentBootstrap) -> Result<()> {
                     .await?
                 }
                 "ollama" => {
-                    let mut builder = ollama::Client::builder().api_key(rig::client::Nothing);
+                    let mut builder = ollama::Client::builder().api_key(rig_core::client::Nothing);
                     if let Some(url) = &resolved.base_url {
                         builder = builder.base_url(url);
                     }

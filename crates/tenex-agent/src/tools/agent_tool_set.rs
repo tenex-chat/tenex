@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::sync::{atomic::AtomicBool, Arc, Mutex};
 
 use nostr::Keys;
-use rig::tool::ToolDyn;
+use rig_core::tool::ToolDyn;
 use tenex_rag::RagStore;
 use tenex_supervision::types::AgentCategory;
 

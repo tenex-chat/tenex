@@ -1,8 +1,8 @@
 use crate::config::ResolvedModel;
 use crate::llm_accounting::{assistant_text, usage_from_rig};
-use rig::client::CompletionClient;
-use rig::completion::{Completion, Message};
-use rig::providers::{anthropic, ollama, openai, openrouter};
+use rig_core::client::CompletionClient;
+use rig_core::completion::{Completion, Message};
+use rig_core::providers::{anthropic, ollama, openai, openrouter};
 use std::cmp::Reverse;
 use std::collections::HashMap;
 use std::time::Duration;
@@ -359,7 +359,7 @@ async fn call_llm(
     operation: &str,
     accounting: &DiscoveryAccountingCtx,
 ) -> anyhow::Result<String> {
-    use rig::client::Nothing;
+    use rig_core::client::Nothing;
 
     let history: Vec<Message> = Vec::new();
 

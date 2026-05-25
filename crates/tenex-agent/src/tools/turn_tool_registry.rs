@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
-use rig::completion::ToolDefinition;
-use rig::tool::ToolError;
+use rig_core::completion::ToolDefinition;
+use rig_core::tool::ToolError;
 use tenex_context::ToolDef as ProjectionToolDef;
 
 use super::recording::RecordingTool;

@@ -1,5 +1,5 @@
 use crate::runtime_control;
-use rig::{completion::ToolDefinition, tool::Tool};
+use rig_core::{completion::ToolDefinition, tool::Tool};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::time::Duration;

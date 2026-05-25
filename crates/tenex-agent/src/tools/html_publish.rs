@@ -15,7 +15,7 @@
 use crate::emit::EmitState;
 use base64::Engine as _;
 use nostr::{EventBuilder, JsonUtil, Keys, Kind, Tag, Timestamp};
-use rig::{completion::ToolDefinition, tool::Tool};
+use rig_core::{completion::ToolDefinition, tool::Tool};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sha2::{Digest, Sha256};

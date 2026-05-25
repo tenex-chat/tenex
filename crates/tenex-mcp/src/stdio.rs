@@ -461,7 +461,7 @@ fn default_schema() -> Value {
 /// When the response is purely textual, the joined text is returned
 /// verbatim. When any [`McpContent::Image`] is present, the output is a
 /// structured JSON envelope matching the shape that
-/// [`rig::completion::message::ToolResultContent::from_tool_output`]
+/// [`rig_core::completion::message::ToolResultContent::from_tool_output`]
 /// parses:
 ///
 /// - **Single image, no text** → `{"type":"image","data":"<base64>","mimeType":"<mime>"}`.

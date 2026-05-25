@@ -13,9 +13,9 @@
 //! - [`usage_from_rig`] converts rig's `Usage` into
 //!   `tenex_accounting::LlmUsage`.
 
-use rig::completion::message::AssistantContent;
-use rig::completion::Usage;
-use rig::OneOrMany;
+use rig_core::completion::message::AssistantContent;
+use rig_core::completion::Usage;
+use rig_core::OneOrMany;
 use tenex_accounting::LlmUsage;
 
 pub fn assistant_text(choice: &OneOrMany<AssistantContent>) -> String {

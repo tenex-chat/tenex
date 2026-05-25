@@ -2,9 +2,9 @@ use anyhow::{Context, Result};
 use futures::StreamExt;
 use reqwest::header::HeaderMap;
 use reqwest::StatusCode;
-use rig::client::CompletionClient;
-use rig::completion::CompletionRequestBuilder;
-use rig::providers::openrouter;
+use rig_core::client::CompletionClient;
+use rig_core::completion::CompletionRequestBuilder;
+use rig_core::providers::openrouter;
 use serde_json::Value;
 use std::borrow::Cow;
 use std::time::Duration;
@@ -58,7 +58,7 @@ async fn run_rig_streaming(key: &str) -> Result<()> {
 
     let mut final_usage = None;
     while let Some(item) = stream.next().await {
-        if let rig::streaming::StreamedAssistantContent::Final(response) =
+        if let rig_core::streaming::StreamedAssistantContent::Final(response) =
             item.context("rig streaming item failed")?
         {
             final_usage = Some(response.usage);

@@ -1,12 +1,12 @@
 use std::time::Instant;
 
 use futures::StreamExt;
-use rig::client::CompletionClient;
-use rig::completion::{
+use rig_core::client::CompletionClient;
+use rig_core::completion::{
     CompletionError, CompletionModel, CompletionRequest, CompletionResponse, GetTokenUsage,
 };
-use rig::message::AssistantContent;
-use rig::streaming::{
+use rig_core::message::AssistantContent;
+use rig_core::streaming::{
     RawStreamingChoice, RawStreamingToolCall, StreamedAssistantContent,
     StreamingCompletionResponse, StreamingResult, ToolCallDeltaContent,
 };
@@ -494,7 +494,7 @@ fn record_streaming_error(
 }
 
 fn assistant_items_to_cassette(
-    choice: rig::OneOrMany<AssistantContent>,
+    choice: rig_core::OneOrMany<AssistantContent>,
 ) -> (String, Vec<CassetteToolCall>) {
     let mut content = String::new();
     let mut tool_calls = Vec::new();
@@ -554,7 +554,7 @@ where
         StreamedAssistantContent::Reasoning(reasoning) => {
             let id = reasoning.id;
             let content = reasoning.content.into_iter().next().unwrap_or(
-                rig::message::ReasoningContent::Text {
+                rig_core::message::ReasoningContent::Text {
                     text: String::new(),
                     signature: None,
                 },

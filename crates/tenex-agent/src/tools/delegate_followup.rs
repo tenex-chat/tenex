@@ -1,6 +1,6 @@
 use crate::emit::EmitState;
 use crate::tools::delegate_followup_resolution::{resolve_delegation, StoredDelegationRoute};
-use rig::{completion::ToolDefinition, tool::Tool};
+use rig_core::{completion::ToolDefinition, tool::Tool};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::{path::PathBuf, sync::Arc};

@@ -7,9 +7,9 @@
 use crate::config::ResolvedModel;
 use crate::llm_accounting::{assistant_text, usage_from_rig};
 use async_trait::async_trait;
-use rig::client::CompletionClient;
-use rig::completion::{Completion, Message};
-use rig::providers::{anthropic, ollama, openai, openrouter};
+use rig_core::client::CompletionClient;
+use rig_core::completion::{Completion, Message};
+use rig_core::providers::{anthropic, ollama, openai, openrouter};
 use std::sync::Arc;
 use tenex_accounting::{record_llm_call, RecordLlmCall, RootKindOrStr};
 use tenex_context::{CompactionSummarizer, Message as CtxMessage};
@@ -89,7 +89,7 @@ impl LlmCompactionSummarizer {
     }
 
     async fn call_llm(&self, user_prompt: String) -> anyhow::Result<String> {
-        use rig::client::Nothing;
+        use rig_core::client::Nothing;
 
         let history: Vec<Message> = Vec::new();
 

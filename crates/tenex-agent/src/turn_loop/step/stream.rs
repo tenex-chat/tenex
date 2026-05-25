@@ -1,11 +1,11 @@
 use anyhow::{Context, Result};
 use futures::StreamExt;
-use rig::OneOrMany;
-use rig::completion::message::{Reasoning, ReasoningContent};
-use rig::completion::{
+use rig_core::OneOrMany;
+use rig_core::completion::message::{Reasoning, ReasoningContent};
+use rig_core::completion::{
     CompletionModel, CompletionRequest, GetTokenUsage, Message as RigMessage, Usage,
 };
-use rig::streaming::{StreamedAssistantContent, ToolCallDeltaContent};
+use rig_core::streaming::{StreamedAssistantContent, ToolCallDeltaContent};
 
 use tenex_context::{CompactionOverride, Message as CtxMessage, ReasoningBlock};
 
@@ -23,7 +23,7 @@ pub(super) async fn run_provider_step<M>(
     emit: &EmitHook,
     progress: &ProgressMonitor<M>,
     registry: &TurnToolRegistry,
-    provider_tools: &[rig::completion::ToolDefinition],
+    provider_tools: &[rig_core::completion::ToolDefinition],
     turn_prompt: &RigMessage,
     turn_text: &str,
     in_turn_tail: &[CtxMessage],

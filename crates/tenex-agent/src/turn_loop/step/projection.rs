@@ -1,5 +1,5 @@
 use anyhow::Result;
-use rig::completion::Message as RigMessage;
+use rig_core::completion::Message as RigMessage;
 use tenex_context::{Message as CtxMessage, ProjectionOptions};
 
 use crate::agent_bootstrap::AgentBootstrap;

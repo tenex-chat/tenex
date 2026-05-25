@@ -1,6 +1,6 @@
-use rig::completion::CompletionRequest;
-use rig::message::{AssistantContent, Message, ReasoningContent, UserContent};
-use rig::OneOrMany;
+use rig_core::completion::CompletionRequest;
+use rig_core::message::{AssistantContent, Message, ReasoningContent, UserContent};
+use rig_core::OneOrMany;
 
 pub(crate) fn sanitize_completion_request(mut request: CompletionRequest) -> CompletionRequest {
     let mut messages: Vec<Message> = request
@@ -76,7 +76,7 @@ fn sanitize_assistant_content(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rig::message::{Text, ToolCall, ToolFunction, ToolResult, ToolResultContent};
+    use rig_core::message::{Text, ToolCall, ToolFunction, ToolResult, ToolResultContent};
 
     fn request(messages: Vec<Message>) -> CompletionRequest {
         CompletionRequest {

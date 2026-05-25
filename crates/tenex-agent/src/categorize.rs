@@ -7,9 +7,9 @@
 //! once `category` is set, the runtime skips this path.
 
 use anyhow::{anyhow, Result};
-use rig::client::{CompletionClient, Nothing};
-use rig::completion::{Completion, Message};
-use rig::providers::{anthropic, ollama, openai, openrouter};
+use rig_core::client::{CompletionClient, Nothing};
+use rig_core::completion::{Completion, Message};
+use rig_core::providers::{anthropic, ollama, openai, openrouter};
 use tenex_accounting::{record_llm_call, RecordLlmCall, RootKindOrStr};
 use tenex_agent_registry::{
     build_user_prompt, parse_category, system_prompt, AgentCategory, AgentMetadata, AgentStorage,

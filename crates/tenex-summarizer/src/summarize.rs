@@ -2,9 +2,9 @@
 //! `src/conversations/services/ConversationSummarizer.ts`.
 
 use anyhow::{anyhow, Context, Result};
-use rig::client::{CompletionClient, Nothing};
-use rig::completion::Usage;
-use rig::providers::{anthropic, ollama, openai, openrouter};
+use rig_core::client::{CompletionClient, Nothing};
+use rig_core::completion::Usage;
+use rig_core::providers::{anthropic, ollama, openai, openrouter};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use tenex_accounting::{flush, record_llm_call, LlmUsage, RecordLlmCall, RootKind};

@@ -1,3 +1,7 @@
 [workspace]
 members = ["crates/tenex-accounting", "crates/tenex-agent-registry", "crates/tenex-backend-keys", "crates/tenex-builtin-skills", "crates/tenex-telemetry", "crates/tenex-agent", "crates/tenex-context", "crates/tenex-conversations", "crates/tenex-embedder", "crates/tenex-firewall", "crates/tenex-identity", "crates/tenex-intervention", "crates/tenex-llm-config", "crates/tenex-mcp", "crates/tenex-models-dev", "crates/tenex-project", "crates/tenex-protocol", "crates/tenex-rag", "crates/tenex-scheduler", "crates/tenex-summarizer", "crates/tenex-supervision", "crates/tenex-system-prompt", "crates/tenex-telegram", "tenex", "crates/tenex-whitelist"]
 resolver = "2"
+
+[patch.crates-io]
+# Using fork until https://github.com/0xPlaygrounds/rig/pull/1819 merges
+rig-core = { git = "https://github.com/pablof7z/rig.git", branch = "fix/ollama-tool-choice" }

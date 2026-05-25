@@ -1,6 +1,6 @@
 use anyhow::{Result, anyhow};
-use rig::agent::ToolCallHookAction;
-use rig::completion::CompletionModel;
+use rig_core::agent::ToolCallHookAction;
+use rig_core::completion::CompletionModel;
 use tenex_context::Message as CtxMessage;
 
 use crate::hook::EmitHook;

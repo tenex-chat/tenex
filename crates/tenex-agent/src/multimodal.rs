@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use base64::Engine as _;
-use rig::completion::message::{
+use rig_core::completion::message::{
     DocumentSourceKind, Image, ImageMediaType, MimeType as _, UserContent,
 };
 use std::path::{Path, PathBuf};

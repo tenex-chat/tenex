@@ -20,8 +20,8 @@
 use std::sync::Arc;
 
 use anyhow::Result;
-use rig::completion::{CompletionError, CompletionModel, CompletionRequest, CompletionResponse};
-use rig::streaming::StreamingCompletionResponse;
+use rig_core::completion::{CompletionError, CompletionModel, CompletionRequest, CompletionResponse};
+use rig_core::streaming::StreamingCompletionResponse;
 use tenex_llm_config::key_health::KeyHealthTracker;
 
 use crate::config::ResolvedModel;

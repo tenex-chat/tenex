@@ -1,5 +1,5 @@
-use rig::completion::CompletionRequest;
-use rig::message::{AssistantContent, Message, ToolResultContent, UserContent};
+use rig_core::completion::CompletionRequest;
+use rig_core::message::{AssistantContent, Message, ToolResultContent, UserContent};
 
 pub(crate) fn request_debug(request: &CompletionRequest) -> String {
     let mut latest = None;

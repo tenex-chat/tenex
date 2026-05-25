@@ -14,9 +14,9 @@
 
 use std::sync::{Arc, Mutex};
 
-use rig::completion::ToolDefinition;
-use rig::tool::{ToolDyn, ToolError};
-use rig::wasm_compat::WasmBoxedFuture;
+use rig_core::completion::ToolDefinition;
+use rig_core::tool::{ToolDyn, ToolError};
+use rig_core::wasm_compat::WasmBoxedFuture;
 use tenex_context::ToolDef as ProjectionToolDef;
 use tracing::{field, info_span, Instrument, Span};
 

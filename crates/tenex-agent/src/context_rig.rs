@@ -1,12 +1,12 @@
-use rig::OneOrMany;
-use rig::completion::message::{
+use rig_core::OneOrMany;
+use rig_core::completion::message::{
     Reasoning, Text, ToolCall as RigToolCall, ToolFunction, ToolResult,
 };
-use rig::completion::message::{ToolResultContent, UserContent};
-use rig::completion::{AssistantContent, Message as RigMessage};
+use rig_core::completion::message::{ToolResultContent, UserContent};
+use rig_core::completion::{AssistantContent, Message as RigMessage};
 use tenex_context::Message as CtxMessage;
 
-/// Convert a `tenex_context::Message` to `rig::completion::Message` for the
+/// Convert a `tenex_context::Message` to `rig_core::completion::Message` for the
 /// provider request assembled by the TENEX step loop.
 pub fn ctx_msg_to_rig(msg: CtxMessage) -> RigMessage {
     match msg {
@@ -70,7 +70,7 @@ pub fn ctx_msg_to_rig(msg: CtxMessage) -> RigMessage {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rig::completion::message::ReasoningContent;
+    use rig_core::completion::message::ReasoningContent;
     use serde_json::json;
     use tenex_context::{ReasoningBlock, ToolCall};
 

@@ -1,7 +1,7 @@
 use std::sync::{Arc, Mutex};
 
-use rig::agent::HookAction;
-use rig::completion::{AssistantContent, CompletionModel, CompletionResponse, Message};
+use rig_core::agent::HookAction;
+use rig_core::completion::{AssistantContent, CompletionModel, CompletionResponse, Message};
 
 pub const RIG_AGENT_TURN_FUSE: usize = 1_000_000;
 
@@ -164,10 +164,10 @@ fn completion_text<T>(response: CompletionResponse<T>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rig::OneOrMany;
-    use rig::completion::{CompletionError, CompletionRequest, Usage};
-    use rig::message::Text;
-    use rig::streaming::StreamingCompletionResponse;
+    use rig_core::OneOrMany;
+    use rig_core::completion::{CompletionError, CompletionRequest, Usage};
+    use rig_core::message::Text;
+    use rig_core::streaming::StreamingCompletionResponse;
 
     #[derive(Clone)]
     struct TestModel {
