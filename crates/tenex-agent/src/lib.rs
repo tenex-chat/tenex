@@ -17,6 +17,7 @@ pub mod skills;
 
 pub(crate) mod injections;
 pub(crate) mod llm_accounting;
+pub(crate) mod llm_retry;
 pub(crate) mod runtime_control;
 pub(crate) mod runtime_state;
 pub(crate) mod runtime_state_json;

@@ -12,6 +12,7 @@ use nostr::Keys;
 use nostr_sdk::{Client, ClientOptions};
 use serde_json::Value;
 use tenex_agent::config::ResolvedModel;
+use tenex_llm_config::key_health::KeyHealthTracker;
 use tenex_agent::emit::EmitState;
 use tenex_agent::mcp_stdio::{serve_stdio, ServerInfo};
 use tenex_agent::skills::SkillLookupCtx;
@@ -107,12 +108,13 @@ pub(super) async fn run(args: AgentArgs) -> Result<()> {
         completion_project_a_tags: Vec::new(),
     }));
 
+    let key_health = Arc::new(KeyHealthTracker::new());
     let resolved_model = Arc::new(
-        ResolvedModel::resolve(&base_dir, agent.raw_model.as_deref())
+        ResolvedModel::resolve(&base_dir, agent.raw_model.as_deref(), key_health.clone())
             .unwrap_or_else(|_| placeholder_model()),
     );
     let summarization_model = Arc::new(
-        ResolvedModel::resolve_role(&base_dir, "summarization")
+        ResolvedModel::resolve_role(&base_dir, "summarization", key_health.clone())
             .unwrap_or_else(|_| (*resolved_model).clone()),
     );
 
@@ -402,8 +404,9 @@ fn placeholder_model() -> ResolvedModel {
     ResolvedModel {
         provider: "standalone".to_string(),
         model: "mcp".to_string(),
-        api_key: None,
+        api_keys: vec![],
         base_url: None,
+        key_health: Arc::new(KeyHealthTracker::new()),
     }
 }
 

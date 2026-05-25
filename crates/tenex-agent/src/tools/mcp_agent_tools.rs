@@ -162,6 +162,7 @@ pub fn build_mcp_agent_tools(ctx: &McpAgentContext) -> Vec<Box<dyn ToolDyn>> {
     tools.push(Box::new(ConversationGetTool::new(
         ctx.emit_state.clone(),
         ctx.conv_db_path.clone(),
+        ctx.base_dir.clone(),
         ctx.summarization_model.clone(),
     )));
     tools.push(Box::new(ConversationListTool::new(

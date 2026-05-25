@@ -4,6 +4,8 @@ use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result};
 use rig::completion::ToolDefinition;
+use serde::Deserialize;
+use serde_json::{json, Value};
 use rig::tool::{ToolDyn, ToolError};
 use rig::wasm_compat::WasmBoxedFuture;
 use tenex_protocol::{nostr::NostrChannel, sink::EventSink, Channel, Intent, ToolUseIntent};
