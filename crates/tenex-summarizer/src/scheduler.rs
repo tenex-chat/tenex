@@ -296,6 +296,19 @@ async fn process_one(
                 latency_ms = started.elapsed().as_millis() as u64,
                 "summarize failed"
             );
+            // Advance last_summarized_at_ms so the MIN_INTERVAL_MS cooldown
+            // applies on failure too — without this, a permanently-failing
+            // conversation (e.g. context too long) retries every scan cycle.
+            // Preserve last_activity_summarized so it retries on new activity.
+            let preserved = state
+                .get(conversation_id)
+                .ok()
+                .flatten()
+                .map(|s| s.last_activity_summarized)
+                .unwrap_or(0);
+            if let Err(e) = state.record(conversation_id, preserved, now_ms()) {
+                warn!(error = %e, "state.record (on failure) failed");
+            }
             false
         }
     }
