@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 
+mod authority;
 mod categories;
 mod config;
 mod ingest;

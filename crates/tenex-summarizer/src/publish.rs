@@ -1,10 +1,10 @@
 //! Sign and publish kind:513 metadata events.
 //!
-//! Events are signed by the project's PM agent (the first agent listed
-//! in the kind:31933 event) — passed in per-publish as a `Signer` — so
-//! that ingesting backends can authenticate the event author against
-//! public project state. The relay-level NIP-42 authentication still
-//! uses the backend's own key, configured at construction.
+//! Events are signed by the project agent p-tagged by the conversation's
+//! opening message — passed in per-publish as a `Signer` — so ingesting
+//! backends can authenticate the event author against public project state.
+//! The relay-level NIP-42 authentication still uses the backend's own key,
+//! configured at construction.
 
 use anyhow::{Context, Result};
 use nostr::event::{EventBuilder, Tag};
@@ -39,7 +39,7 @@ impl Publisher {
         Ok(Self { client })
     }
 
-    /// Sign with the PM agent's signer and broadcast.
+    /// Sign with the selected conversation agent's signer and broadcast.
     pub async fn publish(
         &self,
         conversation_id: &str,

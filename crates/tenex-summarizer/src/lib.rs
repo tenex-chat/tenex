@@ -1,3 +1,4 @@
+pub mod authority;
 pub mod categories;
 pub mod config;
 pub mod ingest;

@@ -14,6 +14,7 @@ use anyhow::Result;
 use tokio::signal::unix::{signal, SignalKind};
 use tracing::{debug, error, info, warn};
 
+use crate::authority;
 use crate::categories;
 use crate::config::Config;
 use crate::ingest;
@@ -42,10 +43,9 @@ pub async fn run(cfg: Config, state: SummaryStateStore) -> Result<()> {
         "tenex-summarizer started",
     );
 
-    // Spawn the ingester. It receives kind:513 events for projects
-    // whose PM agent is hosted on a different backend and applies the
-    // metadata to the local conversation DB, so non-PM backends do
-    // not have to run a redundant LLM pass.
+    // Spawn the ingester. It receives kind:513 events authored by
+    // project agents hosted on other backends and applies the metadata
+    // to the local conversation DB.
     let (ingest_shutdown_tx, ingest_shutdown_rx) = tokio::sync::mpsc::channel::<()>(1);
     let ingest_task = tokio::spawn({
         let secret_key = cfg.backend_secret_key.clone();
@@ -110,32 +110,6 @@ async fn scan_once(
             }
         };
 
-        // Only the backend that owns the project's PM agent (the first
-        // agent in the kind:31933 event) does any summarization work for
-        // this project. Backends without the PM signer rely on the
-        // `ingest` task to receive kind:513 events from the PM-owning
-        // backend and apply them to the local conversation.db — they
-        // must not run a redundant LLM pass.
-        //
-        // A read or parse failure of the PM identity skips the project
-        // entirely so the next scan retries — otherwise a transient
-        // agent-file error would permanently suppress publishing.
-        let pm_signer = match source::pm_identity(&project.d_tag, &base_dir) {
-            Ok(Some(pm)) => match pm.local_signer {
-                Some(s) => s,
-                None => continue,
-            },
-            Ok(None) => continue,
-            Err(e) => {
-                warn!(
-                    d_tag = %project.d_tag,
-                    error = ?e,
-                    "pm identity lookup failed; skipping project this cycle",
-                );
-                continue;
-            }
-        };
-
         let candidates = match source::list_candidates(project, DEBOUNCE_SECS, MAX_AGE_SECS) {
             Ok(c) => c,
             Err(e) => {
@@ -152,14 +126,46 @@ async fn scan_once(
         let scan_ctx = ProjectScanContext {
             project,
             project_event: &project_event,
-            pm_signer: pm_signer.as_ref(),
         };
 
         for cand in candidates {
-            match should_process(state, &cand.conversation_id, cand.last_activity, startup_secs)? {
+            let decision = match should_process(
+                state,
+                &cand.conversation_id,
+                cand.last_activity,
+                startup_secs,
+            )? {
                 Decision::Skip => {
                     total_skipped += 1;
+                    continue;
                 }
+                other => other,
+            };
+
+            let metadata_publisher = match authority::conversation_publisher(
+                project,
+                &cand.conversation_id,
+                &base_dir,
+            ) {
+                Ok(Some(p)) => p,
+                Ok(None) => {
+                    total_skipped += 1;
+                    continue;
+                }
+                Err(e) => {
+                    warn!(
+                        d_tag = %project.d_tag,
+                        conversation_id = %short(&cand.conversation_id),
+                        error = ?e,
+                        "metadata publisher lookup failed; skipping conversation this cycle",
+                    );
+                    total_skipped += 1;
+                    continue;
+                }
+            };
+
+            match decision {
+                Decision::Skip => unreachable!("skip decisions continue before publisher lookup"),
                 Decision::Baseline => {
                     if let Err(e) = state.record(&cand.conversation_id, cand.last_activity, 0) {
                         warn!(error = %e, "state.record (baseline) failed");
@@ -172,6 +178,7 @@ async fn scan_once(
                         state,
                         publisher,
                         &scan_ctx,
+                        metadata_publisher.signer.as_ref(),
                         &cand.conversation_id,
                         cand.last_activity,
                     )
@@ -206,7 +213,6 @@ async fn scan_once(
 struct ProjectScanContext<'a> {
     project: &'a ProjectRef,
     project_event: &'a ProjectEvent,
-    pm_signer: &'a dyn Signer,
 }
 
 enum Decision {
@@ -251,11 +257,12 @@ async fn process_one(
     state: &SummaryStateStore,
     publisher: &Publisher,
     ctx: &ProjectScanContext<'_>,
+    signer: &dyn Signer,
     conversation_id: &str,
     catalog_last_activity: i64,
 ) -> bool {
     let started = std::time::Instant::now();
-    let result = process_inner(cfg, publisher, ctx, conversation_id).await;
+    let result = process_inner(cfg, publisher, ctx, signer, conversation_id).await;
     match result {
         Ok(Some(summary)) => {
             if let Err(e) = state.record(conversation_id, catalog_last_activity, now_ms()) {
@@ -298,6 +305,7 @@ async fn process_inner(
     cfg: &Config,
     publisher: &Publisher,
     ctx: &ProjectScanContext<'_>,
+    signer: &dyn Signer,
     conversation_id: &str,
 ) -> Result<Option<Summary>> {
     let content = match source::fetch_content(ctx.project, ctx.project_event, conversation_id)? {
@@ -332,7 +340,7 @@ async fn process_inner(
             &content.project_event,
             &cfg.llm.model,
             &summary,
-            ctx.pm_signer,
+            signer,
         )
         .await?;
 

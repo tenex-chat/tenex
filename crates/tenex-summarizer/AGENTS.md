@@ -17,7 +17,7 @@ Single-instance lockfile at `~/.tenex/summarizer.pid` (`flock`-based). A second 
 - **Polling, not push.** Wake every 5 s. Summarize conversations whose `last_activity_at` is ≥ 10 s old and whose stored metadata is stale. Hard cap: re-summarize at most every 5 min per conversation.
 - **`src/source.rs` is the only place that knows the on-disk format.** It uses `tenex-conversations` to read messages, derive candidate activity, and write generated metadata into `conversation.db`.
 - **Kind:513 only.** No other event kinds, no inbound relay subscriptions.
-- **PM-owner publishes.** When a project's kind:31933 event is co-served by several backends, only the backend whose local agent projection owns the first listed agent (the project PM) publishes kind:513 for that project. Non-owners still summarize and write to their local `conversation.db` so on-host consumers (agent bootstrap, system-prompt reminders) keep getting title/summary; they just do not emit Nostr events.
+- **OP-targeted agent publishes.** For each conversation, the backend whose local agent projection owns the project agent p-tagged by the conversation's opening message publishes kind:513, signed as that agent. Backends accept kind:513 from any agent listed in the project's kind:31933 event, and ignore local relay echoes to avoid double-counting category stats.
 - **Prompt and response schema are the contract.** Do not redesign casually. Kind:513 event shape for the same input is the success criterion.
 - **Single instance.** Do not remove or weaken the `flock` lockfile. A second instance must fail the lock and exit.
 - **Reads `~/.tenex/config.json`.** Relay list and backend nsec come from there. `llms.summarization` model key takes precedence over `llms.default`.

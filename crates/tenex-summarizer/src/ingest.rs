@@ -1,19 +1,17 @@
 //! Subscribe to kind:513 conversation-metadata events from relays and
 //! apply them to the local conversation DB.
 //!
-//! Backends that do not own the project's PM agent skip the LLM
-//! summarization pass entirely (see `scheduler.rs`); this task is what
-//! keeps their local conversation metadata in sync with the PM-owning
-//! backend's output. Events are authenticated against the PM agent
-//! pubkey listed first in the project's kind:31933 event — so an event
-//! signed by anything other than that key for the project is dropped.
+//! The local scheduler publishes only for conversations whose opening
+//! message p-tags a locally signable project agent. This task keeps local
+//! metadata in sync for conversations owned by project agents hosted on
+//! other backends. Events are authenticated against the full agent set in
+//! the project's kind:31933 event.
 //!
 //! The subscription is refreshed periodically: the daemon walks the
-//! local project list, computes each project's `a` coordinate and PM
-//! pubkey, and resubscribes when the set changes (e.g. a new project
-//! arrived, or PM ownership rotated to another agent).
+//! local project list, computes each project's `a` coordinate and agent
+//! pubkeys, and resubscribes when the set changes.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -27,6 +25,7 @@ use nostr_sdk::{Client, ClientOptions, RelayPoolNotification, SubscriptionId};
 use tokio::sync::mpsc;
 use tracing::{debug, info, warn};
 
+use crate::authority;
 use crate::categories;
 use crate::paths;
 use crate::source::{self, MetadataUpdate};
@@ -96,14 +95,15 @@ pub async fn run(
     }
 }
 
-/// Per-project ingestion target: the location to write into and the PM
-/// pubkey that authorizes events for the project's `a` coordinate.
+/// Per-project ingestion target: the location to write into and the agent
+/// pubkeys that authorize events for the project's `a` coordinate.
 #[derive(Debug, Clone)]
 struct IngestTarget {
     d_tag: String,
     project_root: PathBuf,
     conversation_db: PathBuf,
-    pm_pubkey: String,
+    authorized_pubkeys: HashSet<String>,
+    local_pubkeys: HashSet<String>,
 }
 
 async fn refresh_subscription(
@@ -130,13 +130,12 @@ async fn refresh_subscription(
     *current_targets = new_targets;
 
     if current_targets.is_empty() {
-        debug!("ingest: no projects with PM identity; subscription idle");
+        debug!("ingest: no projects with metadata-authorized agents; subscription idle");
         return;
     }
 
     let coords: Vec<String> = current_targets.keys().cloned().collect();
-    let since =
-        Timestamp::from(now_secs().saturating_sub(BACKFILL_SECS as i64).max(0) as u64);
+    let since = Timestamp::from(now_secs().saturating_sub(BACKFILL_SECS as i64).max(0) as u64);
     let filter = Filter::new()
         .kind(Kind::Custom(KIND_EVENT_METADATA))
         .custom_tags(
@@ -148,7 +147,10 @@ async fn refresh_subscription(
     let id = SubscriptionId::generate();
     match client.subscribe_with_id(id.clone(), filter, None).await {
         Ok(_) => {
-            info!(projects = current_targets.len(), "ingest: subscribed to kind:513");
+            info!(
+                projects = current_targets.len(),
+                "ingest: subscribed to kind:513"
+            );
             *current_sub = Some(id);
         }
         Err(e) => {
@@ -163,19 +165,19 @@ fn targets_eq(a: &HashMap<String, IngestTarget>, b: &HashMap<String, IngestTarge
     }
     for (coord, target) in a {
         match b.get(coord) {
-            Some(other) if other.pm_pubkey == target.pm_pubkey => {}
+            Some(other)
+                if other.authorized_pubkeys == target.authorized_pubkeys
+                    && other.local_pubkeys == target.local_pubkeys => {}
             _ => return false,
         }
     }
     true
 }
 
-/// Walk the local project list and produce one ingest target per
-/// project this backend does *not* own the PM for. PM-owned projects
-/// are excluded: this backend already writes their metadata via the
-/// scheduler's publish path, and adding them here would re-apply the
-/// relay echo of every published event — double-counting categories
-/// on the global tally.
+/// Walk the local project list and produce one ingest target per project
+/// that has any 31933-listed agent. Locally authored relay echoes are
+/// ignored in `handle_event`, so mixed local/remote ownership within the
+/// same project is supported without double-counting categories.
 fn build_targets() -> Result<HashMap<String, IngestTarget>> {
     let base_dir = paths::base_dir();
     let projects = source::discover_projects()?;
@@ -188,12 +190,11 @@ fn build_targets() -> Result<HashMap<String, IngestTarget>> {
                 continue;
             }
         };
-        let pm_pubkey = match source::pm_identity(&project.d_tag, &base_dir) {
-            Ok(Some(pm)) if pm.local_signer.is_some() => continue,
-            Ok(Some(pm)) => pm.pubkey,
+        let authority = match authority::project_authority(&project.d_tag, &base_dir) {
+            Ok(Some(authority)) => authority,
             Ok(None) => continue,
             Err(e) => {
-                debug!(d_tag = %project.d_tag, error = ?e, "ingest: skip project, pm identity failed");
+                debug!(d_tag = %project.d_tag, error = ?e, "ingest: skip project, authority lookup failed");
                 continue;
             }
         };
@@ -203,7 +204,8 @@ fn build_targets() -> Result<HashMap<String, IngestTarget>> {
                 d_tag: project.d_tag.clone(),
                 project_root: project.root.clone(),
                 conversation_db: project.conversation_db.clone(),
-                pm_pubkey,
+                authorized_pubkeys: authority.authorized_pubkeys,
+                local_pubkeys: authority.local_pubkeys,
             },
         );
     }
@@ -232,12 +234,19 @@ fn handle_event(targets: &HashMap<String, IngestTarget>, event: Event) {
     };
 
     let author = event.pubkey.to_hex();
-    if author != target.pm_pubkey {
+    if !target.authorized_pubkeys.contains(&author) {
         warn!(
             coord = %coord,
             author = %author,
-            expected = %target.pm_pubkey,
-            "ingest: kind:513 author is not project PM, dropping"
+            "ingest: kind:513 author is not a project agent, dropping"
+        );
+        return;
+    }
+    if target.local_pubkeys.contains(&author) {
+        debug!(
+            coord = %coord,
+            author = %author,
+            "ingest: ignoring local kind:513 echo"
         );
         return;
     }
@@ -307,11 +316,7 @@ fn parse_metadata_tags(event: &Event) -> ParsedTags {
     out
 }
 
-fn apply_metadata(
-    target: &IngestTarget,
-    conversation_id: &str,
-    parsed: &ParsedTags,
-) -> Result<()> {
+fn apply_metadata(target: &IngestTarget, conversation_id: &str, parsed: &ParsedTags) -> Result<()> {
     let project = tenex_conversations::ProjectRef {
         d_tag: target.d_tag.clone(),
         root: target.project_root.clone(),

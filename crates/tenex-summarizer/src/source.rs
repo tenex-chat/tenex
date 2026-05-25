@@ -1,12 +1,10 @@
 //! Conversation storage adapter for the per-project `conversation.db` file.
 
-use std::fs;
-use std::path::Path;
-
 use anyhow::{Context, Result};
+use rusqlite::OptionalExtension;
 use serde::Deserialize;
+use std::fs;
 use tenex_conversations::{ConversationStore, MessageQuery, MessageRecord, ProjectRef};
-use tenex_project::Signer;
 
 use crate::paths;
 
@@ -38,56 +36,6 @@ impl ProjectEvent {
 /// Enumerate projects under the host's TENEX base directory.
 pub fn discover_projects() -> Result<Vec<ProjectRef>> {
     tenex_conversations::discover_projects(&paths::base_dir())
-}
-
-/// PM identity for a project — the first agent listed in the project's
-/// kind:31933 event.
-///
-/// `pubkey` is always known when this returns `Some`; it is the authority
-/// for kind:513 events for this project (publishers sign with it,
-/// ingesters authenticate against it).
-///
-/// `local_signer` is `Some` only when the PM agent has a usable on-disk
-/// projection on this backend — i.e., this backend can sign as the PM
-/// and is therefore the publisher for the project. Other backends keep
-/// `local_signer = None` and rely on the ingester to receive metadata.
-pub struct PmIdentity {
-    pub pubkey: String,
-    pub local_signer: Option<Box<dyn Signer>>,
-}
-
-/// Resolve the PM identity for a project from on-disk state. Returns
-/// `None` when the project has no agents listed in its kind:31933 event.
-pub fn pm_identity(d_tag: &str, base_dir: &Path) -> Result<Option<PmIdentity>> {
-    let project = tenex_project::Project::open(d_tag, base_dir)
-        .with_context(|| format!("open project {d_tag}"))?;
-    let agents = project
-        .project_agents()
-        .with_context(|| format!("read project agents for {d_tag}"))?;
-    let Some(pm) = agents.into_iter().find(|a| a.is_pm) else {
-        return Ok(None);
-    };
-
-    let agent = project
-        .agent_by_pubkey(&pm.agent_pubkey)
-        .with_context(|| format!("read PM agent {} for {d_tag}", pm.agent_pubkey))?;
-    let local_signer = match agent {
-        Some(a) if a.is_local => match project.signer_for_agent(&pm.agent_pubkey)? {
-            Ok(signer) => Some(signer),
-            Err(e) => {
-                return Err(anyhow::anyhow!(
-                    "PM agent {} for {d_tag} has signer_ref but signer_for_agent failed: {e}",
-                    pm.agent_pubkey
-                ));
-            }
-        },
-        _ => None,
-    };
-
-    Ok(Some(PmIdentity {
-        pubkey: pm.agent_pubkey,
-        local_signer,
-    }))
 }
 
 pub fn load_project_event(project: &ProjectRef) -> Result<ProjectEvent> {
@@ -150,6 +98,29 @@ pub fn list_candidates(
         out.push(r?);
     }
     Ok(out)
+}
+
+pub fn root_targeted_pubkeys(project: &ProjectRef, conversation_id: &str) -> Result<Vec<String>> {
+    let store = ConversationStore::open(&project.conversation_db)
+        .with_context(|| format!("open {}", project.conversation_db.display()))?;
+    let raw: Option<String> = store
+        .connection()
+        .query_row(
+            "SELECT COALESCE(targeted_pubkeys_json, '[]')
+               FROM messages
+              WHERE conversation_id = ?1
+              ORDER BY sequence ASC
+              LIMIT 1",
+            [conversation_id],
+            |row| row.get(0),
+        )
+        .optional()?;
+    let Some(raw) = raw else {
+        return Ok(Vec::new());
+    };
+    let pubkeys = serde_json::from_str::<Vec<String>>(&raw)
+        .with_context(|| format!("parse root targeted_pubkeys for {conversation_id}"))?;
+    Ok(pubkeys)
 }
 
 pub fn fetch_content(
