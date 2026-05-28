@@ -1066,7 +1066,7 @@ async function runDelegationProbe(context: ScenarioContext): Promise<void> {
     );
     const timeoutMs = Number(process.env.TENEX_PROBE_WAIT_MS ?? 8_000);
     await Promise.all(context.pool.publish([context.relayUrl], userEvent));
-    await context.waitForObservedEvent(
+    const delegationEvent = await context.waitForObservedEvent(
         context.events,
         (event) =>
             event.kind === 1 &&
@@ -1077,17 +1077,35 @@ async function runDelegationProbe(context: ScenarioContext): Promise<void> {
         "PM delegation event"
     );
 
+    // Under the new architecture the worker's reply text lives in the
+    // *child* conversation; the parent gets a `delegation-marker` row
+    // (status: completed) that projection expands into the
+    // `# DELEGATION COMPLETED` block with the embedded child transcript.
+    // So the driver waits for two things: (a) the worker's reply
+    // landing in the child store, and (b) the parent's marker upserting
+    // to status=completed.
     const workerCompletion = await waitForStoredMessage(
         context.conversationDbPath,
-        userEvent.id,
+        delegationEvent.id,
         (message) =>
             message.authorPubkey === context.workerPubkey &&
             includesColorChoice(messageText(message)),
         timeoutMs,
-        "worker color completion in parent conversation store",
+        "worker color completion in delegated (child) conversation store",
         context.delay
     );
     const workerColor = extractColorChoice(messageText(workerCompletion));
+    await waitForStoredMessage(
+        context.conversationDbPath,
+        userEvent.id,
+        (message) =>
+            message.messageType === "delegation-marker" &&
+            message.delegationMarker?.status === "completed" &&
+            message.delegationMarker?.delegationConversationId === delegationEvent.id,
+        timeoutMs,
+        "parent delegation-marker upserted to completed",
+        context.delay
+    );
     await waitForStoredMessage(
         context.conversationDbPath,
         userEvent.id,

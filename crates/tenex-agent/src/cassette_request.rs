@@ -14,7 +14,7 @@ pub(crate) fn request_debug(request: &CompletionRequest) -> String {
 fn message_text(message: &Message) -> Option<String> {
     match message {
         Message::System { content } => Some(content.clone()),
-        Message::User { content } => {
+        Message::User { content, .. } => {
             let text = content
                 .iter()
                 .filter_map(user_content_text)

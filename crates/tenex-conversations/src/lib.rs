@@ -25,9 +25,9 @@ pub use discovery::{discover_projects, discover_projects_default, ProjectRef};
 pub use error::{ConversationsError, Result};
 pub use ids::normalize_project_id;
 pub use model::{
-    AgentContextState, Completion, CompletionStatus, FrozenPromptMessage, MessageRecord,
-    NewCompletion, NewMessage, NewPromptHistoryEntry, NewToolMessage, PromptHistoryEntry,
-    ToolMessage,
+    AgentContextState, AttachmentRecord, Completion, CompletionStatus, DelegationMarker,
+    DelegationStatus, FrozenPromptMessage, MessageRecord, NewCompletion, NewMessage,
+    NewPromptHistoryEntry, NewToolMessage, PromptHistoryEntry, ToolMessage,
 };
 pub use project::Project;
 pub use store::{ConversationListFilter, ConversationStore, MessageQuery};

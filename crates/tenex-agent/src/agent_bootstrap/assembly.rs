@@ -146,6 +146,7 @@ pub(super) fn init_supervisor_and_hook(
     project_agents: Arc<Vec<tenex_project::Agent>>,
     teams: Arc<Vec<tenex_project::Team>>,
     project_root: std::path::PathBuf,
+    conv_db_path: std::path::PathBuf,
 ) -> SupervisorComponents {
     let supervisor = Arc::new(Mutex::new(default_supervisor()));
     let supervisor_ref = supervisor.clone();
@@ -165,6 +166,7 @@ pub(super) fn init_supervisor_and_hook(
             project_agents,
             teams,
             project_root,
+            conv_db_path,
         ))
     } else {
         None
@@ -239,6 +241,7 @@ mod tests {
             Arc::new(Vec::new()),
             Arc::new(Vec::new()),
             std::path::PathBuf::from("/tmp"),
+            std::path::PathBuf::from("/tmp/conv.db"),
         )
     }
 

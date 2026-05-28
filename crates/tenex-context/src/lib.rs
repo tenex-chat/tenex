@@ -18,18 +18,20 @@
 mod projection;
 pub mod strategies;
 mod tokens;
+pub mod transcript;
 mod turn;
 pub mod types;
 
 pub use projection::DisplayNameResolver;
 pub use strategies::{
     default_stack, stack_with_compaction_override, CompactionSummarizer, CompactionToolStrategy,
-    ProjectionContext, RemindersStrategy, Strategy, ToolResultDecayStrategy,
+    ProactiveContextStrategy, ProjectionContext, RemindersStrategy, Strategy,
+    ToolResultDecayStrategy,
 };
 pub use types::{
-    BreakpointHint, BreakpointKind, CacheObservation, CompactionOverride, Message, ModelProfile,
-    Projection, ProjectionOptions, ProjectionTelemetry, ReasoningBlock, ToolCall, ToolDef,
-    TurnRecord,
+    BreakpointHint, BreakpointKind, CacheObservation, CompactionOverride, ImageAttachment,
+    Message, ModelProfile, Projection, ProjectionOptions, ProjectionTelemetry, ReasoningBlock,
+    ToolCall, ToolDef, TurnRecord,
 };
 
 use tenex_conversations::ConversationStore;
@@ -96,20 +98,22 @@ pub async fn project_with_options(
     );
 
     let ProjectionOptions {
-        excluded_event_id,
-        in_turn_tail,
         compaction_override,
+        proactive_context,
+        // `excluded_event_id` and `in_turn_tail` are retained on the
+        // struct for serialization-stability with older callers, but no
+        // longer drive projection — the conversation store is the
+        // single source of truth.
+        ..
     } = options;
 
-    let mut messages = projection::project_messages(
+    let messages = projection::project_messages(
         store,
         conversation_id,
         agent_pubkey,
         system_prompt,
         name_resolver,
-        excluded_event_id.as_deref(),
     )?;
-    messages.extend(in_turn_tail);
     let telemetry = ProjectionTelemetry::default();
     let agent_todos = store
         .get_agent_context_state(conversation_id, agent_pubkey)
@@ -117,12 +121,53 @@ pub async fn project_with_options(
         .flatten()
         .and_then(|s| s.todos);
 
+    // Pre-load child transcripts for any direct-child delegation marker
+    // that needs expansion. We do this synchronously here so the
+    // store handle isn't held across an `.await` (it's `!Send`).
+    let mut delegation_transcripts: std::collections::HashMap<
+        String,
+        Vec<tenex_conversations::MessageRecord>,
+    > = std::collections::HashMap::new();
+    for msg in &messages {
+        if let crate::types::Message::DelegationMarker { marker, .. } = msg {
+            if marker.parent_conversation_id != conversation_id {
+                continue;
+            }
+            if matches!(
+                marker.status,
+                tenex_conversations::DelegationStatus::Pending
+            ) {
+                continue;
+            }
+            match store.list_messages(
+                &marker.delegation_conversation_id,
+                tenex_conversations::MessageQuery::default(),
+            ) {
+                Ok(records) => {
+                    delegation_transcripts
+                        .insert(marker.delegation_conversation_id.clone(), records);
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        error = %e,
+                        child_conv = %marker.delegation_conversation_id,
+                        "failed to preload child transcript for delegation marker"
+                    );
+                }
+            }
+        }
+    }
+
     let mut ctx = ProjectionContext {
         messages,
         telemetry,
         model_profile,
         tool_defs,
         agent_todos,
+        proactive_context: proactive_context.as_deref(),
+        delegation_transcripts,
+        conversation_id,
+        name_resolver,
     };
 
     for strat in stack_with_compaction_override(summarizer, compaction_override.as_ref()) {

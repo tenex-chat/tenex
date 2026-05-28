@@ -190,10 +190,12 @@ pub fn build_mcp_agent_tools(ctx: &McpAgentContext) -> Vec<Box<dyn ToolDyn>> {
             ctx.project_agents.clone(),
             ctx.teams.clone(),
             ctx.project_root.clone(),
+            ctx.conv_db_path.clone(),
         )));
-        tools.push(Box::new(SelfDelegateTool::new(ctx.emit_state.clone())));
+        tools.push(Box::new(SelfDelegateTool::new(ctx.emit_state.clone(), ctx.conv_db_path.clone())));
         tools.push(Box::new(DelegateCrossProjectTool::new(
             ctx.emit_state.clone(),
+            ctx.conv_db_path.clone(),
         )));
         tools.push(Box::new(DelegateFollowupTool::new(
             ctx.emit_state.clone(),

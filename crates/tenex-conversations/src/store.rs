@@ -10,12 +10,13 @@
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use rusqlite::{params, Connection, OptionalExtension, Row, TransactionBehavior};
+use rusqlite::{params, Connection, OptionalExtension, Row, Transaction, TransactionBehavior};
 
 use crate::error::{ConversationsError, Result};
 use crate::model::{
-    AgentContextState, Completion, CompletionStatus, ConversationRow, MessageRecord, NewCompletion,
-    NewMessage, NewPromptHistoryEntry, NewToolMessage, PromptHistoryEntry, ToolMessage,
+    AgentContextState, AttachmentRecord, Completion, CompletionStatus, ConversationRow,
+    DelegationMarker, DelegationStatus, MessageRecord, NewCompletion, NewMessage,
+    NewPromptHistoryEntry, NewToolMessage, PromptHistoryEntry, ToolMessage,
 };
 use crate::schema;
 
@@ -369,25 +370,35 @@ impl ConversationStore {
     /// `(conversation_id, record_id)` and on `nostr_event_id` when
     /// present. On conflict, returns the existing row's id and does not
     /// modify the row.
+    ///
+    /// The dedup check, `MAX(sequence)+1` read, and `INSERT` are wrapped
+    /// in a `BEGIN IMMEDIATE` transaction so concurrent writers cannot
+    /// race on the `(conversation_id, sequence)` unique index.
     pub fn append_message(&self, conversation_id: &str, msg: &NewMessage) -> Result<i64> {
         self.ensure_conversation(conversation_id)?;
-        if let Some(existing) = self.find_message_id_by_record(conversation_id, &msg.record_id)? {
+        let tx = Transaction::new_unchecked(&self.conn, TransactionBehavior::Immediate)?;
+
+        if let Some(existing) =
+            find_message_id_by_record_tx(&tx, conversation_id, &msg.record_id)?
+        {
+            tx.rollback()?;
             return Ok(existing);
         }
         if let Some(event_id) = &msg.nostr_event_id {
-            if let Some(existing) = self.find_message_id_by_event(event_id)? {
+            if let Some(existing) = find_message_id_by_event_tx(&tx, event_id)? {
+                tx.rollback()?;
                 return Ok(existing);
             }
         }
 
-        let next_sequence: i64 = self.conn.query_row(
+        let next_sequence: i64 = tx.query_row(
             "SELECT COALESCE(MAX(sequence), -1) + 1 FROM messages WHERE conversation_id = ?1",
             [conversation_id],
             |row| row.get(0),
         )?;
 
         let now = now_ms();
-        self.conn.execute(
+        tx.execute(
             "INSERT INTO messages (
                 conversation_id, record_id, nostr_event_id, sequence,
                 author_pubkey, sender_pubkey, ral, message_type, role, content,
@@ -425,54 +436,10 @@ impl ConversationStore {
                 now,
             ],
         )?;
-        let row_id = self.conn.last_insert_rowid();
-        self.apply_message_to_header(conversation_id, msg)?;
+        let row_id = tx.last_insert_rowid();
+        apply_message_to_header_tx(&tx, conversation_id, msg)?;
+        tx.commit()?;
         Ok(row_id)
-    }
-
-    fn apply_message_to_header(&self, conversation_id: &str, msg: &NewMessage) -> Result<()> {
-        let last_user_message = if msg.message_type == "text" && msg.role.as_deref() == Some("user")
-        {
-            let trimmed = msg.content.trim();
-            if trimmed.is_empty() {
-                None
-            } else {
-                Some(trimmed)
-            }
-        } else {
-            None
-        };
-        let now = now_ms();
-        self.conn.execute(
-            "UPDATE conversations
-                SET owner_pubkey = COALESCE(owner_pubkey, ?2),
-                    created_at = CASE
-                        WHEN ?3 IS NULL THEN created_at
-                        WHEN created_at IS NULL OR ?3 < created_at THEN ?3
-                        ELSE created_at
-                    END,
-                    last_activity = CASE
-                        WHEN ?3 IS NULL THEN last_activity
-                        WHEN last_activity IS NULL OR ?3 >= last_activity THEN ?3
-                        ELSE last_activity
-                    END,
-                    last_user_message = CASE
-                        WHEN ?4 IS NOT NULL
-                         AND (?3 IS NULL OR last_activity IS NULL OR ?3 >= last_activity)
-                        THEN ?4
-                        ELSE last_user_message
-                    END,
-                    updated_at = ?5
-              WHERE id = ?1",
-            params![
-                conversation_id,
-                msg.author_pubkey,
-                msg.timestamp,
-                last_user_message,
-                now,
-            ],
-        )?;
-        Ok(())
     }
 
     pub fn list_messages(
@@ -532,6 +499,48 @@ impl ConversationStore {
         Ok(())
     }
 
+    /// Stamp `nostr_event_id` onto a locally-persisted assistant row, or,
+    /// when a canonical row for the same event id already exists in the
+    /// store (because the runtime materialized the agent's stdout event
+    /// before this stamp ran), delete the local row instead and leave
+    /// the canonical row in place. Returns the id of the canonical row
+    /// that ends up representing this assistant content.
+    ///
+    /// The whole reconciliation runs inside a `BEGIN IMMEDIATE`
+    /// transaction so a third concurrent writer cannot insert a
+    /// duplicate `event:...` row between the check and the resolve.
+    pub fn reconcile_assistant_event_id(
+        &self,
+        message_id: i64,
+        nostr_event_id: &str,
+    ) -> Result<i64> {
+        let tx = Transaction::new_unchecked(&self.conn, TransactionBehavior::Immediate)?;
+        let existing = find_message_id_by_event_tx(&tx, nostr_event_id)?;
+        let canonical = match existing {
+            Some(canon) if canon == message_id => {
+                // Already stamped (idempotent retry).
+                canon
+            }
+            Some(canon) => {
+                // Runtime won the race — its `event:<hex>` row exists.
+                // Drop our synthetic `step:...` row. Terminal-step rows
+                // have no `tool_messages` children, so this is safe;
+                // any FK on parent_message_id is set to ON DELETE SET NULL.
+                tx.execute("DELETE FROM messages WHERE id = ?1", params![message_id])?;
+                canon
+            }
+            None => {
+                tx.execute(
+                    "UPDATE messages SET nostr_event_id = ?1 WHERE id = ?2",
+                    params![nostr_event_id, message_id],
+                )?;
+                message_id
+            }
+        };
+        tx.commit()?;
+        Ok(canonical)
+    }
+
     /// Returns the maximum `timestamp` (seconds since epoch) among message rows
     /// that carry a `nostr_event_id`. Used by the runtime backfill path to
     /// determine the lower bound of the offline window to REQ on next startup.
@@ -552,30 +561,248 @@ impl ConversationStore {
         self.find_message_id_by_event(event_id).map(|opt| opt.is_some())
     }
 
-    fn find_message_id_by_record(
+    pub fn find_message_id_by_record(
         &self,
         conversation_id: &str,
         record_id: &str,
     ) -> Result<Option<i64>> {
+        find_message_id_by_record_tx(&self.conn, conversation_id, record_id)
+    }
+
+    pub fn find_message_id_by_event(&self, event_id: &str) -> Result<Option<i64>> {
+        find_message_id_by_event_tx(&self.conn, event_id)
+    }
+
+    /// Fetch a single message row by Nostr event id, or `None` when no
+    /// row carries it. Used by callers that need the row's `content`
+    /// (e.g. resolving the conversation-root message's text) without
+    /// walking `list_messages`.
+    pub fn get_message_by_event(&self, event_id: &str) -> Result<Option<MessageRecord>> {
         self.conn
             .query_row(
-                "SELECT id FROM messages WHERE conversation_id = ?1 AND record_id = ?2",
-                params![conversation_id, record_id],
-                |row| row.get(0),
+                "SELECT id, conversation_id, record_id, nostr_event_id, sequence,
+                        author_pubkey, sender_pubkey, ral, message_type, role, content,
+                        timestamp, targeted_pubkeys_json, sender_principal_json,
+                        targeted_principals_json, tool_data_json, delegation_marker_json,
+                        human_readable, transcript_tool_attributes_json, created_at
+                   FROM messages
+                  WHERE nostr_event_id = ?1",
+                [event_id],
+                row_to_message,
             )
             .optional()
             .map_err(ConversationsError::from)
     }
 
-    fn find_message_id_by_event(&self, event_id: &str) -> Result<Option<i64>> {
-        self.conn
+    // ==========================================================================
+    // Message attachments (e.g. fetched images for vision-capable models)
+    // ==========================================================================
+
+    /// Persist a binary attachment for an existing `messages` row.
+    /// Idempotent on `(message_id, ordinal)` — re-inserts with the same
+    /// pair return the existing attachment row's id and do not modify it.
+    /// Returns the attachment row id.
+    pub fn record_attachment(
+        &self,
+        message_id: i64,
+        ordinal: i64,
+        media_type: &str,
+        data: &[u8],
+        source_url: Option<&str>,
+    ) -> Result<i64> {
+        if let Some(existing) = self
+            .conn
             .query_row(
-                "SELECT id FROM messages WHERE nostr_event_id = ?1",
-                [event_id],
-                |row| row.get(0),
+                "SELECT id FROM message_attachments
+                  WHERE message_id = ?1 AND ordinal = ?2",
+                params![message_id, ordinal],
+                |row| row.get::<_, i64>(0),
             )
-            .optional()
-            .map_err(ConversationsError::from)
+            .optional()?
+        {
+            return Ok(existing);
+        }
+        let now = now_ms();
+        self.conn.execute(
+            "INSERT INTO message_attachments
+                (message_id, ordinal, media_type, data, source_url, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![message_id, ordinal, media_type, data, source_url, now],
+        )?;
+        Ok(self.conn.last_insert_rowid())
+    }
+
+    /// Bulk-load attachments for a set of `messages.id`s. Returned map
+    /// is keyed by `message_id`; absent ids have no entry. Per-message
+    /// attachments are sorted by ordinal ascending.
+    pub fn list_attachments_by_message_ids(
+        &self,
+        message_ids: &[i64],
+    ) -> Result<std::collections::HashMap<i64, Vec<AttachmentRecord>>> {
+        let mut out: std::collections::HashMap<i64, Vec<AttachmentRecord>> =
+            std::collections::HashMap::new();
+        if message_ids.is_empty() {
+            return Ok(out);
+        }
+        // SQLite has no native array-binding; build a placeholder list.
+        let placeholders: String = (0..message_ids.len())
+            .map(|i| format!("?{}", i + 1))
+            .collect::<Vec<_>>()
+            .join(",");
+        let sql = format!(
+            "SELECT id, message_id, ordinal, media_type, data, source_url, created_at
+               FROM message_attachments
+              WHERE message_id IN ({placeholders})
+              ORDER BY message_id ASC, ordinal ASC"
+        );
+        let mut stmt = self.conn.prepare(&sql)?;
+        let params: Vec<&dyn rusqlite::ToSql> = message_ids
+            .iter()
+            .map(|id| id as &dyn rusqlite::ToSql)
+            .collect();
+        let rows = stmt.query_map(&params[..], |row| {
+            Ok(AttachmentRecord {
+                id: row.get(0)?,
+                message_id: row.get(1)?,
+                ordinal: row.get(2)?,
+                media_type: row.get(3)?,
+                data: row.get(4)?,
+                source_url: row.get(5)?,
+                created_at: row.get(6)?,
+            })
+        })?;
+        for rec in rows {
+            let rec = rec?;
+            out.entry(rec.message_id).or_default().push(rec);
+        }
+        Ok(out)
+    }
+
+    // ==========================================================================
+    // Delegation markers
+    //
+    // Markers track an outgoing delegation's lifecycle in the *parent*
+    // (delegator) agent's conversation. They are real `messages` rows
+    // (with `message_type = "delegation-marker"` and the payload in
+    // `delegation_marker_json`) so they interleave chronologically with
+    // normal turns. Projection's `ExpandDelegationMarkersStrategy`
+    // reads them and renders the visible `# DELEGATION ...` block.
+    //
+    // We append a row for every state transition (one for `Pending`
+    // when the agent issues `delegate`, one for `Completed`/`Aborted`
+    // when the runtime routes the child reply). Projection considers
+    // only the latest marker per `delegation_conversation_id`.
+    // ==========================================================================
+
+    /// Append a delegation marker to a parent conversation. `record_id`
+    /// is namespaced with the status so re-appending an identical
+    /// transition is idempotent via the existing
+    /// `(conversation_id, record_id)` unique index.
+    pub fn add_delegation_marker(
+        &self,
+        parent_conversation_id: &str,
+        marker: &DelegationMarker,
+        agent_pubkey: &str,
+        ral_number: Option<i64>,
+    ) -> Result<i64> {
+        let payload =
+            serde_json::to_value(marker).map_err(ConversationsError::from)?;
+        let record_id = format!(
+            "delegation-marker:{}:{}",
+            marker.delegation_conversation_id,
+            marker.status.as_str()
+        );
+        let timestamp = marker
+            .completed_at
+            .or(marker.initiated_at)
+            .unwrap_or_else(|| now_ms() / 1000);
+        let new_msg = NewMessage {
+            record_id,
+            nostr_event_id: None,
+            author_pubkey: agent_pubkey.to_string(),
+            sender_pubkey: None,
+            ral: ral_number,
+            message_type: "delegation-marker".to_string(),
+            role: Some("user".to_string()),
+            content: String::new(),
+            timestamp: Some(timestamp),
+            targeted_pubkeys: None,
+            sender_principal: None,
+            targeted_principals: None,
+            tool_data: None,
+            delegation_marker: Some(payload),
+            human_readable: None,
+            transcript_tool_attributes: None,
+        };
+        self.append_message(parent_conversation_id, &new_msg)
+    }
+
+    /// Append a `Completed` or `Aborted` marker for an in-flight
+    /// delegation. Idempotent on `(conversation, delegation_conv_id,
+    /// status)` via the `record_id` shape used by
+    /// [`add_delegation_marker`]. `delegation_conv_id`,
+    /// `recipient_pubkey`, and `parent_conversation_id` are required
+    /// because callers don't always have the original `Pending` marker
+    /// to copy from — the runtime resolves them from the
+    /// `DelegationRoute` it registered when the delegation was issued.
+    pub fn update_delegation_marker(
+        &self,
+        parent_conversation_id: &str,
+        delegation_conversation_id: &str,
+        recipient_pubkey: &str,
+        agent_pubkey: &str,
+        status: DelegationStatus,
+        completed_at: i64,
+        abort_reason: Option<String>,
+    ) -> Result<i64> {
+        let marker = DelegationMarker {
+            delegation_conversation_id: delegation_conversation_id.to_string(),
+            recipient_pubkey: recipient_pubkey.to_string(),
+            parent_conversation_id: parent_conversation_id.to_string(),
+            initiated_at: None,
+            completed_at: Some(completed_at),
+            status,
+            abort_reason,
+        };
+        self.add_delegation_marker(parent_conversation_id, &marker, agent_pubkey, None)
+    }
+
+    /// Read the latest marker per delegation in this conversation, keyed
+    /// by `delegation_conversation_id`. "Latest" = highest `sequence`,
+    /// matching projection's read order. Used by
+    /// `ExpandDelegationMarkersStrategy` to resolve the current status
+    /// of each delegation without re-walking the message list.
+    pub fn latest_delegation_markers(
+        &self,
+        conversation_id: &str,
+    ) -> Result<std::collections::HashMap<String, DelegationMarker>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT delegation_marker_json, sequence FROM messages
+              WHERE conversation_id = ?1
+                AND message_type = 'delegation-marker'
+                AND delegation_marker_json IS NOT NULL
+              ORDER BY sequence ASC",
+        )?;
+        let rows = stmt.query_map([conversation_id], |row| {
+            let raw: String = row.get(0)?;
+            let _seq: i64 = row.get(1)?;
+            Ok(raw)
+        })?;
+        let mut latest: std::collections::HashMap<String, DelegationMarker> =
+            std::collections::HashMap::new();
+        for row in rows {
+            let raw = row?;
+            let marker: DelegationMarker = match serde_json::from_str(&raw) {
+                Ok(m) => m,
+                Err(e) => {
+                    tracing::warn!(error = %e, "malformed delegation_marker_json; skipping");
+                    continue;
+                }
+            };
+            // Sequence-ordered scan: later writes overwrite earlier ones.
+            latest.insert(marker.delegation_conversation_id.clone(), marker);
+        }
+        Ok(latest)
     }
 
     // ==========================================================================
@@ -1122,4 +1349,89 @@ fn now_ms() -> i64 {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)
         .unwrap_or(0)
+}
+
+// ==============================================================================
+// Free helpers: usable against either a `Connection` or a `Transaction`
+// (which derefs to `Connection`). Centralized so `append_message`'s
+// `BEGIN IMMEDIATE` transaction and the outside-of-transaction callers
+// share the same dedup/header logic.
+// ==============================================================================
+
+fn find_message_id_by_record_tx(
+    conn: &Connection,
+    conversation_id: &str,
+    record_id: &str,
+) -> Result<Option<i64>> {
+    conn.query_row(
+        "SELECT id FROM messages WHERE conversation_id = ?1 AND record_id = ?2",
+        params![conversation_id, record_id],
+        |row| row.get(0),
+    )
+    .optional()
+    .map_err(ConversationsError::from)
+}
+
+fn find_message_id_by_event_tx(conn: &Connection, event_id: &str) -> Result<Option<i64>> {
+    conn.query_row(
+        "SELECT id FROM messages WHERE nostr_event_id = ?1",
+        [event_id],
+        |row| row.get(0),
+    )
+    .optional()
+    .map_err(ConversationsError::from)
+}
+
+/// Header update predicate: `last_user_message` only updates when the
+/// row is a regular text-role user message. Supervision nudges and
+/// other internal `role=user` rows that carry a non-`"text"` message
+/// type are intentionally skipped here — the conversation list UI
+/// should reflect what the human said, not what the loop's prod
+/// hooks injected.
+fn apply_message_to_header_tx(
+    conn: &Connection,
+    conversation_id: &str,
+    msg: &NewMessage,
+) -> Result<()> {
+    let last_user_message = if msg.message_type == "text" && msg.role.as_deref() == Some("user") {
+        let trimmed = msg.content.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed)
+        }
+    } else {
+        None
+    };
+    let now = now_ms();
+    conn.execute(
+        "UPDATE conversations
+            SET owner_pubkey = COALESCE(owner_pubkey, ?2),
+                created_at = CASE
+                    WHEN ?3 IS NULL THEN created_at
+                    WHEN created_at IS NULL OR ?3 < created_at THEN ?3
+                    ELSE created_at
+                END,
+                last_activity = CASE
+                    WHEN ?3 IS NULL THEN last_activity
+                    WHEN last_activity IS NULL OR ?3 >= last_activity THEN ?3
+                    ELSE last_activity
+                END,
+                last_user_message = CASE
+                    WHEN ?4 IS NOT NULL
+                     AND (?3 IS NULL OR last_activity IS NULL OR ?3 >= last_activity)
+                    THEN ?4
+                    ELSE last_user_message
+                END,
+                updated_at = ?5
+          WHERE id = ?1",
+        params![
+            conversation_id,
+            msg.author_pubkey,
+            msg.timestamp,
+            last_user_message,
+            now,
+        ],
+    )?;
+    Ok(())
 }

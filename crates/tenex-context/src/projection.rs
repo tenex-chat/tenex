@@ -4,19 +4,27 @@
 //! converts them into the role-tagged [`Message`] enum the strategy
 //! pipeline operates on. The system prompt is injected at index 0.
 //!
-//! Tool messages are interleaved into the stream by timestamp so each
-//! `ToolResult` follows the assistant message that issued the call. The
-//! `tool_calls` block is reconstructed onto the same assistant message
-//! so providers see the canonical `tool_use` → `tool_result` pairing
-//! they require — without that linkage Anthropic/OpenAI reject the
-//! request with a 400.
+//! Tool messages pair with their originating assistant via
+//! `tool_messages.parent_message_id`, which references `messages.id`. The
+//! step loop sets this on every tool message it persists, and projection
+//! uses it to reconstruct the `tool_use` → `tool_result` pairing providers
+//! require. Tool messages without a parent are dropped — projection has no
+//! way to position them, and emitting an orphan `tool_result` is a 400
+//! from the provider.
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use serde_json::Value;
 use tenex_conversations::{ConversationStore, MessageQuery, MessageRecord, ToolMessage};
 
-use crate::types::{Message, ToolCall};
+use crate::types::{ImageAttachment, Message, ToolCall};
+
+fn drain_tools_for_parent(
+    by_parent: &mut HashMap<i64, Vec<ToolMessage>>,
+    parent_id: i64,
+) -> Vec<ToolMessage> {
+    by_parent.remove(&parent_id).unwrap_or_default()
+}
 
 /// Resolve a Nostr pubkey to a human-readable display name.
 ///
@@ -30,22 +38,22 @@ pub trait DisplayNameResolver: Send + Sync {
 
 /// Build the initial message vector from storage. Index 0 is always the
 /// system prompt.
+///
+/// The conversation store is the single source of truth: every message
+/// the LLM sees corresponds to either a row in `messages` (or its
+/// `tool_messages` siblings) or to an overlay produced by a downstream
+/// projection strategy (reminders, proactive context, active-tool
+/// pending pairs). No in-memory splicing, no exclusion filter — the
+/// trigger event row is just another row.
 pub(crate) fn project_messages(
     store: &ConversationStore,
     conversation_id: &str,
     agent_pubkey: &str,
     system_prompt: &str,
     name_resolver: Option<&dyn DisplayNameResolver>,
-    exclude_nostr_event_id: Option<&str>,
 ) -> anyhow::Result<Vec<Message>> {
-    let history: Vec<MessageRecord> = store
-        .list_messages(conversation_id, MessageQuery::default())?
-        .into_iter()
-        .filter(|record| {
-            exclude_nostr_event_id
-                .is_none_or(|event_id| record.nostr_event_id.as_deref() != Some(event_id))
-        })
-        .collect();
+    let history: Vec<MessageRecord> =
+        store.list_messages(conversation_id, MessageQuery::default())?;
     // Attribution: when more than one distinct pubkey has authored a
     // user-role message in this conversation, prefix each user message
     // with `[name]` so the agent can disambiguate authors. Single-author
@@ -60,27 +68,103 @@ pub(crate) fn project_messages(
     // Only include tool messages owned by *this* agent. Conversations
     // can host multiple agents; splicing another agent's tool calls
     // into this projection would emit unmatched `tool_use` blocks.
-    let mut tool_msgs: VecDeque<ToolMessage> = store
+    //
+    // Tool messages must carry `parent_message_id` (set by the step
+    // loop's `record_step_tool_messages`) so we can pair them with the
+    // assistant row that emitted them. Rows without a parent have no
+    // home in the prompt and are dropped — emitting an orphan
+    // `tool_result` triggers a 400 from the provider.
+    let mut tools_by_parent: HashMap<i64, Vec<ToolMessage>> = HashMap::new();
+    let mut completed_tool_ids: HashSet<String> = HashSet::new();
+    for tool in store
         .list_tool_messages(conversation_id)?
         .into_iter()
         .filter(|t| t.agent_pubkey == agent_pubkey)
         // Drop in-flight tool calls (no result yet); they have no
         // `ToolResult` to emit, and their `tool_use` would be orphaned.
         .filter(|t| t.result_output.is_some())
-        .collect();
-    let completed_tool_ids: HashSet<String> =
-        tool_msgs.iter().map(|t| t.tool_call_id.clone()).collect();
+    {
+        let Some(parent_id) = tool.parent_message_id else {
+            tracing::debug!(
+                tool_call_id = %tool.tool_call_id,
+                tool_name = %tool.tool_name,
+                "dropping unparented tool message from projection"
+            );
+            continue;
+        };
+        completed_tool_ids.insert(tool.tool_call_id.clone());
+        tools_by_parent.entry(parent_id).or_default().push(tool);
+    }
+    // Preserve per-parent emission order by id (i.e. insertion order in
+    // `tool_messages`), so a step's calls appear in the same sequence
+    // the step loop issued them.
+    for tools in tools_by_parent.values_mut() {
+        tools.sort_by_key(|t| t.id);
+    }
     let mut active_tools =
         load_active_tools(store, conversation_id, agent_pubkey, &completed_tool_ids)?;
-    // Sort by timestamp for deterministic slotting. Fall back to
-    // `created_at` for legacy rows that pre-date the timestamp column.
-    let order_key = |t: &ToolMessage| timestamp_value_ms(t.timestamp.unwrap_or(t.created_at));
-    tool_msgs.make_contiguous().sort_by_key(order_key);
 
-    let mut out = Vec::with_capacity(history.len() + tool_msgs.len() + active_tools.len() * 2 + 1);
+    let estimated_tool_count: usize = tools_by_parent.values().map(Vec::len).sum();
+    let mut out = Vec::with_capacity(history.len() + estimated_tool_count + active_tools.len() * 2 + 1);
     out.push(Message::System {
         content: system_prompt.to_string(),
     });
+
+    // Bulk-load image attachments for user-role rows. The sidecar table
+    // `message_attachments` is the single source of truth for trigger-event
+    // image content; loading them here lets every step's projection see them
+    // without re-fetching from the network.
+    let user_row_ids: Vec<i64> = history
+        .iter()
+        .filter(|r| r.role.as_deref() == Some("user"))
+        .map(|r| r.id)
+        .collect();
+    let mut attachments_by_message: HashMap<i64, Vec<ImageAttachment>> = store
+        .list_attachments_by_message_ids(&user_row_ids)?
+        .into_iter()
+        .map(|(msg_id, records)| {
+            (
+                msg_id,
+                records
+                    .into_iter()
+                    .map(|rec| ImageAttachment {
+                        media_type: rec.media_type,
+                        data: rec.data,
+                        source_url: rec.source_url,
+                    })
+                    .collect(),
+            )
+        })
+        .collect();
+
+    // Pre-compute the latest delegation marker per
+    // `delegation_conversation_id` so we only surface the final
+    // state to projection. Each state transition appends a fresh
+    // row, so the highest-sequence row wins. We also identify
+    // which messages.id values correspond to those latest rows so
+    // we can skip older marker rows in the iteration below.
+    let mut latest_marker_row_id_per_delegation: HashMap<String, i64> = HashMap::new();
+    for record in &history {
+        if record.message_type != "delegation-marker" {
+            continue;
+        }
+        let Some(raw) = record.delegation_marker.as_ref() else {
+            continue;
+        };
+        let Ok(marker) =
+            serde_json::from_value::<tenex_conversations::DelegationMarker>(raw.clone())
+        else {
+            continue;
+        };
+        latest_marker_row_id_per_delegation.insert(
+            marker.delegation_conversation_id.clone(),
+            record.id,
+        );
+    }
+    let latest_marker_row_ids: HashSet<i64> = latest_marker_row_id_per_delegation
+        .values()
+        .copied()
+        .collect();
 
     for (idx, record) in history.iter().enumerate() {
         let Some(role) = record.role.as_deref() else {
@@ -90,6 +174,41 @@ pub(crate) fn project_messages(
                 conversation_id
             );
         };
+
+        // Delegation markers: only the latest row per delegation surfaces,
+        // and it emits as the `Message::DelegationMarker` variant for the
+        // `ExpandDelegationMarkersStrategy` to render. Older rows of the
+        // same delegation are silently dropped — they're just lifecycle
+        // history, not what the model should see.
+        if record.message_type == "delegation-marker" {
+            if !latest_marker_row_ids.contains(&record.id) {
+                continue;
+            }
+            let Some(raw) = record.delegation_marker.as_ref() else {
+                continue;
+            };
+            let marker = match serde_json::from_value::<tenex_conversations::DelegationMarker>(
+                raw.clone(),
+            ) {
+                Ok(m) => m,
+                Err(e) => {
+                    tracing::warn!(
+                        error = %e,
+                        record_id = %record.record_id,
+                        "malformed delegation_marker payload; skipping"
+                    );
+                    continue;
+                }
+            };
+            out.push(Message::DelegationMarker {
+                marker,
+                ral_number: record.ral,
+            });
+            let next_record_ts = next_record_timestamp_ms(&history, idx);
+            push_active_tools_before(&mut out, &mut active_tools, next_record_ts);
+            continue;
+        }
+
         match role {
             "system" => out.push(Message::System {
                 content: record.content.clone(),
@@ -108,29 +227,14 @@ pub(crate) fn project_messages(
                 } else {
                     record.content.clone()
                 };
-                out.push(Message::User { content });
+                let attachments = attachments_by_message.remove(&record.id).unwrap_or_default();
+                out.push(Message::User {
+                    content,
+                    attachments,
+                });
             }
             "assistant" => {
-                // Pair every tool call/result whose timestamp falls
-                // before the next user message with this assistant
-                // message. Consecutive assistant messages still belong
-                // to the same logical turn, so their tool calls stay
-                // grouped.
-                let next_user_ts = history[idx + 1..]
-                    .iter()
-                    .find(|r| matches!(r.role.as_deref(), Some("user")))
-                    .and_then(|r| timestamp_ms(r.timestamp))
-                    .unwrap_or(i64::MAX);
-                let mut paired: Vec<ToolMessage> = Vec::new();
-                while tool_msgs
-                    .front()
-                    .is_some_and(|front| order_key(front) < next_user_ts)
-                {
-                    if let Some(tool) = tool_msgs.pop_front() {
-                        paired.push(tool);
-                    }
-                }
-
+                let paired = drain_tools_for_parent(&mut tools_by_parent, record.id);
                 let tool_calls: Vec<ToolCall> = paired
                     .iter()
                     .map(|t| ToolCall {
@@ -162,12 +266,13 @@ pub(crate) fn project_messages(
         push_active_tools_before(&mut out, &mut active_tools, next_record_ts);
     }
 
-    // Drop any remaining tool messages: they don't have an assistant
-    // row yet (the matching event hasn't been ingested into the
-    // `messages` table). Including them would emit orphan
-    // `tool_result`s — a 400 from the provider. They'll re-slot
-    // correctly on the next projection pass once the assistant lands.
-    drop(tool_msgs);
+    // Any tools still in `tools_by_parent` reference assistant rows that
+    // haven't appeared in `messages` yet (race with materialization, or
+    // the parent was filtered out by `excluded_event_id`). Dropping them
+    // is correct: emitting orphan `tool_result`s is a 400 from the
+    // provider, and they'll re-slot on the next projection once the
+    // parent assistant row lands.
+    drop(tools_by_parent);
     push_active_tools_before(&mut out, &mut active_tools, i64::MAX);
 
     Ok(out)

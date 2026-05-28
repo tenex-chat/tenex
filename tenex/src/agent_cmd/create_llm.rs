@@ -313,6 +313,7 @@ mod tests {
             api_keys: vec![tenex_llm_config::ApiKey {
                 key: "sk-or".to_string(),
                 alias: None,
+                original_index: 0,
             }],
             base_url: Some("https://example.test".to_string()),
             timeout: None,
@@ -340,6 +341,7 @@ mod tests {
                     api_keys: vec![tenex_llm_config::ApiKey {
                         key: "sk-ant".to_string(),
                         alias: None,
+                        original_index: 0,
                     }],
                     base_url: None,
                     timeout: None,

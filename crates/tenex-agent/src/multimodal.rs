@@ -9,32 +9,40 @@ use std::time::Duration;
 const MAX_IMAGE_BYTES: usize = 10 * 1024 * 1024;
 const FETCH_TIMEOUT_SECS: u64 = 15;
 
-/// Scan `content` for image URLs (markdown `![...](url)` or bare image URLs),
-/// fetch each one, base64-encode it, and return a `Vec<UserContent>` with only
-/// image blocks (no text block).
-///
-/// Supports `https://`, `http://`, and `file://` URL schemes. `file://` reads
-/// the bytes from the local filesystem and is gated on `allowed_file_prefixes`
-/// — only paths starting with one of these prefixes (and free of `..`
-/// components) are fetched. Inbound event content is partially user-controlled,
-/// so an unrestricted `file://` reader would let an attacker exfiltrate
-/// arbitrary local files into the LLM prompt.
-///
-/// The caller is responsible for appending the text content after the returned
-/// image blocks so that the final message order is: [images, text].
-///
-/// On any fetch/decode error the image is silently skipped (a message is
-/// printed to stderr) and the remaining images are still attempted.
-///
-/// Returns `None` when no images were found or successfully fetched so the
-/// caller can continue with a plain string prompt.
-pub async fn prepare_multimodal_content(
+/// One successfully-fetched binary attachment from an inbound message.
+/// The agent runner uses the raw form to persist into the
+/// `message_attachments` sidecar table and *also* to build rig
+/// `UserContent::Image` blocks (see [`attachment_to_user_content`]).
+#[derive(Debug, Clone)]
+pub struct FetchedAttachment {
+    pub source_url: String,
+    pub media_type: String,
+    pub data: Vec<u8>,
+}
+
+impl FetchedAttachment {
+    pub fn into_user_content(self) -> UserContent {
+        let encoded = base64::engine::general_purpose::STANDARD.encode(&self.data);
+        let rig_media_type = ImageMediaType::from_mime_type(&self.media_type);
+        UserContent::Image(Image {
+            data: DocumentSourceKind::Base64(encoded),
+            media_type: rig_media_type,
+            detail: None,
+            additional_params: None,
+        })
+    }
+}
+
+/// Lower-level scanner: extracts image URLs from `content`, fetches each one,
+/// and returns the raw fetched data. Returns an empty `Vec` (not `None`) when
+/// no images are found or fetched.
+pub async fn fetch_envelope_attachments(
     content: &str,
     allowed_file_prefixes: &[PathBuf],
-) -> Option<Vec<UserContent>> {
+) -> Vec<FetchedAttachment> {
     let urls = extract_image_urls(content);
     if urls.is_empty() {
-        return None;
+        return Vec::new();
     }
 
     let client = reqwest::Client::builder()
@@ -42,19 +50,15 @@ pub async fn prepare_multimodal_content(
         .build()
         .unwrap_or_default();
 
-    let mut parts: Vec<UserContent> = Vec::new();
-
+    let mut out = Vec::new();
     for url in urls {
         match fetch_image(&client, &url, allowed_file_prefixes).await {
             Ok(Some((data, media_type))) => {
-                let encoded = base64::engine::general_purpose::STANDARD.encode(&data);
-                let rig_media_type = ImageMediaType::from_mime_type(&media_type);
-                parts.push(UserContent::Image(Image {
-                    data: DocumentSourceKind::Base64(encoded),
-                    media_type: rig_media_type,
-                    detail: None,
-                    additional_params: None,
-                }));
+                out.push(FetchedAttachment {
+                    source_url: url,
+                    media_type,
+                    data,
+                });
             }
             Ok(None) => {}
             Err(e) => {
@@ -62,14 +66,12 @@ pub async fn prepare_multimodal_content(
             }
         }
     }
-
-    if parts.is_empty() {
-        return None;
-    }
-
-    Some(parts)
+    out
 }
 
+/// Scan `content` for image URLs (markdown `![...](url)` or bare image URLs),
+/// fetch each one, base64-encode it, and return a `Vec<UserContent>` with only
+/// image blocks (no text block).
 /// Extract deduplicated image URLs from message content.
 ///
 /// Recognises two forms:

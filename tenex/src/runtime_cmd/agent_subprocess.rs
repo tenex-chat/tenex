@@ -518,6 +518,7 @@ pub(super) fn should_persist_agent_message(event: &Event, conversation_id: &str)
     }
 
     let mut has_conversation_ref = false;
+    let mut has_completed_status = false;
 
     for tag in event.tags.iter() {
         let parts = tag.as_slice();
@@ -532,12 +533,17 @@ pub(super) fn should_persist_agent_message(event: &Event, conversation_id: &str)
                     has_conversation_ref = true;
                 }
             }
+            "status" => {
+                if parts.get(1).map(|s| s.as_str()) == Some("completed") {
+                    has_completed_status = true;
+                }
+            }
             "tool" | "intent" | "reasoning" | "error" => return false,
             _ => {}
         }
     }
 
-    has_conversation_ref
+    has_conversation_ref && has_completed_status
 }
 
 pub(super) fn consumed_message_event_ids(
@@ -617,16 +623,25 @@ mod tests {
         Tag::parse(parts.iter().copied()).unwrap()
     }
 
+    /// A kind:1 event that references the conversation root but has no
+    /// `["status", "completed"]` tag is an intermediate `ConversationIntent`
+    /// (streaming text flushed before tool execution). It must NOT be persisted:
+    /// the corresponding `record_step_assistant` call already writes the step row,
+    /// and persisting the event too would produce a duplicate assistant message in
+    /// the next step's projection.
     #[test]
-    fn persists_plain_conversation_event_for_current_root() {
+    fn rejects_intermediate_stream_text_without_completed_status() {
         let root = root_id();
         let event = signed_event(
             Kind::TextNote,
-            "visible reply",
+            "streaming partial text",
             vec![tag(&["e", &root, "", "root"])],
         );
 
-        assert!(should_persist_agent_message(&event, &root));
+        assert!(
+            !should_persist_agent_message(&event, &root),
+            "intermediate ConversationIntent must not be persisted"
+        );
     }
 
     #[test]

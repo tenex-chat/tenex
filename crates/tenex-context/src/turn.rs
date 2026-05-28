@@ -76,6 +76,12 @@ fn build_history_entry(
         Message::User { .. } => ("user", "message", None),
         Message::Assistant { .. } => ("assistant", "message", None),
         Message::ToolResult { .. } => ("tool", "tool_result", None),
+        // Markers are role=user in storage but conceptually an
+        // overlay — once expanded, they look like user messages. We
+        // tag prompt-history rows accordingly so replay can
+        // distinguish raw human input from synthesised delegation
+        // recaps.
+        Message::DelegationMarker { .. } => ("user", "delegation_marker", Some("delegation")),
     };
     let content = serde_json::to_value(msg)?;
     Ok(NewPromptHistoryEntry {

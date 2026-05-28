@@ -41,8 +41,29 @@ pub struct ToolDef {
     pub preserve_results: bool,
 }
 
+/// A binary attachment (image bytes, etc.) bound to a user message.
+/// The projection layer reads these from the `message_attachments` sidecar
+/// table; the agent runner translates them into provider-specific image
+/// blocks alongside the text content.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImageAttachment {
+    pub media_type: String,
+    pub data: Vec<u8>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_url: Option<String>,
+}
+
 /// One message in the projection. Provider-agnostic; the agent runner
 /// converts this into the shape its LLM client expects.
+///
+/// `DelegationMarker` is the lone non-LLM-visible variant: it is the
+/// raw form `project_messages` emits for `message_type =
+/// "delegation-marker"` rows. The `ExpandDelegationMarkersStrategy`
+/// replaces each one with a `User { content: <# DELEGATION ... block> }`
+/// during projection. Any leftover `DelegationMarker` reaching the
+/// rig converter is rendered as a degraded inline note — that
+/// shouldn't happen in the default pipeline, but the converter is
+/// resilient.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "role", rename_all = "lowercase")]
 pub enum Message {
@@ -51,6 +72,13 @@ pub enum Message {
     },
     User {
         content: String,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        attachments: Vec<ImageAttachment>,
+    },
+    DelegationMarker {
+        marker: tenex_conversations::DelegationMarker,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        ral_number: Option<i64>,
     },
     Assistant {
         content: String,
@@ -200,6 +228,14 @@ pub struct ProjectionOptions {
     pub in_turn_tail: Vec<Message>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub compaction_override: Option<CompactionOverride>,
+    /// Pre-computed `<proactive-context>` block (RAG output, etc.) that the
+    /// [`ProactiveContextStrategy`] overlays onto the last non-system
+    /// message. Threaded into every step's projection unchanged so the
+    /// system prompt remains stable across steps.
+    ///
+    /// [`ProactiveContextStrategy`]: crate::ProactiveContextStrategy
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proactive_context: Option<String>,
 }
 
 /// One-shot override for reactive compaction retry paths.

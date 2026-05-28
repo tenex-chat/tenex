@@ -90,7 +90,7 @@ async fn active_tool_projects_as_pending_tool_pair_before_later_user_message() {
     .expect("project");
 
     assert!(
-        matches!(projection.messages[1], Message::User { ref content } if content == "run sleep 60")
+        matches!(projection.messages[1], Message::User { ref content, .. } if content == "run sleep 60")
     );
     assert!(matches!(
         &projection.messages[2],
@@ -111,6 +111,6 @@ async fn active_tool_projects_as_pending_tool_pair_before_later_user_message() {
                 && content.contains("sleep 60")
     ));
     assert!(
-        matches!(projection.messages[4], Message::User { ref content } if content == "kill the shell")
+        matches!(projection.messages[4], Message::User { ref content, .. } if content == "kill the shell")
     );
 }

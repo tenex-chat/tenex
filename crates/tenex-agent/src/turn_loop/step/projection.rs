@@ -6,15 +6,20 @@ use crate::agent_bootstrap::AgentBootstrap;
 use crate::context_rig::ctx_msg_to_rig;
 use crate::tools::TurnToolRegistry;
 
+/// Build the provider-bound `messages[]` for a single step.
+///
+/// Reads the projection straight from the conversation store via
+/// `tenex_context::project_with_options` — no in-memory tail, no
+/// trigger-event exclusion. Every message the LLM sees corresponds
+/// either to a stored row (user/assistant/tool) or to an overlay
+/// produced by a projection strategy (reminders, proactive context,
+/// active-tool pending pairs).
 pub(super) async fn project_step_messages(
     boot: &AgentBootstrap,
     registry: &TurnToolRegistry,
-    turn_prompt: &RigMessage,
-    turn_text: &str,
-    in_turn_tail: &[CtxMessage],
     compaction_override: Option<tenex_context::CompactionOverride>,
 ) -> Result<Vec<RigMessage>> {
-    let mut projected = if let Some(store) = boot.conv_store.as_ref() {
+    let projected: Vec<CtxMessage> = if let Some(store) = boot.conv_store.as_ref() {
         let name_resolver = crate::identity_resolver::IdentityServiceResolver::new(&boot.base_dir);
         tenex_context::project_with_options(
             store,
@@ -33,39 +38,23 @@ pub(super) async fn project_step_messages(
             )),
             Some(&name_resolver),
             ProjectionOptions {
-                excluded_event_id: Some(boot.trigger_event_id.clone()),
-                in_turn_tail: in_turn_tail.to_vec(),
+                excluded_event_id: None,
+                in_turn_tail: Vec::new(),
                 compaction_override,
+                proactive_context: boot.proactive_context.clone(),
             },
         )
         .await?
         .messages
     } else {
-        let mut messages = vec![CtxMessage::System {
+        // No-store fallback: only the system prompt. Mock_llm tests that
+        // exercise the loop without persistence rely on this minimal shape.
+        vec![CtxMessage::System {
             content: boot.system_prompt.clone(),
-        }];
-        messages.extend(in_turn_tail.iter().cloned());
-        messages
+        }]
     };
 
-    let live_prompt_index = projected
-        .iter()
-        .rposition(|message| {
-            matches!(message, CtxMessage::User { content } if is_live_prompt(content, turn_text))
-        });
-    let mut rig_messages: Vec<RigMessage> = projected.drain(..).map(ctx_msg_to_rig).collect();
-    if let Some(index) = live_prompt_index {
-        rig_messages[index] = turn_prompt.clone();
-    }
-    Ok(rig_messages)
-}
-
-fn is_live_prompt(content: &str, turn_text: &str) -> bool {
-    content == turn_text
-        || (!turn_text.is_empty()
-            && content
-                .strip_prefix(turn_text)
-                .is_some_and(|suffix| suffix.starts_with("\n\n<system-reminder")))
+    Ok(projected.into_iter().map(ctx_msg_to_rig).collect())
 }
 
 fn model_profile(boot: &AgentBootstrap) -> tenex_context::ModelProfile {

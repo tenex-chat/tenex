@@ -22,11 +22,20 @@ pub struct SelfDelegateError(String);
 #[derive(Clone)]
 pub struct SelfDelegateTool {
     state: Arc<EmitState>,
+    conv_db_path: std::path::PathBuf,
 }
 
 impl SelfDelegateTool {
-    pub fn new(state: Arc<EmitState>) -> Self {
-        Self { state }
+    pub fn new(state: Arc<EmitState>, conv_db_path: std::path::PathBuf) -> Self {
+        Self { state, conv_db_path }
+    }
+
+    fn parent_conversation_id(&self) -> Option<String> {
+        match self.state.conversation_root.as_ref()? {
+            tenex_protocol::ConversationRef::Nostr { root_event_id } => {
+                Some(root_event_id.to_hex())
+            }
+        }
     }
 }
 
@@ -115,6 +124,47 @@ impl Tool for SelfDelegateTool {
         let delegation_event_id = match &delegation_ref {
             MessageRef::Nostr { event_id } => event_id.to_hex(),
         };
+
+        // Same lifecycle as `delegate`: a `Pending` marker now, the
+        // runtime upserts `Completed` (or `Aborted`) when the self-spawned
+        // child replies. Recipient is the agent's own pubkey because
+        // self_delegate creates a new conversation owned by the same
+        // pubkey.
+        if let Some(parent_conv_id) = self.parent_conversation_id() {
+            match tenex_conversations::ConversationStore::open(&self.conv_db_path) {
+                Ok(store) => {
+                    let initiated_at = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_secs() as i64)
+                        .ok();
+                    let marker = tenex_conversations::DelegationMarker {
+                        delegation_conversation_id: delegation_event_id.clone(),
+                        recipient_pubkey: pubkey_hex.clone(),
+                        parent_conversation_id: parent_conv_id.clone(),
+                        initiated_at,
+                        completed_at: None,
+                        status: tenex_conversations::DelegationStatus::Pending,
+                        abort_reason: None,
+                    };
+                    if let Err(e) = store.add_delegation_marker(
+                        &parent_conv_id,
+                        &marker,
+                        &pubkey_hex,
+                        Some(i64::from(ral)),
+                    ) {
+                        eprintln!(
+                            "[self_delegate] failed to write pending DelegationMarker for {delegation_event_id}: {e}"
+                        );
+                    }
+                }
+                Err(e) => {
+                    eprintln!(
+                        "[self_delegate] could not open conversation store at {} to write pending marker: {e}",
+                        self.conv_db_path.display()
+                    );
+                }
+            }
+        }
 
         let span = tracing::Span::current();
         span.record("delegated.conversation.id", delegation_event_id.as_str());

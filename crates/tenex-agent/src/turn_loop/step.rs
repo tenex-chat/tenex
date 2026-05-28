@@ -5,9 +5,9 @@ mod tools;
 use std::time::Duration;
 
 use anyhow::{Result, anyhow};
-use rig::agent::HookAction;
-use rig::completion::message::ToolCall as RigToolCall;
-use rig::completion::{CompletionModel, GetTokenUsage, Message as RigMessage, Usage};
+use rig_core::agent::HookAction;
+use rig_core::completion::message::ToolCall as RigToolCall;
+use rig_core::completion::{CompletionModel, GetTokenUsage, Usage};
 use tracing::{Instrument, info_span};
 
 use tenex_context::{Message as CtxMessage, ReasoningBlock, ToolCall as CtxToolCall};
@@ -24,6 +24,11 @@ use super::persistence;
 pub(super) struct StepLoopResult {
     pub response: String,
     pub usage: Usage,
+    /// `messages.id` of the persisted terminal-step assistant row, when a
+    /// conversation store is configured. Used by the turn loop to stamp
+    /// `nostr_event_id` once the outbound publish returns the event id,
+    /// so the runtime's own writeback dedups via the partial unique index.
+    pub terminal_assistant_row_id: Option<i64>,
 }
 
 pub(super) struct StepOutput {
@@ -58,9 +63,6 @@ impl StepToolCall {
 pub(super) async fn run_step_loop<M>(
     boot: &mut AgentBootstrap,
     model: M,
-    turn_prompt: RigMessage,
-    turn_text: &str,
-    prefix_tail: &[CtxMessage],
     registry: TurnToolRegistry,
     recorder: std::sync::Arc<ToolRecorder>,
 ) -> Result<StepLoopResult>
@@ -69,16 +71,10 @@ where
     M::StreamingResponse: GetTokenUsage + Clone + Send + Sync + Unpin + 'static,
 {
     let progress = ProgressMonitor::new(model.clone());
-    let provider_tools = registry.provider_definitions(turn_text.to_string()).await;
-    let mut in_turn_tail = prefix_tail.to_vec();
-    in_turn_tail.push(CtxMessage::User {
-        content: turn_text.to_string(),
-    });
+    let provider_tools = registry
+        .provider_definitions(boot.original_task.clone())
+        .await;
     let mut total_usage = Usage::new();
-
-    if let Some(store) = boot.conv_store.as_ref() {
-        persistence::record_step_user(store, &boot.conversation_id, &boot.pubkey_hex, turn_text);
-    }
 
     for step_index in 1..=crate::progress_monitor::RIG_AGENT_TURN_FUSE {
         let step_span = info_span!("tenex.agent.step", step = step_index as u64);
@@ -89,9 +85,6 @@ where
             &progress,
             &registry,
             &provider_tools,
-            &turn_prompt,
-            turn_text,
-            &in_turn_tail,
             None,
         )
         .instrument(step_span)
@@ -116,9 +109,6 @@ where
                     &progress,
                     &registry,
                     &provider_tools,
-                    &turn_prompt,
-                    turn_text,
-                    &in_turn_tail,
                     Some(tenex_context::CompactionOverride {
                         threshold_ratio: 0.5,
                     }),
@@ -139,9 +129,6 @@ where
                     &progress,
                     &registry,
                     &provider_tools,
-                    &turn_prompt,
-                    turn_text,
-                    &in_turn_tail,
                 )
                 .await?
             }
@@ -151,20 +138,22 @@ where
         add_usage(&mut total_usage, output.usage);
 
         let assistant_message = assistant_message_from_step(&output);
-        if let Some(store) = boot.conv_store.as_ref() {
-            persistence::record_step_assistant(
+        let assistant_row_id = if let Some(store) = boot.conv_store.as_ref() {
+            Some(persistence::record_step_assistant(
                 boot,
                 store,
-                assistant_message.clone(),
+                &assistant_message,
                 &output.usage,
-            );
-        }
-        in_turn_tail.push(assistant_message);
+            )?)
+        } else {
+            None
+        };
 
         if output.tool_calls.is_empty() {
             return Ok(StepLoopResult {
                 response: output.text,
                 usage: total_usage,
+                terminal_assistant_row_id: assistant_row_id,
             });
         }
 
@@ -179,14 +168,19 @@ where
         )
         .await?;
         if let Some(store) = boot.conv_store.as_ref() {
+            let parent_id = assistant_row_id.ok_or_else(|| {
+                anyhow!(
+                    "record_step_assistant returned no row id for a step that emitted tool calls"
+                )
+            })?;
             persistence::record_step_tool_messages(
                 store,
                 &boot.conversation_id,
                 &boot.pubkey_hex,
+                parent_id,
                 &tool_results.records,
-            );
+            )?;
         }
-        in_turn_tail.extend(tool_results.messages);
     }
 
     Err(anyhow!(
@@ -205,10 +199,7 @@ async fn run_step_with_transient_retry<M>(
     model: M,
     progress: &ProgressMonitor<M>,
     registry: &TurnToolRegistry,
-    provider_tools: &[rig::completion::ToolDefinition],
-    turn_prompt: &RigMessage,
-    turn_text: &str,
-    in_turn_tail: &[CtxMessage],
+    provider_tools: &[rig_core::completion::ToolDefinition],
 ) -> Result<StepOutput>
 where
     M: CompletionModel + Clone + Send + Sync + 'static,
@@ -233,19 +224,7 @@ where
         );
         tokio::time::sleep(Duration::from_secs(delay_secs)).await;
 
-        match stream::run_provider_step(
-            boot,
-            model.clone(),
-            hook,
-            progress,
-            registry,
-            provider_tools,
-            turn_prompt,
-            turn_text,
-            in_turn_tail,
-            None,
-        )
-        .await
+        match stream::run_provider_step(boot, model.clone(), hook, progress, registry, provider_tools, None).await
         {
             Ok(output) => return Ok(output),
             Err(e) if attempt_num < max && is_transient_server_error(&e) => {

@@ -3,11 +3,11 @@ use futures::StreamExt;
 use rig_core::OneOrMany;
 use rig_core::completion::message::{Reasoning, ReasoningContent};
 use rig_core::completion::{
-    CompletionModel, CompletionRequest, GetTokenUsage, Message as RigMessage, Usage,
+    CompletionModel, CompletionRequest, GetTokenUsage, Usage,
 };
 use rig_core::streaming::{StreamedAssistantContent, ToolCallDeltaContent};
 
-use tenex_context::{CompactionOverride, Message as CtxMessage, ReasoningBlock};
+use tenex_context::{CompactionOverride, ReasoningBlock};
 
 use crate::agent_bootstrap::AgentBootstrap;
 use crate::hook::EmitHook;
@@ -24,24 +24,13 @@ pub(super) async fn run_provider_step<M>(
     progress: &ProgressMonitor<M>,
     registry: &TurnToolRegistry,
     provider_tools: &[rig_core::completion::ToolDefinition],
-    turn_prompt: &RigMessage,
-    turn_text: &str,
-    in_turn_tail: &[CtxMessage],
     compaction_override: Option<CompactionOverride>,
 ) -> Result<StepOutput>
 where
     M: CompletionModel + Clone + Send + Sync + 'static,
     M::StreamingResponse: GetTokenUsage + Clone + Send + Sync + Unpin + 'static,
 {
-    let rig_messages = project_step_messages(
-        boot,
-        registry,
-        turn_prompt,
-        turn_text,
-        in_turn_tail,
-        compaction_override,
-    )
-    .await?;
+    let rig_messages = project_step_messages(boot, registry, compaction_override).await?;
     let prompt = rig_messages
         .last()
         .cloned()

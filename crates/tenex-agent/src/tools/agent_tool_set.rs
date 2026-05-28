@@ -344,12 +344,12 @@ impl ToolSet {
             self.push_tool(
                 &mut tools,
                 &recorder,
-                Box::new(SelfDelegateTool::new(self.emit_state.clone())),
+                Box::new(SelfDelegateTool::new(self.emit_state.clone(), self.conv_db_path.clone())),
             );
             self.push_tool(
                 &mut tools,
                 &recorder,
-                Box::new(DelegateCrossProjectTool::new(self.emit_state.clone())),
+                Box::new(DelegateCrossProjectTool::new(self.emit_state.clone(), self.conv_db_path.clone())),
             );
             self.push_tool(
                 &mut tools,

@@ -33,6 +33,11 @@ pub struct DelegateTool {
     project_agents: Arc<Vec<Agent>>,
     teams: Arc<Vec<Team>>,
     project_root: PathBuf,
+    /// Path to the conversation DB; used to open a short-lived store
+    /// handle when writing the pending `DelegationMarker` for this
+    /// delegation. SQLite WAL handles the concurrent-handle case
+    /// — no need to wrap the bootstrap's store in Arc<Mutex<>>.
+    conv_db_path: PathBuf,
 }
 
 impl DelegateTool {
@@ -41,12 +46,27 @@ impl DelegateTool {
         project_agents: Arc<Vec<Agent>>,
         teams: Arc<Vec<Team>>,
         project_root: PathBuf,
+        conv_db_path: PathBuf,
     ) -> Self {
         Self {
             state,
             project_agents,
             teams,
             project_root,
+            conv_db_path,
+        }
+    }
+
+    /// Resolve the parent conversation id from `EmitState`. The
+    /// conversation root is the canonical conversation id in our
+    /// Nostr-rooted model; if it's absent (shouldn't happen for a
+    /// running agent but the type is `Option`) we skip the marker
+    /// write rather than fabricate an id.
+    fn parent_conversation_id(&self) -> Option<String> {
+        match self.state.conversation_root.as_ref()? {
+            tenex_protocol::ConversationRef::Nostr { root_event_id } => {
+                Some(root_event_id.to_hex())
+            }
         }
     }
 
@@ -238,6 +258,56 @@ impl Tool for DelegateTool {
         let delegation_event_id = match &delegation_ref {
             MessageRef::Nostr { event_id } => event_id.to_hex(),
         };
+
+        // Persist a pending `DelegationMarker` in the *parent*
+        // conversation. This is the first step of the marker
+        // lifecycle: subsequent projections render it as
+        // `# DELEGATION IN PROGRESS\n\n@<recipient> is currently
+        // working on this task.`. When agent2 eventually completes,
+        // the runtime upserts the same marker with `Completed`
+        // status (event_routing.rs), and projection switches to the
+        // `# DELEGATION COMPLETED` block with the child transcript.
+        // Mirrors the TS lifecycle from
+        // `DelegationCompletionHandler.handleDelegationCompletion`
+        // + `RALResolver` pre-port.
+        if let Some(parent_conv_id) = self.parent_conversation_id() {
+            let agent_pubkey_hex = match self.state.channel.identity() {
+                tenex_protocol::PrincipalRef::Nostr { pubkey, .. } => pubkey.to_hex(),
+            };
+            match tenex_conversations::ConversationStore::open(&self.conv_db_path) {
+                Ok(store) => {
+                    let initiated_at = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_secs() as i64)
+                        .ok();
+                    let marker = tenex_conversations::DelegationMarker {
+                        delegation_conversation_id: delegation_event_id.clone(),
+                        recipient_pubkey: pubkey_hex.clone(),
+                        parent_conversation_id: parent_conv_id.clone(),
+                        initiated_at,
+                        completed_at: None,
+                        status: tenex_conversations::DelegationStatus::Pending,
+                        abort_reason: None,
+                    };
+                    if let Err(e) = store.add_delegation_marker(
+                        &parent_conv_id,
+                        &marker,
+                        &agent_pubkey_hex,
+                        Some(i64::from(ral)),
+                    ) {
+                        eprintln!(
+                            "[delegate] failed to write pending DelegationMarker for {delegation_event_id}: {e}"
+                        );
+                    }
+                }
+                Err(e) => {
+                    eprintln!(
+                        "[delegate] could not open conversation store at {} to write pending marker: {e}",
+                        self.conv_db_path.display()
+                    );
+                }
+            }
+        }
 
         let span = tracing::Span::current();
         span.record("delegated.conversation.id", delegation_event_id.as_str());

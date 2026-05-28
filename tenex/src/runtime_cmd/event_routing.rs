@@ -112,7 +112,76 @@ pub(super) async fn dispatch_project_agent_target(
     }
 
     let (agent, conv_id, completion_recipient_pubkey) = select_dispatch_target(&shared, event)?;
-    persist_user_message(&shared.store, event, &conv_id)?;
+
+    // Branch on "is this event a delegation completion routed back to a
+    // parent agent" vs "any other inbound event". Delegation completions
+    // are surfaced to the parent via a `DelegationMarker` upsert (which
+    // projection's `ExpandDelegationMarkersStrategy` renders as the
+    // `# DELEGATION COMPLETED` block with the embedded child
+    // transcript). We deliberately do NOT also call `persist_user_message`
+    // for the completion event — doing so would produce a bare
+    // `[agent2] Black — RGB(0,0,0)` user row alongside the expanded
+    // marker, which is exactly the duplication the marker mechanism
+    // was designed to avoid (matches the TS `expandDelegationMarker`
+    // semantics).
+    let routed_completion = delegation_route_for_child_reply(&shared.store, event)?;
+    if let Some(route) = routed_completion {
+        let completed_at = event.created_at.as_secs() as i64;
+        let status_value = event
+            .tags
+            .iter()
+            .find_map(|t| {
+                let parts = t.as_slice();
+                (parts.first().map(String::as_str) == Some("status"))
+                    .then(|| parts.get(1).cloned())
+                    .flatten()
+            })
+            .unwrap_or_else(|| "completed".to_string());
+        let (marker_status, abort_reason) = match status_value.as_str() {
+            "aborted" => {
+                let reason = event
+                    .tags
+                    .iter()
+                    .find_map(|t| {
+                        let parts = t.as_slice();
+                        (parts.first().map(String::as_str) == Some("abort-reason"))
+                            .then(|| parts.get(1).cloned())
+                            .flatten()
+                    })
+                    .or_else(|| {
+                        if event.content.is_empty() {
+                            None
+                        } else {
+                            Some(event.content.clone())
+                        }
+                    });
+                (tenex_conversations::DelegationStatus::Aborted, reason)
+            }
+            _ => (tenex_conversations::DelegationStatus::Completed, None),
+        };
+        let res = {
+            let s = shared.store.lock().unwrap();
+            s.update_delegation_marker(
+                &route.parent_conversation_id,
+                &route.child_conversation_id,
+                &route.child_agent_pubkey,
+                &route.parent_agent_pubkey,
+                marker_status,
+                completed_at,
+                abort_reason,
+            )
+        };
+        if let Err(e) = res {
+            warn!(
+                error = %e,
+                parent_conv = %route.parent_conversation_id,
+                child_conv = %route.child_conversation_id,
+                "failed to update delegation marker for routed completion"
+            );
+        }
+    } else {
+        persist_user_message(&shared.store, event, &conv_id)?;
+    }
     let agent_json = shared
         .base_dir
         .join("agents")

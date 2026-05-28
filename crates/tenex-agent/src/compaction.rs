@@ -35,7 +35,7 @@ fn build_transcript(messages: &[CtxMessage]) -> String {
         .iter()
         .filter_map(|m| match m {
             CtxMessage::System { .. } => None,
-            CtxMessage::User { content } => Some(format!("[user]\n{content}")),
+            CtxMessage::User { content, .. } => Some(format!("[user]\n{content}")),
             CtxMessage::Assistant {
                 content,
                 tool_calls,
@@ -60,6 +60,10 @@ fn build_transcript(messages: &[CtxMessage]) -> String {
                 ..
             } => Some(format!(
                 "[tool_result id={tool_call_id} name={tool_name} error={is_error}]\n{content}"
+            )),
+            CtxMessage::DelegationMarker { marker, .. } => Some(format!(
+                "[delegation to={} status={}]",
+                marker.recipient_pubkey, marker.status.as_str()
             )),
         })
         .collect::<Vec<_>>()

@@ -4,6 +4,16 @@ import type { Event, SimplePool } from "nostr-tools";
 
 type BunDatabase = any;
 
+export type DelegationMarkerPayload = {
+    delegationConversationId: string;
+    recipientPubkey: string;
+    parentConversationId: string;
+    initiatedAt?: number;
+    completedAt?: number;
+    status: "pending" | "completed" | "aborted";
+    abortReason?: string;
+};
+
 export type ConversationStoreMessage = {
     conversationId: string;
     sequence: number;
@@ -13,6 +23,9 @@ export type ConversationStoreMessage = {
     content: string;
     humanReadable: string | null;
     messageType: string;
+    /// `messages.delegation_marker_json` parsed from storage. Populated
+    /// for `messageType === "delegation-marker"` rows; `null` otherwise.
+    delegationMarker: DelegationMarkerPayload | null;
 };
 
 export type ConversationTranscript = {
@@ -30,6 +43,16 @@ export type ConversationMonitor = {
         label: string
     ) => Promise<Event>;
 };
+
+
+function parseDelegationMarker(raw: string | null): DelegationMarkerPayload | null {
+    if (!raw) return null;
+    try {
+        return JSON.parse(raw) as DelegationMarkerPayload;
+    } catch {
+        return null;
+    }
+}
 
 export type AgentContextStateRow = {
     conversationId: string;
@@ -132,13 +155,27 @@ export function readConversationTranscript(
                         role,
                         content,
                         human_readable AS humanReadable,
-                        message_type AS messageType
+                        message_type AS messageType,
+                        delegation_marker_json AS delegationMarkerJson
                    FROM messages
                   WHERE conversation_id = ?1
                   ORDER BY sequence ASC`
             )
-            .all(conversationId) as ConversationStoreMessage[];
-        return { conversationId, messages: rows };
+            .all(conversationId) as Array<ConversationStoreMessage & { delegationMarkerJson: string | null }>;
+        return {
+            conversationId,
+            messages: rows.map((r) => ({
+                conversationId: r.conversationId,
+                sequence: r.sequence,
+                nostrEventId: r.nostrEventId,
+                authorPubkey: r.authorPubkey,
+                role: r.role,
+                content: r.content,
+                humanReadable: r.humanReadable,
+                messageType: r.messageType,
+                delegationMarker: parseDelegationMarker(r.delegationMarkerJson),
+            })),
+        };
     } finally {
         db.close();
     }
@@ -160,15 +197,26 @@ export function readAllConversationTranscripts(dbPath: string): ConversationTran
                         role,
                         content,
                         human_readable AS humanReadable,
-                        message_type AS messageType
+                        message_type AS messageType,
+                        delegation_marker_json AS delegationMarkerJson
                    FROM messages
                   ORDER BY conversation_id ASC, sequence ASC`
             )
-            .all() as ConversationStoreMessage[];
+            .all() as Array<ConversationStoreMessage & { delegationMarkerJson: string | null }>;
         const byConversation = new Map<string, ConversationStoreMessage[]>();
         for (const row of rows) {
             const messages = byConversation.get(row.conversationId) ?? [];
-            messages.push(row);
+            messages.push({
+                conversationId: row.conversationId,
+                sequence: row.sequence,
+                nostrEventId: row.nostrEventId,
+                authorPubkey: row.authorPubkey,
+                role: row.role,
+                content: row.content,
+                humanReadable: row.humanReadable,
+                messageType: row.messageType,
+                delegationMarker: parseDelegationMarker(row.delegationMarkerJson),
+            });
             byConversation.set(row.conversationId, messages);
         }
         return Array.from(byConversation, ([conversationId, messages]) => ({

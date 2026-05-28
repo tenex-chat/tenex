@@ -735,3 +735,478 @@ fn migration_from_legacy_is_idempotent() {
 
     let _ = report2;
 }
+
+// ============================================================================
+// New behaviour added by the projection-refactor: attachments sidecar,
+// transaction-wrapped append, header guard for non-"text" message types.
+// ============================================================================
+
+fn make_basic_conversation(store: &ConversationStore, id: &str) {
+    store
+        .upsert_conversation(&ConversationRow {
+            id: id.to_owned(),
+            title: None,
+            summary: None,
+            last_user_message: None,
+            status_label: None,
+            status_current_activity: None,
+            owner_pubkey: None,
+            created_at: None,
+            last_activity: None,
+            metadata: json!({}),
+            runtime_state: json!({}),
+            updated_at: 0,
+        })
+        .unwrap();
+}
+
+#[test]
+fn attachment_idempotent_on_message_id_ordinal() {
+    let store = ConversationStore::open_in_memory().unwrap();
+    make_basic_conversation(&store, "conv1");
+    let row_id = store
+        .append_message(
+            "conv1",
+            &NewMessage {
+                record_id: "rec1".into(),
+                nostr_event_id: None,
+                author_pubkey: "user_a".into(),
+                sender_pubkey: None,
+                ral: None,
+                message_type: "text".into(),
+                role: Some("user".into()),
+                content: "hello with image".into(),
+                timestamp: Some(100),
+                targeted_pubkeys: None,
+                sender_principal: None,
+                targeted_principals: None,
+                tool_data: None,
+                delegation_marker: None,
+                human_readable: None,
+                transcript_tool_attributes: None,
+            },
+        )
+        .unwrap();
+
+    let a1 = store
+        .record_attachment(row_id, 0, "image/png", &[0xDE, 0xAD], Some("https://x"))
+        .unwrap();
+    let a2 = store
+        .record_attachment(row_id, 0, "image/png", &[0xDE, 0xAD], Some("https://x"))
+        .unwrap();
+    assert_eq!(a1, a2, "same (message_id, ordinal) returns same row id");
+
+    let listed = store
+        .list_attachments_by_message_ids(&[row_id])
+        .unwrap();
+    assert_eq!(listed.get(&row_id).map(|v| v.len()), Some(1));
+    assert_eq!(listed[&row_id][0].data, vec![0xDE, 0xAD]);
+}
+
+#[test]
+fn header_guard_skips_supervision_typed_messages() {
+    let store = ConversationStore::open_in_memory().unwrap();
+    make_basic_conversation(&store, "conv1");
+
+    // 1) A "text/user" row sets the header.
+    store
+        .append_message(
+            "conv1",
+            &NewMessage {
+                record_id: "rec1".into(),
+                nostr_event_id: None,
+                author_pubkey: "user_a".into(),
+                sender_pubkey: None,
+                ral: None,
+                message_type: "text".into(),
+                role: Some("user".into()),
+                content: "hello".into(),
+                timestamp: Some(100),
+                targeted_pubkeys: None,
+                sender_principal: None,
+                targeted_principals: None,
+                tool_data: None,
+                delegation_marker: None,
+                human_readable: None,
+                transcript_tool_attributes: None,
+            },
+        )
+        .unwrap();
+    let row = store.get_conversation("conv1").unwrap().unwrap();
+    assert_eq!(row.last_user_message.as_deref(), Some("hello"));
+
+    // 2) A "supervision/user" row with a later timestamp must NOT clobber the header.
+    store
+        .append_message(
+            "conv1",
+            &NewMessage {
+                record_id: "supervision:exec1:0".into(),
+                nostr_event_id: None,
+                author_pubkey: "agent_a".into(),
+                sender_pubkey: None,
+                ral: None,
+                message_type: "supervision".into(),
+                role: Some("user".into()),
+                content: "nudge: pending todos".into(),
+                timestamp: Some(200),
+                targeted_pubkeys: None,
+                sender_principal: None,
+                targeted_principals: None,
+                tool_data: None,
+                delegation_marker: None,
+                human_readable: None,
+                transcript_tool_attributes: None,
+            },
+        )
+        .unwrap();
+    let row = store.get_conversation("conv1").unwrap().unwrap();
+    assert_eq!(
+        row.last_user_message.as_deref(),
+        Some("hello"),
+        "supervision-typed user rows must not overwrite the header"
+    );
+}
+
+#[test]
+fn delegation_marker_lifecycle_pending_then_completed() {
+    use tenex_conversations::{DelegationMarker, DelegationStatus};
+    let store = ConversationStore::open_in_memory().unwrap();
+    make_basic_conversation(&store, "parent-conv");
+
+    // Agent issues a delegate → pending marker inserted.
+    let pending = DelegationMarker {
+        delegation_conversation_id: "child-conv-1".into(),
+        recipient_pubkey: "agent2-pk".into(),
+        parent_conversation_id: "parent-conv".into(),
+        initiated_at: Some(100),
+        completed_at: None,
+        status: DelegationStatus::Pending,
+        abort_reason: None,
+    };
+    let pending_row = store
+        .add_delegation_marker("parent-conv", &pending, "agent1-pk", None)
+        .unwrap();
+
+    // Latest-state read sees only the pending marker.
+    let latest = store.latest_delegation_markers("parent-conv").unwrap();
+    assert_eq!(latest.len(), 1);
+    assert_eq!(latest["child-conv-1"].status, DelegationStatus::Pending);
+
+    // Child completes → runtime upserts a Completed marker. Should append
+    // a NEW row (not overwrite the pending one — markers interleave with
+    // normal messages by sequence, and the projection picks the latest).
+    let completed_row = store
+        .update_delegation_marker(
+            "parent-conv",
+            "child-conv-1",
+            "agent2-pk",
+            "agent1-pk",
+            DelegationStatus::Completed,
+            200,
+            None,
+        )
+        .unwrap();
+    assert_ne!(pending_row, completed_row, "completion must append a new row");
+
+    let latest = store.latest_delegation_markers("parent-conv").unwrap();
+    assert_eq!(latest.len(), 1);
+    let m = &latest["child-conv-1"];
+    assert_eq!(m.status, DelegationStatus::Completed);
+    assert_eq!(m.completed_at, Some(200));
+}
+
+#[test]
+fn delegation_marker_idempotent_on_same_status() {
+    use tenex_conversations::{DelegationMarker, DelegationStatus};
+    let store = ConversationStore::open_in_memory().unwrap();
+    make_basic_conversation(&store, "parent-conv");
+    let marker = DelegationMarker {
+        delegation_conversation_id: "child-conv-1".into(),
+        recipient_pubkey: "agent2-pk".into(),
+        parent_conversation_id: "parent-conv".into(),
+        initiated_at: Some(100),
+        completed_at: None,
+        status: DelegationStatus::Pending,
+        abort_reason: None,
+    };
+    let r1 = store
+        .add_delegation_marker("parent-conv", &marker, "agent1-pk", None)
+        .unwrap();
+    let r2 = store
+        .add_delegation_marker("parent-conv", &marker, "agent1-pk", None)
+        .unwrap();
+    assert_eq!(
+        r1, r2,
+        "repeated identical state must dedup via record_id idempotency"
+    );
+}
+
+#[test]
+fn delegation_marker_does_not_pollute_last_user_message_header() {
+    use tenex_conversations::{DelegationMarker, DelegationStatus};
+    let store = ConversationStore::open_in_memory().unwrap();
+    make_basic_conversation(&store, "parent-conv");
+
+    // Real user message lands first.
+    store
+        .append_message(
+            "parent-conv",
+            &NewMessage {
+                record_id: "event:real".into(),
+                nostr_event_id: Some("real".into()),
+                author_pubkey: "user".into(),
+                sender_pubkey: None,
+                ral: None,
+                message_type: "text".into(),
+                role: Some("user".into()),
+                content: "real human task".into(),
+                timestamp: Some(100),
+                targeted_pubkeys: None,
+                sender_principal: None,
+                targeted_principals: None,
+                tool_data: None,
+                delegation_marker: None,
+                human_readable: None,
+                transcript_tool_attributes: None,
+            },
+        )
+        .unwrap();
+
+    // Delegation marker uses role=user but message_type=delegation-marker.
+    // The header guard from the projection refactor must keep it out of
+    // conversations.last_user_message.
+    let marker = DelegationMarker {
+        delegation_conversation_id: "child-conv-1".into(),
+        recipient_pubkey: "agent2-pk".into(),
+        parent_conversation_id: "parent-conv".into(),
+        initiated_at: Some(200),
+        completed_at: None,
+        status: DelegationStatus::Pending,
+        abort_reason: None,
+    };
+    store
+        .add_delegation_marker("parent-conv", &marker, "agent1-pk", None)
+        .unwrap();
+
+    let row = store.get_conversation("parent-conv").unwrap().unwrap();
+    assert_eq!(
+        row.last_user_message.as_deref(),
+        Some("real human task"),
+        "delegation markers must NOT clobber conversations.last_user_message"
+    );
+}
+
+#[test]
+fn reconcile_assistant_event_id_dedups_when_canonical_row_already_exists() {
+    let store = ConversationStore::open_in_memory().unwrap();
+    make_basic_conversation(&store, "conv1");
+
+    // Agent persisted a synthetic step:... row first (no event_id yet).
+    let synthetic_row = store
+        .append_message(
+            "conv1",
+            &NewMessage {
+                record_id: "step:exec1:agent_a:1:1000:0".into(),
+                nostr_event_id: None,
+                author_pubkey: "agent_a".into(),
+                sender_pubkey: None,
+                ral: None,
+                message_type: "text".into(),
+                role: Some("assistant".into()),
+                content: "the final assistant text".into(),
+                timestamp: Some(1000),
+                targeted_pubkeys: None,
+                sender_principal: None,
+                targeted_principals: None,
+                tool_data: None,
+                delegation_marker: None,
+                human_readable: None,
+                transcript_tool_attributes: None,
+            },
+        )
+        .unwrap();
+
+    // Race: runtime materialized the relay echo first with the canonical
+    // event:<hex> record_id and nostr_event_id stamped.
+    let canonical_row = store
+        .append_message(
+            "conv1",
+            &NewMessage {
+                record_id: "event:deadbeef".into(),
+                nostr_event_id: Some("deadbeef".into()),
+                author_pubkey: "agent_a".into(),
+                sender_pubkey: None,
+                ral: None,
+                message_type: "text".into(),
+                role: Some("assistant".into()),
+                content: "the final assistant text".into(),
+                timestamp: Some(1001),
+                targeted_pubkeys: None,
+                sender_principal: None,
+                targeted_principals: None,
+                tool_data: None,
+                delegation_marker: None,
+                human_readable: None,
+                transcript_tool_attributes: None,
+            },
+        )
+        .unwrap();
+    assert_ne!(synthetic_row, canonical_row);
+
+    // Reconciliation: drop the synthetic row, keep the canonical.
+    let winner = store
+        .reconcile_assistant_event_id(synthetic_row, "deadbeef")
+        .unwrap();
+    assert_eq!(winner, canonical_row);
+
+    // Storage now contains exactly one row for this content.
+    let rows = store.list_messages("conv1", MessageQuery::default()).unwrap();
+    let matching: Vec<_> = rows
+        .iter()
+        .filter(|m| m.content == "the final assistant text")
+        .collect();
+    assert_eq!(matching.len(), 1, "duplicate must be reconciled away");
+    assert_eq!(matching[0].id, canonical_row);
+    assert_eq!(matching[0].record_id, "event:deadbeef");
+}
+
+#[test]
+fn reconcile_assistant_event_id_stamps_when_no_canonical_yet() {
+    let store = ConversationStore::open_in_memory().unwrap();
+    make_basic_conversation(&store, "conv1");
+
+    let row = store
+        .append_message(
+            "conv1",
+            &NewMessage {
+                record_id: "step:exec1:agent_a:1:1000:0".into(),
+                nostr_event_id: None,
+                author_pubkey: "agent_a".into(),
+                sender_pubkey: None,
+                ral: None,
+                message_type: "text".into(),
+                role: Some("assistant".into()),
+                content: "x".into(),
+                timestamp: Some(1000),
+                targeted_pubkeys: None,
+                sender_principal: None,
+                targeted_principals: None,
+                tool_data: None,
+                delegation_marker: None,
+                human_readable: None,
+                transcript_tool_attributes: None,
+            },
+        )
+        .unwrap();
+
+    let winner = store.reconcile_assistant_event_id(row, "feedface").unwrap();
+    assert_eq!(winner, row, "no canonical existed → stamp succeeded on ours");
+
+    let by_event = store.find_message_id_by_event("feedface").unwrap();
+    assert_eq!(by_event, Some(row));
+}
+
+#[test]
+fn reconcile_assistant_event_id_is_idempotent_on_retry() {
+    let store = ConversationStore::open_in_memory().unwrap();
+    make_basic_conversation(&store, "conv1");
+
+    let row = store
+        .append_message(
+            "conv1",
+            &NewMessage {
+                record_id: "step:exec1:agent_a:1:1000:0".into(),
+                nostr_event_id: Some("cafebabe".into()),
+                author_pubkey: "agent_a".into(),
+                sender_pubkey: None,
+                ral: None,
+                message_type: "text".into(),
+                role: Some("assistant".into()),
+                content: "x".into(),
+                timestamp: Some(1000),
+                targeted_pubkeys: None,
+                sender_principal: None,
+                targeted_principals: None,
+                tool_data: None,
+                delegation_marker: None,
+                human_readable: None,
+                transcript_tool_attributes: None,
+            },
+        )
+        .unwrap();
+
+    // Stamp with the same id we already have → return our id, no error.
+    let winner = store.reconcile_assistant_event_id(row, "cafebabe").unwrap();
+    assert_eq!(winner, row);
+}
+
+#[test]
+fn append_message_serializes_under_concurrent_writers() {
+    // Sequence races: two threads racing on MAX(sequence)+1. Without
+    // BEGIN IMMEDIATE wrapping this fails probabilistically on a sequence
+    // unique-index violation; with it, every insert claims a distinct
+    // sequence number deterministically.
+    use std::sync::Arc;
+
+    let tmp = TempDir::new().unwrap();
+    let path = tmp.path().join("conversation.db");
+    let store = Arc::new(ConversationStore::open(&path).unwrap());
+    make_basic_conversation(&store, "conv1");
+
+    let n_threads = 8;
+    let n_per_thread = 25;
+    let mut handles = Vec::new();
+    for t in 0..n_threads {
+        let store = ConversationStore::open(&path).unwrap();
+        handles.push(std::thread::spawn(move || {
+            for i in 0..n_per_thread {
+                store
+                    .append_message(
+                        "conv1",
+                        &NewMessage {
+                            record_id: format!("rec:{t}:{i}"),
+                            nostr_event_id: None,
+                            author_pubkey: format!("a{t}"),
+                            sender_pubkey: None,
+                            ral: None,
+                            message_type: "text".into(),
+                            role: Some("user".into()),
+                            content: format!("msg t={t} i={i}"),
+                            timestamp: Some(1000 + i as i64),
+                            targeted_pubkeys: None,
+                            sender_principal: None,
+                            targeted_principals: None,
+                            tool_data: None,
+                            delegation_marker: None,
+                            human_readable: None,
+                            transcript_tool_attributes: None,
+                        },
+                    )
+                    .expect("append should not collide on sequence");
+            }
+        }));
+    }
+    for h in handles {
+        h.join().unwrap();
+    }
+
+    let total = store
+        .list_messages("conv1", MessageQuery::default())
+        .unwrap()
+        .len();
+    assert_eq!(total, (n_threads * n_per_thread) as usize);
+
+    let mut seqs: Vec<i64> = store
+        .list_messages("conv1", MessageQuery::default())
+        .unwrap()
+        .into_iter()
+        .map(|m| m.sequence)
+        .collect();
+    seqs.sort();
+    seqs.dedup();
+    assert_eq!(
+        seqs.len(),
+        (n_threads * n_per_thread) as usize,
+        "all sequences must be distinct"
+    );
+}

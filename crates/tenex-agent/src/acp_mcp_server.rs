@@ -165,17 +165,18 @@ async fn build_server(
                 project_agents.clone(),
                 teams.clone(),
                 context.project_root.clone(),
+                conv_db_path.clone(),
             )),
             state.clone(),
             true,
         ));
         always_on.push(expose_tool(
-            Box::new(SelfDelegateTool::new(state.clone())),
+            Box::new(SelfDelegateTool::new(state.clone(), conv_db_path.clone())),
             state.clone(),
             true,
         ));
         always_on.push(expose_tool(
-            Box::new(DelegateCrossProjectTool::new(state.clone())),
+            Box::new(DelegateCrossProjectTool::new(state.clone(), conv_db_path.clone())),
             state.clone(),
             true,
         ));

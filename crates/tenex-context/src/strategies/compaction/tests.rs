@@ -22,8 +22,8 @@ fn ctx_with_messages<'a>(
     }];
     for u in user_msgs {
         messages.push(Message::User {
-            content: u.to_string(),
-        });
+            content: u.to_string(), attachments: Vec::new(),
+            });
     }
     ProjectionContext {
         messages,
@@ -31,6 +31,10 @@ fn ctx_with_messages<'a>(
         model_profile: p,
         tool_defs: &[],
         agent_todos: None,
+        proactive_context: None,
+        delegation_transcripts: ::std::collections::HashMap::new(),
+        conversation_id: "test-conv",
+        name_resolver: None,
     }
 }
 
@@ -74,7 +78,7 @@ async fn compaction_collapses_middle_and_preserves_head_and_tail() {
     assert!(ctx.telemetry.compacted_count >= 1);
     assert!(matches!(&ctx.messages[0], Message::System { content } if content == sys_content));
     let has_summary = ctx.messages.iter().any(
-        |m| matches!(m, Message::User { content } if content.starts_with("[Compacted context:")),
+        |m| matches!(m, Message::User { content, .. } if content.starts_with("[Compacted context:")),
     );
     assert!(has_summary);
     assert!(
@@ -94,8 +98,8 @@ async fn compaction_respects_keep_tail() {
     let mut ctx = ctx_with_messages("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", &msgs, &p);
     let last = ctx.messages.len() - 1;
     ctx.messages[last] = Message::User {
-        content: tag.to_string(),
-    };
+        content: tag.to_string(), attachments: Vec::new(),
+            };
 
     CompactionToolStrategy::default()
         .apply(&mut ctx)
@@ -105,7 +109,7 @@ async fn compaction_respects_keep_tail() {
     let tail_survived = ctx
         .messages
         .iter()
-        .any(|m| matches!(m, Message::User { content } if content == tag));
+        .any(|m| matches!(m, Message::User { content, .. } if content == tag));
     assert!(tail_survived);
 }
 

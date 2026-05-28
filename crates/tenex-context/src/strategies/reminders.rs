@@ -134,7 +134,7 @@ impl Strategy for RemindersStrategy {
         };
 
         match msg {
-            Message::User { content } | Message::Assistant { content, .. } => {
+            Message::User { content, .. } | Message::Assistant { content, .. } => {
                 content.push_str("\n\n");
                 content.push_str(&reminder);
             }
@@ -142,7 +142,7 @@ impl Strategy for RemindersStrategy {
                 content.push_str("\n\n");
                 content.push_str(&reminder);
             }
-            Message::System { .. } => return Ok(()),
+            Message::System { .. } | Message::DelegationMarker { .. } => return Ok(()),
         }
 
         ctx.telemetry.reminders_overlayed += 1;
@@ -179,6 +179,10 @@ mod tests {
             model_profile: p,
             tool_defs: &[],
             agent_todos: todos,
+            proactive_context: None,
+            delegation_transcripts: ::std::collections::HashMap::new(),
+            conversation_id: "test-conv",
+            name_resolver: None,
         }
     }
 
@@ -199,8 +203,8 @@ mod tests {
                     content: "sys".into(),
                 },
                 Message::User {
-                    content: "hello".into(),
-                },
+                    content: "hello".into(), attachments: Vec::new(),
+            },
             ],
             None,
             &p,
@@ -210,7 +214,8 @@ mod tests {
         assert_eq!(
             ctx.messages[1],
             Message::User {
-                content: "hello".into()
+                content: "hello".into(),
+                attachments: Vec::new(),
             }
         );
     }
@@ -228,8 +233,8 @@ mod tests {
                     content: "sys".into(),
                 },
                 Message::User {
-                    content: "hello".into(),
-                },
+                    content: "hello".into(), attachments: Vec::new(),
+            },
             ],
             Some(todos),
             &p,
@@ -237,7 +242,7 @@ mod tests {
         RemindersStrategy.apply(&mut ctx).await.unwrap();
         assert_eq!(ctx.telemetry.reminders_overlayed, 1);
         let last = match &ctx.messages[1] {
-            Message::User { content } => content.clone(),
+            Message::User { content, .. } => content.clone(),
             other => panic!("expected user message, got {other:?}"),
         };
         assert!(last.contains("<system-reminder>"), "reminder block present");
@@ -257,11 +262,11 @@ mod tests {
                     content: "sys".into(),
                 },
                 Message::User {
-                    content: "first".into(),
-                },
+                    content: "first".into(), attachments: Vec::new(),
+            },
                 Message::User {
-                    content: "last".into(),
-                },
+                    content: "last".into(), attachments: Vec::new(),
+            },
             ],
             Some(todos),
             &p,
@@ -270,7 +275,7 @@ mod tests {
         assert_eq!(ctx.telemetry.reminders_overlayed, 1);
         // Reminder was appended to the LAST message (index 2), not index 1
         let last = match &ctx.messages[2] {
-            Message::User { content } => content.clone(),
+            Message::User { content, .. } => content.clone(),
             _ => panic!("expected user message"),
         };
         assert!(
@@ -318,8 +323,8 @@ mod tests {
                     content: "sys".into(),
                 },
                 Message::User {
-                    content: "msg".into(),
-                },
+                    content: "msg".into(), attachments: Vec::new(),
+            },
             ],
             Some(todos),
             &p,
@@ -327,7 +332,7 @@ mod tests {
         RemindersStrategy.apply(&mut ctx).await.unwrap();
         assert_eq!(ctx.telemetry.reminders_overlayed, 1);
         let last = match &ctx.messages[1] {
-            Message::User { content } => content.clone(),
+            Message::User { content, .. } => content.clone(),
             other => panic!("expected user message, got {other:?}"),
         };
         assert!(last.contains("2 pending"), "should show 2 pending");
@@ -349,8 +354,8 @@ mod tests {
                     content: "sys".into(),
                 },
                 Message::User {
-                    content: "user".into(),
-                },
+                    content: "user".into(), attachments: Vec::new(),
+            },
                 Message::ToolResult {
                     tool_call_id: "call-1".into(),
                     tool_name: "shell".into(),

@@ -4,17 +4,25 @@
 //! in-flight messages, telemetry, and access to `tool_defs`. The default
 //! pipeline is fixed: compaction → decay → reminders.
 
+use std::collections::HashMap;
+
 use crate::CompactionOverride;
+use crate::projection::DisplayNameResolver;
 use crate::types::{Message, ModelProfile, ProjectionTelemetry, ToolDef};
 use async_trait::async_trait;
 use std::sync::Arc;
+use tenex_conversations::MessageRecord;
 
 mod compaction;
 mod decay;
+mod delegation_markers;
+mod proactive;
 mod reminders;
 
 pub use compaction::CompactionToolStrategy;
 pub use decay::ToolResultDecayStrategy;
+pub use delegation_markers::ExpandDelegationMarkersStrategy;
+pub use proactive::ProactiveContextStrategy;
 pub use reminders::RemindersStrategy;
 
 /// Mutable working state passed through the strategy pipeline.
@@ -28,6 +36,29 @@ pub struct ProjectionContext<'a> {
     /// Agent todos from `agent_context_state.todos_json`, used by the
     /// reminders strategy to inject the `<agent-todos>` block.
     pub agent_todos: Option<serde_json::Value>,
+    /// Pre-computed `<proactive-context>` block (typically RAG output
+    /// against the trigger event). Threaded into every step's projection
+    /// unchanged so the system prompt stays stable and the prompt cache
+    /// remains warm. `None` when no proactive context is configured.
+    pub proactive_context: Option<&'a str>,
+    /// Pre-loaded child conversation transcripts, keyed by
+    /// `delegation_conversation_id`. Populated synchronously by
+    /// `project_with_options` before the async strategy pipeline runs
+    /// (the SQLite store is `!Send` so we can't hold it across an
+    /// `.await`). [`ExpandDelegationMarkersStrategy`] consumes this
+    /// map to render each marker's `### Transcript:` block. Markers
+    /// whose `delegation_conversation_id` is absent here fall back to
+    /// an empty `<conversation>` rendering.
+    pub delegation_transcripts: HashMap<String, Vec<MessageRecord>>,
+    /// The current conversation id. Lets [`ExpandDelegationMarkersStrategy`]
+    /// distinguish "direct child of this conversation" markers (full
+    /// transcript) from "nested deeper" markers (one-line reference).
+    pub conversation_id: &'a str,
+    /// Resolves pubkeys to display names for transcript attribution.
+    /// Same resolver `project_messages` used for multi-author user
+    /// prefixing — passed through so the same names appear inside the
+    /// embedded `<conversation>` XML.
+    pub name_resolver: Option<&'a dyn DisplayNameResolver>,
 }
 
 /// Async callback used by [`CompactionToolStrategy`] to generate a semantic
@@ -82,6 +113,11 @@ pub fn stack_with_compaction_override(
     vec![
         Box::new(compaction),
         Box::new(ToolResultDecayStrategy),
+        // Delegation marker expansion produces user-shaped messages
+        // that downstream strategies (proactive, reminders) can then
+        // legitimately overlay onto. Must run before those.
+        Box::new(ExpandDelegationMarkersStrategy),
+        Box::new(ProactiveContextStrategy),
         Box::new(RemindersStrategy),
     ]
 }

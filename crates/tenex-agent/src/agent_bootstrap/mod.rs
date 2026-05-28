@@ -46,14 +46,32 @@ pub(crate) struct AgentBootstrap {
     pub pubkey_hex: String,
     pub agent_slug: String,
     pub project_id: String,
+    /// Per-process invocation id, sourced from `TENEX_EXECUTION_ID` set
+    /// by the runtime before spawning the subprocess. Used to build
+    /// invocation-scoped record_ids that are guaranteed not to collide
+    /// across re-invocations of the same agent in the same conversation.
+    pub execution_id: String,
     pub base_dir: std::path::PathBuf,
     pub resolved: ResolvedModel,
     pub cassette_recorder: Option<CassetteRecorder>,
     pub system_prompt: String,
     pub user_message: String,
-    pub trigger_event_id: String,
     pub envelope_image_parts: Option<Vec<rig_core::completion::message::UserContent>>,
-    pub envelope_content: String,
+    /// The content of the conversation's root user message — what the human
+    /// originally asked. Sourced from the conversation store at bootstrap
+    /// and threaded into supervision so the "Your original task was: …"
+    /// nudge always references the *real* original task, not the envelope
+    /// of whichever event re-triggered this subprocess (e.g. a delegatee's
+    /// reply, which would mis-name the task as "Black — RGB(0,0,0)").
+    pub original_task: String,
+    /// Pre-computed `<proactive-context>` block (RAG output against the
+    /// trigger event). Threaded into every step's projection via
+    /// `ProjectionOptions.proactive_context` so [`ProactiveContextStrategy`]
+    /// overlays it onto the last visible message. Stable across the entire
+    /// invocation so the system prompt remains cacheable.
+    ///
+    /// [`ProactiveContextStrategy`]: tenex_context::ProactiveContextStrategy
+    pub proactive_context: Option<String>,
     pub tool_set: ToolSet,
     pub emit_state: Arc<EmitState>,
     pub hook: EmitHook,
@@ -400,6 +418,7 @@ pub(crate) async fn build(
         project_agents.clone(),
         teams.clone(),
         project_root.clone(),
+        conv_db_path.clone(),
     );
 
     let skill_list_tool = SkillListTool::new(skill_ctx.clone());
@@ -421,10 +440,17 @@ pub(crate) async fn build(
     );
 
     // Proactive context: search RAG before the LLM call so relevant past
-    // knowledge appears in the system prompt without the agent needing to ask.
+    // knowledge appears in the projection without the agent needing to ask.
     // Uses an LLM query planner (for non-trivial messages) and LLM reranker
     // (when > 3 results pass the score threshold).
-    if let Some(block) = stages::proactive_context_block(
+    //
+    // The block lives on `boot.proactive_context` and is overlaid onto the
+    // last non-system message by `ProactiveContextStrategy` at projection
+    // time — *not* concatenated onto `system_prompt`, because the system
+    // prompt must remain stable across invocations to keep the prompt
+    // cache warm. (Previously this push_str() was the root cause of
+    // 0% cache-hit rate observed across delegation callback chains.)
+    let proactive_context: Option<String> = stages::proactive_context_block(
         rag_store.as_ref(),
         &envelope.content,
         &project_id,
@@ -432,10 +458,7 @@ pub(crate) async fn build(
         &conversation_id,
         &resolved,
     )
-    .await
-    {
-        system_prompt.push_str(&block);
-    }
+    .await;
 
     if let Some(state) = &runtime_state {
         if let Some(active_tools) = state.render_active_tools_reminder() {
@@ -504,9 +527,69 @@ pub(crate) async fn build(
     // Prefetch images from the inbound envelope for vision-capable providers.
     // Fetched once so re-engagement turns (supervisor-generated text) do not
     // trigger additional network calls.
-    let envelope_image_parts =
-        stages::prepare_envelope_image_parts(&resolved.provider, &base_dir, &envelope.content)
-            .await;
+    let fetched_attachments =
+        stages::fetch_envelope_attachments(&resolved.provider, &base_dir, &envelope.content).await;
+
+    // Persist attachments to the conversation store, hanging them off the
+    // trigger event row that the runtime already materialized before
+    // spawning this subprocess (see tenex/src/runtime_cmd/dispatch_pipeline.rs
+    // and event_routing.rs). The post-refactor projection reads from this
+    // sidecar; the dual-write path below keeps the in-memory `turn_prompt`
+    // path working for now.
+    if let Some(store) = conv_store.as_ref() {
+        if let Ok(Some(trigger_row_id)) = store.find_message_id_by_event(&trigger_event_id) {
+            for (ordinal, att) in fetched_attachments.iter().enumerate() {
+                if let Err(e) = store.record_attachment(
+                    trigger_row_id,
+                    ordinal as i64,
+                    &att.media_type,
+                    &att.data,
+                    Some(att.source_url.as_str()),
+                ) {
+                    eprintln!(
+                        "[tenex-agent] failed to persist attachment {} for trigger row {}: {}",
+                        att.source_url, trigger_row_id, e
+                    );
+                }
+            }
+        } else if !fetched_attachments.is_empty() {
+            eprintln!(
+                "[tenex-agent] warn: trigger row for event {} not found in store; \
+                 {} attachments could not be persisted (will fall back to in-memory path)",
+                trigger_event_id,
+                fetched_attachments.len()
+            );
+        }
+    }
+
+    let envelope_image_parts = if fetched_attachments.is_empty() {
+        None
+    } else {
+        Some(
+            fetched_attachments
+                .into_iter()
+                .map(crate::multimodal::FetchedAttachment::into_user_content)
+                .collect::<Vec<_>>(),
+        )
+    };
+
+    // Source the "original task" string from the conversation store: the
+    // user-role row whose `nostr_event_id` matches the conversation root
+    // event id. The conversation_id IS the root event id in our
+    // Nostr-rooted conversation model. Fallback to envelope.content if
+    // the conversation root row is not yet materialized (race or fresh
+    // conversation with no prior turn — in which case envelope.content
+    // *is* the root). Reading from storage is what fixes Bug B on
+    // delegation callbacks, where the envelope carries the delegatee's
+    // reply, not the original task.
+    let original_task: String = conv_store
+        .as_ref()
+        .and_then(|store| store.get_message_by_event(&conversation_id).ok().flatten())
+        .map(|row| row.content)
+        .unwrap_or_else(|| envelope.content.clone());
+
+    let execution_id =
+        std::env::var("TENEX_EXECUTION_ID").unwrap_or_else(|_| format!("local-{}", std::process::id()));
 
     Ok(AgentBootstrap {
         channel,
@@ -515,14 +598,15 @@ pub(crate) async fn build(
         pubkey_hex,
         agent_slug,
         project_id,
+        execution_id,
         base_dir,
         resolved,
         cassette_recorder,
         system_prompt,
         user_message,
-        trigger_event_id,
         envelope_image_parts,
-        envelope_content: envelope.content,
+        original_task,
+        proactive_context,
         tool_set,
         emit_state,
         hook,

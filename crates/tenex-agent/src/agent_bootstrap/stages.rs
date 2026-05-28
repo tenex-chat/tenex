@@ -221,16 +221,18 @@ pub(super) fn build_skill_context(inputs: SkillContextInputs<'_>) -> SkillContex
     }
 }
 
-/// Prefetch envelope-borne images and return them as rig user-content parts.
-/// Returns `None` for non-vision providers and empty results.
-pub(super) async fn prepare_envelope_image_parts(
+/// Prefetch envelope-borne images and return them as raw fetched bytes.
+/// Returns an empty `Vec` for non-vision providers and on empty/failed
+/// fetches. The agent runner uses these both to persist attachment rows
+/// in the conversation store *and* to build rig `UserContent` parts.
+pub(super) async fn fetch_envelope_attachments(
     provider: &str,
     base_dir: &std::path::Path,
     envelope_content: &str,
-) -> Option<Vec<rig_core::completion::message::UserContent>> {
+) -> Vec<crate::multimodal::FetchedAttachment> {
     let supports_vision = matches!(provider, "anthropic" | "openai" | "openrouter");
     if !supports_vision {
-        return None;
+        return Vec::new();
     }
     // `file://` image URLs are only honoured when they live under one of these
     // trusted cache prefixes — otherwise an inbound event could read arbitrary
@@ -245,7 +247,7 @@ pub(super) async fn prepare_envelope_image_parts(
     let media_root = base_dir.join("data").join("telegram-media");
     let _ = std::fs::create_dir_all(&media_root);
     let allowed_file_prefixes = vec![media_root.canonicalize().unwrap_or(media_root)];
-    crate::multimodal::prepare_multimodal_content(envelope_content, &allowed_file_prefixes).await
+    crate::multimodal::fetch_envelope_attachments(envelope_content, &allowed_file_prefixes).await
 }
 
 /// Open the conversation store for `(project_id)` if available, ensuring

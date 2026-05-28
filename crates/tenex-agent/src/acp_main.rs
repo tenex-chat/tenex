@@ -829,6 +829,7 @@ async fn run_prompt(
             messages_visible: vec![
                 CtxMessage::User {
                     content: envelope.content.clone(),
+                    attachments: Vec::new(),
                 },
                 CtxMessage::Assistant {
                     content: visible_text.clone(),
@@ -1037,6 +1038,7 @@ async fn render_history(
                 excluded_event_id: exclude_nostr_event_id.map(str::to_string),
                 in_turn_tail: Vec::new(),
                 compaction_override: None,
+                proactive_context: None,
             },
         )
         .await
@@ -1058,9 +1060,14 @@ async fn render_history(
 fn format_context_message(message: CtxMessage) -> Option<String> {
     match message {
         CtxMessage::System { .. } => None,
-        CtxMessage::User { content } => Some(format!("User:\n{content}")),
+        CtxMessage::User { content, .. } => Some(format!("User:\n{content}")),
         CtxMessage::Assistant { content, .. } => Some(format!("Assistant:\n{content}")),
         CtxMessage::ToolResult { content, .. } => Some(format!("Tool result:\n{content}")),
+        CtxMessage::DelegationMarker { marker, .. } => Some(format!(
+            "Delegation ({}) to {}",
+            marker.status.as_str(),
+            marker.recipient_pubkey,
+        )),
     }
 }
 

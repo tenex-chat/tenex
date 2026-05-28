@@ -1,7 +1,6 @@
 use anyhow::{Result, anyhow};
 use rig_core::agent::ToolCallHookAction;
 use rig_core::completion::CompletionModel;
-use tenex_context::Message as CtxMessage;
 
 use crate::hook::EmitHook;
 use crate::progress_monitor::ProgressMonitor;
@@ -11,7 +10,6 @@ use crate::tools::recording::{ToolCallRecord, ToolRecorder};
 use super::{StepToolCall, ensure_continue};
 
 pub(super) struct StepToolResults {
-    pub messages: Vec<CtxMessage>,
     pub records: Vec<ToolCallRecord>,
 }
 
@@ -25,14 +23,17 @@ pub(super) async fn execute_step_tools<M>(
 where
     M: CompletionModel + Send + Sync + 'static,
 {
-    let mut messages = Vec::with_capacity(tool_calls.len());
     let mut records = Vec::with_capacity(tool_calls.len());
     for tool_call in tool_calls {
         let tool_call_id = tool_call.provider_tool_call_id();
         let args = tool_call.function_arguments_string();
         let tool_name = tool_call.tool_call.function.name.clone();
         let provider_call_id = tool_call.tool_call.call_id.clone();
-        let (result, is_error) = match emit
+        // `is_error` flows through to projection via the `ToolCallRecord`s
+        // emitted by `recorder.take_records()` / `tool_record(...)`. The
+        // local result string here is only used to feed the progress
+        // monitor and emit hooks (display/telemetry), not persistence.
+        let result: String = match emit
             .on_tool_call(
                 &tool_name,
                 provider_call_id.clone(),
@@ -52,11 +53,11 @@ where
             {
                 Ok(result) => {
                     records.extend(recorder.take_records());
-                    (result, false)
+                    result
                 }
                 Err(error) => {
                     records.extend(recorder.take_records());
-                    (error.to_string(), true)
+                    error.to_string()
                 }
             },
             ToolCallHookAction::Skip { reason } => {
@@ -68,7 +69,7 @@ where
                     serde_json::Value::String(reason.clone()),
                     false,
                 ));
-                (reason, false)
+                reason
             }
             ToolCallHookAction::Terminate { reason } => {
                 return Err(anyhow!("agent loop terminated by tool hook: {reason}"));
@@ -88,22 +89,18 @@ where
         ensure_continue(
             emit.on_tool_result(
                 &tool_name,
-                provider_call_id.clone(),
+                provider_call_id,
                 &tool_call.internal_call_id,
                 &args,
                 &result,
             )
             .await,
         )?;
-        messages.push(CtxMessage::ToolResult {
-            tool_call_id,
-            provider_call_id,
-            tool_name,
-            content: result,
-            is_error,
-        });
+        // The tool result row is persisted by the caller via
+        // record_step_tool_messages and read back by the next
+        // projection — there is no in-memory side-channel.
     }
-    Ok(StepToolResults { messages, records })
+    Ok(StepToolResults { records })
 }
 
 impl StepToolCall {

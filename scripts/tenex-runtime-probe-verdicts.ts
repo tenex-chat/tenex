@@ -731,10 +731,25 @@ function evaluateDelegation(events: Event[], context: EvaluateContext): Verdict[
             message.authorPubkey === context.pmPubkey &&
             message.nostrEventId === delegation?.id
     );
-    const storedWorkerCompletion = parentTranscript.messages.find(
+    // Under the new architecture, the parent conversation holds a
+    // `delegation-marker` row referencing the child; the worker's
+    // reply itself lives in the child (delegated) transcript and is
+    // rendered into the parent's projection via the
+    // `ExpandDelegationMarkersStrategy` (`# DELEGATION COMPLETED` block
+    // with embedded child-transcript XML). We assert both halves of
+    // that contract here: (1) worker's color lives in the child store;
+    // (2) the parent store has a marker with `status = completed`
+    // referencing the same child conversation.
+    const storedWorkerCompletion = delegatedTranscript.messages.find(
         (message) =>
             message.authorPubkey === context.workerPubkey &&
             includesColorChoice(messageText(message))
+    );
+    const completedDelegationMarker = parentTranscript.messages.find(
+        (message) =>
+            message.messageType === "delegation-marker" &&
+            message.delegationMarker?.status === "completed" &&
+            message.delegationMarker?.delegationConversationId === delegation?.id
     );
     const workerColor = storedWorkerCompletion
         ? extractColorChoice(messageText(storedWorkerCompletion))
@@ -816,9 +831,15 @@ function evaluateDelegation(events: Event[], context: EvaluateContext): Verdict[
             detail: "Expected delegated conversation transcript to start from the PM delegation event.",
         },
         {
-            name: "Store recorded worker completion in parent conversation",
+            name: "Child store recorded worker color completion",
             ok: Boolean(storedWorkerCompletion),
-            detail: "Expected parent conversation transcript to contain worker color completion.",
+            detail: "Expected delegated (child) conversation transcript to contain worker color reply.",
+        },
+        {
+            name: "Parent store has completed delegation marker referencing child",
+            ok: Boolean(completedDelegationMarker),
+            detail: "Expected parent transcript to contain a delegation-marker row with status=completed " +
+                "and a delegationConversationId pointing at the child delegation event id.",
         },
         {
             name: "Store kept PM color report in parent conversation",

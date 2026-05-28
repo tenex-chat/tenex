@@ -1,6 +1,8 @@
+use base64::Engine as _;
 use rig_core::OneOrMany;
 use rig_core::completion::message::{
-    Reasoning, Text, ToolCall as RigToolCall, ToolFunction, ToolResult,
+    DocumentSourceKind, Image, ImageMediaType, MimeType as _, Reasoning, Text,
+    ToolCall as RigToolCall, ToolFunction, ToolResult,
 };
 use rig_core::completion::message::{ToolResultContent, UserContent};
 use rig_core::completion::{AssistantContent, Message as RigMessage};
@@ -11,9 +13,37 @@ use tenex_context::Message as CtxMessage;
 pub fn ctx_msg_to_rig(msg: CtxMessage) -> RigMessage {
     match msg {
         CtxMessage::System { content } => RigMessage::System { content },
-        CtxMessage::User { content } => RigMessage::User {
-            content: OneOrMany::one(UserContent::Text(Text { text: content })),
-        },
+        CtxMessage::User {
+            content,
+            attachments,
+        } => {
+            if attachments.is_empty() {
+                RigMessage::User {
+                    content: OneOrMany::one(UserContent::Text(Text { text: content })),
+                }
+            } else {
+                // Images first, then text — matches the order the in-memory
+                // path produced via turn_loop/mod.rs:67-86 today.
+                let mut parts: Vec<UserContent> = Vec::with_capacity(attachments.len() + 1);
+                for att in attachments {
+                    let encoded =
+                        base64::engine::general_purpose::STANDARD.encode(&att.data);
+                    let media_type = ImageMediaType::from_mime_type(&att.media_type);
+                    parts.push(UserContent::Image(Image {
+                        data: DocumentSourceKind::Base64(encoded),
+                        media_type,
+                        detail: None,
+                        additional_params: None,
+                    }));
+                }
+                parts.push(UserContent::Text(Text { text: content }));
+                RigMessage::User {
+                    content: OneOrMany::many(parts).unwrap_or_else(|_| {
+                        OneOrMany::one(UserContent::Text(Text { text: String::new() }))
+                    }),
+                }
+            }
+        }
         CtxMessage::Assistant {
             content,
             reasoning,
@@ -62,6 +92,25 @@ pub fn ctx_msg_to_rig(msg: CtxMessage) -> RigMessage {
                 id: tool_call_id,
                 call_id: provider_call_id,
                 content: OneOrMany::one(ToolResultContent::Text(Text { text: content })),
+            })),
+        },
+        // An un-expanded delegation marker shouldn't reach this point
+        // under the default strategy stack (ExpandDelegationMarkersStrategy
+        // converts these to `User` before the converter runs). If one
+        // slips through, surface it as a visible-but-degraded note so
+        // the model can still reason about it.
+        CtxMessage::DelegationMarker { marker, .. } => RigMessage::User {
+            content: OneOrMany::one(UserContent::Text(Text {
+                text: format!(
+                    "[Delegation to {} (conv: {}...) — {}]",
+                    marker.recipient_pubkey.chars().take(8).collect::<String>(),
+                    marker
+                        .delegation_conversation_id
+                        .chars()
+                        .take(10)
+                        .collect::<String>(),
+                    marker.status.as_str(),
+                ),
             })),
         },
     }
@@ -125,7 +174,7 @@ mod tests {
             is_error: false,
         };
 
-        let RigMessage::User { content } = ctx_msg_to_rig(msg) else {
+        let RigMessage::User { content, .. } = ctx_msg_to_rig(msg) else {
             panic!("expected user message");
         };
         let UserContent::ToolResult(result) = content.first_ref() else {

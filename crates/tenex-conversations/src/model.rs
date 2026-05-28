@@ -71,6 +71,83 @@ pub struct NewMessage {
     pub transcript_tool_attributes: Option<serde_json::Value>,
 }
 
+/// Lifecycle state of a delegation, as observed by the *parent* (delegator)
+/// agent. Mirrors the TypeScript `DelegationMarker.status` field. The
+/// parent's conversation gains one marker row per state transition
+/// (initially `Pending`, then `Completed` or `Aborted`), so the
+/// projection layer can lazily render the full delegation lifecycle as a
+/// `# DELEGATION COMPLETED` (or `# DELEGATION IN PROGRESS` / `# DELEGATION
+/// ABORTED`) block carrying the child conversation transcript.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum DelegationStatus {
+    Pending,
+    Completed,
+    Aborted,
+}
+
+impl DelegationStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            DelegationStatus::Pending => "pending",
+            DelegationStatus::Completed => "completed",
+            DelegationStatus::Aborted => "aborted",
+        }
+    }
+}
+
+/// Marker row inserted into the *parent* (delegator) agent's
+/// conversation to track an outgoing delegation. Persisted as a row in
+/// the `messages` table with `message_type = "delegation-marker"`,
+/// `content = ""`, and the marker payload in the `delegation_marker`
+/// JSON column. Projection's `ExpandDelegationMarkersStrategy` reads
+/// these rows and lazily expands them into the `# DELEGATION ...`
+/// rendering carrying the child conversation transcript.
+///
+/// Mirrors the TypeScript `DelegationMarker` shape that drove the same
+/// behaviour pre-Rust port (`src/conversations/types.ts:21-36` in the
+/// final TS commit).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DelegationMarker {
+    /// The child conversation's id (which IS the delegation Nostr event
+    /// id, in our Nostr-rooted conversation model). Identifies the
+    /// delegation across the parent and child stores.
+    pub delegation_conversation_id: String,
+    /// Pubkey of the agent the parent delegated to.
+    pub recipient_pubkey: String,
+    /// The parent conversation's id. Set so the projection can tell
+    /// "direct child of this conversation" vs "nested deeper down" —
+    /// only direct children get full-transcript expansion to avoid
+    /// exponential context bloat on multi-level delegations.
+    pub parent_conversation_id: String,
+    /// When the delegation was created. Unix seconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub initiated_at: Option<i64>,
+    /// When the delegation finished (`Completed` or `Aborted`). Unix
+    /// seconds. Always `None` for `Pending`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub completed_at: Option<i64>,
+    pub status: DelegationStatus,
+    /// Aborted-only narrative. `None` for `Pending` and `Completed`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub abort_reason: Option<String>,
+}
+
+/// One image (or other binary) attachment hanging off a `messages` row.
+/// Carried as a separate row in `message_attachments` so the BLOB
+/// payload doesn't bloat list queries on the `messages` table.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AttachmentRecord {
+    pub id: i64,
+    pub message_id: i64,
+    pub ordinal: i64,
+    pub media_type: String,
+    pub data: Vec<u8>,
+    pub source_url: Option<String>,
+    pub created_at: i64,
+}
+
 /// One tool call + its result. Bodies are stored as `BLOB` to make the
 /// schema agnostic to encoding choice (today JSON-as-bytes; tomorrow
 /// possibly compressed). The library decodes/encodes as JSON.

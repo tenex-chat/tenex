@@ -24,11 +24,20 @@ pub struct DelegateCrossProjectError(String);
 #[derive(Clone)]
 pub struct DelegateCrossProjectTool {
     state: Arc<EmitState>,
+    conv_db_path: std::path::PathBuf,
 }
 
 impl DelegateCrossProjectTool {
-    pub fn new(state: Arc<EmitState>) -> Self {
-        Self { state }
+    pub fn new(state: Arc<EmitState>, conv_db_path: std::path::PathBuf) -> Self {
+        Self { state, conv_db_path }
+    }
+
+    fn parent_conversation_id(&self) -> Option<String> {
+        match self.state.conversation_root.as_ref()? {
+            tenex_protocol::ConversationRef::Nostr { root_event_id } => {
+                Some(root_event_id.to_hex())
+            }
+        }
     }
 }
 
@@ -188,6 +197,51 @@ impl Tool for DelegateCrossProjectTool {
         let delegation_event_id = match &delegation_ref {
             MessageRef::Nostr { event_id } => event_id.to_hex(),
         };
+
+        // Pending marker lives in the SOURCE project's conversation
+        // store — that's where the parent agent runs and where its
+        // projection will surface the marker. The cross-project routing
+        // happens at the runtime level (target project's runtime sees
+        // the event, handles it), but the parent's view of "I have a
+        // pending delegation" is local to the source.
+        if let Some(parent_conv_id) = self.parent_conversation_id() {
+            let agent_pubkey_hex = match self.state.channel.identity() {
+                tenex_protocol::PrincipalRef::Nostr { pubkey, .. } => pubkey.to_hex(),
+            };
+            match tenex_conversations::ConversationStore::open(&self.conv_db_path) {
+                Ok(store) => {
+                    let initiated_at = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_secs() as i64)
+                        .ok();
+                    let marker = tenex_conversations::DelegationMarker {
+                        delegation_conversation_id: delegation_event_id.clone(),
+                        recipient_pubkey: agent.pubkey.clone(),
+                        parent_conversation_id: parent_conv_id.clone(),
+                        initiated_at,
+                        completed_at: None,
+                        status: tenex_conversations::DelegationStatus::Pending,
+                        abort_reason: None,
+                    };
+                    if let Err(e) = store.add_delegation_marker(
+                        &parent_conv_id,
+                        &marker,
+                        &agent_pubkey_hex,
+                        Some(i64::from(ral)),
+                    ) {
+                        eprintln!(
+                            "[delegate_crossproject] failed to write pending DelegationMarker for {delegation_event_id}: {e}"
+                        );
+                    }
+                }
+                Err(e) => {
+                    eprintln!(
+                        "[delegate_crossproject] could not open conversation store at {} to write pending marker: {e}",
+                        self.conv_db_path.display()
+                    );
+                }
+            }
+        }
 
         let span = tracing::Span::current();
         span.record("delegated.conversation.id", delegation_event_id.as_str());

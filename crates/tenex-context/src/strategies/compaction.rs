@@ -108,6 +108,7 @@ impl Strategy for CompactionToolStrategy {
 
         let summary = Message::User {
             content: summary_text,
+            attachments: Vec::new(),
         };
 
         ctx.messages.splice(compact_start..compact_end, [summary]);

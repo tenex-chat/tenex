@@ -16,13 +16,13 @@ use std::sync::atomic::Ordering;
 
 use anyhow::{Context, Result};
 use rig_core::client::CompletionClient as _;
-use rig_core::completion::Message as RigMessage;
 use rig_core::providers::{anthropic, ollama, openai, openrouter};
 use tenex_accounting::{
     RecordLlmCall, RootKind, finish_trace, flush as flush_accounting, open_trace, with_trace,
 };
-use tenex_context::Message as CtxMessage;
-use tenex_protocol::{CompletionIntent, ConversationIntent, ErrorIntent, Intent, LlmUsage};
+use tenex_protocol::{
+    CompletionIntent, ConversationIntent, ErrorIntent, Intent, LlmUsage, MessageRef,
+};
 use tenex_supervision::supervisor::PostCompletionOutcome;
 use tenex_supervision::types::{TodoEntry as SupTodoEntry, TodoStatus as SupTodoStatus};
 use tracing::{Instrument, info_span};
@@ -35,11 +35,14 @@ use crate::oauth_client;
 use crate::tools::{TodoStatus, ToolRecorder};
 
 pub(crate) async fn run_turn_loop(boot: &mut AgentBootstrap) -> Result<()> {
-    // current_message starts as the inbound user prompt; supervision may replace it with a
-    // re-engagement prompt after each turn if pending todos remain.
-    let mut current_message = std::mem::take(&mut boot.user_message);
-    let mut re_engage_tail: Vec<CtxMessage> = Vec::new();
+    // The trigger user message stays fixed across all iterations of this
+    // invocation; re-engagement nudges are now persisted as supervision-typed
+    // user rows, so the next projection naturally surfaces them rather than
+    // an in-memory tail being spliced in. (We still drain `boot.user_message`
+    // so its memory is freed for the rest of the loop.)
+    let _ = std::mem::take(&mut boot.user_message);
     let mut iteration: u64 = 0;
+    let mut nudge_seq: u64 = 0;
 
     'agent_loop: loop {
         iteration += 1;
@@ -49,41 +52,12 @@ pub(crate) async fn run_turn_loop(boot: &mut AgentBootstrap) -> Result<()> {
         // tool call so the inner loop's invocations all land here.
         let recorder = ToolRecorder::new();
         let tool_registry = boot.tool_set.build_for_turn(recorder.clone());
-        let injected = boot.injection_tracker.lock().unwrap().take_new_messages();
-        let turn_message = if let Some(ref injected) = injected {
-            format!("{current_message}\n\n{injected}")
-        } else {
-            current_message.clone()
-        };
-
-        // Build a multipart prompt when the envelope contained images that were
-        // successfully fetched. Images are prepended so vision providers see them
-        // before the text (preferred order). This applies to every turn, including
-        // re-engagement, so the original images remain visible as context.
-        let turn_prompt: RigMessage = {
-            use rig_core::OneOrMany;
-            use rig_core::completion::message::{Text, UserContent};
-            match &boot.envelope_image_parts {
-                Some(image_parts) => {
-                    let mut parts: Vec<UserContent> = image_parts.clone();
-                    parts.push(UserContent::Text(Text {
-                        text: turn_message.clone(),
-                    }));
-                    RigMessage::User {
-                        content: OneOrMany::many(parts).unwrap_or_else(|_| {
-                            OneOrMany::one(UserContent::Text(Text {
-                                text: turn_message.clone(),
-                            }))
-                        }),
-                    }
-                }
-                None => RigMessage::User {
-                    content: OneOrMany::one(UserContent::Text(Text {
-                        text: turn_message.clone(),
-                    })),
-                },
-            }
-        };
+        // The injection tracker used to splice mid-turn user input into the
+        // in-memory `turn_message`; that path is gone — the runtime
+        // persists inbound user rows directly and the next projection
+        // sees them naturally. We still drain the tracker buffer here so
+        // the "new messages" indicator clears.
+        let _ = boot.injection_tracker.lock().unwrap().take_new_messages();
 
         // Per-iteration child of `tenex.agent.turn` (created in `main::run`).
         // The outer turn span owns the model/history attrs and the env-extracted
@@ -133,15 +107,7 @@ pub(crate) async fn run_turn_loop(boot: &mut AgentBootstrap) -> Result<()> {
                         resolved.key_health.clone(),
                         keyed_models,
                     );
-                    step::run_step_loop(
-                        boot,
-                        model,
-                        turn_prompt.clone(),
-                        &turn_message,
-                        &re_engage_tail,
-                        tool_registry,
-                        recorder.clone(),
-                    )
+                    step::run_step_loop(boot,model,tool_registry,recorder.clone(),)
                     .await?
                 }
                 "openai" => {
@@ -167,15 +133,7 @@ pub(crate) async fn run_turn_loop(boot: &mut AgentBootstrap) -> Result<()> {
                         resolved.key_health.clone(),
                         keyed_models,
                     );
-                    step::run_step_loop(
-                        boot,
-                        model,
-                        turn_prompt.clone(),
-                        &turn_message,
-                        &re_engage_tail,
-                        tool_registry,
-                        recorder.clone(),
-                    )
+                    step::run_step_loop(boot,model,tool_registry,recorder.clone(),)
                     .await?
                 }
                 "ollama" => {
@@ -185,15 +143,7 @@ pub(crate) async fn run_turn_loop(boot: &mut AgentBootstrap) -> Result<()> {
                     }
                     let client =
                         RecordingClient::new(builder.build()?, cassette_recorder.clone(), "ollama");
-                    step::run_step_loop(
-                        boot,
-                        client.completion_model(resolved.model.clone()),
-                        turn_prompt.clone(),
-                        &turn_message,
-                        &re_engage_tail,
-                        tool_registry,
-                        recorder.clone(),
-                    )
+                    step::run_step_loop(boot,client.completion_model(resolved.model.clone()),tool_registry,recorder.clone(),)
                     .await?
                 }
                 "mock" => {
@@ -202,15 +152,7 @@ pub(crate) async fn run_turn_loop(boot: &mut AgentBootstrap) -> Result<()> {
                         cassette_recorder.clone(),
                         "mock",
                     );
-                    step::run_step_loop(
-                        boot,
-                        client.completion_model(resolved.model.clone()),
-                        turn_prompt.clone(),
-                        &turn_message,
-                        &re_engage_tail,
-                        tool_registry,
-                        recorder.clone(),
-                    )
+                    step::run_step_loop(boot,client.completion_model(resolved.model.clone()),tool_registry,recorder.clone(),)
                     .await?
                 }
                 _ => {
@@ -271,15 +213,7 @@ pub(crate) async fn run_turn_loop(boot: &mut AgentBootstrap) -> Result<()> {
                             resolved.key_health.clone(),
                             keyed_models,
                         );
-                        step::run_step_loop(
-                            boot,
-                            model,
-                            turn_prompt.clone(),
-                            &turn_message,
-                            &re_engage_tail,
-                            tool_registry,
-                            recorder.clone(),
-                        )
+                        step::run_step_loop(boot,model,tool_registry,recorder.clone(),)
                         .await?
                     } else {
                         let keyed_models = healthy_keys
@@ -303,15 +237,7 @@ pub(crate) async fn run_turn_loop(boot: &mut AgentBootstrap) -> Result<()> {
                             resolved.key_health.clone(),
                             keyed_models,
                         );
-                        step::run_step_loop(
-                            boot,
-                            model,
-                            turn_prompt.clone(),
-                            &turn_message,
-                            &re_engage_tail,
-                            tool_registry,
-                            recorder.clone(),
-                        )
+                        step::run_step_loop(boot,model,tool_registry,recorder.clone(),)
                         .await?
                     }
                 }
@@ -379,7 +305,7 @@ pub(crate) async fn run_turn_loop(boot: &mut AgentBootstrap) -> Result<()> {
             accounting_trace.clone(),
             persistence::record_turn_accounting(
                 boot,
-                &current_message,
+                &boot.original_task,
                 &final_response.response,
                 &final_response.usage,
             ),
@@ -414,7 +340,7 @@ pub(crate) async fn run_turn_loop(boot: &mut AgentBootstrap) -> Result<()> {
             sup.check_post_completion(
                 todos_snap,
                 usize::from(boot.emit_state.has_pending_external_work()),
-                boot.envelope_content.clone(),
+                boot.original_task.clone(),
             )
         };
         match outcome {
@@ -432,7 +358,9 @@ pub(crate) async fn run_turn_loop(boot: &mut AgentBootstrap) -> Result<()> {
                             ),
                             ..Default::default()
                         });
-                        if boot.emit_state.has_pending_external_work() {
+                        if boot.emit_state.has_pending_external_work()
+                            || has_pending_delegations_in_store(boot)
+                        {
                             let mut final_ctx = boot.emit_state.build_ctx(final_ral);
                             final_ctx.llm_runtime_ms = boot.emit_state.take_runtime_delta();
                             let intent = ConversationIntent {
@@ -441,10 +369,16 @@ pub(crate) async fn run_turn_loop(boot: &mut AgentBootstrap) -> Result<()> {
                                 usage,
                                 metadata: None,
                             };
-                            boot.channel
+                            let refs = boot
+                                .channel
                                 .send(Intent::Conversation(intent), &final_ctx)
                                 .await
                                 .context("Failed to emit pending-work conversation event")?;
+                            stamp_terminal_event_id_if_any(
+                                boot,
+                                final_response.terminal_assistant_row_id,
+                                &refs,
+                            );
                         } else {
                             let final_ctx = boot.emit_state.build_completion_ctx(final_ral);
                             let intent = CompletionIntent {
@@ -452,10 +386,16 @@ pub(crate) async fn run_turn_loop(boot: &mut AgentBootstrap) -> Result<()> {
                                 usage,
                                 metadata: None,
                             };
-                            boot.channel
+                            let refs = boot
+                                .channel
                                 .send(Intent::Completion(intent), &final_ctx)
                                 .await
                                 .context("Failed to emit final completion event")?;
+                            stamp_terminal_event_id_if_any(
+                                boot,
+                                final_response.terminal_assistant_row_id,
+                                &refs,
+                            );
                         }
                     }
                 }
@@ -476,7 +416,9 @@ pub(crate) async fn run_turn_loop(boot: &mut AgentBootstrap) -> Result<()> {
                             ),
                             ..Default::default()
                         });
-                        if boot.emit_state.has_pending_external_work() {
+                        if boot.emit_state.has_pending_external_work()
+                            || has_pending_delegations_in_store(boot)
+                        {
                             let mut final_ctx = boot.emit_state.build_ctx(final_ral);
                             final_ctx.llm_runtime_ms = boot.emit_state.take_runtime_delta();
                             let intent = ConversationIntent {
@@ -485,10 +427,16 @@ pub(crate) async fn run_turn_loop(boot: &mut AgentBootstrap) -> Result<()> {
                                 usage,
                                 metadata: None,
                             };
-                            boot.channel
+                            let refs = boot
+                                .channel
                                 .send(Intent::Conversation(intent), &final_ctx)
                                 .await
                                 .context("Failed to emit pending-work conversation event")?;
+                            stamp_terminal_event_id_if_any(
+                                boot,
+                                final_response.terminal_assistant_row_id,
+                                &refs,
+                            );
                         } else {
                             let final_ctx = boot.emit_state.build_completion_ctx(final_ral);
                             let intent = CompletionIntent {
@@ -496,30 +444,107 @@ pub(crate) async fn run_turn_loop(boot: &mut AgentBootstrap) -> Result<()> {
                                 usage,
                                 metadata: None,
                             };
-                            boot.channel
+                            let refs = boot
+                                .channel
                                 .send(Intent::Completion(intent), &final_ctx)
                                 .await
                                 .context("Failed to emit final completion event")?;
+                            stamp_terminal_event_id_if_any(
+                                boot,
+                                final_response.terminal_assistant_row_id,
+                                &refs,
+                            );
                         }
                     }
                 }
                 break 'agent_loop;
             }
             PostCompletionOutcome::ReEngage { message } => {
-                re_engage_tail = if final_response.response.trim().is_empty() {
-                    Vec::new()
-                } else {
-                    vec![CtxMessage::Assistant {
-                        content: final_response.response.clone(),
-                        reasoning: Vec::new(),
-                        tool_calls: Vec::new(),
-                    }]
+                // Persist the supervision nudge as a `role=user` row with
+                // `message_type = "supervision"`. The next iteration's
+                // projection picks it up the same way it would pick up a
+                // real user message, and the loop reacts to it. The
+                // terminal assistant from this iteration is already in
+                // storage (via `record_step_assistant`), so projection
+                // produces the correct ordering: prior steps + terminal
+                // assistant + supervision nudge — no in-memory splice
+                // required.
+                let Some(store) = boot.conv_store.as_ref() else {
+                    // Without a store the nudge has nowhere to go and the
+                    // next iteration would re-project identical state,
+                    // re-fire the same supervisor outcome, and loop
+                    // forever. Hard-error rather than spinning until
+                    // MAX_STUCK_ITERATIONS hides the configuration bug.
+                    anyhow::bail!(
+                        "supervision ReEngage requires a conversation store; \
+                         re-engagement is unsupported in the no-store path"
+                    );
                 };
-                current_message = message;
+                persistence::record_supervision_nudge(boot, store, nudge_seq, &message)
+                    .context("failed to persist supervision nudge")?;
+                nudge_seq += 1;
                 eprintln!("[tenex-agent] Supervision: pending todos — re-engaging...");
             }
         }
     }
 
     Ok(())
+}
+
+/// True iff at least one delegation in this conversation still has a
+/// latest marker with `status = Pending`. Used as a cross-invocation
+/// completion-suppression check: when this is true, the agent emits a
+/// `ConversationIntent` (kind 1, no `status: completed` tag) instead of
+/// a `CompletionIntent`, mirroring the TS rule that an agent with open
+/// delegations may not declare itself complete.
+///
+/// Returns `false` when there's no store (test path) — the per-process
+/// `EmitState.has_pending_external_work()` flag is the only signal in
+/// that case.
+fn has_pending_delegations_in_store(boot: &AgentBootstrap) -> bool {
+    let Some(store) = boot.conv_store.as_ref() else {
+        return false;
+    };
+    match store.latest_delegation_markers(&boot.conversation_id) {
+        Ok(markers) => markers
+            .values()
+            .any(|m| matches!(m.status, tenex_conversations::DelegationStatus::Pending)),
+        Err(e) => {
+            eprintln!(
+                "[tenex-agent] could not check pending delegation markers: {e} \
+                 — defaulting to no-pending (may emit completion prematurely)"
+            );
+            false
+        }
+    }
+}
+
+/// Stamp the just-published Nostr event id onto the locally-persisted
+/// step assistant row, so the runtime's own writeback (which materializes
+/// the agent's stdout event with `nostr_event_id = Some(<hex>)`) finds
+/// this row via the partial unique index and is a no-op. Without this
+/// stamp, the runtime would insert a second row for the same content.
+///
+/// No-op when the agent has no conversation store, when the step had no
+/// persisted row (shouldn't happen post-step-7 but defensive), or when
+/// the channel returned no Nostr event refs (e.g. test channels).
+fn stamp_terminal_event_id_if_any(
+    boot: &AgentBootstrap,
+    terminal_row_id: Option<i64>,
+    refs: &[MessageRef],
+) {
+    let Some(row_id) = terminal_row_id else { return };
+    let Some(store) = boot.conv_store.as_ref() else { return };
+    let Some(MessageRef::Nostr { event_id }) = refs.iter().find(|r| matches!(r, MessageRef::Nostr { .. })) else {
+        return;
+    };
+    if let Err(e) =
+        persistence::reconcile_step_assistant_event_id(store, row_id, &event_id.to_hex())
+    {
+        eprintln!(
+            "[tenex-agent] warn: failed to reconcile event_id {} on row {}: {e}",
+            event_id.to_hex(),
+            row_id
+        );
+    }
 }
