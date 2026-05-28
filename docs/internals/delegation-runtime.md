@@ -2,17 +2,29 @@
 title: "Delegation Runtime"
 date: "2026-04-29"
 audience: "llms"
-scope: "How TENEX agents create delegated work, route completions, resume parent RALs, and represent delegation state in the current TypeScript runtime, with Rust intent-path notes where they affect the shared protocol."
-status: "investigated"
+scope: "HISTORICAL REFERENCE. How the now-removed TypeScript runtime represented delegated work, routed completions, and resumed parent RALs, with Rust intent-path notes where they affect the shared protocol. For current Rust behavior, see the documents linked below."
+status: "historical"
 related_docs:
-  - "docs/DELEGATION-AND-RAL-PROCESSING.md"
   - "docs/internals/ral-lifecycle-and-mid-run-injection.md"
-  - "docs/SUPERVISION.md"
+  - "docs/internals/delegation-followup-runtime.md"
   - "docs/RUST-AGENT-SPEC.md"
-confidence: "high for the TypeScript runtime, medium for Rust parity"
+confidence: "describes the removed TypeScript runtime; the current Rust runtime differs"
 ---
 
 # Delegation Runtime
+
+> **Historical reference.** This document describes the delegation/RAL model of
+> the **now-removed TypeScript runtime** (`RALRegistry`, `AgentDispatchService`,
+> the `src/services/ral/` and `src/agents/execution/` machinery). The Rust
+> system does not replicate that in-memory RAL orchestration; its delegation
+> path is simpler and persists routes in `conversation.db`. It is kept as a
+> record of the prior design (the TypeScript reference worktree noted in the
+> top-level `AGENTS.md` still holds the source).
+>
+> For how delegation works in the **current Rust runtime**, see:
+> - `docs/internals/ral-lifecycle-and-mid-run-injection.md`
+> - `docs/internals/delegation-followup-runtime.md`
+> - the Rust intent path in `crates/tenex-agent/src/tools/delegate.rs`, `delegate_followup.rs`, `self_delegate.rs`, and `crates/tenex-protocol/`.
 
 ## Question
 
@@ -20,7 +32,7 @@ How does TENEX represent a delegated task, route it to another agent, wait for i
 
 ## Short Answer
 
-In the current TypeScript runtime, a delegation is a fresh kind:1 Nostr event from the delegating agent to the delegatee. It p-tags the delegatee, has no root `e` tag, and is treated as the root of the child conversation. `AgentPublisher.delegate()` also adds a `delegation` tag pointing back to the parent conversation so the child conversation can build a delegation chain.
+In the TypeScript runtime, a delegation was a fresh kind:1 Nostr event from the delegating agent to the delegatee. It p-tags the delegatee, has no root `e` tag, and is treated as the root of the child conversation. `AgentPublisher.delegate()` also adds a `delegation` tag pointing back to the parent conversation so the child conversation can build a delegation chain.
 
 The parent RAL does not end when the tool publishes the delegation. The tool immediately registers a `PendingDelegation` in `RALRegistry`, while `PendingDelegationsRegistry` holds the published event id long enough for `ToolExecutionTracker` to add a q-tag to the delayed tool-use event. The executor may keep streaming, but final completion is blocked while pending or completed delegation work remains.
 

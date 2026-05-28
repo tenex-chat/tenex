@@ -18,9 +18,7 @@ related_files:
   - "crates/tenex-summarizer/src/state.rs"
   - "crates/tenex-summarizer/src/categories.rs"
   - "tenex/src/daemon/mod.rs"
-  - "src/events/NDKEventMetadata.ts"
-  - "src/event-handler/index.ts"
-confidence: "high for current Rust source; medium for future tenex-conversations cutover"
+confidence: "high for current Rust source"
 ---
 
 # Conversation Metadata Generation
@@ -33,9 +31,9 @@ How does TENEX generate conversation metadata such as titles, summaries, status 
 
 The current Rust owner is `crates/tenex-summarizer`, a host-level companion daemon. The Rust `tenex daemon` starts it if a `tenex-summarizer` binary exists beside the `tenex` binary. The summarizer runs once per host, takes a singleton `flock` lock at `$TENEX_BASE_DIR/summarizer.pid`, polls every 5 seconds, and scans every project under `$TENEX_BASE_DIR/projects`.
 
-For now, the source adapter in `crates/tenex-summarizer/src/source.rs` reads the interim Bun-era storage layout: per-project JSON transcripts plus `conversation-catalog.db`. The catalog supplies candidate conversation ids and last-activity timestamps. The JSON transcript supplies text messages and receives the metadata writeback. The summarizer does not yet read or write the newer `crates/tenex-conversations` SQLite store directly.
+The source adapter in `crates/tenex-summarizer/src/source.rs` reads and writes the per-project `conversation.db` through the `tenex-conversations` `ConversationStore`. It lists candidate conversations from the `messages` table (by most recent message activity), builds transcripts from the stored messages, and writes generated metadata back through the store's `update_metadata`. It does not read JSON transcripts or any `conversation-catalog.db`.
 
-For each eligible conversation, the scheduler waits until the catalog last activity is at least 10 seconds quiet and not older than 7 days. It then checks `$TENEX_BASE_DIR/summarizer/state.db` so it only summarizes when activity has advanced, with a 5 minute per-conversation minimum interval. It formats text messages into a speaker-labeled transcript, asks the configured summarization LLM for a structured `Summary`, writes non-empty title/summary/status fields into the JSON `metadata` object, records category counts globally, and publishes an empty-content kind:513 event with `e`, `a`, `title`, `summary`, `status-*`, `t`, and `model` tags.
+For each eligible conversation, the scheduler waits until the last message activity is at least 10 seconds quiet and not older than 7 days. It then checks `$TENEX_BASE_DIR/summarizer/state.db` so it only summarizes when activity has advanced, with a 5 minute per-conversation minimum interval. It formats text messages into a speaker-labeled transcript, asks the configured summarization LLM for a structured `Summary`, writes non-empty title/summary/status fields to the conversation's header columns in `conversation.db`, records category counts globally, and publishes an empty-content kind:513 event with `e`, `a`, `title`, `summary`, `status-*`, `t`, and `model` tags.
 
 ## System Map
 
@@ -47,7 +45,7 @@ For each eligible conversation, the scheduler waits until the catalog last activ
 
 `crates/tenex-summarizer/src/scheduler.rs` owns process policy: scan cadence, quiet window, maximum age, per-conversation rate limit, error handling, category recording, and success/failure logs.
 
-`crates/tenex-summarizer/src/source.rs` is the only Rust summarizer module that knows the current on-disk conversation layout. It discovers projects, loads `event.json` for the project `a` tag, queries `conversation-catalog.db` for candidate rows, builds transcripts from JSON `messages`, and writes generated metadata back to the JSON file.
+`crates/tenex-summarizer/src/source.rs` is the only Rust summarizer module that knows the conversation store schema. It discovers projects, loads `event.json` for the project `a` tag, opens `conversation.db` through `tenex-conversations`, lists candidate conversations from the `messages` table, builds transcripts from the stored messages, and writes generated metadata back through `ConversationStore::update_metadata`.
 
 `crates/tenex-summarizer/src/summarize.rs` owns the LLM prompt and output schema. The schema uses snake-case fields at the LLM boundary: `title`, `summary`, `status_label`, `status_current_activity`, and `categories`.
 
@@ -55,40 +53,34 @@ For each eligible conversation, the scheduler waits until the catalog last activ
 
 `crates/tenex-summarizer/src/categories.rs` stores a global category tally at `$TENEX_BASE_DIR/data/conversation-categories.json`. The LLM receives the top 10 categories by frequency as canonical suggestions, not an allowlist.
 
-`src/events/NDKEventMetadata.ts` and `src/event-handler/index.ts` are still relevant on the TypeScript side. A runtime that receives kind:513 can apply `title`, `summary`, `status-label`, and `status-current-activity` tags to an in-memory `ConversationStore`, then save the transcript.
+Consuming the published kind:513 events — applying the `title`, `summary`, `status-label`, and `status-current-activity` tags back onto a conversation the runtime already knows — is a separate runtime concern from this publish-only daemon. The TypeScript consumers that previously did this (`NDKEventMetadata`, the event handler, and `ConversationCatalogService`) were removed in the cutover; see the addendum for how that path worked.
 
-`src/conversations/ConversationCatalogService.ts` is the derived read model for metadata queries in the interim TypeScript storage path. It mirrors metadata fields from JSON into `conversation-catalog.db`, but the Rust summarizer currently writes the JSON file directly and does not update the catalog DB itself.
+Generated metadata is written to the conversation's header columns in `conversation.db` via `ConversationStore::update_metadata`. There is no separate `conversation-catalog.db` in this path; the conversation store is the single substrate the summarizer reads and writes.
 
 ## Runtime Flow
 
 1. `tenex daemon` starts, resolves its base directory, and spawns `tenex-summarizer` as a supervised companion when the binary is present beside `tenex`.
 2. `tenex-summarizer run` initializes telemetry/logging, acquires `$TENEX_BASE_DIR/summarizer.pid`, loads config, opens `$TENEX_BASE_DIR/summarizer/state.db`, creates a Nostr publisher, and starts a 5 second ticker.
-3. Each scan calls `source::discover_projects()`. A project is considered only when `$TENEX_BASE_DIR/projects/<dTag>/conversation-catalog.db` exists. Missing catalogs are skipped because projects can exist before the catalog is populated.
+3. Each scan calls `source::discover_projects()` (via `tenex-conversations`). A project is considered only when both its `event.json` and `conversation.db` exist.
 4. For each project, `source::load_project_event()` reads `event.json` and extracts the project owner pubkey plus d-tag. This becomes the kind:513 `a` tag value `31933:<pubkey>:<dTag>`.
-5. `source::list_candidates()` opens the project catalog read-only and selects conversations whose `last_activity` is between `now - 7 days` and `now - 10 seconds`, newest first.
-6. `scheduler::should_process()` reads the summarizer state row keyed by `conversation_id`. New conversations process once. Existing rows process only when catalog `last_activity` is greater than the last summarized activity and at least 5 minutes have elapsed since the last successful or empty-content handling.
-7. `source::fetch_content()` reads `<project>/conversations/<conversation_id>.json`, keeps only messages with `messageType == "text"`, formats each as `speaker: content`, and joins messages with blank lines. Speaker selection prefers `senderPrincipal.displayName`, then `senderPrincipal.username`, then the first 8 chars of `senderPubkey`, then `system` for system-role messages, then `unknown`.
+5. `source::list_candidates()` opens `conversation.db` and selects conversations from the `messages` table, grouped by `conversation_id` by most recent message activity, whose last activity is between `now - 7 days` and `now - 10 seconds`, newest first.
+6. `scheduler::should_process()` reads the summarizer state row keyed by `conversation_id`. New conversations process once. Existing rows process only when the last message activity is greater than the last summarized activity and at least 5 minutes have elapsed since the last successful or empty-content handling.
+7. `source::fetch_content()` reads the conversation's messages from `conversation.db` via `list_messages`, keeps only messages with `message_type == "text"`, formats each as `speaker: content`, and joins messages with blank lines. Speaker selection uses `system` for system-role messages, then `senderPrincipal.displayName`, then `senderPrincipal.username`, then the first 8 chars of the sender/author pubkey, then `unknown`.
 8. `summarize::summarize()` passes the transcript and category suggestion text to a Rig extractor for the configured provider. The system prompt instructs the model to avoid invented outcomes, keep titles to 3-5 words, keep summaries to one dense sentence under 160 characters, choose one of the fixed status labels, and emit 0-3 stable lowercase category nouns.
-9. `scheduler::process_inner()` converts non-empty LLM fields into a `MetadataUpdate`. It writes `title`, `summary`, `statusLabel`, and `statusCurrentActivity` into the JSON conversation `metadata` object. Empty fields are ignored rather than deleting old metadata.
+9. `scheduler::process_inner()` converts non-empty LLM fields into a `MetadataUpdate` and writes `title`, `summary`, `status_label`, and `status_current_activity` through `ConversationStore::update_metadata` into the conversation's header columns in `conversation.db`. Empty fields are ignored rather than deleting old metadata.
 10. The publisher emits a kind:513 event with tags for the conversation id, metadata fields, categories, project `a` reference, and model id. The event content is empty.
 11. After `process_inner()` succeeds, the scheduler records `(conversation_id, last_activity_summarized, last_summarized_at_ms)` in `state.db`. It then increments category counts for any returned categories and logs `summarized`.
 
 ## State And Data
 
-The local metadata shape in JSON transcripts is camel-case:
+Metadata is stored on the conversation row in `conversation.db`, set via `update_metadata`. The four fields written are:
 
-```json
-{
-  "metadata": {
-    "title": "Runtime Probe Fix",
-    "summary": "Probe replay waits were adjusted after flaky runtime timing.",
-    "statusLabel": "Completed",
-    "statusCurrentActivity": "Runtime probe expectations now match replay timing."
-  }
-}
-```
+- `title`
+- `summary`
+- `status_label`
+- `status_current_activity`
 
-Category tags are not written into the conversation JSON metadata by the Rust summarizer. They are published as Nostr `t` tags and counted in the global category tally.
+Category tags are not written into the conversation metadata by the Rust summarizer. They are published as Nostr `t` tags and counted in the global category tally.
 
 The kind:513 event contract uses tag names rather than JSON content:
 
@@ -103,27 +95,25 @@ The kind:513 event contract uses tag names rather than JSON content:
 ["model", "<model-id>"]
 ```
 
-The summarizer state DB is independent of project catalog state. Its `conversation_summary_state` table stores only the conversation id, the catalog last-activity value that was handled, and the wall-clock summarize time in milliseconds. This implies the architecture treats Nostr conversation event ids as globally unique enough for host-wide state keys.
+The summarizer state DB is independent of the conversation store. Its `conversation_summary_state` table stores only the conversation id, the last message-activity value that was handled, and the wall-clock summarize time in milliseconds. This implies the architecture treats Nostr conversation event ids as globally unique enough for host-wide state keys.
 
-The interim `conversation-catalog.db` stores title, summary, last user message, status label, current activity, timestamps, participants, delegations, and embedding index state. `ConversationCatalogService` derives those fields by parsing JSON transcripts or by receiving `ConversationStore.save()` upserts. A direct Rust `source::write_metadata()` changes the JSON transcript but does not directly upsert the catalog.
-
-The newer `crates/tenex-conversations` schema already has first-class conversation header columns for title, summary, last user message, status label, status current activity, owner pubkey, timestamps, and `metadata_json`. The summarizer adapter has not been switched to that store in the reviewed source.
+The `tenex-conversations` schema has first-class conversation header columns for title, summary, last user message, status label, status current activity, owner pubkey, timestamps, and `metadata_json`. The summarizer writes the title/summary/status fields into those columns via `update_metadata`. (Previously, the now-removed TypeScript `ConversationCatalogService` derived such fields from JSON transcripts and `ConversationStore.save()` upserts — see the addendum.)
 
 ## Contracts And Invariants
 
-Only `source.rs` should know the current transcript storage layout. The rest of the summarizer is intentionally storage-agnostic so the JSON+catalog adapter can be replaced when `tenex-conversations` becomes the runtime conversation store.
+Only `source.rs` knows the conversation store schema. The rest of the summarizer is intentionally storage-agnostic; the adapter targets the `tenex-conversations` `ConversationStore`.
 
 The summarizer is publish-only. It does not subscribe to relays, route inbound events, execute agents, manage RAL state, or mutate project membership.
 
 The LLM schema is a compatibility contract. The Rust prompt and schema were lifted from the removed TypeScript `ConversationSummarizer`; changing either should be treated as a wire/behavior change, not a local refactor.
 
-The local write uses camel-case status keys, while the kind:513 event uses kebab-case tag keys and the LLM schema uses snake-case field names. Future agents should preserve this mapping unless they update every reader.
+There are three distinct representations of the same fields: the conversation store columns (`status_label`, `status_current_activity`), the kind:513 event's kebab-case tag keys (`status-label`, `status-current-activity`), and the snake-case LLM schema fields. Future agents should preserve this mapping unless they update every reader.
 
-The event should include an `e` tag for the conversation id and an `a` tag for the project coordinate. The TypeScript daemon classification path treats kind:513 as conversation-plane traffic, and the event handler updates only conversations it already knows.
+The event should include an `e` tag for the conversation id and an `a` tag for the project coordinate. Consumers classify kind:513 as conversation-plane traffic and update only conversations they already know.
 
 The current Rust transcript formatter ignores tool-call, tool-result, and delegation-marker messages. Generated metadata is therefore based only on text conversation entries.
 
-The singleton lock is part of the correctness model. Two host summarizers would race on JSON writes, duplicate kind:513 events, and double-count categories.
+The singleton lock is part of the correctness model. Two host summarizers would race on metadata writes, duplicate kind:513 events, and double-count categories.
 
 ## Failure And Recovery
 
@@ -131,15 +121,15 @@ If config is missing, no valid relay remains, no backend secret key exists, or t
 
 If project discovery fails, the scan logs a warning and continues on the next tick. If one project has an unreadable `event.json`, only that project is skipped. If listing candidates fails for one project, the scan continues to the next project.
 
-If a candidate's JSON transcript is missing or produces an empty transcript, `process_inner()` returns `Ok(None)`. The scheduler still records the catalog last-activity value in state, so the same empty candidate is not retried until activity advances.
+If a candidate conversation is missing from the store or produces an empty transcript, `process_inner()` returns `Ok(None)`. The scheduler still records the last message-activity value in state, so the same empty candidate is not retried until activity advances.
 
-If the LLM call, JSON metadata write, signing, or publish fails, the scheduler logs `summarize failed` and does not record state. The next scan can retry the same candidate. Because JSON write happens before publish, a publish failure can leave local JSON metadata updated even though the summarizer will retry and potentially publish later.
+If the LLM call, metadata write, signing, or publish fails, the scheduler logs `summarize failed` and does not record state. The next scan can retry the same candidate. Because the metadata write happens before publish, a publish failure can leave the stored metadata updated even though the summarizer will retry and potentially publish later.
 
 If category tally recording fails after successful metadata generation and publishing, the scheduler logs a warning but keeps the summarization state. Category tally failure does not retry the conversation.
 
 There is no explicit LLM timeout or parallel worker pool in the reviewed scheduler. A slow LLM call blocks subsequent candidate processing in that daemon process until it returns or fails.
 
-The Rust direct JSON write preserves other top-level transcript fields and writes through a temporary `*.json.tmp` followed by rename. It does not coordinate with a simultaneously saving TypeScript `ConversationStore`, so the singleton summarizer prevents summarizer/summarizer races but not every possible cross-process JSON write race in the interim layout.
+The metadata write goes through `ConversationStore::update_metadata` against `conversation.db`. The singleton summarizer lock prevents summarizer/summarizer races; the store is the same SQLite file other consumers open, so concurrency is mediated by SQLite rather than by file-rename semantics.
 
 ## Observability
 
@@ -149,9 +139,7 @@ The `status` subcommand probes the lockfile and prints `running (pid <pid>)` or 
 
 The current Rust code initializes `tenex_telemetry`, but the summarizer path reviewed here relies on logs rather than a detailed span model. This differs from the old TypeScript path, which created a `tenex.summarize` OpenTelemetry span for each summarization.
 
-`crates/tenex-summarizer/tests/discover_and_read.rs` is the focused Rust test. It builds an isolated `$TENEX_BASE_DIR`, creates a project fixture with `event.json`, `conversation-catalog.db`, and JSON transcript, then verifies discovery, candidate listing, transcript formatting, state recording, and metadata writeback. It intentionally stops at the LLM boundary.
-
-Useful TypeScript validation remains around kind:513 consumption and catalog projection: `src/event-handler/index.ts` applies metadata event tags to known conversations, and `src/conversations/ConversationCatalogService.ts` projects JSON metadata into catalog rows.
+`crates/tenex-summarizer/tests/discover_and_read.rs` is the focused Rust test. It builds an isolated `$TENEX_BASE_DIR`, creates a project fixture with `event.json` and a `conversation.db`, then verifies discovery, candidate listing, transcript formatting, state recording, and metadata writeback. It intentionally stops at the LLM boundary.
 
 ## Source Guide
 
@@ -159,7 +147,7 @@ Read `crates/tenex-summarizer/AGENTS.md` first for the local invariants: polling
 
 Read `crates/tenex-summarizer/src/scheduler.rs` for scan timing, candidate policy, state decisions, and retry behavior.
 
-Read `crates/tenex-summarizer/src/source.rs` for the current storage adapter, transcript formatter, project event loading, candidate SQL, and JSON metadata write.
+Read `crates/tenex-summarizer/src/source.rs` for the conversation-store adapter, transcript formatter, project event loading, candidate SQL, and the `update_metadata` write.
 
 Read `crates/tenex-summarizer/src/summarize.rs` for the exact LLM prompt, structured output schema, provider support, and category suggestion injection.
 
@@ -169,15 +157,11 @@ Read `crates/tenex-summarizer/src/config.rs`, `state.rs`, `categories.rs`, and `
 
 Read `tenex/src/daemon/mod.rs` and `tenex/src/daemon/supervisor.rs` to understand how the daemon is launched and restarted.
 
-Read `src/events/NDKEventMetadata.ts`, `src/event-handler/index.ts`, `src/conversations/ConversationStore.ts`, and `src/conversations/ConversationCatalogService.ts` for remaining TypeScript consumers of generated metadata.
-
-Read `crates/tenex-conversations/src/schema.rs`, `model.rs`, `store.rs`, and `migration.rs` before moving the summarizer off JSON transcripts.
+Read `crates/tenex-conversations/src/schema.rs`, `model.rs`, `store.rs`, and `migration.rs` for the conversation store schema the summarizer reads and writes.
 
 ## Open Questions
 
-The source adapter still targets JSON transcripts plus `conversation-catalog.db`. The intended `tenex-conversations` SQLite cutover is documented, but the reviewed source has not implemented it.
-
-The Rust summarizer writes JSON metadata directly and does not update `conversation-catalog.db` or embedding index state directly. Catalog consumers that reconcile from disk will eventually see the metadata, but there is no immediate Rust-side catalog upsert in this path.
+The summarizer writes conversation header metadata but does not update embedding index state. RAG indexing is a separate concern owned by `tenex-embedder`.
 
 The Rust transcript formatter does not use `tenex-identity` for pubkey display-name resolution. It falls back to sender-principal fields or short pubkeys, which may produce lower-fidelity speaker labels than the old TypeScript `IdentityService` path.
 
@@ -189,13 +173,13 @@ TypeScript comparison reference: local git object `2855d63d93dee6a708800d6d9b8f4
 
 In TypeScript, `ConversationSummarizer` and `MetadataDebounceManager` lived inside the project runtime. `AgentDispatchService` invoked them on new conversations, after normal agent dispatch, and after delegation response handling. The cutover commit deleted those services and callsites so the Rust daemon owns kind:513 generation.
 
-The trigger model changed. TypeScript generated initial metadata immediately for a new non-internal conversation, then used in-memory per-conversation debounce timers: agent start cleared pending timers, subsequent completions waited 10 seconds, and a 5 minute max deadline forced publication. Rust polls catalog activity instead. It waits for at least 10 seconds of quiet time, processes on the next 5 second scan, and hard-caps re-summarization to once every 5 minutes after a successful or empty-content handling.
+The trigger model changed. TypeScript generated initial metadata immediately for a new non-internal conversation, then used in-memory per-conversation debounce timers: agent start cleared pending timers, subsequent completions waited 10 seconds, and a 5 minute max deadline forced publication. Rust polls message activity instead. It waits for at least 10 seconds of quiet time, processes on the next 5 second scan, and hard-caps re-summarization to once every 5 minutes after a successful or empty-content handling.
 
 The failure boundary changed. In TypeScript, a hung or crashing summarization call shared a process with agent dispatch. In Rust, summarization is a supervised host daemon; crashes can be restarted without taking down agent execution, and pending work is rediscovered from disk.
 
 The debounce state changed from volatile timers to durable SQLite state. TypeScript lost pending timers on runtime shutdown. Rust records last summarized activity in `$TENEX_BASE_DIR/summarizer/state.db`, so restart does not resummarize the whole host.
 
-The data access path changed. TypeScript summarized a live `ConversationStore`, saved through `ConversationStore.save()`, updated `ConversationCatalogService`, and triggered indexing hooks. Rust reads and writes JSON directly through `source.rs`; this preserves local transcript metadata but bypasses immediate TypeScript catalog/index hooks.
+The data access path changed. TypeScript summarized a live in-memory `ConversationStore`, saved through `ConversationStore.save()`, updated `ConversationCatalogService`, and triggered indexing hooks. Rust reads and writes the SQLite `conversation.db` directly through `source.rs` (via the `tenex-conversations` `ConversationStore`), with no separate catalog or index-hook step.
 
 The LLM prompt and schema are intentionally the same. TypeScript used `llmServiceFactory.generateObject()` with a Zod schema. Rust uses Rig extractors with a serde/schemars `Summary` struct. The field names and prompt text are parity-sensitive.
 

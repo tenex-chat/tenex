@@ -31,52 +31,46 @@ The goal is **always** the right long-term, sustainable, idiomatic, coherent fix
 - Don't wrap libraries unnecessarily
 - Three similar lines > premature abstraction
 
-### NDK USAGE
-- Import NDK types directly from `@nostr-dev-kit/ndk` for typing
-- Use `src/nostr` wrappers (`AgentPublisher`, `AgentEventEncoder/Decoder`, `ndkClient`) for publishing and decoding
-- Avoid ad-hoc NDK access outside `nostr/` unless tests need mocks
+### NOSTR USAGE
+- Use the `nostr-sdk` crate for Nostr primitives (events, keys, filters).
+- TENEX event kind/tag construction and decoding lives in `tenex-protocol` (intent vocabulary + Nostr channel encoding). Build and parse TENEX events there — never ad-hoc at call sites.
+- Signing is always behind the `Signer` trait (`tenex-project`); never reach for raw keys.
+- The agent runner (`tenex-agent`) does not open relay connections — subscription and orchestration live outside it.
 
 ---
 
 ## Architecture
 
-### Layer Hierarchy (Dependencies Flow DOWN Only)
-```
-Layer 4: commands/ daemon/ event-handler/
-    ↓
-Layer 3: services/ agents/ conversations/ tools/
-    ↓
-Layer 2: llm/ nostr/ prompts/ events/
-    ↓
-Layer 1: utils/
-    ↓
-Layer 0: lib/  ← ZERO TENEX imports
-```
+TENEX is a Rust workspace. The host CLI/supervisor is `tenex/`; every other
+concern is a crate under `crates/`. See `MODULE_INVENTORY.md` for the full map
+and `crates/AGENTS.md` for the authoritative rules.
 
-**Violations are blocking errors. No exceptions.**
+### One crate, one thing
+Each crate owns a single concern — a storage layer, a projection, a daemon, or
+a one-shot binary. New behavior extends the crate that already owns the concern;
+it does not accrete into an unrelated one.
 
-### Layer Rules
+### Three roles, kept separate
+- **Subscribe** — owns the relay connection.
+- **Orchestrate** — owns dispatch, RAL state, the delegation tree.
+- **Execute** — the LLM loop and tools (`tenex-agent`).
 
-| Layer | Can Import | Cannot Import |
-|-------|------------|---------------|
-| `lib/` | Node built-ins, npm only | ANY `@/` imports |
-| `utils/` | `lib/` | `services/`, `agents/`, `commands/` |
-| `services/` | `utils/`, `lib/`, `llm/`, `nostr/` | `commands/`, `daemon/`, `event-handler/` |
-| `commands/` | Everything below | N/A |
+The runner never opens relays; the orchestrator never calls LLMs; the subscriber
+never tracks delegations. Mixing these is the biggest design failure mode here.
 
-### Services Organization
-```
-services/
-├── ral/           ← Delegation/RAL state
-│   ├── RALRegistry.ts
-│   └── types.ts
-├── rag/
-├── mcp/
-├── ConfigService.ts  ← Small services at root
-└── ...
-```
+### Library vs daemon
+Take a process boundary only when you get concurrency/security isolation,
+language choice, independent restart, or hot-swap. Otherwise it is a library. A
+daemon's public surface is a Unix socket speaking NDJSON; a library's is a typed
+Rust API over its substrate (a versioned SQLite schema or a JSON file layout).
+Pick one; never both.
 
-**Rule:** Create subdirectory when 3+ related files exist.
+### Storage is the contract
+SQLite migrations are forward-only and belong only to the crate that owns the
+database; JSON file-layout changes belong only to the crate that owns that
+directory. State lives on disk — every process must survive restart from it.
+
+**Rule:** Project IDs accept either the NIP-33 coordinate (`31933:<pubkey>:<dTag>`) or the bare dTag — normalize once at the owning crate's boundary.
 
 ---
 
@@ -84,35 +78,40 @@ services/
 
 | Type | Convention | Example |
 |------|------------|---------|
-| Services | `*Service` suffix | `ProjectStatusService` |
-| Files (services) | PascalCase | `ProjectStatusService.ts` |
-| Files (utils) | kebab-case | `error-formatter.ts` |
-| Types | `types.ts` or inline | `types.ts` |
-| Tests | `*.test.ts` in `__tests__/` | `__tests__/Foo.test.ts` |
+| Crates | `tenex-<area>`, kebab-case | `tenex-conversations` |
+| Modules / files | snake_case `.rs` | `store.rs`, `schema.rs` |
+| Types | CamelCase | `ConversationStore` |
+| Functions / fields | snake_case | `list_candidates` |
+| Tests | `#[cfg(test)]` module or `tests/*.rs` | `tests/discover_and_read.rs` |
+
+Each crate carries an `AGENTS.md` with its local invariants. Read it before
+changing that crate.
 
 ---
 
-## Import Patterns
+## Dependency Patterns
 
-```typescript
-// CORRECT: Direct imports with @/ alias
-import { RALRegistry } from "@/services/ral";
-import { formatAnyError } from "@/lib/error-formatter";
-import type { NDKEvent } from "@nostr-dev-kit/ndk";
+```rust
+// CORRECT: depend on the crate that owns the concern; import what you need
+use tenex_conversations::ConversationStore;
+use tenex_project::Signer;
 
-// WRONG: Barrel imports
-import { RALRegistry } from "@/services";
-
-// WRONG: Relative cross-module imports
-import { config } from "../../../services/ConfigService";
+// WRONG: reaching across roles — opening a relay from inside the agent runner,
+//        or calling an LLM from the orchestrator
+// WRONG: re-normalizing a project id at every call site instead of once at the
+//        owning crate's boundary
 ```
+
+Crate dependencies are declared in each crate's `Cargo.toml` and the workspace
+`Cargo.toml`. Keep the graph acyclic and minimal. The tree is Rust-only — no
+`bun`/TypeScript imports.
 
 ---
 
 ## Before Writing Code
 
 ### MANDATORY - Answer These Questions First:
-1. **Where does this code belong?** (Check layer hierarchy)
+1. **Which crate owns this concern?** (Extend it; don't add a new crate unless it is a new role in the fleet)
 2. **Does similar code already exist?** (Search before creating)
 3. **What's the minimal change needed?** (No scope creep)
 4. **Am I about to write a TODO?** (Stop. Fix it now or don't do it)
@@ -128,74 +127,72 @@ import { config } from "../../../services/ConfigService";
 
 ## Anti-Patterns to Reject
 
-### Layer Violations
-```typescript
-// REJECT: utils importing services
-// utils/something.ts
-import { config } from "@/services/ConfigService";  // ❌
+### Role / Crate Violations
+```rust
+// REJECT: the agent runner opening a relay connection  ❌
+// REJECT: the orchestrator calling an LLM              ❌
 
-// FIX: Move to services/ or pass config as parameter
+// FIX: keep Subscribe / Orchestrate / Execute separate. Relay access lives
+//      outside tenex-agent; LLM calls live inside it.
+```
+
+### Sentinel Values That Mask Failure
+```rust
+// REJECT: silently turning an error into "not found"
+let view = resolve(pubkey).unwrap_or(None);  // ❌ (on Result<Option<T>>)
+let name = display_name.unwrap_or_else(|| "unknown".into());  // ❌
+
+// FIX: represent absence with Option; propagate or log-and-bail on failure
 ```
 
 ### Backwards Compatibility
-```typescript
-// REJECT: Keeping old interface
-export { OldName as NewName };  // ❌
-export const legacyMethod = newMethod;  // ❌
+```rust
+// REJECT: keeping the old name alive
+pub use new_module::NewName as OldName;  // ❌
 
-// FIX: Just rename it. Update all call sites.
+// FIX: just rename it and update all call sites.
 ```
 
 ### Unused Code
-```typescript
-// REJECT: Underscore prefix for unused
-const _oldValue = compute();  // ❌
+```rust
+// REJECT: underscore prefix for unused
+let _old_value = compute();  // ❌
 
-// FIX: Delete it entirely
+// FIX: delete it entirely
 ```
 
-### God Classes
-```typescript
-// REJECT: Class doing everything
-class ConversationManager {
-  fetch() { }
-  persist() { }
-  format() { }
-  summarize() { }
-  // ... 50 more methods
+### God Modules
+```rust
+// REJECT: one type doing everything
+impl ConversationManager {
+    fn fetch(&self) {}
+    fn persist(&self) {}
+    fn format(&self) {}
+    fn summarize(&self) {}
+    // ... 50 more methods
 }
 
-// FIX: Split into focused services
+// FIX: split by concern across crates/modules
+//      (storage vs projection vs summarizer)
 ```
 
 ---
 
 ## Tool Implementations
 
-Tools in `src/tools/implementations/` should:
-- Be single-purpose (one file = one tool)
-- Delegate business logic to services
+Agent tools live in `crates/tenex-agent/src/tools/` (one file per tool). They should:
+- Be single-purpose
+- Delegate business logic to the crate that owns it (`tenex-rag`, `tenex-mcp`, `tenex-conversations`, …)
 - Never hold state
-- Follow naming: `<domain>_<action>.ts`
+- Follow naming: `<domain>_<action>.rs`
 
-```typescript
-// CORRECT: Tool delegates to service
-import { RAGService } from "@/services/rag";
+```rust
+// CORRECT: the tool delegates to the owning crate
+use tenex_rag::RagStore;
+// ...the tool resolves the store, calls it, and shapes the result.
+// It holds no schema, no SQL, and no vector-store logic itself.
 
-export const rag_search = tool({
-  execute: async ({ query }) => {
-    const ragService = new RAGService();
-    return await ragService.query(query);
-  }
-});
-
-// WRONG: Tool implements business logic directly
-export const rag_search = tool({
-  execute: async ({ query }) => {
-    const db = await connectVectorStore();
-    // ... 100 lines of implementation
-  }
-});
+// WRONG: the tool opens the vector store and implements query logic inline
 ```
 
 ---
@@ -213,8 +210,8 @@ This project runs multiple agents concurrently. Follow these rules to avoid inte
 ## References
 
 - **Full architecture guide:** `docs/ARCHITECTURE.md`
+- **Crate philosophy and rules:** `crates/AGENTS.md`
 - **Module inventory:** `MODULE_INVENTORY.md`
-- **Testing status:** `docs/TESTING_STATUS.md`
 
 ---
 
@@ -224,6 +221,6 @@ This project runs multiple agents concurrently. Follow these rules to avoid inte
 2. **Right fix, not fast fix** - Sustainable, idiomatic, coherent — never expedient
 3. **No backwards compatibility** - Clean breaks only
 4. **No over-engineering** - Minimal changes for the task
-5. **Respect layer boundaries** - Dependencies flow down
-6. **Use `nostr/` wrappers** - Keep NDK publishing/decoding inside `src/nostr`
+5. **Respect crate boundaries** - One crate, one concern; keep the three roles separate
+6. **Build Nostr events in `tenex-protocol`** - Use `nostr-sdk` primitives; sign behind the `Signer` trait
 7. **Delete unused code** - Don't comment or underscore it

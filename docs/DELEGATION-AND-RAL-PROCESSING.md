@@ -1,6 +1,17 @@
 # Delegation and RAL Processing
 
-This document describes how delegation and RAL (Reason-Act Loop) state is tracked and resumed in the current implementation.
+> **Historical reference.** This document describes the delegation/RAL
+> (Reason-Act Loop) machinery of the **now-removed TypeScript runtime**
+> (`src/services/ral/RALRegistry.ts`, `src/agents/execution/*.ts`, the
+> `StopExecutionSignal` flow). The Rust runtime does not replicate this
+> in-memory RAL model. It is kept as a record of the prior design.
+>
+> For current Rust behavior, see `docs/internals/ral-lifecycle-and-mid-run-injection.md`
+> and `docs/internals/delegation-followup-runtime.md`. The shared **wire
+> contract** below (event kinds and tags) is still accurate, since the Rust
+> runtime preserves it.
+
+This document describes how delegation and RAL state was tracked and resumed in the TypeScript runtime.
 
 ## Key Components
 

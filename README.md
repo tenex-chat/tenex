@@ -54,9 +54,9 @@ Agents can define phases (for example: planning, execution, review) to structure
 
 ### Prerequisites
 
-- **Node.js** 20+ or **Bun** runtime (recommended for development)
+- A **Rust toolchain** (stable, via [rustup](https://rustup.rs))
 - **Git** for version control integration
-- An API key for at least one LLM provider (OpenAI, Anthropic, etc.)
+- An API key for at least one LLM provider (OpenAI, Anthropic, OpenRouter, …)
 
 ### Installation
 
@@ -65,23 +65,26 @@ Agents can define phases (for example: planning, execution, review) to structure
 git clone https://github.com/tenex-chat/tenex
 cd tenex
 
-# Install dependencies
-bun install
+# Build the workspace
+cargo build --release
 ```
+
+The `tenex` binary is produced at `target/release/tenex`.
 
 ### Configuration
 
-Before you can start using TENEX, you need to set up your LLM provider credentials.
-From the repo, run:
+Before using TENEX, run the setup wizard to configure your identity, relays, and
+LLM provider credentials:
 
 ```bash
-bun run start -- setup
+tenex onboard
 ```
 
-If you install the daemon launcher from npm, run:
+Then start the project supervisor, which subscribes to Nostr and spawns a
+runtime per project on inbound events:
 
 ```bash
-npx @tenex-chat/daemon
+tenex daemon
 ```
 
 ### Quick Start
@@ -102,28 +105,40 @@ TENEX: [System routes to Planner]
 
 ## 📚 Documentation
 
-- **[Architecture](./docs/ARCHITECTURE.md)**: Core principles, layered architecture, and module organization.
+- **[Architecture](./docs/ARCHITECTURE.md)**: Core principles, the Rust crate workspace, and module organization.
+- **[crates/AGENTS.md](./crates/AGENTS.md)**: Modularization philosophy and the rules for adding or splitting crates.
+- **[Module Inventory](./MODULE_INVENTORY.md)**: Canonical map of every crate and its internal modules.
 - **[Contributing](./docs/CONTRIBUTING.md)**: Development workflow, coding guidelines, and testing.
-- **[Testing Status](./docs/TESTING_STATUS.md)**: Current state of the test suite and future improvements.
-- **[NDK Testing](./docs/testing-with-ndk.md)**: How to use Nostr Development Kit utilities for testing.
-- **[Worktrees](./docs/worktrees.md)**: Guide to using Git worktrees for parallel development.
 
 ## 🏗️ Project Structure
 
+TENEX is a Rust workspace. The host CLI/supervisor lives in `tenex/`; every
+other concern is a focused crate under `crates/`. See
+[MODULE_INVENTORY.md](./MODULE_INVENTORY.md) for the full map.
+
 ```
-src/
-├── agents/         # Agent definitions and execution runtime
-├── commands/       # User-facing CLI commands
-├── conversations/  # Conversation history and state management
-├── daemon/         # Long-running background processes and UI
-├── events/         # Core event schemas and constants
-├── lib/            # Pure, framework-agnostic utilities (zero TENEX dependencies)
-├── llm/            # LLM provider abstractions and factories
-├── nostr/          # Nostr protocol integration and clients
-├── prompts/        # System prompt composition and management
-├── services/       # Stateful business logic and orchestration
-├── tools/          # Agent tool implementations and registry
-└── utils/          # TENEX-specific helper functions
+tenex/                     # Host CLI + supervisor: onboarding, config, doctor, daemon, runtime, agent/mcp/cron commands
+crates/
+├── tenex-agent/           # One-shot agent runner: LLM loop + tools (NDJSON over stdio)
+├── tenex-conversations/   # SQLite conversation store (messages, prompt history, completions, delegations)
+├── tenex-context/         # Conversation-history → LLM-message projection
+├── tenex-system-prompt/   # Deterministic system-prompt assembly
+├── tenex-project/         # Read-side project view: membership, teams, signer
+├── tenex-agent-registry/  # Global installed-agent JSON registry
+├── tenex-llm-config/      # LLM/provider configuration resolver
+├── tenex-mcp/             # Project-scoped MCP server runtime
+├── tenex-rag/             # RAG storage + embeddings
+├── tenex-summarizer/      # kind:513 conversation-metadata daemon
+├── tenex-embedder/        # Conversation embedding daemon
+├── tenex-scheduler/       # Cron / schedule daemon
+├── tenex-intervention/    # Completion-timeout watcher daemon
+├── tenex-identity/        # kind:0 profile resolver + cache
+├── tenex-telegram/        # Telegram integration
+├── tenex-protocol/        # TENEX intent vocabulary + Nostr channel encoding
+├── tenex-whitelist/       # Local trust-set reader
+├── tenex-supervision/     # Pure supervision heuristics (no I/O)
+├── tenex-telemetry/       # OpenTelemetry / tracing bootstrap
+└── tenex-accounting/      # LLM accounting store + embedded UI
 ```
 
 ## 🤝 Contributing
@@ -133,24 +148,23 @@ We welcome contributions! Please read our [**Contributing Guide**](./docs/CONTRI
 ### Development Setup
 
 ```bash
-# Install dependencies
-bun install
+# Build the workspace
+cargo build
 
-# Run tests
-bun test
+# Run the test suite
+cargo test --workspace
 
-# Run tests in watch mode
-bun test --watch
+# Lint (deny warnings)
+cargo clippy --workspace --all-targets
 
-# Run type checking
-bun run typecheck
+# Format
+cargo fmt --all
 
-# Run architecture linting
-bun run lint:architecture
-
-# Build for production
-bun run build
+# Build optimized binaries
+cargo build --release
 ```
+
+The pre-commit hook runs `cargo check --workspace`.
 
 ## 🔮 What Makes TENEX Different?
 

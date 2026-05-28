@@ -1,190 +1,94 @@
 # Conversation Indexing
 
-TENEX automatically indexes conversations for semantic search using RAG (Retrieval-Augmented Generation).
+TENEX embeds conversation transcripts so they are searchable by semantic
+similarity (RAG). Indexing is performed by a standalone daemon, **`tenex-embedder`**,
+backed by the **`tenex-rag`** storage layer.
 
 ## How It Works
 
-- **Automatic Background Indexing**: Runs every 5 minutes when the daemon is active
-- **Smart Change Detection**: Only re-indexes conversations when content changes
-- **Full Transcript Indexing**: Embeds complete conversation history (not just metadata)
-- **Project Isolation**: Properly scopes search results to project boundaries
+- **Source of truth is Nostr.** The embedder reads kind:1 events from the
+  configured relays, filtered to the projects owned by the host (derived from
+  `tenexPrivateKey` plus the project `event.json` files). It does **not** read
+  the local `conversation.db`.
+- **Standalone daemon, not an in-runtime job.** `tenex-embedder` runs as a host
+  companion process and scans on a short interval (every 30 seconds), walking
+  bounded windows of relay history from a persisted cursor.
+- **Change detection.** Per conversation it tracks the event count and the
+  newest `created_at`; an unchanged conversation is skipped. When a conversation
+  has advanced, its transcript is re-chunked and only chunks whose content hash
+  changed are re-embedded.
+- **Full transcript.** It embeds the conversation transcript, not just metadata.
+- **Project scoping.** Chunks are tagged with their project id(s) so search can
+  filter to a project.
 
-## CLI Commands
+## Storage
 
-### Check Indexing Status
+- Embeddings live in a global SQLite store at `~/.tenex/embeddings.db`
+  (vector-enabled), owned by `tenex-rag`.
+- The embedder keeps its own bookkeeping under `~/.tenex/.embedder/`: per-
+  conversation state (`state.db`) and the relay-walk cursor (`cursor.db`).
 
-```bash
-tenex doctor conversations status
-```
+## Chunking
 
-Displays:
-- Total indexed conversations
-- RAG collection stats
-- Indexing job status
-- Embedding provider info
-- Number of tracked conversations
+Transcripts are chunked with message-aligned windows: a target size around
+6,000 characters (~1,500 tokens for `text-embedding-3-small`), a hard ceiling
+above which a single message is truncated, and a few trailing messages of
+overlap carried into the next chunk for continuity. Each chunk carries a SHA-256
+content hash used for change detection, plus metadata (conversation id, project
+id(s), chunk index, sequence range, timestamps).
 
-**Example Output:**
-```
-Checking conversation indexing status...
+## CLI
 
-RAG Collection:
-  Collection: conversation_embeddings
-  Total indexed: 42
-  Has content: yes
-  Embedding provider: OpenAI text-embedding-3-small
-
-Indexing Job:
-  Running: yes
-  Batch in progress: no
-  Interval: 5 minutes
-
-Indexing State:
-  Tracked conversations: 42
-
-✓ Conversation indexing is active
-```
-
-### Force Full Re-index
+The daemon handles indexing automatically. For manual operations:
 
 ```bash
-tenex doctor conversations reindex
+# One-shot backfill of a single project's conversations from the relays
+tenex doctor conversations backfill <project> [--since <unix-secs>]
+
+# The embedder's own backfill (bulk pass), with reset / window / dry-run
+tenex-embedder backfill [--since <unix-secs>] [--reset] [--dry-run]
 ```
 
-This will:
-1. Clear all indexing state
-2. Re-index all conversations across all projects
-3. Re-embed conversations even if they haven't changed
+`--reset` re-embeds even unchanged chunks (use it after changing the embedding
+provider or model). `tenex doctor conversations status` and `… reindex` exist as
+diagnostics but are limited; the backfill commands above are the wired path.
 
-**With Confirmation Skip:**
-```bash
-tenex doctor conversations reindex --confirm
-```
+Configure the embedding provider/model with:
 
-Use this when:
-- You've changed embedding providers
-- You've updated the embedding model
-- Conversations aren't appearing in search results
-- You suspect indexing corruption
-
-## Automatic Indexing
-
-The `ConversationIndexingJob` runs automatically in the background when the daemon is active:
-
-- **Frequency**: Every 5 minutes
-- **Detection**: Uses content versioning + metadata hashing
-- **Efficiency**: Only indexes new/changed conversations
-- **State Tracking**: Durable per-conversation state in catalog
-
-### What Triggers Re-indexing?
-
-A conversation is re-indexed when:
-1. **Content version changes** (e.g., v1 → v2 format upgrade)
-2. **Metadata changes**: title, summary, lastUserMessage, or lastActivity
-3. **Never indexed before**
-
-### What Doesn't Trigger Re-indexing?
-
-- Unchanged conversations (skip redundant work)
-- Conversations marked as "no content" (empty conversations)
-
-## Search Tools
-
-Once indexed, conversations are searchable via:
-
-1. **`conversation_search` tool** (agents)
-   - Keyword mode (fast title matching)
-   - Semantic mode (natural language)
-   - Hybrid mode (both)
-   - Full-text mode (deep message search)
-
-2. **`rag_search` tool** (agents)
-   - Unified search across all RAG collections
-   - Includes conversations + lessons + custom collections
-   - Optional LLM-based extraction
-
-## Architecture
-
-```
-ConversationIndexingJob (5min cron)
-  ↓
-IndexingStateManager (tracks what needs indexing)
-  ↓
-ConversationEmbeddingService (builds documents)
-  ↓
-RAGService (stores in vector DB)
-  ↓
-Vector Store (SQLite-vec/Qdrant)
-```
-
-### Key Files
-
-- `src/conversations/search/embeddings/ConversationIndexingJob.ts` - Background indexer
-- `src/conversations/search/embeddings/ConversationEmbeddingService.ts` - Document builder
-- `src/conversations/search/embeddings/IndexingStateManager.ts` - State tracker
-- `src/tools/implementations/conversation_search.ts` - Search tool
-- `src/tools/implementations/rag_search.ts` - Unified RAG search
-
-## Troubleshooting
-
-### No conversations showing in search
-
-1. Check indexing status:
-   ```bash
-   tenex doctor conversations status
-   ```
-
-2. If `Total indexed: 0`, run reindex:
-   ```bash
-   tenex doctor conversations reindex
-   ```
-
-3. Verify daemon is running:
-   ```bash
-   tenex daemon-status
-   ```
-
-### Search results are stale
-
-The indexing job runs every 5 minutes. Recent conversations will be indexed automatically.
-
-To force immediate indexing:
-```bash
-tenex doctor conversations reindex --confirm
-```
-
-### Embedding provider errors
-
-Check your LLM provider configuration:
-```bash
-tenex config providers
-```
-
-Ensure you have:
-- Valid API keys
-- Correct embedding model configured
-- Network connectivity to provider
-
-### Memory issues during indexing
-
-Indexing embeds full conversation transcripts. For large histories:
-- Indexing happens sequentially to limit memory usage
-- Each batch is 20 conversations (configurable in code)
-- Progress is saved incrementally (failures don't lose progress)
-
-## Configuration
-
-Embedding settings are configured via:
 ```bash
 tenex config embed
 ```
 
-Supported providers:
-- OpenAI (text-embedding-3-small, text-embedding-3-large)
-- Anthropic (Voyage AI models)
-- OpenRouter (various models)
-- Local providers (via MCP)
+## Search Tools (agents)
 
-Vector store configuration is read from the `vectorStore` field in `embed.json`:
-- `provider`: `sqlite-vec` (default) or `qdrant`
-- `url`: Qdrant server URL (if using Qdrant)
+- **`conversation_search`** — semantic search over the shared `conversations`
+  collection. Defaults to the current project; pass `project_id: "ALL"` to search
+  across all projects. Returns score, content, title, conversation id, and
+  project id.
+- **`rag_search`** — unified semantic search across the `conversations`
+  collection, the project knowledge base (`project_<id>`), and the agent's own
+  notes (`agent_<pubkey>`). If a `prompt` is supplied, it additionally runs an
+  LLM pass to extract a focused answer from the matches.
+- **`rag_add_documents`** — adds documents by audience scope: `self` →
+  `agent_<pubkey>`, `project` → `project_<id>`. Agents add documents by scope;
+  they do not create, list, or delete collections.
+
+## Troubleshooting
+
+**Nothing appears in search.** Confirm the `tenex-embedder` daemon is running and
+that the relays hold the conversation events (the embedder reads from relays, not
+local disk). Run a backfill for the project:
+`tenex doctor conversations backfill <project>`.
+
+**Results look stale after changing models.** Re-embed everything with
+`tenex-embedder backfill --reset`.
+
+**Embedding provider errors.** Check the provider configuration and API keys via
+`tenex config embed` / `tenex config providers`, and confirm network access to
+the provider.
+
+## Where to look
+
+- `crates/tenex-embedder/` (`scope.rs`, `backfill.rs`, `cursor.rs`, `processor.rs`, `chunking.rs`, `state.rs`, `scheduler.rs`, `tuning.rs`; `lib.rs` documents the relay-source design).
+- `crates/tenex-rag/` (`sqlite_store.rs`, `store.rs`, `rag.rs`).
+- `crates/tenex-agent/src/tools/conversation_search.rs`, `rag_search.rs`, `rag_add_documents.rs`.

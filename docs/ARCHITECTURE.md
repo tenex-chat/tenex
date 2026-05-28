@@ -1,500 +1,234 @@
 # TENEX Architecture Guide
 
-## Table of Contents
-- [Core Principles](#core-principles)
-- [Layered Architecture](#layered-architecture)
-- [Module Organization](#module-organization)
-- [Naming Conventions](#naming-conventions)
-- [Import Patterns](#import-patterns)
-- [Adding New Code](#adding-new-code)
-- [Anti-Patterns to Avoid](#anti-patterns-to-avoid)
+TENEX is a multi-agent AI coordination system built on Nostr. It is a **Rust
+workspace**: a set of focused crates that decompose the system into libraries,
+daemons, and one-shot binaries, plus the `tenex` host CLI/supervisor.
 
-Related architecture notes:
+This document is the human-readable orientation. Two companion documents are
+authoritative and should be kept in sync with it:
 
-- `docs/system-prompt-architecture.md` covers how TENEX builds the base system prompt.
-- `docs/CONTEXT-MANAGEMENT-AND-REMINDERS.md` covers request-time context management, reminders, and prompt-history overlays.
-- `docs/SUPERVISION.md` covers supervision heuristics, post-completion gating, retry semantics, and structured resolution paths.
-- `docs/plans/2026-04-28-architecture-map.md` covers Rust workspace crates, including the JSON-backed installed-agent registry.
+- **`crates/AGENTS.md`** — the modularization philosophy and the non-negotiable
+  rules for adding, splitting, or merging crates.
+- **`MODULE_INVENTORY.md`** — the canonical map of every crate and its internal
+  modules. Consult it before writing code.
+
+Related notes:
+
+- `docs/system-prompt-architecture.md` — how an agent's system prompt is assembled.
+- `docs/CONTEXT-MANAGEMENT-AND-REMINDERS.md` — request-time context management, reminders, prompt-history overlays.
+- `docs/SUPERVISION.md` — supervision heuristics, post-completion gating, retry semantics.
+- `docs/plans/2026-04-28-architecture-map.md` — the migration map and target end state.
 
 ---
 
 ## Core Principles
 
-### 1. **Unidirectional Dependencies**
-Dependencies flow **downward only**, never upward:
+### 1. One crate, one thing
+Each crate does a single job: a storage layer, a projection, a subsystem of the
+host daemon, or a one-shot binary. Not a kitchen sink. New behavior extends the
+crate that already owns the concern; it does not accrete into an unrelated one.
 
-```
-commands/daemon/event-handler → services/agents/conversations/tools
-  ↓
-llm/nostr/prompts/events
-  ↓
-utils
-  ↓
-lib
-```
+### 2. Composition through narrow contracts
+Crates compose through explicit contracts, never through inheritance or shared
+globals. Two contracts dominate the tree:
 
-**Rule:** Lower layers never import from higher layers.
+- **Storage contract by substrate.** SQLite-backed crates expose a typed Rust
+  API over a versioned, forward-only schema. JSON-backed crates expose typed
+  APIs over a documented file layout. Multiple processes open the same durable
+  state directly — there is no service in front and no IPC layer for storage.
+- **NDJSON over Unix sockets** (and over stdio for one-shots) is the canonical
+  local IPC. The same frame format applies whether the peer is a subprocess or
+  a long-lived daemon. `tenex-agent` already speaks NDJSON over stdio.
 
-### 2. **Pure Utilities in lib/**
-The `lib/` layer contains **zero TENEX-specific code**. These are pure, reusable utilities that could work in any Node.js project:
-- Filesystem operations
-- String manipulation
-- Time formatting
-- Validation helpers
-- Error formatting
+Typed APIs within a process; text streams between processes.
 
-**Rule:** `lib/` has NO imports from `utils/`, `services/`, or any TENEX modules.
+### 3. Three roles, kept separate
+Anything that touches relays + LLM + tools must keep these apart:
 
-### 3. **TENEX-Specific Utilities in utils/**
-The `utils/` layer contains helpers specific to TENEX's domain:
-- Nostr entity parsing
-- Phase management
-- Git operations
-- Conversation utilities
+- **Subscribe** — owns the relay connection.
+- **Orchestrate** — owns dispatch, RAL state, and the delegation tree.
+- **Execute** — owns the LLM loop and tools (`tenex-agent`).
 
-**Rule:** `utils/` can import from `lib/` but not from `services/` or higher layers.
+The runner does not open relays. The orchestrator does not call LLMs. The
+subscriber does not track delegations. Collapsing these is the single biggest
+design failure mode in this codebase.
 
-### 4. **Business Logic in services/**
-The `services/` layer contains stateful business logic and domain services:
-- Configuration management
-- RAG operations
-- Scheduling
-- Delegation/RAL state tracking
-- MCP integration
-
-**Rule:** Services can import from `utils/`, `lib/`, `nostr/`, `llm/`, but not from `commands/`, `daemon/`, or `event-handler/`.
+### 4. Crash and restart are normal
+State lives on disk. In-memory caches are caches, not the truth. Every process
+must survive being killed and restarted from SQLite or filesystem state.
 
 ---
 
-## Layered Architecture
+## Workspace Shape
 
-### Layer 0: Platform Primitives (`lib/`)
-**Purpose:** Framework-agnostic utilities
+The host CLI/supervisor lives in `tenex/` (package `tenex`). Everything else is
+a crate under `crates/`. See `MODULE_INVENTORY.md` for the authoritative list;
+the roles below are a summary.
 
-**Contains:**
-- `lib/fs/` - Filesystem operations
-- `lib/string.ts` - String utilities
-- `lib/error-formatter.ts` - Error formatting
-- `lib/time.ts` - Time utilities
+### Library crates (no daemon — just typed APIs)
 
-**Dependencies:** Node.js built-ins, npm packages only
+| Crate | Owns |
+|---|---|
+| `tenex-conversations` | SQLite conversation store: messages, tool messages, prompt history, completions, delegations, context state, and migration from older disk formats. |
+| `tenex-agent-registry` | JSON-backed global installed-agent registry under `<base_dir>/agents`: document normalization, mutation, keys, index maintenance. |
+| `tenex-project` | Read-side project view over project event JSON and agent JSON: id normalization, membership projection, teams, signer selection. |
+| `tenex-context` | Conversation-history → LLM-message projection: message shaping, token estimates, cache-breakpoint hints, context-management turn recording. |
+| `tenex-system-prompt` | Deterministic system-prompt assembly from agent identity, project context, and skill references. |
+| `tenex-identity` | `pubkey → IdentityView` resolution via kind:0 plus a host-wide cache. |
+| `tenex-llm-config` | Filesystem-backed LLM/provider configuration resolver, including meta/inline model resolution and API-key health. |
+| `tenex-mcp` | Project-scoped MCP server lifecycle, tool manifests, and the runtime↔agent Unix-socket bridge. |
+| `tenex-rag` | RAG configuration, embeddings, and SQLite-backed vector/document storage. |
+| `tenex-protocol` | Transport-agnostic TENEX intent vocabulary and Nostr channel encoding. |
+| `tenex-supervision` | Pure supervision heuristics for the agent runner: no I/O, no async. |
+| `tenex-whitelist` | Local trust-set reader for whitelisted users and project p-tags. |
+| `tenex-telemetry` | Shared OpenTelemetry/`tracing` bootstrap and context propagation. |
+| `tenex-accounting` | SQLite-backed LLM accounting/observability store plus an embedded local UI. |
 
-**Example:**
-```typescript
-// ✅ Good - pure utility
-export function toKebabCase(str: string): string {
-    return str.replace(/([a-z])([A-Z])/g, "$1-$2").toLowerCase();
-}
+### Daemons (long-lived)
 
-// ❌ Bad - depends on TENEX code
-import { config } from "@/services/ConfigService";
-```
+| Daemon | Owns |
+|---|---|
+| `tenex daemon` (supervisor) | Boots and supervises project runtimes and host companion daemons on inbound events. |
+| `tenex-summarizer` | Generates kind:513 conversation metadata across projects. |
+| `tenex-embedder` | Reads kind:1 events from the relays for the host's owned projects and embeds the conversation transcripts into the global RAG store (`embeddings.db`). |
+| `tenex-scheduler` | Schedule/cron firing for scheduled and one-off tasks. |
+| `tenex-intervention` | Human-replica review when an agent completion times out. |
+| `tenex-identity` | Resolves and caches kind:0 profile data host-wide. |
+| `tenex-telegram` | Telegram integration: bot client, bindings, polling, rendering, event synthesis. |
 
----
+### One-shot / pure-compute binaries
 
-### Layer 1: TENEX Utilities (`utils/`)
-**Purpose:** Domain-specific helpers
-
-**Contains:**
-- `utils/nostr-entity-parser.ts` - Nostr parsing utilities
-- `utils/git/` - Git operations (including worktree management)
-- `utils/phase-utils.ts` - Phase management
-- `utils/conversation-id.ts` - Conversation identifier helpers
-- `utils/logger.ts` - Logging (can depend on services/config)
-
-**Dependencies:** `lib/`, Node.js built-ins, npm packages
-
-**Example:**
-```typescript
-// ✅ Good - TENEX-specific helper using lib utilities
-import { formatAnyError } from "@/lib/error-formatter";
-
-export function parseNostrUser(input: string): { pubkey: string } | null {
-    // ... implementation
-}
-```
+| Binary | Owns |
+|---|---|
+| `tenex-agent` | Single-turn agent runner. Reads one Nostr event over stdin, runs the LLM/tool loop, emits signed NDJSON frames over stdout. **Does not open relays.** |
+| `tenex whitelist check` | Single trust check from the shell. |
+| `tenex doctor` | Diagnostics and one-time migration/repair workflows. |
 
 ---
 
-### Layer 2: Protocol & Abstraction Layers
-**Modules:** `events/`, `nostr/`, `llm/`, `prompts/`
+## Library vs Daemon — the decision rule
 
-**Purpose:** Protocol implementations and provider abstractions
+Process boundaries cost something. Take one only when you get at least one of:
+concurrency isolation, security isolation, language choice, independent restart,
+or hot-swap. Otherwise it is a library, not a daemon.
 
-**Dependencies:** `utils/`, `lib/`
+| Want | Make it a… |
+|---|---|
+| Typed state shared across processes | Library + SQLite (`tenex-conversations`) |
+| Global installed-agent JSON shared across processes | Library + JSON files (`tenex-agent-registry`) |
+| Read-side project metadata and membership | Library + JSON files (`tenex-project`) |
+| LLM-bound or stateful work that should survive runtime restarts | Daemon (`tenex-summarizer`, `tenex-scheduler`, `tenex-intervention`) |
+| Pure compute reachable over a frame protocol | One-shot or long-lived binary (`tenex-agent`) |
 
----
-
-### Layer 3: Domain Logic
-**Modules:** `services/`, `agents/`, `conversations/`, `tools/`
-
-**Purpose:** Business logic, state management, capabilities
-
-**Notes:** Tools stay stateless even when they are runtime-gated. Context-injected capabilities such as `send_message` belong in `src/tools/registry.ts` and must delegate transport work to services like `src/services/telegram/TelegramDeliveryService`. Within the conversation domain, canonical transcripts remain JSON in `ConversationStore`, while metadata-style reads belong on the per-project SQLite catalog in `ConversationCatalogService`. Prompt and tool code should query that catalog or `ConversationRegistry` compatibility APIs instead of reparsing transcript files.
-
-Teams are a local-only service concern. `src/services/teams/` loads JSON definitions from disk, normalizes membership, resolves team names to lead agents for delegation, and feeds prompt-facing team summaries into the prompt layer. Team scope itself is carried across Nostr via `["team", "..."]` tags, not via team objects in relay state.
-
-**Dependencies:** Everything below (layers 0-2)
+A daemon's public surface is a Unix socket speaking NDJSON. A library's public
+surface is a typed Rust API over its substrate. Pick one; never both.
 
 ---
 
-### Layer 4: Application Entry Points
-**Modules:** `commands/`, `daemon/`, `event-handler/`
+## Cross-Cutting Contracts
 
-**Purpose:** CLI, runtime orchestration, event routing
+These hold across every crate. Violations are bugs.
 
-**Dependencies:** Everything below (layers 0-3)
-
----
-
-## Module Organization
-
-### Services Directory Structure
-
-Services should be organized by domain, with related code grouped together:
-
-```
-services/
-├── analysis/            # LLM telemetry schema, migrations, and query services
-├── migrations/          # Explicit TENEX state migrations keyed by config.json version
-├── dispatch/             # Chat routing + delegation dispatch
-│   ├── AgentDispatchService.ts
-│   ├── AgentRouter.ts
-│   └── DelegationCompletionHandler.ts
-├── ral/                  # Delegation/RAL state
-│   ├── RALRegistry.ts
-│   ├── DelegationRegistry.ts
-│   ├── KillSwitchRegistry.ts
-│   ├── HeuristicViolationManager.ts
-│   ├── MessageInjectionQueue.ts
-│   ├── ExecutionTimingTracker.ts
-│   ├── types.ts
-│   └── index.ts
-├── teams/                # Local team definitions, prompt context, and delegate resolution
-├── rag/                  # RAG domain
-│   ├── RAGService.ts
-│   ├── RAGDatabaseService.ts
-│   ├── RagSubscriptionService.ts
-│   ├── ...
-│   └── index.ts
-├── projects/
-├── scheduling/
-├── reports/
-├── mcp/
-└── ...
-```
-
-**When to create a subdirectory:**
-- 3+ related files
-- Distinct domain boundary
-- Internal implementation details to hide
-
-**Small services (1-2 files):** Keep at top level until they grow.
-
-### Conversation Read Models
-
-TENEX conversation storage has two intentional layers:
-
-- `ConversationStore` is the canonical ledger. It owns full transcript JSON, context-management compactions, and save/load semantics.
-- `ConversationCatalogService` is the per-project derived read model backed by `conversation-catalog.db`. It exists for prompt/tool metadata queries such as recent conversations, conversation previews, participant/delegation lookups, and durable embedding indexing state.
-
-`ConversationStore` also carries per-agent prompt-view state that is intentionally separate from the canonical transcript:
-
-- Canonical `ConversationRecord`s remain the source of truth for transcript history.
-- Per-agent frozen prompt histories record the exact pre-context-management prompt view previously sent to that agent. Runtime-only system reminder overlays remain ephemeral until a request has actually established prompt caching; after that anchor exists they can be persisted as replayable prompt-history entries.
-- Runtime overlays must never be replayed by mutating historical transcript messages. Append them as prompt-history entries instead.
-
-When adding a new conversation-facing feature, decide explicitly which layer it belongs to:
-
-- If it needs the full transcript or mutates canonical conversation state, use `ConversationStore`.
-- If it only needs queryable metadata or list/filter behavior, use the catalog. Do not add new transcript-scanning helpers for those paths.
-
-### Teams
-
-Teams are local JSON-defined memberships that never become standalone Nostr entities. The runtime resolves them from disk through `src/services/teams/TeamService.ts`, which normalizes the team lead into membership, caches by file state, and resolves team names to lead pubkeys for delegation.
-
-- Team definitions stay local on disk and are not published as Nostr events.
-- Delegation events carry team scope through the `["team", "..."]` tag.
-- Prompt rendering uses team membership to filter `<available-agents>`: when teams are defined, only the active team's teammates and unaffiliated agents are detailed; other teams appear as one-line summaries.
-- Team names are resolved case-insensitively, with agent slugs still taking priority when a recipient string matches both.
-
----
-
-### Supporting Tooling
-
-Standalone developer tooling or auxiliary CLIs should live under `tools/` at the repo root. Treat each tool as isolated (own `package.json`/`tsconfig.json`) and document additions in `MODULE_INVENTORY.md`.
+- **Project IDs accept either form.** Public APIs that take a project identifier
+  accept the full NIP-33 coordinate (`31933:<pubkey>:<dTag>`) or the bare dTag.
+  Normalize once at the boundary, with the owning crate (`tenex-project` /
+  `tenex-conversations`) — not repeatedly at call sites.
+- **Schema or file layout is the contract.** SQLite migrations are forward-only
+  and versioned, and belong only to the crate that owns the database. JSON
+  file-layout changes belong only to the crate that owns that directory.
+- **Signing is behind the `Signer` trait.** One implementation today (`nsec:`),
+  one tomorrow (`bunker:` / NIP-46). A single swap when the bunker lands.
+- **MCP is project-scoped.** Server definitions live in the project working
+  directory's `.mcp.json`; agent JSON grants access. There is no host-global
+  MCP server registry, and MCP discovery/runtime belongs in `tenex-mcp`.
+- **Agent execution belongs in `tenex-agent`.** Relay subscription and runtime
+  orchestration belong outside the agent runner.
+- **Prompt assembly belongs in `tenex-system-prompt`; message-stream projection
+  belongs in `tenex-context`.**
+- **RAG: agents add documents by audience scope only.** Do not add
+  collection-management tools back into the agent surface.
+- **Lessons are not in the storage crates.** They are out of scope for
+  `tenex-project`, `tenex-agent-registry`, and `tenex-conversations`.
 
 ---
 
 ## Naming Conventions
 
-### Services
-**Preferred suffix:** `Service`
+| Thing | Convention | Example |
+|---|---|---|
+| Crates | `tenex-<area>`, kebab-case | `tenex-conversations` |
+| Crate package name | matches the directory | `tenex-conversations` |
+| Modules / files | snake_case `.rs` | `schema.rs`, `store.rs` |
+| Types | `CamelCase` | `ConversationStore`, `IdentityView` |
+| Functions / fields | snake_case | `list_candidates`, `last_activity` |
+| Tests | `#[cfg(test)]` modules or `tests/*.rs` | `tests/discover_and_read.rs` |
 
-```typescript
-// ✅ Preferred
-ConfigService
-RAGService
-SchedulerService
-ProjectStatusService
-
-// ✅ Most business-logic classes use the "Service" suffix.
-```
-
-**Goal:** Consistent "Service" suffix for all business logic classes.
-
-**Exceptions:** Registries (e.g., `RALRegistry`) keep their names when they are not business-logic services.
+Each crate carries an `AGENTS.md` describing its local invariants. Read it
+before changing that crate.
 
 ---
 
-### File Naming
-- **Services:** `SomethingService.ts` (PascalCase)
-- **Utilities:** `kebab-case.ts` or `camelCase.ts` (be consistent within a directory)
-- **Types:** `types.ts` or `Something.types.ts`
-- **Tests:** `Something.test.ts` (co-located in `__tests__/`)
+## Dependencies
+
+- Crate dependencies are declared in each crate's `Cargo.toml` and the workspace
+  `Cargo.toml`. Keep the dependency graph acyclic and minimal.
+- The whole tree is **Rust-only**. There are no `bun`/TypeScript imports.
+  Cross-language state sharing, where it still exists during migration, happens
+  only through the shared SQLite schemas or JSON file layouts on disk — never
+  through code imports.
+- Pure, no-I/O logic (e.g. supervision heuristics in `tenex-supervision`) stays
+  free of async and workspace dependencies so it can be unit-tested in isolation.
 
 ---
 
-## Import Patterns
+## Before Writing Code
 
-### Rule 1: No Barrel Exports for Services
-**Do NOT** use `services/index.ts` barrel export. Import directly from service directories:
+Three questions, in order (from `crates/AGENTS.md`):
 
-```typescript
-// ✅ Good - direct import
-import { RALRegistry } from "@/services/ral";
-import { RAGService } from "@/services/rag";
+1. **Does an existing crate already own this concern?** If yes, extend it.
+2. **Is this a new role in the fleet, or a new instance of an existing role?**
+   New role → new crate. New instance → the existing home for that role.
+3. **Library or daemon?** Apply the decision rule above. If undecided, it is a
+   library.
 
-// ❌ Bad - barrel import
-import { RALRegistry, RAGService } from "@/services";
-```
-
-**Why:**
-- Explicit dependencies
-- Better tree-shaking
-- Faster TypeScript compilation
-- No barrel maintenance
-
-### Rule 2: Subdirectories Control Their Exports
-Each service subdirectory has an `index.ts` that controls what's public:
-
-```typescript
-// services/ral/index.ts
-export { RALRegistry } from "./RALRegistry";
-export type { PendingDelegation, CompletedDelegation } from "./types";
-```
-
-### Rule 3: Use @/ Alias
-Always use the `@/` path alias for absolute imports:
-
-```typescript
-// ✅ Good
-import { config } from "@/services/ConfigService";
-import { formatAnyError } from "@/lib/error-formatter";
-
-// ❌ Bad - relative imports for cross-module
-import { config } from "../../../services/ConfigService";
-```
+If all three point to "yes, new crate," update both
+`docs/plans/2026-04-28-architecture-map.md` and the workspace `Cargo.toml` in
+the same change, and add the crate's `AGENTS.md`.
 
 ---
 
-## Adding New Code
+## Anti-Patterns to Reject
 
-### Adding a New Utility
-
-**1. Determine if it's pure or TENEX-specific:**
-- **Pure** (no TENEX deps) → `lib/`
-- **TENEX-specific** → `utils/`
-
-**2. Create the file:**
-```typescript
-// lib/array-utils.ts (pure utility)
-export function chunk<T>(array: T[], size: number): T[][] {
-    // ... implementation
-}
-```
-
-**3. Prefer direct imports.** Add an `index.ts` only when a subdirectory needs an explicit public surface.
+- **Collapsing the three roles.** A runner that opens relays, or an orchestrator
+  that calls an LLM, breaks the fleet model.
+- **A daemon that also exposes a typed storage API**, or a library that also
+  runs a socket. Pick one public surface.
+- **Re-normalizing project IDs at every call site** instead of once at the
+  owning crate's boundary.
+- **Sentinel values that mask failure.** `"unknown"`, `String::new()`, `0`, or
+  `unwrap_or(None)` on a `Result<Option<T>>` silently convert errors into
+  "not found". Represent absence with `Option`; propagate or log-and-bail on
+  failure.
+- **Backwards-compatibility shims past a single bounded cutover.** No `_unused`
+  prefixes, no commented-out blocks, no "temporary" code.
 
 ---
 
-### Adding a New Service
+## Discipline
 
-**1. Decide if it needs a subdirectory:**
-- **Yes** if: 3+ related files, distinct domain
-- **No** if: 1-2 files, simple service
-
-**2. Create the service:**
-```typescript
-// services/notifications/NotificationService.ts
-import { config } from "@/services/ConfigService";
-import { logger } from "@/utils/logger";
-
-export class NotificationService {
-    constructor(
-        private readonly config: typeof config,
-        private readonly logger: typeof logger
-    ) {}
-
-    // Methods...
-}
-
-// Export default instance for convenience
-export const notificationService = new NotificationService(config, logger);
-```
-
-**3. Create index.ts:**
-```typescript
-// services/notifications/index.ts
-export { NotificationService, notificationService } from "./NotificationService";
-export type { NotificationOptions } from "./types";
-```
-
-**4. Import where needed:**
-```typescript
-import { notificationService } from "@/services/notifications";
-```
-
----
-
-### Adding to Existing Layers
-
-**Adding to lib/:**
-- Must be pure, no TENEX dependencies
-- No imports from `utils/`, `services/`, etc.
-- Use console.error instead of TENEX logger
-
-**Adding to utils/:**
-- Can import from `lib/`
-- Should be domain helpers, not business logic
-- If it needs state, it should be a service instead
-
-**Adding to services/:**
-- Can import from `utils/`, `lib/`, `nostr/`, `llm/`, `prompts/`, `events/`
-- Cannot import from `commands/`, `daemon/`, `event-handler/`
-
----
-
-## Anti-Patterns to Avoid
-
-### ❌ Circular Dependencies
-```typescript
-// lib/something.ts
-import { logger } from "@/utils/logger";  // ❌ lib → utils (wrong direction)
-
-// utils/helper.ts
-import { someService } from "@/services/SomeService";  // ❌ utils → services
-```
-
-**Solution:** Move code to correct layer or use dependency injection.
-
----
-
-### ❌ Barrel Export Bypass
-```typescript
-// ❌ Importing from barrel when subdirectory exists
-import { RAGService } from "@/services";
-
-// ✅ Import directly from subdirectory
-import { RAGService } from "@/services/rag";
-```
-
----
-
-### ❌ Business Logic in Utilities
-```typescript
-// ❌ Bad - stateful service masquerading as utility
-// utils/user-manager.ts
-export class UserManager {
-    private users: Map<string, User> = new Map();
-    // ... state management
-}
-```
-
-**Solution:** Move to `services/` if it has state or business logic.
-
----
-
-### ❌ Inconsistent Naming
-Avoid mixing naming styles for the same layer. Use `Service` for business logic, and reserve `Registry`/`Manager` for registries or infrastructure helpers.
-
----
-
-## Dependency Injection Pattern
-
-**Recommended pattern for services:**
-
-```typescript
-// services/something/SomethingService.ts
-export class SomethingService {
-    // Declare dependencies in constructor
-    constructor(
-        private readonly config: typeof config,
-        private readonly logger: typeof logger,
-        private readonly someOtherService: SomeOtherService
-    ) {}
-
-    doSomething(): void {
-        // Use injected dependencies
-        const value = this.config.getConfigPath();
-        this.logger.info("Doing something", { value });
-    }
-}
-
-// Export default instance for convenience
-import { config } from "@/services/ConfigService";
-import { logger } from "@/utils/logger";
-import { someOtherService } from "@/services/some-other";
-
-export const somethingService = new SomethingService(
-    config,
-    logger,
-    someOtherService
-);
-```
-
-**Benefits:**
-- Testable (inject mocks)
-- Clear dependencies
-- No hidden singletons
-- Convenient default instance
-
----
-
-## Evolution Strategy
-
-### Completed Improvements
-
-- **Pure Utilities in `lib/`**: All pure, framework-agnostic utilities are now isolated in the `lib/` directory with zero TENEX dependencies.
-- **No Circular Dependencies**: All circular dependencies between layers have been resolved.
-- **Consistent Service Naming**: All services have been refactored to use the `Service` suffix, removing legacy names like `ReportManager` and `PubkeyNameRepository`.
-- **Git Utilities Consolidated**: All Git-related helpers, including worktree management, are now centralized in `utils/git/`.
-- **Configuration Architecture**: A centralized `ConfigService` now manages all configuration, ensuring consistent and predictable settings management.
-
-### Target State
-
-**We are incrementally moving toward:**
-1. ⏳ **Subdirectory Grouping for Services**: Gradually group related services into subdirectories for better organization.
-2. ⏳ **Dependency Injection Pattern**: Continue to adopt dependency injection for all services to improve testability and clarity.
-3. ⏳ **Removal of Barrel Exports**: Phase out all remaining barrel exports in favor of direct imports.
-
-**Philosophy:** Make incremental improvements. Leave code better than you found it (Boy Scout Rule).
-
----
-
-## Questions?
-
-If unsure where code belongs:
-1. Is it pure/framework-agnostic? → `lib/`
-2. Is it a TENEX helper with no state? → `utils/`
-3. Does it manage state or business logic? → `services/`
-4. Is it protocol-specific? → `nostr/`, `llm/`, etc.
-
-When in doubt, **ask in PR review** or **check this document**.
+- **Simplicity over complexity, every time.** An abstraction earns its place by
+  serving two or more concrete consumers — never one, never speculative.
+- **Repetition is a hard boundary.** Three similar lines is fine; the third copy
+  of a real pattern is a refactor, not optional.
+- **Zero accumulation of technical debt.** If the right fix is hard, do the hard
+  thing. Speed is not a value here; coherence is.
+- **Boy Scout Rule.** Leave every file better than you found it — fix the stale
+  comment or off-pattern name nearby, without widening scope into a refactor PR.
 
 ---
 
 ## See Also
-- [CONTRIBUTING.md](./CONTRIBUTING.md) - Development workflow
-- [MODULE_INVENTORY.md](../MODULE_INVENTORY.md) - Current module list
-- [TESTING_STATUS.md](./TESTING_STATUS.md) - Testing guidelines
+- [crates/AGENTS.md](../crates/AGENTS.md) — modularization philosophy and rules.
+- [MODULE_INVENTORY.md](../MODULE_INVENTORY.md) — canonical crate and module map.
+- [CONTRIBUTING.md](./CONTRIBUTING.md) — development workflow.
+- [docs/plans/2026-04-28-architecture-map.md](./plans/2026-04-28-architecture-map.md) — migration map and target end state.

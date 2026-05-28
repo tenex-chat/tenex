@@ -13,7 +13,7 @@ before adding code, moving behavior, or introducing a new dependency.
 | `crates/tenex-agent-registry/` | `tenex-agent-registry` | JSON-backed global installed-agent registry under `<base_dir>/agents`. Owns agent document normalization, mutation, keys, and index maintenance. |
 | `crates/tenex-context/` | `tenex-context` | Conversation-history projection for LLM prompts. Owns message shaping, token estimates, cache-breakpoint hints, and context-management turn recording. |
 | `crates/tenex-conversations/` | `tenex-conversations` | SQLite conversation store for project-local messages, tool messages, prompt history, context state, completions, project discovery, and migration from older disk formats. |
-| `crates/tenex-embedder/` | `tenex-embedder` | Host daemon + backfill subcommand that embeds conversation transcripts and summaries into per-project RAG stores. Polls `conversation.db`, message-aligned chunking with delegation-marker synthesis, writes to `embeddings.db`. |
+| `crates/tenex-embedder/` | `tenex-embedder` | Host daemon + backfill subcommand that embeds conversation transcripts into the global RAG store. Reads kind:1 events from the relays for the host's owned projects (the local `conversation.db` is not read), message-aligned chunking, writes to `embeddings.db`. |
 | `crates/tenex-identity/` | `tenex-identity` | Host identity cache and daemon for resolving Nostr kind:0 profile data over the configured relays. |
 | `crates/tenex-intervention/` | `tenex-intervention` | Intervention daemon and detector logic for identifying conversations that need owner review or follow-up. |
 | `crates/tenex-llm-config/` | `tenex-llm-config` | Filesystem-backed LLM/provider configuration resolver. Owns standard and meta model resolution, inline model references, provider credentials, and API-key health tracking. |
@@ -133,10 +133,10 @@ before adding code, moving behavior, or introducing a new dependency.
 | `lockfile.rs` | `flock`-based singleton lock at `~/.tenex/embedder.pid`. |
 | `pacing.rs` | Token-bucket-style rate limiter with exponential backoff on 429/5xx. |
 | `paths.rs` | Embedder file paths (`state.db`, `pid`, `embeddings.db`). |
-| `processor.rs` | Per-conversation orchestration: chunk diff, marker synthesis, summary embedding, state cursors. |
-| `progress.rs` | `ProgressReporter` trait + `LogReporter` (daemon) and `IndicatifReporter` (backfill). |
-| `scheduler.rs` | Daemon polling loop. Discovers projects per scan, processes per project. |
-| `source.rs` | Read side over `conversation.db`: headers, messages, child→parent delegation map and fingerprints. |
+| `processor.rs` | Per-conversation orchestration: chunk diff against stored chunks, embedding, state cursors. |
+| `scheduler.rs` | Daemon polling loop (30s). Walks bounded windows of relay history per scan. |
+| `scope.rs` | Derives the set of host-owned projects (from `tenexPrivateKey` + project `event.json`) into relay `a`-tag filters. |
+| `relay.rs` / `cursor.rs` / `accumulator.rs` | Relay connection, persisted relay-walk cursor, and deduplicated event accumulation. The source of truth is relay kind:1 events, not `conversation.db`. |
 | `state.rs` | `~/.tenex/embedder/state.db` — three-cursor per-conversation embed state plus `child_set_hash` and `summary_hash` fingerprints. |
 | `target.rs` | Write side: stable chunk IDs, `RagStore::put` / `delete_by_source` / `delete_by_id` wrappers. |
 | `transcript.rs` | Speaker rendering, `AgentDirectory` name resolution chain (project agent → pubkey hex), merged stream construction. |
