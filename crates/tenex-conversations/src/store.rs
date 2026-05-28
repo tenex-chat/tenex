@@ -118,6 +118,22 @@ impl ConversationStore {
             .map_err(ConversationsError::from)
     }
 
+    /// Distinct author pubkeys that have posted in the conversation, ordered
+    /// by first appearance (lowest sequence). Returns an empty vec when the
+    /// conversation is unknown locally or has no messages.
+    pub fn participant_pubkeys(&self, conversation_id: &str) -> Result<Vec<String>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT author_pubkey FROM messages
+              WHERE conversation_id = ?1
+              GROUP BY author_pubkey
+              ORDER BY MIN(sequence) ASC",
+        )?;
+        let rows = stmt
+            .query_map([conversation_id], |row| row.get::<_, String>(0))?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
     /// Conversations whose `messages.author_pubkey` (or `targeted_pubkeys`)
     /// includes `pubkey`. Joins through `messages`.
     pub fn list_by_participant(

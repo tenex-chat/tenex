@@ -65,8 +65,8 @@ pub(crate) struct AgentBootstrap {
     /// reply, which would mis-name the task as "Black — RGB(0,0,0)").
     pub original_task: String,
     /// Pre-computed `<proactive-context>` block (RAG output against the
-    /// trigger event). Threaded into every step's projection via
-    /// `ProjectionOptions.proactive_context` so [`ProactiveContextStrategy`]
+    /// trigger event). Threaded into every step's projection via the
+    /// `project(… proactive_context …)` parameter so [`ProactiveContextStrategy`]
     /// overlays it onto the last visible message. Stable across the entire
     /// invocation so the system prompt remains cacheable.
     ///
@@ -450,8 +450,11 @@ pub(crate) async fn build(
     // prompt must remain stable across invocations to keep the prompt
     // cache warm. (Previously this push_str() was the root cause of
     // 0% cache-hit rate observed across delegation callback chains.)
+    let proactive_resolver = crate::identity_resolver::IdentityServiceResolver::new(&base_dir);
     let proactive_context: Option<String> = stages::proactive_context_block(
         rag_store.as_ref(),
+        conv_store.as_ref(),
+        &proactive_resolver,
         &envelope.content,
         &project_id,
         &pubkey_hex,

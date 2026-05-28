@@ -804,6 +804,47 @@ fn attachment_idempotent_on_message_id_ordinal() {
 }
 
 #[test]
+fn participant_pubkeys_returns_distinct_authors_by_first_appearance() {
+    let store = ConversationStore::open_in_memory().unwrap();
+    make_basic_conversation(&store, "conv1");
+
+    let append = |author: &str, content: &str, ts: i64| {
+        store
+            .append_message(
+                "conv1",
+                &NewMessage {
+                    record_id: format!("rec-{author}-{ts}"),
+                    nostr_event_id: None,
+                    author_pubkey: author.into(),
+                    sender_pubkey: None,
+                    ral: None,
+                    message_type: "text".into(),
+                    role: Some("user".into()),
+                    content: content.into(),
+                    timestamp: Some(ts),
+                    targeted_pubkeys: None,
+                    sender_principal: None,
+                    targeted_principals: None,
+                    tool_data: None,
+                    delegation_marker: None,
+                    human_readable: None,
+                    transcript_tool_attributes: None,
+                },
+            )
+            .unwrap();
+    };
+
+    append("alice", "first", 1);
+    append("bob", "second", 2);
+    append("alice", "third", 3);
+
+    let participants = store.participant_pubkeys("conv1").unwrap();
+    assert_eq!(participants, vec!["alice".to_string(), "bob".to_string()]);
+
+    assert!(store.participant_pubkeys("unknown").unwrap().is_empty());
+}
+
+#[test]
 fn header_guard_skips_supervision_typed_messages() {
     let store = ConversationStore::open_in_memory().unwrap();
     make_basic_conversation(&store, "conv1");

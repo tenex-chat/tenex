@@ -7,6 +7,7 @@
 
 use std::sync::Arc;
 
+use tenex_context::DisplayNameResolver;
 use tenex_conversations::ConversationStore;
 use tenex_protocol::ProjectRef;
 use tenex_rag::RagStore;
@@ -316,11 +317,20 @@ pub(super) fn build_shell_env(
 /// render it as a `<proactive-context>` block. Returns `None` when the store
 /// is absent or no relevant rows pass the score threshold.
 ///
+/// Conversation hits are rendered by their real title/summary/participants
+/// (looked up via `conv_store`, with pubkeys resolved to kind:0 names by
+/// `resolver`) rather than transcript snippets, and deduplicated by
+/// conversation so multiple matching chunks collapse to one entry. Other
+/// collections (project/agent notes) render their title and a content
+/// snippet.
+///
 /// Always emits a `rag.context_discovery` span so an absent store is
 /// distinguishable from an empty result set in telemetry. Phase counts and
 /// LLM child spans are populated by [`context_discovery::discover_context`].
 pub(super) async fn proactive_context_block(
     rag_store: Option<&Arc<RagStore>>,
+    conv_store: Option<&ConversationStore>,
+    resolver: &dyn DisplayNameResolver,
     envelope_content: &str,
     project_id: &str,
     agent_pubkey: &str,
@@ -385,27 +395,91 @@ pub(super) async fn proactive_context_block(
         tracing::Span::current().record("outcome", "returned");
 
         let mut block = String::from(
-            "\n\n<proactive-context>\nPotentially relevant information retrieved based on your task:\n",
+            "\n\n<proactive-context>\nPotentially relevant past conversations and notes, retrieved based on your task:\n",
         );
-        for (i, r) in relevant.iter().enumerate() {
-            let snippet: String = r.content.chars().take(300).collect();
-            let ellipsis = if r.content.len() > 300 { "…" } else { "" };
-            block.push_str(&format!(
-                "\n[{}] score:{:.2} collection:{}{}\n{}{}\n",
-                i + 1,
-                r.score,
-                r.collection,
-                r.title
-                    .as_deref()
-                    .map(|t| format!(" title:{t}"))
-                    .unwrap_or_default(),
-                snippet,
-                ellipsis,
-            ));
+        let mut seen_convs: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut rendered_any = false;
+        for r in &relevant {
+            let conv_id = r
+                .meta_json
+                .as_ref()
+                .and_then(|m| m.get("conversation_id"))
+                .and_then(|v| v.as_str());
+
+            match conv_id {
+                Some(cid) => {
+                    // Skip the conversation the agent is already in — listing
+                    // it back is self-referential noise.
+                    if cid == conversation_id {
+                        continue;
+                    }
+                    if !seen_convs.insert(cid.to_string()) {
+                        continue;
+                    }
+                    let row = conv_store.and_then(|s| s.get_conversation(cid).ok().flatten());
+                    let title = row
+                        .as_ref()
+                        .and_then(|row| row.title.clone())
+                        .or_else(|| row.as_ref().and_then(|row| first_line(row.last_user_message.as_deref())))
+                        .unwrap_or_else(|| "(untitled conversation)".to_string());
+                    let short_id: String = cid.chars().take(8).collect();
+                    block.push_str(&format!("\n{title} [ id: {short_id} ]\n"));
+                    if let Some(summary) = row.as_ref().and_then(|row| row.summary.as_deref()) {
+                        block.push_str(summary);
+                        block.push('\n');
+                    }
+                    let names = participant_names(conv_store, resolver, cid);
+                    if !names.is_empty() {
+                        block.push_str(&format!("Participants: {}\n", names.join(", ")));
+                    }
+                    rendered_any = true;
+                }
+                None => {
+                    let title = r.title.clone().unwrap_or_else(|| "(note)".to_string());
+                    let snippet: String = r.content.chars().take(300).collect();
+                    let ellipsis = if r.content.chars().count() > 300 { "…" } else { "" };
+                    block.push_str(&format!("\n{title} [ id: {} ]\n{snippet}{ellipsis}\n", r.id));
+                    rendered_any = true;
+                }
+            }
+        }
+        if !rendered_any {
+            return None;
         }
         block.push_str("</proactive-context>");
         Some(block)
     }
     .instrument(span)
     .await
+}
+
+/// Resolve a conversation's distinct participants to kind:0 display names,
+/// ordered by first appearance. Unresolved pubkeys fall back to their first
+/// 8 hex chars. Returns empty when the conversation store is absent.
+fn participant_names(
+    conv_store: Option<&ConversationStore>,
+    resolver: &dyn DisplayNameResolver,
+    conversation_id: &str,
+) -> Vec<String> {
+    let Some(store) = conv_store else {
+        return Vec::new();
+    };
+    store
+        .participant_pubkeys(conversation_id)
+        .unwrap_or_default()
+        .iter()
+        .map(|pk| {
+            resolver
+                .display_name(pk)
+                .unwrap_or_else(|| pk.chars().take(8).collect())
+        })
+        .collect()
+}
+
+/// First non-empty line of `s`, trimmed and capped at 80 chars — a usable
+/// title fallback for conversations the summarizer hasn't titled yet.
+fn first_line(s: Option<&str>) -> Option<String> {
+    let line = s?.lines().map(str::trim).find(|l| !l.is_empty())?;
+    let truncated: String = line.chars().take(80).collect();
+    Some(truncated)
 }
