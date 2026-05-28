@@ -320,6 +320,14 @@ pub(crate) async fn run_turn_loop(boot: &mut AgentBootstrap) -> Result<()> {
         let stream_usage = final_response.usage;
         let pending_final = boot.hook_handle.take_pending();
 
+        // `no_response` requests a terminal silent completion. End the loop
+        // immediately: no supervision, no re-engagement, and no final
+        // completion/conversation event. `pending_final` (taken above) is
+        // left unemitted.
+        if boot.suppress_response.load(Ordering::Acquire) {
+            break 'agent_loop;
+        }
+
         // Post-completion supervision: check if pending todos warrant re-engagement.
         let todos_snap: Vec<SupTodoEntry> = {
             let lock = boot.todos.lock().unwrap();
@@ -345,116 +353,106 @@ pub(crate) async fn run_turn_loop(boot: &mut AgentBootstrap) -> Result<()> {
         };
         match outcome {
             PostCompletionOutcome::Accept => {
-                let suppressed = boot.suppress_response.load(Ordering::Acquire);
                 if let Some((final_content, final_ral)) = pending_final {
-                    if !suppressed {
-                        let usage = Some(LlmUsage {
-                            input_tokens: Some(stream_usage.input_tokens),
-                            output_tokens: Some(stream_usage.output_tokens),
-                            total_tokens: Some(stream_usage.total_tokens),
-                            cached_input_tokens: Some(stream_usage.cached_input_tokens),
-                            cache_creation_tokens: Some(
-                                stream_usage.cache_creation_input_tokens,
-                            ),
-                            ..Default::default()
-                        });
-                        if boot.emit_state.has_pending_external_work()
-                            || has_pending_delegations_in_store(boot)
-                        {
-                            let mut final_ctx = boot.emit_state.build_ctx(final_ral);
-                            final_ctx.llm_runtime_ms = boot.emit_state.take_runtime_delta();
-                            let intent = ConversationIntent {
-                                content: final_content,
-                                is_reasoning: false,
-                                usage,
-                                metadata: None,
-                            };
-                            let refs = boot
-                                .channel
-                                .send(Intent::Conversation(intent), &final_ctx)
-                                .await
-                                .context("Failed to emit pending-work conversation event")?;
-                            stamp_terminal_event_id_if_any(
-                                boot,
-                                final_response.terminal_assistant_row_id,
-                                &refs,
-                            );
-                        } else {
-                            let final_ctx = boot.emit_state.build_completion_ctx(final_ral);
-                            let intent = CompletionIntent {
-                                content: final_content,
-                                usage,
-                                metadata: None,
-                            };
-                            let refs = boot
-                                .channel
-                                .send(Intent::Completion(intent), &final_ctx)
-                                .await
-                                .context("Failed to emit final completion event")?;
-                            stamp_terminal_event_id_if_any(
-                                boot,
-                                final_response.terminal_assistant_row_id,
-                                &refs,
-                            );
-                        }
+                    let usage = Some(LlmUsage {
+                        input_tokens: Some(stream_usage.input_tokens),
+                        output_tokens: Some(stream_usage.output_tokens),
+                        total_tokens: Some(stream_usage.total_tokens),
+                        cached_input_tokens: Some(stream_usage.cached_input_tokens),
+                        cache_creation_tokens: Some(stream_usage.cache_creation_input_tokens),
+                        ..Default::default()
+                    });
+                    if boot.emit_state.has_pending_external_work()
+                        || has_pending_delegations_in_store(boot)
+                    {
+                        let mut final_ctx = boot.emit_state.build_ctx(final_ral);
+                        final_ctx.llm_runtime_ms = boot.emit_state.take_runtime_delta();
+                        let intent = ConversationIntent {
+                            content: final_content,
+                            is_reasoning: false,
+                            usage,
+                            metadata: None,
+                        };
+                        let refs = boot
+                            .channel
+                            .send(Intent::Conversation(intent), &final_ctx)
+                            .await
+                            .context("Failed to emit pending-work conversation event")?;
+                        stamp_terminal_event_id_if_any(
+                            boot,
+                            final_response.terminal_assistant_row_id,
+                            &refs,
+                        );
+                    } else {
+                        let final_ctx = boot.emit_state.build_completion_ctx(final_ral);
+                        let intent = CompletionIntent {
+                            content: final_content,
+                            usage,
+                            metadata: None,
+                        };
+                        let refs = boot
+                            .channel
+                            .send(Intent::Completion(intent), &final_ctx)
+                            .await
+                            .context("Failed to emit final completion event")?;
+                        stamp_terminal_event_id_if_any(
+                            boot,
+                            final_response.terminal_assistant_row_id,
+                            &refs,
+                        );
                     }
                 }
                 break 'agent_loop;
             }
             PostCompletionOutcome::InjectMessage { message } => {
                 eprintln!("[tenex-agent] Supervision nudge (no re-engage): {message}");
-                let suppressed = boot.suppress_response.load(Ordering::Acquire);
                 if let Some((final_content, final_ral)) = pending_final {
-                    if !suppressed {
-                        let usage = Some(LlmUsage {
-                            input_tokens: Some(stream_usage.input_tokens),
-                            output_tokens: Some(stream_usage.output_tokens),
-                            total_tokens: Some(stream_usage.total_tokens),
-                            cached_input_tokens: Some(stream_usage.cached_input_tokens),
-                            cache_creation_tokens: Some(
-                                stream_usage.cache_creation_input_tokens,
-                            ),
-                            ..Default::default()
-                        });
-                        if boot.emit_state.has_pending_external_work()
-                            || has_pending_delegations_in_store(boot)
-                        {
-                            let mut final_ctx = boot.emit_state.build_ctx(final_ral);
-                            final_ctx.llm_runtime_ms = boot.emit_state.take_runtime_delta();
-                            let intent = ConversationIntent {
-                                content: final_content,
-                                is_reasoning: false,
-                                usage,
-                                metadata: None,
-                            };
-                            let refs = boot
-                                .channel
-                                .send(Intent::Conversation(intent), &final_ctx)
-                                .await
-                                .context("Failed to emit pending-work conversation event")?;
-                            stamp_terminal_event_id_if_any(
-                                boot,
-                                final_response.terminal_assistant_row_id,
-                                &refs,
-                            );
-                        } else {
-                            let final_ctx = boot.emit_state.build_completion_ctx(final_ral);
-                            let intent = CompletionIntent {
-                                content: final_content,
-                                usage,
-                                metadata: None,
-                            };
-                            let refs = boot
-                                .channel
-                                .send(Intent::Completion(intent), &final_ctx)
-                                .await
-                                .context("Failed to emit final completion event")?;
-                            stamp_terminal_event_id_if_any(
-                                boot,
-                                final_response.terminal_assistant_row_id,
-                                &refs,
-                            );
-                        }
+                    let usage = Some(LlmUsage {
+                        input_tokens: Some(stream_usage.input_tokens),
+                        output_tokens: Some(stream_usage.output_tokens),
+                        total_tokens: Some(stream_usage.total_tokens),
+                        cached_input_tokens: Some(stream_usage.cached_input_tokens),
+                        cache_creation_tokens: Some(stream_usage.cache_creation_input_tokens),
+                        ..Default::default()
+                    });
+                    if boot.emit_state.has_pending_external_work()
+                        || has_pending_delegations_in_store(boot)
+                    {
+                        let mut final_ctx = boot.emit_state.build_ctx(final_ral);
+                        final_ctx.llm_runtime_ms = boot.emit_state.take_runtime_delta();
+                        let intent = ConversationIntent {
+                            content: final_content,
+                            is_reasoning: false,
+                            usage,
+                            metadata: None,
+                        };
+                        let refs = boot
+                            .channel
+                            .send(Intent::Conversation(intent), &final_ctx)
+                            .await
+                            .context("Failed to emit pending-work conversation event")?;
+                        stamp_terminal_event_id_if_any(
+                            boot,
+                            final_response.terminal_assistant_row_id,
+                            &refs,
+                        );
+                    } else {
+                        let final_ctx = boot.emit_state.build_completion_ctx(final_ral);
+                        let intent = CompletionIntent {
+                            content: final_content,
+                            usage,
+                            metadata: None,
+                        };
+                        let refs = boot
+                            .channel
+                            .send(Intent::Completion(intent), &final_ctx)
+                            .await
+                            .context("Failed to emit final completion event")?;
+                        stamp_terminal_event_id_if_any(
+                            boot,
+                            final_response.terminal_assistant_row_id,
+                            &refs,
+                        );
                     }
                 }
                 break 'agent_loop;

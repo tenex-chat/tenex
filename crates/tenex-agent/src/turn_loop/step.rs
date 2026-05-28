@@ -2,6 +2,7 @@ mod projection;
 mod stream;
 mod tools;
 
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use anyhow::{Result, anyhow};
@@ -180,6 +181,17 @@ where
                 parent_id,
                 &tool_results.records,
             )?;
+        }
+
+        // `no_response` sets this flag during tool execution. It is a
+        // terminal silent completion: the turn ends here without feeding
+        // the tool results back to the model for another provider step.
+        if boot.suppress_response.load(Ordering::Acquire) {
+            return Ok(StepLoopResult {
+                response: output.text,
+                usage: total_usage,
+                terminal_assistant_row_id: assistant_row_id,
+            });
         }
     }
 
