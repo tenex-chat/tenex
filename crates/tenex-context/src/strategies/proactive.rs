@@ -1,15 +1,20 @@
 //! Proactive-context strategy.
 //!
 //! Overlays a pre-computed `<proactive-context>` block onto the last
-//! non-system message in the projection. Computed once per agent
-//! invocation (typically via RAG over the trigger message) and threaded
-//! through every step's projection unchanged — this keeps the system
-//! prompt stable so the prompt-cache anchor remains valid across steps.
+//! *user* message in the projection — the message that frames the agent's
+//! current task. Computed once per agent invocation (typically via RAG
+//! over the trigger message) and threaded through every step's projection
+//! unchanged — this keeps the system prompt stable so the prompt-cache
+//! anchor remains valid across steps.
 //!
-//! Runs after decay and before reminders. Reminders therefore sit *after*
-//! proactive context in the final tail, which is what we want for
-//! attention prominence — todo state should be the last thing the model
-//! sees.
+//! It anchors to the real user message rather than the last message of any
+//! role on purpose: a trailing message is often a `ToolResult`, which on
+//! the wire is a role-`user` wrapper around a single tool call's output.
+//! Retrieval context does not belong inside a tool result — it would
+//! corrupt the `tool_use` → `tool_result` contract and attribute the RAG
+//! hits to whatever tool happened to run last.
+//!
+//! Runs after decay and before reminders.
 
 use async_trait::async_trait;
 
@@ -34,30 +39,15 @@ impl Strategy for ProactiveContextStrategy {
             return Ok(());
         }
 
-        let Some(target) = ctx
-            .messages
-            .iter_mut()
-            .rev()
-            .find(|m| !matches!(m, Message::System { .. }))
-        else {
+        let Some(content) = ctx.messages.iter_mut().rev().find_map(|m| match m {
+            Message::User { content, .. } => Some(content),
+            _ => None,
+        }) else {
             return Ok(());
         };
 
-        match target {
-            Message::User { content, .. } | Message::Assistant { content, .. } => {
-                content.push_str("\n\n");
-                content.push_str(block);
-            }
-            Message::ToolResult { content, .. } => {
-                content.push_str("\n\n");
-                content.push_str(block);
-            }
-            // System prompt is intentionally stable; pending delegation
-            // markers will have been expanded by an earlier strategy.
-            // If one slipped through, skip — the marker isn't a sane
-            // overlay target.
-            Message::System { .. } | Message::DelegationMarker { .. } => return Ok(()),
-        }
+        content.push_str("\n\n");
+        content.push_str(block);
 
         ctx.telemetry.strategies_applied.push(NAME.to_string());
         Ok(())
@@ -150,7 +140,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn appends_to_assistant_or_tool_result_too() {
+    async fn anchors_to_last_user_skipping_trailing_assistant_and_tool_result() {
         let p = profile();
         let mut c = ctx(
             vec![
@@ -161,12 +151,46 @@ mod tests {
                     reasoning: Vec::new(),
                     tool_calls: Vec::new(),
                 },
+                Message::ToolResult {
+                    tool_call_id: "call-1".into(),
+                    tool_name: "shell".into(),
+                    content: "output".into(),
+                    provider_call_id: None,
+                    is_error: false,
+                },
             ],
             &p,
             Some("BLOCK"),
         );
         ProactiveContextStrategy.apply(&mut c).await.unwrap();
+        let Message::User { content, .. } = &c.messages[1] else { unreachable!() };
+        assert!(content.ends_with("BLOCK"), "block lands on the user message");
         let Message::Assistant { content, .. } = &c.messages[2] else { unreachable!() };
-        assert!(content.ends_with("BLOCK"));
+        assert_eq!(content, "a", "trailing assistant untouched");
+        let Message::ToolResult { content, .. } = &c.messages[3] else { unreachable!() };
+        assert_eq!(content, "output", "trailing tool result untouched");
+    }
+
+    #[tokio::test]
+    async fn no_op_when_no_user_message() {
+        let p = profile();
+        let mut c = ctx(
+            vec![
+                Message::System { content: "sys".into() },
+                Message::ToolResult {
+                    tool_call_id: "call-1".into(),
+                    tool_name: "shell".into(),
+                    content: "output".into(),
+                    provider_call_id: None,
+                    is_error: false,
+                },
+            ],
+            &p,
+            Some("BLOCK"),
+        );
+        ProactiveContextStrategy.apply(&mut c).await.unwrap();
+        assert!(c.telemetry.strategies_applied.is_empty());
+        let Message::ToolResult { content, .. } = &c.messages[1] else { unreachable!() };
+        assert_eq!(content, "output", "no user message → tool result untouched");
     }
 }
