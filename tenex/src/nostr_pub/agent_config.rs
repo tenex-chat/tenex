@@ -55,16 +55,6 @@ struct ActiveConfig {
     skills: HashSet<String>,
 }
 
-/// Truncated pubkey used by the on-disk skill-discovery layout for the
-/// agent-home source. Mirrors `tenex_agent::skills::short_pubkey`.
-fn short_pubkey(pubkey: &str) -> &str {
-    if pubkey.len() >= 8 {
-        &pubkey[..8]
-    } else {
-        pubkey
-    }
-}
-
 /// Lookup directories for *globally* reachable skills — mirrors the canonical
 /// layout in `tenex_agent::skills::lookup_dirs`, but **excludes** the
 /// project-shared source (`{project_path}/.agents/skills/`). Project-shared
@@ -79,7 +69,7 @@ fn short_pubkey(pubkey: &str) -> &str {
 /// on the machine where this agent runs), so they must be announced on the
 /// per-agent kind:0, not on the per-project kind:24010.
 fn global_skill_dirs(agent_pubkey: &str, base_dir: &Path) -> Vec<PathBuf> {
-    let short = short_pubkey(agent_pubkey);
+    let short = tenex_utils::pubkey::shorten_for_path(agent_pubkey);
     let mut dirs: Vec<PathBuf> = Vec::new();
 
     // 1. Built-in (shipped with the TENEX installation)
@@ -495,8 +485,8 @@ mod tests {
         write_skill(&builtin_skills, "builtin-skill");
 
         // Source 2: agent-home skills (seed with actual short pubkey).
-        let short = &agent.pubkey[..8];
-        let agent_home_skills = base_dir.join("home").join(short).join("skills");
+        let short = tenex_utils::pubkey::shorten_for_path(&agent.pubkey);
+        let agent_home_skills = base_dir.join("home").join(&short).join("skills");
         fs::create_dir_all(&agent_home_skills).unwrap();
         write_skill(&agent_home_skills, "home-only");
 

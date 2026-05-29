@@ -10,6 +10,7 @@ path = "src/lib.rs"
 
 [dependencies]
 anyhow = "1"
+tenex-utils = { path = "../tenex-utils" }
 indexmap = { version = "2", features = ["serde"] }
 nostr-sdk = "0.44"
 regex = "1"

@@ -6,5 +6,7 @@
 //!
 //! - [`ids`] — event-ID validators, factories, and the single canonical
 //!   long-to-short shortener.
+//! - [`pubkey`] — pubkey shortening for display vs on-disk path contexts.
 
 pub mod ids;
+pub mod pubkey;

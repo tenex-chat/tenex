@@ -77,7 +77,7 @@ pub struct BuildSystemPromptInput<'a> {
 /// Mirrors the TS `renderAgentBullet` helper: locality marker first, then
 /// description/role, then a `Use when:` line when `use_criteria` is set.
 fn render_agent_bullet(a: &tenex_project::Agent) -> String {
-    let short_pubkey = &a.pubkey[..8.min(a.pubkey.len())];
+    let short_pubkey = tenex_utils::pubkey::shorten_for_display(&a.pubkey);
     let mut line = match a.category.as_deref() {
         Some(cat) if !cat.is_empty() => {
             format!("  - {} ({}, {})", a.slug, short_pubkey, cat)
@@ -307,7 +307,7 @@ pub fn build_system_prompt(input: BuildSystemPromptInput<'_>) -> String {
     let mut parts: Vec<String> = Vec::new();
 
     // Fragment 01: Agent identity
-    let short_pubkey = &pubkey_hex[..8.min(pubkey_hex.len())];
+    let short_pubkey = tenex_utils::pubkey::shorten_for_display(pubkey_hex);
     parts.push(format!(
         "<agent-identity>\nYour name: {} ({})\n{}</agent-identity>",
         identity_name,
@@ -412,14 +412,14 @@ Your nsec and other secrets are in $AGENT_HOME/.env (auto-loaded in shell sessio
             if let Some(owner) = &meta.owner_pubkey {
                 ctx_parts.push(format!(
                     "  Owner pubkey: \"{}\"",
-                    &owner[..8.min(owner.len())]
+                    tenex_utils::pubkey::shorten_for_display(owner)
                 ));
             }
         }
         if let Some(conv_id) = conversation_id {
             ctx_parts.push(format!(
                 "  Conversation ID: {}",
-                &conv_id[..8.min(conv_id.len())]
+                tenex_utils::ids::shorten_full_event_id(conv_id)
             ));
         }
 

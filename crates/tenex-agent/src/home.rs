@@ -9,7 +9,7 @@ const MAX_INJECTED_FILE_LENGTH: usize = 1500;
 pub fn agent_home_dir(base_dir: &Path, pubkey_hex: &str) -> PathBuf {
     base_dir
         .join("home")
-        .join(&pubkey_hex[..8.min(pubkey_hex.len())])
+        .join(tenex_utils::pubkey::shorten_for_path(pubkey_hex))
 }
 
 pub fn ensure_agent_home_dir(home_dir: &Path) -> bool {

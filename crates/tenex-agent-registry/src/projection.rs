@@ -55,7 +55,7 @@ pub fn read_agent_projection_file(path: &Path, pubkey: &str) -> anyhow::Result<A
     let signer_ref = raw.nsec.as_ref().map(|n| format!("nsec:{n}"));
     let slug = raw.slug;
     let name = raw.name.unwrap_or_else(|| slug.clone().unwrap_or_default());
-    let slug = slug.unwrap_or_else(|| pubkey[..8].to_string());
+    let slug = slug.unwrap_or_else(|| tenex_utils::pubkey::shorten_for_display(pubkey));
     Ok(AgentProjection {
         pubkey: pubkey.to_string(),
         slug,

@@ -80,7 +80,7 @@ impl UnavailableAgentNames for IdentityServiceAgentNames {
 pub(crate) fn log_unavailable_agent(pubkey: &str, names: &dyn UnavailableAgentNames) {
     let display_name = names
         .display_name(pubkey)
-        .unwrap_or_else(|| short_pubkey(pubkey));
+        .unwrap_or_else(|| tenex_utils::pubkey::shorten_for_display(pubkey));
     tracing::debug!(
         pubkey = %pubkey,
         agent = %display_name,
@@ -110,8 +110,4 @@ fn resolve_identity_view(socket_path: &Path, pubkey: &str) -> Option<tenex_ident
     }
 
     serde_json::from_str(trimmed).ok()
-}
-
-fn short_pubkey(pubkey: &str) -> String {
-    pubkey.chars().take(8).collect()
 }

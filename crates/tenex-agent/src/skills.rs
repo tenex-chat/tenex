@@ -181,18 +181,10 @@ fn parse_frontmatter(lines: &[&str]) -> SkillFrontmatter {
 
 // ─── Directory discovery ──────────────────────────────────────────────────────
 
-fn short_pubkey(pubkey: &str) -> &str {
-    if pubkey.len() >= 8 {
-        &pubkey[..8]
-    } else {
-        pubkey
-    }
-}
-
 /// Returns skill lookup directories in precedence order (first-seen-wins):
 /// built-in first, then agent, project, shared.
 pub fn lookup_dirs(ctx: &SkillLookupCtx) -> Vec<(PathBuf, SkillScope)> {
-    let short = short_pubkey(&ctx.agent_pubkey);
+    let short = tenex_utils::pubkey::shorten_for_path(&ctx.agent_pubkey);
     let mut dirs = Vec::new();
 
     // 1. Built-in (shipped with TENEX installation)

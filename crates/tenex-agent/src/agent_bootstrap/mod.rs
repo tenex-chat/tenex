@@ -186,7 +186,7 @@ pub(crate) async fn build(
     eprintln!(
         "[tenex-agent] {} ({}) @ {}",
         agent_config.identity_name(),
-        &pubkey_hex[..8],
+        tenex_utils::pubkey::shorten_for_display(&pubkey_hex),
         working_dir,
     );
     eprintln!(
@@ -219,7 +219,7 @@ pub(crate) async fn build(
     eprintln!(
         "[tenex-agent] Triggered by event {} from {}",
         tenex_utils::ids::shorten_full_event_id(&trigger_event_id),
-        &trigger_pubkey_hex[..8]
+        tenex_utils::pubkey::shorten_for_display(&trigger_pubkey_hex)
     );
     let injection_tracker = Arc::new(Mutex::new(MessageInjectionTracker::new(
         conv_db_path.clone(),

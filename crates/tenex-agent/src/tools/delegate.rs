@@ -81,7 +81,7 @@ impl DelegateTool {
             RecipientResolution::Ambiguous(candidates) => ResolveOutcome::Ambiguous(
                 candidates
                     .into_iter()
-                    .map(|a| format!("{} ({})", a.slug, &a.pubkey[..8.min(a.pubkey.len())]))
+                    .map(|a| format!("{} ({})", a.slug, tenex_utils::pubkey::shorten_for_display(&a.pubkey)))
                     .collect(),
             ),
             RecipientResolution::NotFound => {

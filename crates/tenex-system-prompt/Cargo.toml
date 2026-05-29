@@ -10,4 +10,5 @@ path = "src/lib.rs"
 
 [dependencies]
 tenex-project = { path = "../tenex-project" }
+tenex-utils = { path = "../tenex-utils" }
 tenex-supervision = { path = "../tenex-supervision" }

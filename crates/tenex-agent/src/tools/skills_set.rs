@@ -222,7 +222,7 @@ impl Tool for SkillsSetTool {
                 .ctx
                 .base_dir
                 .join("home")
-                .join(&self.ctx.agent_pubkey[..8.min(self.ctx.agent_pubkey.len())])
+                .join(tenex_utils::pubkey::shorten_for_path(&self.ctx.agent_pubkey))
                 .display()
                 .to_string();
             let tenex_base = self.ctx.base_dir.display().to_string();

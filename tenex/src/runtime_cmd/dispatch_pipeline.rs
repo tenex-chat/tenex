@@ -204,7 +204,7 @@ async fn process_relay_event_inner(
                 parent: event_received_span,
                 tracing::Level::INFO,
                 event_id = short,
-                author = %&author_hex[..8],
+                author = %tenex_utils::pubkey::shorten_for_display(&author_hex),
                 "external author persisted; routeUnauthorizedAuthors=false",
             );
             return;
@@ -430,7 +430,7 @@ pub(super) async fn run_external_dispatch(
     let short_id = tenex_utils::ids::shorten_full_event_id(&event_id_hex);
     let short = short_id.as_str();
     let author_hex = event.pubkey.to_hex();
-    let author_short = &author_hex[..8];
+    let author_short = tenex_utils::pubkey::shorten_for_display(&author_hex);
 
     let firewall_ctx = tenex_firewall::ProjectContext {
         title: shared.project_title.as_str(),
@@ -585,7 +585,7 @@ pub(super) async fn handle_stop_command(shared: Arc<RuntimeShared>, event: &Even
     }
 
     let conversation_id = conversation_id_from_event(event);
-    let reason = format!("stop signal from {}", &event.pubkey.to_hex()[..8]);
+    let reason = format!("stop signal from {}", tenex_utils::pubkey::shorten_for_display(&event.pubkey.to_hex()));
     for agent_pubkey in &agent_pubkeys {
         set_agent_blocked(&shared.store, &conversation_id, agent_pubkey)?;
         let result =

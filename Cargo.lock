@@ -3315,6 +3315,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+ "tenex-utils",
 ]
 
 [[package]]
@@ -3502,6 +3503,7 @@ dependencies = [
  "tempfile",
  "tenex-agent-registry",
  "tenex-identity",
+ "tenex-utils",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -3605,6 +3607,7 @@ version = "0.1.0"
 dependencies = [
  "tenex-project",
  "tenex-supervision",
+ "tenex-utils",
 ]
 
 [[package]]

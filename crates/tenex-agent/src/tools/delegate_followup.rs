@@ -73,7 +73,7 @@ impl DelegateFollowupTool {
             .iter()
             .find(|agent| agent.pubkey == pubkey)
             .map(|agent| format!("@{}", agent.slug))
-            .unwrap_or_else(|| format!("@{}", &pubkey[..pubkey.len().min(8)]))
+            .unwrap_or_else(|| format!("@{}", tenex_utils::pubkey::shorten_for_display(pubkey)))
     }
 
     fn resolve_recipient(

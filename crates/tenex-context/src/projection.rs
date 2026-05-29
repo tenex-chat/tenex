@@ -220,7 +220,7 @@ pub(crate) fn project_messages(
                         .or_insert_with(|| {
                             name_resolver
                                 .and_then(|r| r.display_name(&record.author_pubkey))
-                                .unwrap_or_else(|| short_pubkey(&record.author_pubkey))
+                                .unwrap_or_else(|| tenex_utils::pubkey::shorten_for_display(&record.author_pubkey))
                         })
                         .clone();
                     format!("[{name}] {}", record.content)
@@ -398,10 +398,6 @@ fn next_record_timestamp_ms(history: &[MessageRecord], idx: usize) -> i64 {
 
 fn timestamp_ms(timestamp: Option<i64>) -> Option<i64> {
     timestamp.map(timestamp_value_ms)
-}
-
-fn short_pubkey(pubkey: &str) -> String {
-    pubkey.chars().take(8).collect()
 }
 
 fn timestamp_value_ms(timestamp: i64) -> i64 {

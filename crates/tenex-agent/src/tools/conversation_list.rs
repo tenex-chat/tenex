@@ -262,7 +262,7 @@ impl Tool for ConversationListTool {
                 RecipientResolution::Ambiguous(candidates) => {
                     let labels: Vec<String> = candidates
                         .iter()
-                        .map(|a| format!("{} ({})", a.slug, &a.pubkey[..8.min(a.pubkey.len())]))
+                        .map(|a| format!("{} ({})", a.slug, tenex_utils::pubkey::shorten_for_display(&a.pubkey)))
                         .collect();
                     return Ok(format!(
                         "Error: 'with' value '{}' matches multiple agents: {}. Use a longer pubkey prefix or the agent slug.",
