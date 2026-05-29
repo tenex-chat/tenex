@@ -96,3 +96,10 @@ typecheck.cjs
 .worktrees/
 .claude/worktrees/
 .devtools
+
+# Legacy / untracked directories (not part of active codebase)
+src/
+packages/
+rig/
+sdk/
+
