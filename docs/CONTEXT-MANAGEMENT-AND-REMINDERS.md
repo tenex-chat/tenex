@@ -1,324 +1,119 @@
 # TENEX Context Management And Reminders
 
-This document explains how request-time context management works in TENEX after reminder handling was merged into `ai-sdk-context-management`.
+This document explains how TENEX shapes the message list sent to the LLM on each
+turn: context-window management (compaction, tool-result decay), delegation-marker
+expansion, proactive RAG context, and reminders.
 
 The short version:
 
-- TENEX keeps the canonical transcript immutable.
-- TENEX keeps a separate per-agent prompt-view history of what was actually sent.
-- Reminders are computed at request time by `RemindersStrategy`.
-- Runtime-only reminders are stored as append-only prompt overlays, not as edits to old user messages.
-- Cold prompt histories are restored from canonical transcript content before each request, so non-cached providers do not keep replaying stale reminder-appended user turns.
-
-## Design Invariants
-
-These rules are intentional and should not be broken by future refactors:
-
-1. Canonical conversation history is the source of truth for the transcript.
-2. Historical prompt state is append-only per agent.
-3. Runtime reminders must not rewrite historical transcript messages.
-4. Reminder delta/full bookkeeping is separate from prompt-history storage.
-
-The bug that drove this design was prompt corruption from repeatedly appending runtime reminder content into older user messages. That caused prompt drift, duplicated reminder blocks, and unbounded prompt growth. The current architecture exists to prevent that.
-
-## Main Pieces
-
-### TENEX runtime wiring
-
-- `src/agents/execution/context-management/runtime.ts`
-- `src/agents/execution/request-preparation.ts`
-- `src/agents/execution/StreamSetup.ts`
-- `src/agents/execution/StreamCallbacks.ts`
-
-TENEX constructs an `ai-sdk-context-management` runtime per execution context and passes current request facts into it.
-
-### Library strategies
-
-- `ai-sdk-context-management/src/strategies/reminders/index.ts`
-
-`RemindersStrategy` owns reminder production and placement.
-
-### TENEX reminder providers
-
-- `src/agents/execution/system-reminders.ts`
-
-TENEX supplies provider-specific reminder facts and reminder renderers for:
-
-- `datetime`
-- `todo-list`
-- `response-routing`
-- `delegations`
-- `conversations`
-- `loaded-skills`
-
-Non-loaded skills are not exposed through a system reminder. Agents must use `skill_list` to discover available skills on demand.
-
-TENEX also enables the library-owned built-in reminder sources for:
-
-- context utilization
-- context-window status
-
-### Runtime-only reminder queue
-
-- `src/llm/system-reminder-context.ts`
-
-This is an `AsyncLocalStorage` queue for current-cycle reminders such as supervision corrections or one-shot runtime notices. It supports:
-
-- `queue(...)`
-- `defer(...)`
-- `advance()`
-- `collect()`
-
-This queue is not the main reminder engine. It is an ingress path for transient reminders that should affect the current or next request without being written into the canonical transcript.
-
-For the supervision side of this flow, see `docs/SUPERVISION.md`. That document explains where `supervision-correction` and `supervision-message` reminders come from and why some supervision violations re-engage the agent immediately while others only queue a later reminder.
-
-### Persistence
-
-- `src/conversations/ConversationStore.ts`
-- `src/conversations/types.ts`
-
-TENEX persists three different kinds of state:
-
-1. Canonical transcript state
-2. Per-agent prompt history
-3. Per-agent reminder engine state
-
-Those are separate on purpose.
-
-## End-To-End Request Flow
-
-### 1. Compile canonical prompt material
-
-`MessageCompiler` compiles the canonical conversation projection for the current turn.
-
-That output is still canonical conversation state. It does not yet include request-time overlays from context management.
-
-### 2. Promote deferred current-cycle reminders
-
-At the start of execution, `StreamSetup.ts` calls:
-
-```ts
-getSystemReminderContext().advance();
-```
-
-This promotes reminders that were deferred from the previous cycle into the current queued reminder set.
-
-### 3. Build `reminderData`
-
-TENEX assembles current turn facts in `StreamSetup.ts` or `StreamCallbacks.ts`, including:
-
-- the agent
-- the conversation store
-- the responding principal
-- pending and completed delegations
-- rendered conversation summary content
-- loaded skills
-- skill tool permissions
-- project path
-
-This object is passed into context management as `reminderData`.
-
-### 4. Build prompt history from canonical messages only
-
-Before context management runs, TENEX calls:
-
-- `buildPromptHistoryMessages(...)` in `src/agents/execution/prompt-history.ts`
-
-This appends any newly visible canonical messages into the agent's frozen prompt history.
-
-Important: this first pass does not inject runtime overlays yet.
-
-### 5. Prepare the provider-facing request
-
-`prepareLLMRequest(...)` in `src/agents/execution/request-preparation.ts` does the request-time transformation step.
-
-It:
-
-1. normalizes legacy message shapes
-2. collects queued current-cycle reminders from `getSystemReminderContext().collect()`
-3. maps them into `queuedReminders`
-4. calls `contextManagement.prepareRequest(...)`
-
-At this point TENEX passes two reminder inputs into the library:
-
-- `reminderData`: the persistent, domain-level facts for the turn
-- `queuedReminders`: transient current-cycle reminders from the async reminder context
-
-### 6. Strategy stack runs inside `ai-sdk-context-management`
-
-In `src/agents/execution/context-management/runtime.ts`, TENEX currently wires a stack shaped like:
-
-1. `CompactionToolStrategy` when enabled
-2. `ToolResultDecayStrategy` when enabled
-3. `RemindersStrategy` when enabled
-
-The exact toggles come from `src/agents/execution/context-management/settings.ts`.
-
-### 7. `RemindersStrategy` computes reminder output
-
-`RemindersStrategy` is now the only strategy allowed to apply reminders to the prompt.
-
-It owns:
-
-- built-in reminder sources
-- provider full/delta/skip logic
-- reminder placement
-- deferred reminder replay
-- reminder state persistence via the store callback
-
-It returns reminder content in one of three placements:
-
-- `overlay-user`
-- `latest-user-append`
-- `system-append`
-
-### 8. Runtime overlays are appended to prompt history
-
-If context management returned `runtimeOverlays`, TENEX performs a second append-only prompt-history pass:
-
-- `StreamSetup.ts`
-- `StreamCallbacks.ts`
-
-These overlays are added as standalone `runtime-overlay` prompt-history entries.
-
-This is the key safety property:
-
-- old user messages remain unchanged
-- new runtime-only prompt material is stored as new prompt-history entries
-
-### 9. Save only when state changed
-
-TENEX saves the conversation if any of these changed:
-
-- canonical prompt-history entries were appended
-- runtime overlay prompt-history entries were appended
-- reminder engine state changed
-
-## Reminder Placement Model
-
-### `overlay-user`
-
-Used for dynamic reminder content that should remain separate from historical user content.
-
-The library emits a standalone user-role overlay message and TENEX stores it as a runtime overlay in prompt history.
-
-This is the safest placement for volatile state.
-
-### `latest-user-append`
-
-Used when reminder content should be appended to the latest user message in the outgoing prompt only.
-
-This affects the current request but does not rewrite the canonical transcript stored in `ConversationStore`.
-
-TENEX uses this placement only after the host has observed a cache anchor for that agent prompt history.
-
-### `system-append`
-
-Used when reminder content should be emitted as a secondary system message.
-
-TENEX uses this placement while prompt history is still cold, so non-cached providers get the current reminder snapshot in `system` without creating reminder-only `user` turns or replaying stale user-appended reminder history.
-
-## Reminder State Persistence
-
-Reminder engine state is stored in:
-
-- `ConversationState.contextManagementReminderStates`
-
-and accessed via:
-
-- `getContextManagementReminderState(agentPubkey)`
-- `setContextManagementReminderState(agentPubkey, state)`
-- `clearContextManagementReminderState(agentPubkey)`
-
-This state tracks things like:
-
-- prior provider snapshots
-- turns since full reminder emission
-- deferred reminders
-
-It is separate from prompt history because these are different concerns:
-
-- prompt history answers "what did the model see?"
-- reminder state answers "what reminder facts were already conveyed?"
-
-## Prompt History Model
-
-Per-agent prompt history lives in `src/agents/execution/prompt-history.ts`.
-
-Each frozen entry is either:
-
-- `canonical`
-- `runtime-overlay`
-
-Canonical entries come from the conversation projection.
-
-Runtime-overlay entries come from request-time overlays such as system reminders.
-
-This preserves a stable, append-only history of what each agent actually saw without mutating the underlying conversation record.
-
-## Current-Cycle Reminder Queue
-
-The async reminder context in `src/llm/system-reminder-context.ts` is for transient reminders that should not become part of canonical reminder facts.
-
-Examples:
-
-- a supervision correction for this cycle only
-- a deferred one-shot reminder that should appear on the next cycle
-
-Behavior:
-
-- `queue(...)` affects the next `collect()`
-- `defer(...)` affects a future cycle after `advance()`
-- `collect()` drains the queued reminders
-
-These reminders are passed to `RemindersStrategy` as `queuedReminders`, so the placement and overlay logic still stays inside the main reminder strategy.
-
-## Configuration Surface
-
-`src/agents/execution/context-management/settings.ts` currently exposes these strategy toggles:
-
-- `reminders`
-- `toolResultDecay`
-- `compaction`
-- `contextUtilizationReminder`
-- `contextWindowStatus`
-
-Other relevant controls:
-
-- `tokenBudget`
-- `utilizationWarningThresholdPercent`
-- `compactionThresholdPercent`
-
-## What Changed Compared To The Older Design
-
-Older design:
-
-- reminder logic was split between a separate reminder package, TENEX host-side wiring, and prompt-history mutation logic
-- reminder deltas could leak into old transcript messages
-- Anthropic system-prompt behavior was partly treated as a separate reminder concern in the host
-
-Current design:
-
-- reminder orchestration lives in `RemindersStrategy`
-- TENEX supplies facts and reminder providers, not the reminder engine itself
-- prompt history remains append-only
-- runtime overlays remain isolated from canonical transcript history
-
-## Files To Read First
-
-If you need to change this system, start with these files:
-
-- `src/agents/execution/context-management/runtime.ts`
-- `src/agents/execution/request-preparation.ts`
-- `src/agents/execution/prompt-history.ts`
-- `src/agents/execution/system-reminders.ts`
-- `src/llm/system-reminder-context.ts`
-- `src/agents/execution/StreamSetup.ts`
-- `src/agents/execution/StreamCallbacks.ts`
-- `src/conversations/ConversationStore.ts`
-
-Then read the library side:
-
-- `../ai-sdk-context-management/src/strategies/reminders/index.ts`
-- `../ai-sdk-context-management/src/types.ts`
+- The canonical conversation transcript is **immutable**.
+- On each turn, the **`tenex-context`** crate *projects* that history into the
+  `messages[]` the model sees, by running a fixed pipeline of strategies over an
+  in-memory copy. It never mutates stored messages.
+- The system prompt is assembled once (by `tenex-system-prompt`) and stays
+  stable across the turn's steps — it is the cache anchor. Volatile per-turn
+  material (reminders, RAG context) is added to the projected messages, not to
+  the system prompt and not by rewriting historical messages.
+- Projection is **deterministic** from its inputs. There is no asynchronous
+  reminder queue, no provider-specific delta/full/skip logic, and no
+  cache-anchor decision gating — those were TypeScript-era concepts that no
+  longer exist.
+
+## Ownership
+
+- **`tenex-context`** owns projection. Its public surface is `project()` /
+  `project_with_options()` (history → `messages[]`, with token estimates and
+  cache-breakpoint hints) and `record_turn()` (write-back to per-agent prompt
+  history). Modules: `projection`, `tokens`, `turn`, `types`, and `strategies/`.
+- **`tenex-agent`** drives it. The turn loop calls `project_with_options(...)`
+  for each step with a stable system prompt, the precomputed proactive-context
+  block, and the tool definitions; it calls `record_turn(...)` afterward.
+
+## The strategy pipeline
+
+`tenex-context` runs these strategies in a **fixed order** over a clone of the
+projected message list. Each is a pure transformation; none touches the stored
+transcript.
+
+1. **Compaction** — when the projected token count reaches the threshold
+   (default 80% of the model's context window), the system prompt and a recent
+   tail of messages (default 6) are preserved and the middle is collapsed into a
+   summary. The summary is an 8-section LLM-produced digest when a
+   `CompactionSummarizer` is available (`tenex-agent` provides an LLM-backed
+   implementation); otherwise a deterministic placeholder is used.
+2. **Tool-result decay** — the most recent decay-eligible tool results (default
+   3) are kept verbatim; older ones are replaced by a marker that preserves the
+   tool-call/tool-result linkage. Eligibility is per tool via `ToolDef.preserve_results`:
+   tools whose output is a work product (e.g. `load_skill`, `delegate`) are never
+   decayed.
+3. **Delegation-marker expansion** — pending delegations are dropped from the
+   stream and surfaced as an `<agent-delegations>` reminder block on the last
+   non-system message; completed/aborted delegations are rewritten in place as a
+   user message carrying the child transcript; deeply nested delegations are
+   reduced to a one-line reference to bound prompt growth.
+4. **Proactive context (RAG)** — a precomputed RAG block is appended to the last
+   **user** message (computed once per invocation and threaded in as a stable
+   option, so it does not perturb tool-call linkage).
+5. **Reminders** — the current todo state is rendered as a
+   `<system-reminder><agent-todos>` block and appended inline to the last
+   non-system message.
+
+## Reminders, concretely
+
+Reminders are deterministic functions of current state, not a stateful engine.
+They reach the model in two places:
+
+- **In the user message.** At bootstrap, the runner composes the user message
+  from the triggering event plus appended plain-text blocks: the todo reminder,
+  conversation reminders read from the store, and external/remote-agent
+  disclosures. At projection time, the reminders strategy appends the current
+  `<agent-todos>` block to the last non-system message.
+- **In the system prompt (stable additions only).** At bootstrap the runner
+  appends an active-tools reminder and an active-shell-tasks reminder to the
+  otherwise-stable system prompt. Because these are fixed for the duration of the
+  turn, they do not break cache stability.
+
+There is **no** separate runtime-overlay store, no `queue/defer/advance/collect`
+async reminder context, and no per-provider placement model. Supervision
+messages that re-engage an agent are persisted as ordinary `supervision`-type
+user messages in the conversation store (see `docs/SUPERVISION.md`) and then
+projected like any other message — they are not a special reminder channel.
+
+## Prompt history and cache observation
+
+`record_turn()` appends one entry per visible message to the per-agent prompt
+history (`agent_prompt_history`), capturing `agent_pubkey`, `prompt_id`,
+`sequence`, `role`, `source_kind`, and `overlay_type` (e.g. `delegation` for an
+expanded delegation marker). This answers "what did this agent actually see,"
+separately from and without mutating the canonical transcript.
+
+Cache observations from the turn (whether a cache hit occurred, breakpoint hints)
+are recorded for **observability**. They do not gate strategy behavior: reminders
+are always appended to the last message and never rewrite earlier ones, so there
+is no cache-anchor decision logic to maintain.
+
+## Configuration
+
+There is no per-strategy configuration surface. The pipeline order is fixed and
+the thresholds are constants in `tenex-context`: compaction at 80% of context,
+a 6-message preserved tail, 3 verbatim recent tool results. The model's context
+window size is supplied by the runner per request.
+
+## Design intent
+
+- **Immutability + projection.** The transcript is the source of truth; the
+  prompt is a deterministic projection of it. This prevents the prompt-drift
+  failure mode where repeatedly appending reminders into old user messages
+  duplicated content and grew the prompt without bound.
+- **Stable system prompt = reliable caching.** Everything that varies per turn
+  lives in the projected messages (appended to the tail), so the system-prompt
+  cache anchor stays byte-stable. See `docs/system-prompt-architecture.md`.
+- **One pipeline, no hidden lifecycle.** Five composable strategies in a fixed
+  order, each pure, replace the previous runtime's reminder engine, async queue,
+  and overlay bookkeeping.
+
+## Where to look
+
+- `crates/tenex-context/` (`projection.rs`, `strategies/`, `turn.rs`, `types.rs`) and its `AGENTS.md`.
+- `crates/tenex-agent/src/agent_bootstrap/` (user-message composition, system-prompt reminders) and the projection call in `crates/tenex-agent/src/turn_loop/`.
+- `docs/system-prompt-architecture.md` for the stable system-prompt anchor.

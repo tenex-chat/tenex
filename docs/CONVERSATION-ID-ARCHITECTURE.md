@@ -2,132 +2,76 @@
 
 ## Overview
 
-Conversation IDs exist in two forms:
-1. **Canonical IDs** (64-char hex) - used internally for lookups, matching, storage
-2. **Display IDs** (10-char shortened) - used in tool output, logs, UI
+A conversation ID is a **full 64-character hex Nostr event id** — the id of the
+event that rooted the conversation. TENEX does not mint conversation ids; they
+come from Nostr. They are stored and matched canonically, in full.
 
-## Architecture Layers
+Conversation ids appear in two forms:
 
-### Data Layer: `ConversationCatalogService`
+1. **Canonical IDs** (full 64-char hex) — used for all storage, lookup, and
+   matching.
+2. **Display IDs** (a short prefix) — used only when rendering to humans in tool
+   output and logs.
 
-**Returns:** Full canonical IDs (64-char hex)
+The distinction is a **presentation concern, not a storage concern**. The data
+layer always works with full ids; shortening happens at the point of display.
 
-**Used by:**
-- Internal systems (migrations, reminders, indexing)
-- Code that needs to match/lookup conversations
-- Systems that aggregate across conversations
+## Storage: a single `ConversationStore`
 
-**Why full IDs:** The catalog is a shared programmatic read model used for internal logic that requires exact ID matching. Returning shortened IDs breaks migrations, deduplication, and cross-reference logic.
+All conversation state for a project lives in one SQLite database,
+`~/.tenex/projects/<dTag>/conversation.db`, owned by the **`tenex-conversations`**
+crate. Every consumer — the project runtime, the agent runner, the summarizer,
+the intervention watcher, conversation tools — opens that same file through
+`ConversationStore`. There is no separate "catalog" database and no read-model
+service in front of the store: read methods on `ConversationStore` serve all
+consumers directly.
 
-```typescript
-const catalog = ConversationCatalogService.getInstance(projectId);
-const conversations = catalog.listConversations({ limit: 50 });
-// conversations[0].id === "abc123...xyz" (64 chars)
-```
+The `conversations.id` column is the full hex id (a `TEXT PRIMARY KEY`). The
+store never truncates ids. Returning a shortened id from a read method would
+break matching, deduplication, delegation-chain reconstruction, and migration.
 
-### Presentation Layer: `ConversationPresenter`
+> Historical note: the previous TypeScript runtime split this into a canonical
+> `ConversationStore` plus a derived `ConversationCatalogService` over a separate
+> `conversation-catalog.db`, with a `ConversationPresenter` formatting layer.
+> Those types do not exist in the Rust system; the four-store TypeScript layout
+> was consolidated into the single `conversation.db` by a one-time migration
+> (`tenex-conversations`'s `migration` module).
 
-**Returns:** Shortened display IDs + full IDs for lookups
+## Display: shortening at the edge
 
-**Used by:**
-- Tools that display data to users
-- Code that uses the catalog and needs formatted output
+Shortening is applied by each consumer when it renders ids for humans, never by
+the store. The conventions in the current code:
 
-```typescript
-import { ConversationPresenter } from "@/conversations/presenters/ConversationPresenter";
+- The **host CLI** (`tenex` binary) has a shared `shorten_event_id` helper
+  (`tenex/src/utils/identifiers.rs`) that takes a 10-character prefix of a hex
+  event id. Telegram-style ids (prefixed `tg_`) are hashed before truncation so
+  they stay opaque and fixed-length.
+- The **`conversation_get`** agent tool shortens to a 10-character prefix and
+  resolves collisions when several ids share a prefix in the same view.
+- The **`conversation_list`** agent tool shortens to an 8-character prefix for
+  its line-formatted output.
+- The **`conversation_search`** tool returns full ids to its caller; it does not
+  shorten.
 
-const catalog = ConversationCatalogService.getInstance(projectId);
-const entries = catalog.listConversations({ limit: 50 });
-const formatted = ConversationPresenter.formatListEntries(entries);
-// formatted[0].id === "abc123..." (10 chars, shortened)
-// formatted[0].fullId === "abc123...xyz" (64 chars, for lookups)
-```
+There is intentionally **no single library-level `shorten_conversation_id`
+function**: a conversation id *is* a Nostr event id, so display shortening is the
+same operation as event-id shortening, and it lives with the consumer that owns
+the rendering (the host binary's helper, or the tool's own formatter).
 
-### Tool Layer
+## Rules
 
-**Option A: Simple tools using catalog**
-- Use `ConversationCatalogService` + `ConversationPresenter`
-- Get automatic ID formatting
-- No manual shortening needed
+1. **Never shorten at the storage layer.** `ConversationStore` returns full
+   canonical ids. Shorten only when producing human-facing output.
+2. **Treat a conversation id as a Nostr event id.** Reuse the host's
+   `shorten_event_id` helper rather than re-implementing truncation, so special
+   cases (e.g. Telegram ids) stay consistent.
+3. **Keep the full id reachable.** A view that displays a short id must retain
+   the full id for any subsequent lookup.
+4. **Document deliberate prefix lengths.** Tools that pick a non-standard prefix
+   length (e.g. `conversation_list`'s 8 chars) should say why.
 
-**Option B: Complex tools with special needs**
-- May load directly from `ConversationStore` (e.g., for delegation chain metadata)
-- Use centralized `shortenConversationId()` helper for formatting
-- Example: `conversation_list` (builds tree structures from delegation chains)
+## Related
 
-```typescript
-import { shortenConversationId } from "@/utils/conversation-id";
-
-// For custom tree structures or special metadata
-const store = ConversationStore.getOrLoad(fullId);
-const displayId = shortenConversationId(store.id);
-```
-
-## When to Use Which
-
-| Use Case | Data Source | ID Formatting |
-|----------|------------|---------------|
-| Internal matching/lookups | `ConversationCatalogService` | Use full IDs as-is |
-| Tool displaying lists | `ConversationCatalogService` + `ConversationPresenter` | Automatic shortened IDs |
-| Custom tree structures | `ConversationStore` directly | Manual with `shortenConversationId()` |
-| Migrations/indexing | `ConversationCatalogService` | Full IDs (no formatting) |
-| Logging/traces | Any source | `shortenConversationId()` helper |
-
-## Critical Rules
-
-1. **Never shorten IDs at the data layer** - The catalog must return full canonical IDs for internal system integrity
-
-2. **Use the centralized helper** - Always use `shortenConversationId()` from `@/utils/conversation-id`, never substring or duplicate logic
-
-3. **Keep full IDs available** - The presenter includes both shortened (`id`) and full (`fullId`) for lookups
-
-4. **Document special cases** - Tools with custom needs (like tree structures) should document why they bypass the presenter
-
-## Examples
-
-### ✅ Correct: Simple tool with catalog
-
-```typescript
-const catalog = ConversationCatalogService.getInstance(projectId);
-const entries = catalog.listConversations({ limit: 50 });
-const formatted = ConversationPresenter.formatListEntries(entries);
-return { conversations: formatted }; // Shortened IDs automatically
-```
-
-### ✅ Correct: Complex tool with special needs
-
-```typescript
-// conversation_list tool - needs delegation chain tree structure
-const conversations = loadConversationsFromStore();
-return conversations.map(conv => ({
-    id: shortenConversationId(conv.id), // Use centralized helper
-    children: buildTreeStructure(conv), // Custom logic
-}));
-```
-
-### ❌ Wrong: Shortening at data layer
-
-```typescript
-// DON'T DO THIS in ConversationCatalogService
-private toPreview(row: ConversationRow): ConversationCatalogPreview {
-    return {
-        id: shortenConversationId(row.conversation_id), // ❌ Breaks migrations!
-        // ...
-    };
-}
-```
-
-### ❌ Wrong: Manual shortening without helper
-
-```typescript
-// DON'T DO THIS
-const displayId = fullId.substring(0, 10); // ❌ Duplicates logic, breaks special IDs
-```
-
-## Testing
-
-When testing catalog-dependent code:
-- Verify full 64-char IDs are returned from catalog methods
-- Test that migrations/reminders work with full IDs
-- Test that presenter correctly shortens IDs while preserving fullId
-- Test that tools using the helper get consistent formatting
+- `crates/tenex-conversations/AGENTS.md` — store invariants and the single-file contract.
+- `docs/internals/conversation-metadata-generation.md` — how metadata is generated for conversations.
+- `docs/CONVERSATION_INDEXING.md` — conversation indexing for RAG.

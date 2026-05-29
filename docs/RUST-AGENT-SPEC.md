@@ -317,7 +317,7 @@ Search file contents using ripgrep (falls back to grep). Pattern is always treat
 | `description` | string | Brief reason for this search |
 | `path` | string? | File or directory to search (defaults to cwd) |
 | `output_mode` | string? | `files_with_matches` \| `content` \| `count` (default: `files_with_matches`) |
-| `glob` | string? | Glob filter for files (e.g. `*.ts`) |
+| `glob` | string? | Glob filter for files (e.g. `*.rs`) |
 | `-i` | bool? | Case-insensitive search |
 | `-A` | integer? | Lines of trailing context (content mode) |
 | `-B` | integer? | Lines of leading context (content mode) |
@@ -512,7 +512,7 @@ Request a silent completion for the current turn. Use only when the user's messa
 
 No parameters.
 
-Uses `Arc<AtomicBool>::swap(true)` — idempotent: a second call detects the flag was already set and returns a "STOP — do not call this tool again" advisory instead of silently no-op'ing. After the inner rig loop ends, `main.rs` checks the flag before emitting the final `ConversationIntent` — if set, no event is published and the turn ends silently. Note: the TS implementation (in `no_response.ts`) uses a similar early-exit pattern; the Rust version is behaviorally equivalent.
+Uses `Arc<AtomicBool>::swap(true)` — idempotent: a second call detects the flag was already set and returns a "STOP — do not call this tool again" advisory instead of silently no-op'ing. After the inner rig loop ends, `main.rs` checks the flag before emitting the final `ConversationIntent` — if set, no event is published and the turn ends silently.
 
 ### `report_publish`
 Publish markdown files as NIP-23 long-form articles (kind:30023) to Nostr, signed with the agent's keys. Accepts a single file or a directory (directory walk is recursive). Path may be absolute or relative to the project root.
