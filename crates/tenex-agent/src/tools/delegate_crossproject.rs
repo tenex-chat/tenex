@@ -268,9 +268,10 @@ impl Tool for DelegateCrossProjectTool {
                 DelegateCrossProjectError(format!("failed to emit tool-use event: {e}"))
             })?;
 
+        let short_id = &delegation_event_id[..delegation_event_id.len().min(10)];
         Ok(format!(
             "Delegated to @{} in project '{}'. Delegation event ID: {}. Stop here — do not take further actions this turn.",
-            args.recipient, args.project_id, delegation_event_id
+            args.recipient, args.project_id, short_id
         ))
     }
 }

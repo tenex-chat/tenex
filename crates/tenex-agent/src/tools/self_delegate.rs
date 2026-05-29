@@ -188,8 +188,9 @@ impl Tool for SelfDelegateTool {
             .await
             .map_err(|e| SelfDelegateError(format!("failed to emit tool-use event: {e}")))?;
 
+        let short_id = &delegation_event_id[..delegation_event_id.len().min(10)];
         Ok(format!(
-            "Self-delegation queued. Delegation event ID: {delegation_event_id}. Stop here — do not take further actions this turn."
+            "Self-delegation queued. Delegation event ID: {short_id}. Stop here — do not take further actions this turn."
         ))
     }
 }
