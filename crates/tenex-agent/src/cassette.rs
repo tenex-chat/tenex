@@ -52,6 +52,7 @@ struct CassetteTurnRecord<'a> {
     duration_ms: u64,
     timestamp_ms: u64,
     request_debug: &'a str,
+    chat_history: &'a str,
     content: &'a str,
     tool_calls: &'a [CassetteToolCall],
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -83,11 +84,12 @@ impl CassetteRecorder {
         turn: usize,
         duration_ms: u64,
         request_debug: &str,
+        chat_history: &str,
         content: &str,
         tool_calls: &[CassetteToolCall],
     ) {
         if let Err(err) =
-            self.try_record_turn(turn, duration_ms, request_debug, content, tool_calls)
+            self.try_record_turn(turn, duration_ms, request_debug, chat_history, content, tool_calls)
         {
             eprintln!(
                 "[tenex-agent cassette] failed to append LLM cassette {}: {err}",
@@ -101,6 +103,7 @@ impl CassetteRecorder {
         turn: usize,
         duration_ms: u64,
         request_debug: &str,
+        chat_history: &str,
         content: &str,
         tool_calls: &[CassetteToolCall],
     ) -> Result<()> {
@@ -117,6 +120,7 @@ impl CassetteRecorder {
             duration_ms,
             timestamp_ms,
             request_debug,
+            chat_history,
             content,
             tool_calls,
             error: None,
@@ -130,6 +134,7 @@ impl CassetteRecorder {
         turn: usize,
         duration_ms: u64,
         request_debug: &str,
+        chat_history: &str,
         content: &str,
         tool_calls: &[CassetteToolCall],
         error: &CassetteStreamError,
@@ -138,6 +143,7 @@ impl CassetteRecorder {
             turn,
             duration_ms,
             request_debug,
+            chat_history,
             content,
             tool_calls,
             error,
@@ -154,6 +160,7 @@ impl CassetteRecorder {
         turn: usize,
         duration_ms: u64,
         request_debug: &str,
+        chat_history: &str,
         content: &str,
         tool_calls: &[CassetteToolCall],
         error: &CassetteStreamError,
@@ -171,6 +178,7 @@ impl CassetteRecorder {
             duration_ms,
             timestamp_ms,
             request_debug,
+            chat_history,
             content,
             tool_calls,
             error: Some(error),

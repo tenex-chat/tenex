@@ -129,6 +129,7 @@ where
                         turn,
                         started.elapsed().as_millis() as u64,
                         &request_debug,
+                        &input_messages,
                         &content,
                         &tool_calls,
                     );
@@ -196,6 +197,7 @@ where
             turn,
             started,
             request_debug,
+            chat_history: input_messages,
             content: String::new(),
             tool_calls: Vec::new(),
             diagnostics: StreamDiagnostics::new(trace_tool_args_enabled()),
@@ -235,6 +237,7 @@ where
                             state.turn,
                             state.started,
                             &state.request_debug,
+                            &state.chat_history,
                             &state.content,
                             &state.tool_calls,
                         );
@@ -263,6 +266,7 @@ where
                             state.turn,
                             state.started,
                             &state.request_debug,
+                            &state.chat_history,
                             &state.content,
                             &state.tool_calls,
                         );
@@ -283,6 +287,7 @@ struct StreamState<S> {
     turn: Option<usize>,
     started: Instant,
     request_debug: String,
+    chat_history: String,
     content: String,
     tool_calls: Vec<CassetteToolCall>,
     diagnostics: StreamDiagnostics,
@@ -396,6 +401,7 @@ fn record_once(
     turn: Option<usize>,
     started: Instant,
     request_debug: &str,
+    chat_history: &str,
     content: &str,
     tool_calls: &[CassetteToolCall],
 ) {
@@ -404,6 +410,7 @@ fn record_once(
             turn,
             started.elapsed().as_millis() as u64,
             request_debug,
+            chat_history,
             content,
             tool_calls,
         );
@@ -424,6 +431,7 @@ fn record_error_once<S>(state: &StreamState<S>, err: &CompletionError, failure: 
             turn,
             state.started.elapsed().as_millis() as u64,
             &state.request_debug,
+            &state.chat_history,
             &state.content,
             &state.tool_calls,
             &stream_error,
