@@ -91,7 +91,7 @@ pub(super) fn is_full_hex_id(input: &str) -> bool {
 }
 
 pub(super) fn short_id(value: &str) -> String {
-    tenex_ids::shorten_full_event_id(value)
+    tenex_utils::ids::shorten_full_event_id(value)
 }
 
 pub(super) fn get_string(value: &serde_json::Value, keys: &[&str]) -> Option<String> {

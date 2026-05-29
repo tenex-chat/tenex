@@ -58,7 +58,7 @@ pub(super) async fn dispatch_notification(
 
     mark_seen(&shared.seen, event.id);
     if let Err(error) = shared.client.send_event(&event).await {
-        warn!(event_id = %tenex_ids::shorten_full_event_id(&event.id.to_hex()), error = %error, "failed to publish MCP subscription notification");
+        warn!(event_id = %tenex_utils::ids::shorten_full_event_id(&event.id.to_hex()), error = %error, "failed to publish MCP subscription notification");
     }
 
     let completion_recipient_pubkey =

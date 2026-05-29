@@ -1,0 +1,8 @@
+[package]
+name = "tenex-utils"
+version = "0.1.0"
+edition = "2021"
+description = "Shared, dependency-light utilities for the TENEX workspace (event-ID helpers and more)."
+
+[dependencies]
+anyhow = "1"

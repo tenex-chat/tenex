@@ -116,7 +116,7 @@ fn display_name(pubkey: &str, resolver: Option<&dyn DisplayNameResolver>) -> Str
 }
 
 fn short_id(id: &str) -> String {
-    tenex_ids::shorten_full_event_id(id)
+    tenex_utils::ids::shorten_full_event_id(id)
 }
 
 fn push_attr_escaped(out: &mut String, s: &str) {

@@ -31,7 +31,7 @@ fn shorten_event_identifier(value: &str) -> String {
         }
         return hex;
     }
-    tenex_ids::shorten_full_event_id(value).to_lowercase()
+    tenex_utils::ids::shorten_full_event_id(value).to_lowercase()
 }
 
 /// Mirror `shortenConversationId` (`conversation-id.ts:49-51`).

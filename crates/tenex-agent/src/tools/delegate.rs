@@ -331,7 +331,7 @@ impl Tool for DelegateTool {
             .await
             .map_err(|e| DelegateError(format!("Failed to emit tool-use event: {e}")))?;
 
-        let short_id = tenex_ids::shorten_full_event_id(&delegation_event_id);
+        let short_id = tenex_utils::ids::shorten_full_event_id(&delegation_event_id);
         Ok(format!(
             "Delegated to @{}. Delegation event ID: {}. Use this ID with delegate_followup if you need to send corrections before they finish. Stop here — do not take further actions this turn.",
             args.recipient, short_id

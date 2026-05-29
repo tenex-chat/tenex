@@ -205,7 +205,7 @@ fn expand_terminal_marker(
             // status line rather than panicking.
             return format!(
                 "[Delegation to @{recipient_name} (conv: {}...) — pending]",
-                tenex_ids::shorten_full_event_id(&marker.delegation_conversation_id)
+                tenex_utils::ids::shorten_full_event_id(&marker.delegation_conversation_id)
             );
         }
     };
@@ -213,7 +213,7 @@ fn expand_terminal_marker(
 }
 
 fn empty_conversation_xml(conv_id: &str) -> String {
-    let short = tenex_ids::shorten_full_event_id(conv_id);
+    let short = tenex_utils::ids::shorten_full_event_id(conv_id);
     format!("<conversation id=\"{short}\" t0=\"0\"></conversation>")
 }
 

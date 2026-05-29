@@ -94,7 +94,7 @@ fn query_store(
 
 fn format_conv_line(tagged: &TaggedConv, indent: &str) -> String {
     let row = &tagged.row;
-    let id_short = tenex_ids::shorten_full_event_id(&row.id);
+    let id_short = tenex_utils::ids::shorten_full_event_id(&row.id);
     let title = row.title.as_deref().unwrap_or("(untitled)");
     let last_msg = row
         .last_user_message

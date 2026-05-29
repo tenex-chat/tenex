@@ -231,7 +231,7 @@ impl Tool for DelegateFollowupTool {
             MessageRef::Nostr { event_id } => event_id.to_hex(),
         };
 
-        let short_id = tenex_ids::shorten_full_event_id(&canonical_id);
+        let short_id = tenex_utils::ids::shorten_full_event_id(&canonical_id);
         Ok(format!(
             "Followup sent to {} referencing delegation {}. Followup event ID: {}.",
             recipient_label, short_id, followup_event_id

@@ -124,7 +124,7 @@ pub(super) fn spawn_dispatch_job(shared: Arc<RuntimeShared>, job: DispatchJob) {
                 Err(e) => {
                     tenex_telemetry::record_current_error(&e);
                     warn!(
-                        event_id = %tenex_ids::shorten_full_event_id(&job.event.id.to_hex()),
+                        event_id = %tenex_utils::ids::shorten_full_event_id(&job.event.id.to_hex()),
                         agent = %job.agent.slug,
                         error = %e,
                         "agent run failed"

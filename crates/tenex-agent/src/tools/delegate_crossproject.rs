@@ -268,7 +268,7 @@ impl Tool for DelegateCrossProjectTool {
                 DelegateCrossProjectError(format!("failed to emit tool-use event: {e}"))
             })?;
 
-        let short_id = tenex_ids::shorten_full_event_id(&delegation_event_id);
+        let short_id = tenex_utils::ids::shorten_full_event_id(&delegation_event_id);
         Ok(format!(
             "Delegated to @{} in project '{}'. Delegation event ID: {}. Stop here — do not take further actions this turn.",
             args.recipient, args.project_id, short_id

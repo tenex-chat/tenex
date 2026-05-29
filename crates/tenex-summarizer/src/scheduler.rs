@@ -384,5 +384,5 @@ fn now_secs() -> i64 {
 }
 
 fn short(id: &str) -> String {
-    tenex_ids::shorten_full_event_id(id)
+    tenex_utils::ids::shorten_full_event_id(id)
 }

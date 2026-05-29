@@ -124,7 +124,7 @@ async fn process_relay_event_inner(
         event_received_span.record("outcome", "project_definition_update");
         if let Err(e) = handle_project_definition_update(shared, reload_context, &event).await {
             tenex_telemetry::record_current_error(&e);
-            warn!(event_id = %tenex_ids::shorten_full_event_id(&event.id.to_hex()), error = %e, "project definition update failed");
+            warn!(event_id = %tenex_utils::ids::shorten_full_event_id(&event.id.to_hex()), error = %e, "project definition update failed");
         }
         return;
     }
@@ -132,7 +132,7 @@ async fn process_relay_event_inner(
         event_received_span.record("outcome", "stop_command");
         if let Err(e) = handle_stop_command(shared.clone(), &event).await {
             tenex_telemetry::record_current_error(&e);
-            warn!(event_id = %tenex_ids::shorten_full_event_id(&event.id.to_hex()), error = %e, "stop command failed");
+            warn!(event_id = %tenex_utils::ids::shorten_full_event_id(&event.id.to_hex()), error = %e, "stop command failed");
         }
         return;
     }
@@ -140,7 +140,7 @@ async fn process_relay_event_inner(
         event_received_span.record("outcome", "agent_config_update");
         if let Err(e) = handle_agent_config_update(shared, reload_context, &event).await {
             tenex_telemetry::record_current_error(&e);
-            warn!(event_id = %tenex_ids::shorten_full_event_id(&event.id.to_hex()), error = %e, "agent config update failed");
+            warn!(event_id = %tenex_utils::ids::shorten_full_event_id(&event.id.to_hex()), error = %e, "agent config update failed");
         }
         return;
     }
@@ -155,7 +155,7 @@ async fn process_relay_event_inner(
         event_received_span.record("outcome", "dropped_scope");
         return;
     }
-    let short_id = tenex_ids::shorten_full_event_id(&event.id.to_hex());
+    let short_id = tenex_utils::ids::shorten_full_event_id(&event.id.to_hex());
     let short = short_id.as_str();
     tracing::event!(
         parent: event_received_span,
@@ -427,7 +427,7 @@ pub(super) async fn run_external_dispatch(
     agent_pubkeys: HashSet<String>,
 ) {
     let event_id_hex = event.id.to_hex();
-    let short_id = tenex_ids::shorten_full_event_id(&event_id_hex);
+    let short_id = tenex_utils::ids::shorten_full_event_id(&event_id_hex);
     let short = short_id.as_str();
     let author_hex = event.pubkey.to_hex();
     let author_short = &author_hex[..8];
@@ -576,7 +576,7 @@ pub(super) async fn handle_stop_command(shared: Arc<RuntimeShared>, event: &Even
     let agent_pubkeys = p_tag_pubkeys(event);
     if !has_e_tag || agent_pubkeys.is_empty() {
         warn!(
-            event_id = %tenex_ids::shorten_full_event_id(&event.id.to_hex()),
+            event_id = %tenex_utils::ids::shorten_full_event_id(&event.id.to_hex()),
             has_e_tag,
             p_tags = agent_pubkeys.len(),
             "stop command missing target tags"
