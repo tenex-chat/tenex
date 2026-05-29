@@ -14,8 +14,7 @@
 
 use serde_json::json;
 use tenex_context::{
-    project_with_options, BreakpointHint, BreakpointKind, DisplayNameResolver, Message,
-    ModelProfile, ProjectionOptions,
+    BreakpointHint, BreakpointKind, DisplayNameResolver, Message, ModelProfile,
 };
 use tenex_conversations::{
     ConversationStore, DelegationMarker, DelegationStatus, NewMessage, NewToolMessage,
@@ -166,17 +165,8 @@ fn record_tool(
         .unwrap();
 }
 
-fn opts() -> ProjectionOptions {
-    ProjectionOptions {
-        excluded_event_id: None,
-        in_turn_tail: Vec::new(),
-        compaction_override: None,
-        proactive_context: None,
-    }
-}
-
 async fn project(store: &ConversationStore, agent: &str) -> Vec<Message> {
-    project_with_options(
+    tenex_context::project(
         store,
         CONVO_ID,
         agent,
@@ -185,7 +175,8 @@ async fn project(store: &ConversationStore, agent: &str) -> Vec<Message> {
         &[],
         None,
         None,
-        opts(),
+        None,
+        None,
     )
     .await
     .unwrap()
@@ -472,15 +463,7 @@ async fn proactive_context_overlays_last_message_via_strategy() {
     let store = open_store_with_conv();
     append_user(&store, "event:t1", Some("t1"), "user-pk", "hello", 100);
 
-    let opts = ProjectionOptions {
-        excluded_event_id: None,
-        in_turn_tail: Vec::new(),
-        compaction_override: None,
-        proactive_context: Some(
-            "<proactive-context>\nfound: prior reply 'Black'\n</proactive-context>".into(),
-        ),
-    };
-    let projection = project_with_options(
+    let projection = tenex_context::project(
         &store,
         CONVO_ID,
         AGENT1,
@@ -489,7 +472,8 @@ async fn proactive_context_overlays_last_message_via_strategy() {
         &[],
         None,
         None,
-        opts,
+        Some("<proactive-context>\nfound: prior reply 'Black'\n</proactive-context>".into()),
+        None,
     )
     .await
     .unwrap();
@@ -620,7 +604,7 @@ async fn delegation_completed_projects_with_delegation_completed_header_and_tran
 
     // Agent1's callback invocation projects:
     let resolver = StubNameResolver;
-    let projection = project_with_options(
+    let projection = tenex_context::project(
         &store,
         CONVO_ID,
         AGENT1,
@@ -629,7 +613,8 @@ async fn delegation_completed_projects_with_delegation_completed_header_and_tran
         &[],
         None,
         Some(&resolver),
-        opts(),
+        None,
+        None,
     )
     .await
     .unwrap();
@@ -707,9 +692,9 @@ async fn delegation_pending_projects_as_system_reminder_overlay_not_user_message
         .unwrap();
 
     let resolver = StubNameResolver;
-    let projection = project_with_options(
+    let projection = tenex_context::project(
         &store, CONVO_ID, AGENT1, SYSTEM_PROMPT, &profile(),
-        &[], None, Some(&resolver), opts(),
+        &[], None, Some(&resolver), None, None,
     )
     .await
     .unwrap();
@@ -778,9 +763,9 @@ async fn delegation_aborted_projects_with_reason() {
         .unwrap();
 
     let resolver = StubNameResolver;
-    let projection = project_with_options(
+    let projection = tenex_context::project(
         &store, CONVO_ID, AGENT1, SYSTEM_PROMPT, &profile(),
-        &[], None, Some(&resolver), opts(),
+        &[], None, Some(&resolver), None, None,
     )
     .await
     .unwrap();
@@ -892,9 +877,9 @@ async fn delegation_completion_lands_at_its_own_sequence_position_not_where_dele
         .unwrap();
 
     let resolver = StubNameResolver;
-    let projection = project_with_options(
+    let projection = tenex_context::project(
         &store, CONVO_ID, AGENT1, SYSTEM_PROMPT, &profile(),
-        &[], None, Some(&resolver), opts(),
+        &[], None, Some(&resolver), None, None,
     )
     .await
     .unwrap();
@@ -963,9 +948,9 @@ async fn nested_delegation_marker_renders_one_liner_not_full_transcript() {
         .unwrap();
 
     let resolver = StubNameResolver;
-    let projection = project_with_options(
+    let projection = tenex_context::project(
         &store, CONVO_ID, AGENT1, SYSTEM_PROMPT, &profile(),
-        &[], None, Some(&resolver), opts(),
+        &[], None, Some(&resolver), None, None,
     )
     .await
     .unwrap();
@@ -992,7 +977,7 @@ async fn system_anchor_breakpoint_still_emitted_for_cached_profiles() {
         prompt_cache: true,
         ..profile()
     };
-    let projection = project_with_options(
+    let projection = tenex_context::project(
         &store,
         CONVO_ID,
         AGENT1,
@@ -1001,7 +986,8 @@ async fn system_anchor_breakpoint_still_emitted_for_cached_profiles() {
         &[],
         None,
         None,
-        opts(),
+        None,
+        None,
     )
     .await
     .unwrap();

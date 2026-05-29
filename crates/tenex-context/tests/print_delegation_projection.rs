@@ -6,9 +6,7 @@
 //! Kept as a real `#[tokio::test]` so it stays compiled and any
 //! regressions in the rendered shape surface here too.
 
-use tenex_context::{
-    project_with_options, DisplayNameResolver, Message, ModelProfile, ProjectionOptions,
-};
+use tenex_context::{project, DisplayNameResolver, Message, ModelProfile};
 use tenex_conversations::{
     ConversationStore, DelegationMarker, DelegationStatus, NewMessage, NewToolMessage,
 };
@@ -211,7 +209,7 @@ async fn print_pending_and_completed_projections() {
     println!("\n=========================================================");
     println!("SCENARIO 1: delegation is PENDING (agent2 hasn't replied yet)");
     println!("=========================================================");
-    let projection = project_with_options(
+    let projection = project(
         &store,
         CONV,
         AGENT1_PK,
@@ -220,7 +218,8 @@ async fn print_pending_and_completed_projections() {
         &[],
         None,
         Some(&resolver),
-        ProjectionOptions::default(),
+        None,
+        None,
     )
     .await
     .unwrap();
@@ -281,7 +280,7 @@ async fn print_pending_and_completed_projections() {
     println!("\n=========================================================");
     println!("SCENARIO 2: delegation has COMPLETED (agent2's reply arrived)");
     println!("=========================================================");
-    let projection = project_with_options(
+    let projection = project(
         &store,
         CONV,
         AGENT1_PK,
@@ -290,7 +289,8 @@ async fn print_pending_and_completed_projections() {
         &[],
         None,
         Some(&resolver),
-        ProjectionOptions::default(),
+        None,
+        None,
     )
     .await
     .unwrap();

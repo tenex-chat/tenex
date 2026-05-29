@@ -10,9 +10,7 @@
 //! pipeline) — see `scripts/tenex-runtime-probe.ts`. This file fills
 //! the multi-delegation gap that probe doesn't reach today.
 
-use tenex_context::{
-    project_with_options, DisplayNameResolver, Message, ModelProfile, ProjectionOptions,
-};
+use tenex_context::{project, DisplayNameResolver, Message, ModelProfile};
 use tenex_conversations::{
     ConversationStore, DelegationMarker, DelegationStatus, NewMessage,
 };
@@ -133,7 +131,7 @@ fn write_child_reply(store: &ConversationStore, child_conv: &str, author: &str, 
 }
 
 async fn project_pm(store: &ConversationStore) -> Vec<Message> {
-    project_with_options(
+    project(
         store,
         CONV,
         PM_PK,
@@ -142,7 +140,8 @@ async fn project_pm(store: &ConversationStore) -> Vec<Message> {
         &[],
         None,
         Some(&Names),
-        ProjectionOptions::default(),
+        None,
+        None,
     )
     .await
     .unwrap()

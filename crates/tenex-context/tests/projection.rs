@@ -3,8 +3,8 @@
 
 use serde_json::json;
 use tenex_context::{
-    BreakpointKind, CacheObservation, DisplayNameResolver, Message, ModelProfile,
-    ProjectionOptions, ToolCall, ToolDef, TurnRecord, project, project_with_options, record_turn,
+    BreakpointKind, CacheObservation, DisplayNameResolver, Message, ModelProfile, ToolCall,
+    ToolDef, TurnRecord, project, record_turn,
 };
 use tenex_conversations::{ConversationStore, NewMessage, NewToolMessage};
 
@@ -142,6 +142,8 @@ async fn basic_projection_emits_system_prompt_and_anchor() {
         &[],
         None,
         None,
+        None,
+        None,
     )
     .await
     .expect("project");
@@ -156,53 +158,6 @@ async fn basic_projection_emits_system_prompt_and_anchor() {
         .iter()
         .any(|b| b.kind == BreakpointKind::SystemAnchor);
     assert!(has_system_anchor, "system anchor must be emitted");
-}
-
-#[tokio::test]
-async fn in_turn_tail_is_ignored_after_splice_removal() {
-    // Under the single-source-of-truth architecture, `in_turn_tail` is
-    // retained on `ProjectionOptions` only for serialization stability
-    // — projection itself ignores it. The conversation store is the
-    // sole source of truth; callers that want messages to appear in
-    // projection must persist rows.
-    let store = open_store();
-    append_user(&store, "stored-user", "stored user");
-
-    let projection = project_with_options(
-        &store,
-        CONVO_ID,
-        AGENT_PUBKEY,
-        "system",
-        &cacheable_profile(),
-        &[],
-        None,
-        None,
-        ProjectionOptions {
-            excluded_event_id: None,
-            in_turn_tail: vec![Message::User {
-                content: "this MUST NOT appear in projection".into(),
-                attachments: Vec::new(),
-            }],
-            compaction_override: None,
-            proactive_context: None,
-        },
-    )
-    .await
-    .expect("project");
-
-    let user_messages: Vec<&str> = projection
-        .messages
-        .iter()
-        .filter_map(|m| match m {
-            Message::User { content, .. } => Some(content.as_str()),
-            _ => None,
-        })
-        .collect();
-    assert_eq!(
-        user_messages,
-        vec!["stored user"],
-        "in_turn_tail must be silently dropped — only stored rows project"
-    );
 }
 
 #[tokio::test]
@@ -256,6 +211,8 @@ async fn no_decay_tagging_preserves_load_skill_and_delegate_results() {
         "system",
         &profile,
         &tool_defs,
+        None,
+        None,
         None,
         None,
     )
@@ -325,6 +282,8 @@ async fn unknown_tool_results_are_decay_eligible() {
         &[],
         None,
         None,
+        None,
+        None,
     )
     .await
     .expect("p");
@@ -365,6 +324,8 @@ async fn compaction_keeps_tool_call_pairs_atomic() {
         "system",
         &tiny_profile(),
         &[],
+        None,
+        None,
         None,
         None,
     )
@@ -469,6 +430,8 @@ async fn no_prompt_cache_emits_no_message_stream_breakpoint() {
         &[],
         None,
         None,
+        None,
+        None,
     )
     .await
     .expect("project");
@@ -488,60 +451,6 @@ async fn no_prompt_cache_emits_no_message_stream_breakpoint() {
         .iter()
         .any(|b| b.kind == BreakpointKind::SystemAnchor);
     assert!(has_system_anchor, "SystemAnchor still emitted");
-}
-
-#[tokio::test]
-async fn excluded_event_id_is_ignored_storage_is_truth() {
-    // Under the single-source-of-truth architecture, the trigger event row
-    // is just another row in storage — there is no in-memory replay path
-    // that would duplicate it. `excluded_event_id` is retained on the
-    // options struct for serialization stability but no longer filters.
-    let store = open_store();
-    append_user_with_event(
-        &store,
-        "event:old-event",
-        Some("old-event"),
-        "prior user message",
-    );
-    append_user_with_event(
-        &store,
-        "event:current-event",
-        Some("current-event"),
-        "current user message",
-    );
-
-    let projection = project_with_options(
-        &store,
-        CONVO_ID,
-        AGENT_PUBKEY,
-        "system",
-        &cacheable_profile(),
-        &[],
-        None,
-        None,
-        ProjectionOptions {
-            excluded_event_id: Some("current-event".into()),
-            in_turn_tail: Vec::new(),
-            proactive_context: None,
-            compaction_override: None,
-        },
-    )
-    .await
-    .expect("project");
-
-    let user_msgs: Vec<&str> = projection
-        .messages
-        .iter()
-        .filter_map(|m| match m {
-            Message::User { content, .. } => Some(content.as_str()),
-            _ => None,
-        })
-        .collect();
-    assert_eq!(
-        user_msgs,
-        vec!["prior user message", "current user message"],
-        "trigger row stays in projection — single source of truth"
-    );
 }
 
 // ── Author attribution ────────────────────────────────────────────────────────
@@ -597,6 +506,8 @@ async fn single_author_user_messages_are_not_prefixed() {
         &[],
         None,
         Some(&resolver),
+        None,
+        None,
     )
     .await
     .expect("project");
@@ -639,6 +550,8 @@ async fn multi_author_user_messages_get_name_prefix() {
         &[],
         None,
         Some(&resolver),
+        None,
+        None,
     )
     .await
     .expect("project");
@@ -678,6 +591,8 @@ async fn multi_author_falls_back_to_short_pubkey_when_resolver_misses() {
         &[],
         None,
         Some(&resolver),
+        None,
+        None,
     )
     .await
     .expect("project");
@@ -710,6 +625,8 @@ async fn multi_author_without_resolver_does_not_prefix() {
         &[],
         None,
         None,
+        None,
+        None,
     )
     .await
     .expect("project");
@@ -727,31 +644,18 @@ async fn multi_author_without_resolver_does_not_prefix() {
 }
 
 /// Reproduces production trace `1bbd7e35a80d91c739195701f04e3fbe`
-/// (human-replica agent on kimi-k2.6:cloud via ollama). After the fix,
-/// step.rs no longer accumulates step state in `in_turn_tail` when a
-/// store is present — `in_turn_tail` only carries the live user prompt
-/// and the supervisor `prefix_tail`, and the store is the sole source
-/// for prior steps' assistant + tool messages.
-///
-/// This test exercises step 2's projection call directly: store has the
-/// user prompt plus step 1's assistant row (with role=assistant) and
+/// (human-replica agent on kimi-k2.6:cloud via ollama). The store holds
+/// the user prompt plus step 1's assistant row (with role=assistant) and
 /// step 1's tool message (parent_message_id set to the assistant row).
-/// The provided `in_turn_tail` mirrors the post-fix shape — `[User]`
-/// only. Projection must emit each tool_call_id exactly once, with the
-/// tool result anchored to its parent assistant via parent_message_id.
-///
-/// Uses the real production shape: trigger has a nostr_event_id and is
-/// excluded via `excluded_event_id` (the trigger is provided live as the
-/// turn prompt, not duplicated from history).
+/// Projection must emit each tool_call_id exactly once, with the tool
+/// result anchored to its parent assistant via parent_message_id.
 #[tokio::test]
-async fn step_loop_in_turn_tail_does_not_duplicate_persisted_messages() {
+async fn projection_emits_each_tool_call_exactly_once() {
     let store = open_store();
     let profile = no_cache_profile();
 
     let user_text =
         "Ensure Claude and developer and developer macOS are all in the same commit/branch";
-    // Real production shape: trigger has a nostr_event_id; excluded so it
-    // isn't duplicated alongside the live in_turn_tail copy.
     append_user_with_event(&store, "event:trigger-rec", Some("trigger-rec"), user_text);
 
     // Step 1 has just finished. `record_step_assistant` wrote an
@@ -761,14 +665,7 @@ async fn step_loop_in_turn_tail_does_not_duplicate_persisted_messages() {
     let call_id = "8xxbfD_wUDVJk9SGkRbSD"; // verbatim from the trace
     append_tool_result(&store, asst_id, call_id, "todo_write", "Todo list updated (4 items)");
 
-    // Step 2 is about to call the provider. With a store present,
-    // `in_turn_tail` carries only the live user prompt — no step
-    // accumulation.
-    let in_turn_tail = vec![Message::User {
-        content: user_text.to_string(), attachments: Vec::new(),
-            }];
-
-    let projection = project_with_options(
+    let projection = project(
         &store,
         CONVO_ID,
         AGENT_PUBKEY,
@@ -777,12 +674,8 @@ async fn step_loop_in_turn_tail_does_not_duplicate_persisted_messages() {
         &[],
         None,
         None,
-        ProjectionOptions {
-            excluded_event_id: Some("trigger-rec".into()),
-            in_turn_tail,
-            proactive_context: None,
-            compaction_override: None,
-        },
+        None,
+        None,
     )
     .await
     .expect("project");
@@ -822,22 +715,15 @@ async fn step_loop_in_turn_tail_does_not_duplicate_persisted_messages() {
     );
 }
 
-/// Regression: before the fix, `project_with_options` appended `in_turn_tail`
-/// at the very end — AFTER all step rows already persisted for this turn.
-/// At step 2+ the user trigger therefore appeared after the LLM's own prior
-/// step messages, which is nonsensical (user can't respond to something the
-/// LLM said before the user spoke).
-///
-/// After the fix the user trigger from `in_turn_tail` is spliced BEFORE the
-/// first in-turn step row so the final messages[] order is:
+/// The user trigger row, persisted at conversation start, projects BEFORE
+/// the step rows written later in the turn so the final messages[] order is:
 ///   [system, …prior history…, user trigger, step1 assistant+tools, …]
+/// A user message must never appear after the LLM's own prior step output.
 #[tokio::test]
 async fn step2_user_trigger_appears_before_step_messages() {
     let store = open_store();
     let profile = no_cache_profile();
 
-    // Real production shape: trigger has a nostr_event_id; excluded so the
-    // live in_turn_tail copy is the only instance in messages[].
     append_user_with_event(&store, "event:trigger-abc", Some("trigger-abc"), "do something");
 
     // Step 1 finished: record_step_assistant wrote this row (record_id
@@ -845,12 +731,7 @@ async fn step2_user_trigger_appears_before_step_messages() {
     let step1_id = append_assistant(&store, "step:agent:1000:0", "");
     append_tool_result(&store, step1_id, "call-1", "shell", "shell result");
 
-    // Step 2 projection: in_turn_tail carries only the live user prompt.
-    let in_turn_tail = vec![Message::User {
-        content: "do something".into(), attachments: Vec::new(),
-            }];
-
-    let projection = project_with_options(
+    let projection = project(
         &store,
         CONVO_ID,
         AGENT_PUBKEY,
@@ -859,12 +740,8 @@ async fn step2_user_trigger_appears_before_step_messages() {
         &[],
         None,
         None,
-        ProjectionOptions {
-            excluded_event_id: Some("trigger-abc".into()),
-            in_turn_tail,
-            proactive_context: None,
-            compaction_override: None,
-        },
+        None,
+        None,
     )
     .await
     .expect("project");
@@ -926,6 +803,8 @@ async fn projection_pairs_each_step_assistant_with_its_own_tool_calls() {
         &[],
         None,
         None,
+        None,
+        None,
     )
     .await
     .expect("project");
@@ -981,6 +860,8 @@ async fn projection_drops_orphan_tool_messages_lacking_parent() {
         "system",
         &profile,
         &[],
+        None,
+        None,
         None,
         None,
     )

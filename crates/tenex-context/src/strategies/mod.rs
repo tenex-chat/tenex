@@ -2,7 +2,8 @@
 //!
 //! Strategies operate on a mutable [`ProjectionContext`] holding the
 //! in-flight messages, telemetry, and access to `tool_defs`. The default
-//! pipeline is fixed: compaction → decay → reminders.
+//! pipeline is fixed: compaction → decay → delegation_markers →
+//! proactive_context → reminders.
 
 use std::collections::HashMap;
 
@@ -43,7 +44,7 @@ pub struct ProjectionContext<'a> {
     pub proactive_context: Option<&'a str>,
     /// Pre-loaded child conversation transcripts, keyed by
     /// `delegation_conversation_id`. Populated synchronously by
-    /// `project_with_options` before the async strategy pipeline runs
+    /// `project` before the async strategy pipeline runs
     /// (the SQLite store is `!Send` so we can't hold it across an
     /// `.await`). [`ExpandDelegationMarkersStrategy`] consumes this
     /// map to render each marker's `### Transcript:` block. Markers

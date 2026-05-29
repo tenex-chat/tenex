@@ -68,7 +68,7 @@ use std::sync::{
 };
 use tenex_context::{
     CacheObservation, Message as CtxMessage, ModelProfile, ToolCall as CtxToolCall, ToolDef,
-    ProjectionOptions, TurnRecord,
+    TurnRecord,
 };
 use tenex_conversations::ConversationStore;
 use tenex_project::{Project, ProjectMetadata};
@@ -214,9 +214,6 @@ async fn run(
         .context("no bootstrap event on stdin")?;
     let bootstrap_envelope = tenex_protocol::nostr::decode(&bootstrap_frame.event)
         .context("decoding bootstrap event")?;
-    let trigger_event_id = match &bootstrap_envelope.message {
-        MessageRef::Nostr { event_id } => event_id.to_hex(),
-    };
 
     let stdout_sink = SharedStdoutEventSink::new();
     let pending_external_work = Arc::new(AtomicBool::new(false));
@@ -477,7 +474,6 @@ async fn run(
         &pubkey_hex,
         &system_prompt,
         &acp_config.backend,
-        Some(&trigger_event_id),
     )
     .await;
 
@@ -1003,7 +999,6 @@ async fn render_history(
     agent_pubkey: &str,
     system_prompt: &str,
     backend: &str,
-    exclude_nostr_event_id: Option<&str>,
 ) -> String {
     let Some(store) = store else {
         return String::new();
@@ -1017,7 +1012,7 @@ async fn render_history(
         max_context_tokens: 200_000,
     };
     let tool_defs: Vec<ToolDef> = Vec::new();
-    // `project_with_options` is async but drives a synchronous
+    // `project` is async but drives a synchronous
     // SQLite read; held across `.await` only because `ConversationStore`
     // is `!Send`, requiring `std::sync::Mutex` and locking before the
     // future is awaited. render_history runs once at child startup before
@@ -1025,7 +1020,7 @@ async fn render_history(
     #[allow(clippy::await_holding_lock)]
     let projection_result = {
         let store_guard = store.lock().unwrap();
-        tenex_context::project_with_options(
+        tenex_context::project(
             &store_guard,
             conversation_id,
             agent_pubkey,
@@ -1034,12 +1029,8 @@ async fn render_history(
             &tool_defs,
             None,
             None,
-            ProjectionOptions {
-                excluded_event_id: exclude_nostr_event_id.map(str::to_string),
-                in_turn_tail: Vec::new(),
-                compaction_override: None,
-                proactive_context: None,
-            },
+            None,
+            None,
         )
         .await
     };

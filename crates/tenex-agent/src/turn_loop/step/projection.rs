@@ -1,6 +1,6 @@
 use anyhow::Result;
 use rig_core::completion::Message as RigMessage;
-use tenex_context::{Message as CtxMessage, ProjectionOptions};
+use tenex_context::Message as CtxMessage;
 
 use crate::agent_bootstrap::AgentBootstrap;
 use crate::context_rig::ctx_msg_to_rig;
@@ -9,7 +9,7 @@ use crate::tools::TurnToolRegistry;
 /// Build the provider-bound `messages[]` for a single step.
 ///
 /// Reads the projection straight from the conversation store via
-/// `tenex_context::project_with_options` — no in-memory tail, no
+/// `tenex_context::project` — no in-memory tail, no
 /// trigger-event exclusion. Every message the LLM sees corresponds
 /// either to a stored row (user/assistant/tool) or to an overlay
 /// produced by a projection strategy (reminders, proactive context,
@@ -21,7 +21,7 @@ pub(super) async fn project_step_messages(
 ) -> Result<Vec<RigMessage>> {
     let projected: Vec<CtxMessage> = if let Some(store) = boot.conv_store.as_ref() {
         let name_resolver = crate::identity_resolver::IdentityServiceResolver::new(&boot.base_dir);
-        tenex_context::project_with_options(
+        tenex_context::project(
             store,
             &boot.conversation_id,
             &boot.pubkey_hex,
@@ -37,12 +37,8 @@ pub(super) async fn project_step_messages(
                 ),
             )),
             Some(&name_resolver),
-            ProjectionOptions {
-                excluded_event_id: None,
-                in_turn_tail: Vec::new(),
-                compaction_override,
-                proactive_context: boot.proactive_context.clone(),
-            },
+            boot.proactive_context.clone(),
+            compaction_override,
         )
         .await?
         .messages

@@ -10,7 +10,7 @@ Canonical spec: `docs/plans/2026-04-28-tenex-context-library.md`
 
 Two entrypoints; everything else is strategy plumbing.
 
-- `project(store, conversation_id, agent_pubkey, system_prompt: &str, model_profile, tool_defs) -> Projection` — read history, run the strategy stack, emit `messages` + `cache_breakpoints` + `telemetry`. The system prompt enters opaque; this crate never inspects or assembles it.
+- `project(store, conversation_id, agent_pubkey, system_prompt: &str, model_profile, tool_defs, summarizer, name_resolver, proactive_context, compaction_override) -> Projection` — read history, run the strategy stack, emit `messages` + `cache_breakpoints` + `telemetry`. The system prompt enters opaque; this crate never inspects or assembles it. `proactive_context` is overlaid by the proactive-context strategy; `compaction_override` is a one-shot threshold override for reactive compaction retries.
 - `record_turn(store, conversation_id, agent_pubkey, turn)` — persist what the agent runner sent and what the provider observed. Writes per-message rows into `agent_prompt_history` and updates `agent_context_state`.
 
 Both take `&ConversationStore` from `tenex-conversations`. Stateless from the consumer's perspective: the crate holds no long-lived state.
@@ -33,7 +33,9 @@ Default stack, fixed order:
 
 1. `CompactionToolStrategy` — when projected tokens exceed a fraction of `model_profile.max_context_tokens`, collapse the middle of the message vector (preserving the system prompt and a tail window) into a single summary marker.
 2. `ToolResultDecayStrategy` — honors `preserve_results`. Keeps the most recent decay-eligible tool results verbatim; older eligible results are replaced by a placeholder message that retains the tool-call linkage.
-3. `RemindersStrategy` — appends a system-reminder note to the last non-system message so it rides at the tail of the prompt.
+3. `ExpandDelegationMarkersStrategy` — renders delegation markers into user-shaped messages (full transcript for direct children, one-line reference for nested), so later overlays have a message to attach to.
+4. `ProactiveContextStrategy` — overlays the pre-computed `<proactive-context>` block onto the last non-system message.
+5. `RemindersStrategy` — appends a system-reminder note to the last non-system message so it rides at the tail of the prompt.
 
 Each strategy implements the `Strategy` trait (`name() -> &'static str`, `apply(&self, &mut ProjectionContext) -> anyhow::Result<()>`). Adding a new strategy is one file in `src/strategies/` plus a test fixture; nothing else changes.
 

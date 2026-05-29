@@ -284,7 +284,7 @@ mod tests {
     //! These tests drive the *actual* persistence helpers
     //! (`write_step_assistant`, `record_step_tool_messages`,
     //! `write_supervision_nudge`, `reconcile_assistant_event_id`) and
-    //! then project via `tenex_context::project_with_options`, so they
+    //! then project via `tenex_context::project`, so they
     //! prove the contract the agent runner depends on: when these
     //! helpers run with realistic inputs, the next projection produces
     //! the expected `messages[]` shape. This is the gap the
@@ -294,8 +294,8 @@ mod tests {
     use rig_core::completion::Usage;
     use serde_json::json;
     use tenex_context::{
-        project_with_options, DisplayNameResolver, Message as CtxMessage, ModelProfile,
-        ProjectionOptions, ToolCall as CtxToolCall,
+        project, DisplayNameResolver, Message as CtxMessage, ModelProfile,
+        ToolCall as CtxToolCall,
     };
     use tenex_conversations::{ConversationStore, NewMessage};
 
@@ -343,10 +343,6 @@ mod tests {
             image_support: false,
             max_context_tokens: 200_000,
         }
-    }
-
-    fn opts() -> ProjectionOptions {
-        ProjectionOptions::default()
     }
 
     fn open() -> ConversationStore {
@@ -398,7 +394,7 @@ mod tests {
         agent: &str,
         resolver: Option<&dyn DisplayNameResolver>,
     ) -> Vec<CtxMessage> {
-        project_with_options(
+        project(
             store,
             CONV_ID,
             agent,
@@ -407,7 +403,8 @@ mod tests {
             &[],
             None,
             resolver,
-            opts(),
+            None,
+            None,
         )
         .await
         .unwrap()

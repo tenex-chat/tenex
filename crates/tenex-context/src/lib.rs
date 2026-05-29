@@ -30,8 +30,8 @@ pub use strategies::{
 };
 pub use types::{
     BreakpointHint, BreakpointKind, CacheObservation, CompactionOverride, ImageAttachment,
-    Message, ModelProfile, Projection, ProjectionOptions, ProjectionTelemetry, ReasoningBlock,
-    ToolCall, ToolDef, TurnRecord,
+    Message, ModelProfile, Projection, ProjectionTelemetry, ReasoningBlock, ToolCall, ToolDef,
+    TurnRecord,
 };
 
 use tenex_conversations::ConversationStore;
@@ -46,6 +46,10 @@ use tenex_conversations::ConversationStore;
 /// `summarizer` is an optional LLM-backed compaction summarizer. When
 /// provided, the compaction strategy generates a semantic 8-section
 /// summary instead of a deterministic placeholder.
+/// `proactive_context` is a pre-computed `<proactive-context>` block
+/// overlaid by [`ProactiveContextStrategy`]; `compaction_override` is a
+/// one-shot threshold override used by reactive compaction retry paths.
+#[allow(clippy::too_many_arguments)]
 pub async fn project(
     store: &ConversationStore,
     conversation_id: &str,
@@ -55,39 +59,8 @@ pub async fn project(
     tool_defs: &[ToolDef],
     summarizer: Option<std::sync::Arc<dyn CompactionSummarizer>>,
     name_resolver: Option<&dyn DisplayNameResolver>,
-) -> anyhow::Result<Projection> {
-    project_with_options(
-        store,
-        conversation_id,
-        agent_pubkey,
-        system_prompt,
-        model_profile,
-        tool_defs,
-        summarizer,
-        name_resolver,
-        ProjectionOptions::default(),
-    )
-    .await
-}
-
-/// Like [`project`], but can omit one materialized Nostr event from history
-/// and append unpersisted in-turn messages before strategies run.
-///
-/// Agent runners pass the triggering user event separately as the live prompt;
-/// when the runtime has already materialized that same event into the
-/// conversation DB, excluding it here prevents the current user message from
-/// appearing twice in the provider request.
-#[allow(clippy::too_many_arguments)]
-pub async fn project_with_options(
-    store: &ConversationStore,
-    conversation_id: &str,
-    agent_pubkey: &str,
-    system_prompt: &str,
-    model_profile: &ModelProfile,
-    tool_defs: &[ToolDef],
-    summarizer: Option<std::sync::Arc<dyn CompactionSummarizer>>,
-    name_resolver: Option<&dyn DisplayNameResolver>,
-    options: ProjectionOptions,
+    proactive_context: Option<String>,
+    compaction_override: Option<CompactionOverride>,
 ) -> anyhow::Result<Projection> {
     tracing::trace!(
         conversation_id,
@@ -96,16 +69,6 @@ pub async fn project_with_options(
         model = %model_profile.model_id,
         "projecting conversation"
     );
-
-    let ProjectionOptions {
-        compaction_override,
-        proactive_context,
-        // `excluded_event_id` and `in_turn_tail` are retained on the
-        // struct for serialization-stability with older callers, but no
-        // longer drive projection — the conversation store is the
-        // single source of truth.
-        ..
-    } = options;
 
     let messages = projection::project_messages(
         store,

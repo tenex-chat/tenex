@@ -218,26 +218,6 @@ pub struct Projection {
     pub telemetry: ProjectionTelemetry,
 }
 
-/// Options for projecting persisted conversation history plus any in-flight
-/// messages accumulated inside the current turn.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct ProjectionOptions {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub excluded_event_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub in_turn_tail: Vec<Message>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub compaction_override: Option<CompactionOverride>,
-    /// Pre-computed `<proactive-context>` block (RAG output, etc.) that the
-    /// [`ProactiveContextStrategy`] overlays onto the last non-system
-    /// message. Threaded into every step's projection unchanged so the
-    /// system prompt remains stable across steps.
-    ///
-    /// [`ProactiveContextStrategy`]: crate::ProactiveContextStrategy
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub proactive_context: Option<String>,
-}
-
 /// One-shot override for reactive compaction retry paths.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CompactionOverride {
