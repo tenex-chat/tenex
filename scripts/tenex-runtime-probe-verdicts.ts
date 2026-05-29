@@ -641,7 +641,7 @@ function evaluateAgentConfigUpdate(events: Event[], context: EvaluateContext): V
         {
             name: "Agent config reflected updated model",
             ok: Boolean(updatedConfig),
-            detail: `Expected a 34011 from worker advertising model ${agentConfigUpdateModelName}.`,
+            detail: `Expected a kind:0 from worker advertising model ${agentConfigUpdateModelName}.`,
         },
     ];
 }
@@ -658,7 +658,7 @@ function evaluateProjectStatusModelTag(events: Event[], context: EvaluateContext
         name: "Agent configs publish model access",
         ok: Boolean(pmConfig) && Boolean(workerConfig),
         detail:
-            `Expected kind:34011 from both pm and worker advertising model ${context.modelName}; ` +
+            `Expected kind:0 from both pm and worker advertising model ${context.modelName}; ` +
             `pm=${pmConfig ? "ok" : "missing"}, worker=${workerConfig ? "ok" : "missing"}.`,
     };
 }
@@ -670,7 +670,7 @@ function findAgentConfigWithModel(
 ): Event | undefined {
     return events.find(
         (event) =>
-            event.kind === 34011 &&
+            event.kind === 0 &&
             event.pubkey === pubkey &&
             event.tags.some((tag) => tag[0] === "model" && tag[1] === modelName)
     );
@@ -684,7 +684,7 @@ function evaluateAgentModelAccess(
 ): Verdict {
     const config = findAgentConfigWithModel(events, pubkey, modelName);
     const seenModels = events
-        .filter((event) => event.kind === 34011 && event.pubkey === pubkey)
+        .filter((event) => event.kind === 0 && event.pubkey === pubkey)
         .flatMap((event) => event.tags)
         .filter((tag) => tag[0] === "model");
 
@@ -692,7 +692,7 @@ function evaluateAgentModelAccess(
         name: `Agent config publishes ${slug} model access`,
         ok: Boolean(config),
         detail:
-            `Expected kind:34011 from ${slug} (${pubkey}) advertising model ${modelName}; ` +
+            `Expected kind:0 from ${slug} (${pubkey}) advertising model ${modelName}; ` +
             `saw ${seenModels.length > 0 ? seenModels.map((tag) => JSON.stringify(tag)).join(", ") : "<none>"}.`,
     };
 }

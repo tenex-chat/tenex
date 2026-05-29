@@ -1553,13 +1553,13 @@ async function runAgentConfigUpdateProbe(context: ScenarioContext): Promise<void
     await context.waitForObservedEvent(
         context.events,
         (event) =>
-            event.kind === 34011 &&
+            event.kind === 0 &&
             event.pubkey === context.workerPubkey &&
             event.tags.some(
                 (tag) => tag[0] === "model" && tag[1] === agentConfigUpdateModelName
             ),
         timeoutMs,
-        "34011 worker config after agent config update"
+        "kind:0 worker config after agent config update"
     );
 
     const workerAgentPath = path.join(context.agentsDir, `${context.workerPubkey}.json`);

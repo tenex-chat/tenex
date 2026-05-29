@@ -423,7 +423,7 @@ const pool = new SimplePool();
 await pool.ensureRelay(relayUrl);
 const sub = pool.subscribeMany(
     [relayUrl],
-    { kinds: [1, 24010, 24020, 24133, 24135, 31933, 34011], since: startTime },
+    { kinds: [0, 1, 24010, 24020, 24133, 24135, 31933], since: startTime },
     { onevent: (event) => events.push(event) }
 );
 
@@ -508,7 +508,7 @@ let mergedEvents = events;
 try {
     const storedEvents = await pool.querySync(
         [relayUrl],
-        { kinds: [1, 24010, 24020, 24133, 24135, 31933, 34011], since: startTime },
+        { kinds: [0, 1, 24010, 24020, 24133, 24135, 31933], since: startTime },
         { maxWait: 2_000 }
     );
     mergedEvents = mergeEvents(events, storedEvents);
