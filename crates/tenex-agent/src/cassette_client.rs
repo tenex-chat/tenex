@@ -95,7 +95,11 @@ where
         let request = crate::provider_request_sanitizer::sanitize_completion_request(request);
         let turn = self.recorder.as_ref().map(CassetteRecorder::next_turn);
         let request_debug = request_debug(&request);
-        let input_messages = serde_json::to_string(&request.chat_history).unwrap_or_default();
+        let messages: Vec<_> = request.chat_history.iter().collect();
+        let total_count = messages.len();
+        let tail_start = total_count.saturating_sub(50);
+        let tail = &messages[tail_start..];
+        let input_messages = serde_json::to_string(tail).unwrap_or_default();
         let span = info_span!(
             "chat",
             otel.name = format!("chat {}", self.model_id),
@@ -104,6 +108,7 @@ where
             "gen_ai.operation.name" = "chat",
             "gen_ai.request.model" = %self.model_id,
             "gen_ai.input.messages" = %input_messages,
+            "gen_ai.input.messages.count" = total_count as i64,
             "gen_ai.output.messages" = field::Empty,
             "gen_ai.response.model" = field::Empty,
             "gen_ai.response.id" = field::Empty,
@@ -150,7 +155,11 @@ where
         let request = crate::provider_request_sanitizer::sanitize_completion_request(request);
         let turn = self.recorder.as_ref().map(CassetteRecorder::next_turn);
         let request_debug = request_debug(&request);
-        let input_messages = serde_json::to_string(&request.chat_history).unwrap_or_default();
+        let messages: Vec<_> = request.chat_history.iter().collect();
+        let total_count = messages.len();
+        let tail_start = total_count.saturating_sub(50);
+        let tail = &messages[tail_start..];
+        let input_messages = serde_json::to_string(tail).unwrap_or_default();
         let span = info_span!(
             "chat",
             otel.name = format!("chat {}", self.model_id),
@@ -160,6 +169,7 @@ where
             "gen_ai.request.model" = %self.model_id,
             "gen_ai.request.stream" = true,
             "gen_ai.input.messages" = %input_messages,
+            "gen_ai.input.messages.count" = total_count as i64,
             "gen_ai.output.messages" = field::Empty,
             "gen_ai.response.model" = field::Empty,
             "gen_ai.response.id" = field::Empty,
