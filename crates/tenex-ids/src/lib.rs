@@ -1,7 +1,13 @@
-//! Event-ID validators + factory functions.
+//! Canonical event-ID validators, factories, and the single short-ID
+//! shortener for the TENEX Rust workspace.
 //!
-//! Mirrors `src/types/event-ids.ts` byte-for-byte. Three ID flavours
-//! flow through TENEX:
+//! This is the *one* place that defines the length of event IDs and the
+//! translation from a long (full) ID to a short ID. Every crate that needs
+//! to render or prefix-match an event ID depends on this crate rather than
+//! hand-rolling `&id[..N]`.
+//!
+//! Mirrors `src/types/event-ids.ts` byte-for-byte. Three ID flavours flow
+//! through TENEX:
 //!
 //! - **Full event ID** — 64-char lowercase hex (Nostr events,
 //!   conversation IDs, agent pubkeys).
@@ -15,11 +21,10 @@
 //! `String`s where the TS source uses `FullEventId`/`ShortEventId`.
 //! Verbatim TS error strings are preserved.
 //!
-//! Note: spec doc 06 §3.1 + the simpler `shortenEventId(fullId)` lives
-//! in [`shorten_full_event_id`] here. The Telegram-aware
-//! `shortenEventId` from `utils/conversation-id.ts` lives in
-//! [`crate::utils::identifiers::shorten_event_id`] (it's a different
-//! function — same name, different file in TS).
+//! [`shorten_full_event_id`] is the canonical prefix-truncation shortener.
+//! The Telegram-aware variant (hashing non-hex `tg_*` IDs before
+//! truncation) lives in the `tenex` binary's `utils::identifiers` module
+//! and delegates its hex path here so the two cannot drift.
 
 use anyhow::{anyhow, Result};
 
@@ -169,14 +174,13 @@ pub fn try_create_shell_task_id(id: &str) -> Option<String> {
     }
 }
 
-/// Mirror `shortenEventId` (`event-ids.ts:227-229`):
-/// first 10 chars of a full event ID — the simple prefix-truncation
-/// variant. The Telegram-aware variant lives in
-/// [`crate::utils::identifiers::shorten_event_id`].
+/// The canonical short-ID shortener: first [`SHORT_EVENT_ID_LENGTH`] chars
+/// of a full event ID. Mirror `shortenEventId` (`event-ids.ts:227-229`).
 ///
 /// Caller is expected to pass an already-validated full event ID; this
 /// function does not re-validate (matches TS — it's typed as
-/// `FullEventId → ShortEventId`).
+/// `FullEventId → ShortEventId`). Inputs shorter than
+/// [`SHORT_EVENT_ID_LENGTH`] are returned unchanged.
 pub fn shorten_full_event_id(full_id: &str) -> String {
     full_id.chars().take(SHORT_EVENT_ID_LENGTH).collect()
 }

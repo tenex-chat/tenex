@@ -1,8 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use tenex_conversations::{MessageRecord, ToolMessage};
 
-const SHORT_ID_LENGTH: usize = 10;
-
 pub(super) struct ShortIds {
     used: HashSet<String>,
     full_by_short: HashMap<String, String>,
@@ -93,7 +91,7 @@ pub(super) fn is_full_hex_id(input: &str) -> bool {
 }
 
 pub(super) fn short_id(value: &str) -> String {
-    value.chars().take(SHORT_ID_LENGTH).collect()
+    tenex_ids::shorten_full_event_id(value)
 }
 
 pub(super) fn get_string(value: &serde_json::Value, keys: &[&str]) -> Option<String> {

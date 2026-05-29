@@ -28,11 +28,7 @@ pub(super) fn prepend_recipient_label(content: &str, label: &str) -> String {
 }
 
 pub(super) fn shorten_conversation_id(id: &str) -> String {
-    if id.len() <= 8 {
-        id.to_string()
-    } else {
-        id[..8].to_string()
-    }
+    tenex_ids::shorten_full_event_id(id)
 }
 
 fn starts_with_slug_prefix(s: &str) -> bool {

@@ -22,6 +22,7 @@ tenex-agent-registry = { path = "../tenex-agent-registry" }
 tenex-conversations = { path = "../tenex-conversations" }
 tenex-context = { path = "../tenex-context" }
 tenex-identity = { path = "../tenex-identity" }
+tenex-ids = { path = "../tenex-ids" }
 tenex-protocol = { path = "../tenex-protocol", default-features = false }
 tenex-llm-config = { path = "../tenex-llm-config" }
 tenex-mcp = { path = "../tenex-mcp" }

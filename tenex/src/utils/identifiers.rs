@@ -12,9 +12,6 @@
 
 use sha2::{Digest, Sha256};
 
-/// Source: `types/event-ids.ts:88` (`SHORT_EVENT_ID_LENGTH`).
-const SHORT_EVENT_ID_LENGTH: usize = 10;
-
 /// Source: `utils/nostr-entity-parser.ts:21` (`PUBKEY_DISPLAY_LENGTH`).
 #[cfg(test)]
 const PUBKEY_DISPLAY_LENGTH: usize = 6;
@@ -34,8 +31,7 @@ fn shorten_event_identifier(value: &str) -> String {
         }
         return hex;
     }
-    let prefix: String = value.chars().take(SHORT_EVENT_ID_LENGTH).collect();
-    prefix.to_lowercase()
+    tenex_ids::shorten_full_event_id(value).to_lowercase()
 }
 
 /// Mirror `shortenConversationId` (`conversation-id.ts:49-51`).

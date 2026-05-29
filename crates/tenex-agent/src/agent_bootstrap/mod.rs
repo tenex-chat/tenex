@@ -218,7 +218,7 @@ pub(crate) async fn build(
     };
     eprintln!(
         "[tenex-agent] Triggered by event {} from {}",
-        &trigger_event_id[..8],
+        tenex_ids::shorten_full_event_id(&trigger_event_id),
         &trigger_pubkey_hex[..8]
     );
     let injection_tracker = Arc::new(Mutex::new(MessageInjectionTracker::new(

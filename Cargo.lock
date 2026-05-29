@@ -3213,6 +3213,7 @@ dependencies = [
  "tenex-conversations",
  "tenex-firewall",
  "tenex-identity",
+ "tenex-ids",
  "tenex-llm-config",
  "tenex-mcp",
  "tenex-models-dev",
@@ -3282,6 +3283,7 @@ dependencies = [
  "tenex-context",
  "tenex-conversations",
  "tenex-identity",
+ "tenex-ids",
  "tenex-llm-config",
  "tenex-mcp",
  "tenex-models-dev",
@@ -3345,6 +3347,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tenex-conversations",
+ "tenex-ids",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -3433,6 +3436,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "tenex-ids"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+]
+
+[[package]]
 name = "tenex-intervention"
 version = "0.1.0"
 dependencies = [
@@ -3515,6 +3525,7 @@ dependencies = [
  "nostr-sdk",
  "serde",
  "serde_json",
+ "tenex-ids",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -3581,6 +3592,7 @@ dependencies = [
  "tempfile",
  "tenex-accounting",
  "tenex-conversations",
+ "tenex-ids",
  "tenex-llm-config",
  "tenex-project",
  "tenex-telemetry",

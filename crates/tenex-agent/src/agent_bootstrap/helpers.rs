@@ -130,7 +130,7 @@ pub(super) fn build_conversation_reminders(
                 .last_activity
                 .map(|ts| format_relative_time(now_secs - ts))
                 .unwrap_or_else(|| "unknown".to_string());
-            let id_short = row.id[..row.id.len().min(8)].to_string();
+            let id_short = tenex_ids::shorten_full_event_id(&row.id);
             tenex_system_prompt::ConversationSummary {
                 id_short,
                 title: row.title,
@@ -145,7 +145,7 @@ pub(super) fn build_conversation_reminders(
             .ok()
             .flatten()
             .and_then(|row| row.title);
-        let id_short = parent_id[..parent_id.len().min(8)].to_string();
+        let id_short = tenex_ids::shorten_full_event_id(parent_id);
         tenex_system_prompt::DelegationParentRef { id_short, title }
     });
 

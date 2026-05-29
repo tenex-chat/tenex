@@ -43,6 +43,7 @@ tenex-project = { path = "../crates/tenex-project", features = ["nip46"] }
 tenex-conversations = { path = "../crates/tenex-conversations" }
 tenex-agent-registry = { path = "../crates/tenex-agent-registry" }
 tenex-protocol = { path = "../crates/tenex-protocol", features = ["relay"] }
+tenex-ids = { path = "../crates/tenex-ids" }
 tenex-agent = { path = "../crates/tenex-agent" }
 tenex-rag = { path = "../crates/tenex-rag" }
 tenex-supervision = { path = "../crates/tenex-supervision" }

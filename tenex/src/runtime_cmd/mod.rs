@@ -593,7 +593,7 @@ async fn backfill_missed_events(
             match store.has_seen_event(&event_id_hex) {
                 Ok(seen) => seen,
                 Err(e) => {
-                    warn!(error = %e, event_id = %&event_id_hex[..8], "backfill: has_seen_event failed");
+                    warn!(error = %e, event_id = %tenex_ids::shorten_full_event_id(&event_id_hex), "backfill: has_seen_event failed");
                     false
                 }
             }

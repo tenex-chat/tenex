@@ -96,7 +96,7 @@ pub(super) async fn handle_project_definition_update(
 
     reload_project_membership_snapshot(shared, ctx).await?;
     info!(
-        event_id = %event.id.to_hex()[..8],
+        event_id = %tenex_ids::shorten_full_event_id(&event.id.to_hex()),
         project = ctx.project_dtag,
         "reloaded project definition"
     );
@@ -210,7 +210,7 @@ pub(super) async fn handle_agent_config_update(
 
     if let Some(reason) = outcome.ignored_reason {
         info!(
-            event_id = %event.id.to_hex()[..8],
+            event_id = %tenex_ids::shorten_full_event_id(&event.id.to_hex()),
             agent_pubkey = outcome.agent_pubkey.as_deref().unwrap_or(""),
             reason,
             "ignored agent config update"
@@ -219,7 +219,7 @@ pub(super) async fn handle_agent_config_update(
     }
 
     info!(
-        event_id = %event.id.to_hex()[..8],
+        event_id = %tenex_ids::shorten_full_event_id(&event.id.to_hex()),
         agent_pubkey = outcome.agent_pubkey.as_deref().unwrap_or(""),
         updated = outcome.config_updated,
         reset = outcome.has_reset,

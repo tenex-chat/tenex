@@ -22,8 +22,6 @@ use tenex_conversations::MessageRecord;
 
 use crate::projection::DisplayNameResolver;
 
-const SHORT_ID_LEN: usize = 10;
-
 /// Render `child_messages` (already filtered/ordered by the caller) as
 /// a `<conversation>...</conversation>` XML string. `name_resolver` is
 /// consulted to turn `author_pubkey` strings into display names — if
@@ -118,7 +116,7 @@ fn display_name(pubkey: &str, resolver: Option<&dyn DisplayNameResolver>) -> Str
 }
 
 fn short_id(id: &str) -> String {
-    id.chars().take(SHORT_ID_LEN).collect()
+    tenex_ids::shorten_full_event_id(id)
 }
 
 fn push_attr_escaped(out: &mut String, s: &str) {

@@ -384,9 +384,5 @@ fn now_secs() -> i64 {
 }
 
 fn short(id: &str) -> String {
-    if id.len() > 8 {
-        id[..8].to_string()
-    } else {
-        id.to_string()
-    }
+    tenex_ids::shorten_full_event_id(id)
 }

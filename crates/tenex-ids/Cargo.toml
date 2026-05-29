@@ -1,0 +1,8 @@
+[package]
+name = "tenex-ids"
+version = "0.1.0"
+edition = "2021"
+description = "Canonical TENEX event-ID validators, factories, and the single short-ID shortener."
+
+[dependencies]
+anyhow = "1"

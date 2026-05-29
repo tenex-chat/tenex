@@ -36,8 +36,6 @@ mod agent_home_files;
 #[cfg(test)]
 mod embed_models;
 #[cfg(test)]
-mod event_ids;
-#[cfg(test)]
 mod llm_config_options;
 #[cfg(test)]
 mod project_ids;

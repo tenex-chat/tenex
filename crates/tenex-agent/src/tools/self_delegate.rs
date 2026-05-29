@@ -188,7 +188,7 @@ impl Tool for SelfDelegateTool {
             .await
             .map_err(|e| SelfDelegateError(format!("failed to emit tool-use event: {e}")))?;
 
-        let short_id = &delegation_event_id[..delegation_event_id.len().min(10)];
+        let short_id = tenex_ids::shorten_full_event_id(&delegation_event_id);
         Ok(format!(
             "Self-delegation queued. Delegation event ID: {short_id}. Stop here — do not take further actions this turn."
         ))
