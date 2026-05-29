@@ -441,7 +441,11 @@ async fn run(
     let session_result = acp
         .request(
             "session/new",
-            session_new_params(&working_dir, &mcp_bridge, resolved_category_enum)?,
+            session_new_params(
+                &working_dir,
+                vec![mcp_bridge.session_server_config()?],
+                resolved_category_enum,
+            ),
         )
         .await?;
     let session_id = session_result

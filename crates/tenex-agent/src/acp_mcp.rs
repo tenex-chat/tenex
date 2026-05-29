@@ -203,12 +203,11 @@ impl AcpMcpBridge {
 
 pub(crate) fn session_new_params(
     working_dir: &str,
-    bridge: &AcpMcpBridge,
+    mcp_servers: Vec<Value>,
     agent_category: Option<AgentCategory>,
-) -> Result<Value> {
-    let mcp_servers = vec![bridge.session_server_config()?];
+) -> Value {
     let disallowed_tools = claude_code_disallowed_tools(agent_category);
-    Ok(json!({
+    json!({
         "cwd": working_dir,
         "mcpServers": mcp_servers,
         "_meta": {
@@ -218,7 +217,7 @@ pub(crate) fn session_new_params(
                 }
             }
         }
-    }))
+    })
 }
 
 /// Compute the Claude Code `disallowedTools` list for an ACP session.
@@ -397,7 +396,7 @@ mod tests {
     fn disallowed_tools_for(
         category: Option<AgentCategory>,
     ) -> Vec<String> {
-        let params = session_new_params("/tmp", None, category).unwrap();
+        let params = session_new_params("/tmp", Vec::new(), category);
         params
             .pointer("/_meta/claudeCode/options/disallowedTools")
             .and_then(Value::as_array)
