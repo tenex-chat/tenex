@@ -1,16 +1,4 @@
-//! Project-local hooks: Claude Code-compatible shell commands that fire at
-//! `pre-tool` and `post-tool` boundaries.
-//!
-//! Hooks are configured in `.tenex-hooks.json` in the agent's workspace
-//! directory. Each hook receives JSON context on stdin and can:
-//! - **block** a tool call (exit non-zero on `pre-tool`), or
-//! - **inject** context into the conversation (non-empty stdout on exit 0).
-//!
-//! The hook protocol is intentionally language-agnostic: hooks are plain
-//! shell commands, so any Claude Code-compatible hook (e.g. proactive-context)
-//! works without bespoke integration. This crate owns spawning and the
-//! stdin/stdout contract; [`crate::hook::EmitHook`] owns wiring the outcomes
-//! into the tool-call lifecycle.
+//! Project-local `.tenex-hooks.json` shell commands that fire at `pre-tool` and `post-tool` boundaries.
 
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -196,10 +184,10 @@ impl ProjectHooksRunner {
                     );
                 }
                 HookRun::SpawnFailed(e) => {
-                    eprintln!(
-                        "[tenex-agent] warn: pre-tool hook '{}' failed to run: {e}; continuing",
+                    return PreToolOutcome::Block(format!(
+                        "pre-tool hook '{}' could not run: {e}",
                         hook.name
-                    );
+                    ));
                 }
             }
         }
@@ -264,7 +252,10 @@ impl ProjectHooksRunner {
             .current_dir(&self.working_dir)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
+            .stderr(Stdio::piped())
+            // On timeout the wait future is dropped; without this the OS
+            // process would be detached and orphaned.
+            .kill_on_drop(true);
 
         let mut child = match command.spawn() {
             Ok(child) => child,
@@ -438,6 +429,23 @@ mod tests {
         let runner = ProjectHooksRunner::new(config, tmp.path().to_path_buf());
         match runner.fire_pre_tool("shell", "{}").await {
             PreToolOutcome::Block(reason) => assert!(reason.contains("silent-block")),
+            other => panic!("expected block, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn pre_tool_spawn_failure_blocks() {
+        let tmp = tempfile::tempdir().unwrap();
+        let config = ProjectHooksConfig {
+            hooks: vec![HookEntry {
+                name: "missing".into(),
+                command: vec!["/nonexistent/hook-binary".into()],
+                events: vec![HookEvent::PreTool],
+            }],
+        };
+        let runner = ProjectHooksRunner::new(config, tmp.path().to_path_buf());
+        match runner.fire_pre_tool("shell", "{}").await {
+            PreToolOutcome::Block(reason) => assert!(reason.contains("missing")),
             other => panic!("expected block, got {other:?}"),
         }
     }

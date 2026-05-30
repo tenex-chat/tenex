@@ -95,9 +95,7 @@ impl EmitHook {
         }
     }
 
-    /// Take all pending project-hook injection strings. Called by the turn
-    /// loop after a tool's `post-tool` hooks fire, so the strings land on the
-    /// tool result the model reads next.
+    /// Take all pending project-hook injection strings for folding into the next tool result.
     pub fn drain_hook_injections(&self) -> Vec<String> {
         std::mem::take(&mut *self.hook_injections.lock().unwrap())
     }
@@ -248,9 +246,8 @@ impl EmitHook {
         args: &str,
         result: &str,
     ) -> HookAction {
-        // Project `post-tool` hooks observe the completed call. The tool has
-        // already run, so they cannot abort it; their stdout queues for
-        // injection into the result the model reads next.
+        // The tool already ran, so `post-tool` hooks cannot abort it; their
+        // stdout only queues for injection.
         if let Some(runner) = &self.project_hooks {
             let injections = runner.fire_post_tool(tool_name, args, result).await;
             self.hook_injections.lock().unwrap().extend(injections);
@@ -303,9 +300,7 @@ impl EmitHook {
         let name = tool_name.to_string();
         let args_string = args.to_string();
 
-        // Project hooks gate the call before the supervisor policy runs: a
-        // workspace `.tenex-hooks.json` `pre-tool` hook can block the tool
-        // outright or contribute context for the next LLM call.
+        // Project hooks gate the call before the supervisor policy runs.
         if let Some(runner) = &self.project_hooks {
             match runner.fire_pre_tool(tool_name, args).await {
                 PreToolOutcome::Block(reason) => return ToolCallHookAction::skip(reason),

@@ -25,15 +25,12 @@ where
 {
     let mut records = Vec::with_capacity(tool_calls.len());
     for tool_call in tool_calls {
-        let records_before = records.len();
         let tool_call_id = tool_call.provider_tool_call_id();
         let args = tool_call.function_arguments_string();
         let tool_name = tool_call.tool_call.function.name.clone();
         let provider_call_id = tool_call.tool_call.call_id.clone();
-        // `is_error` flows through to projection via the `ToolCallRecord`s
-        // emitted by `recorder.take_records()` / `tool_record(...)`. The
-        // local result string here is only used to feed the progress
-        // monitor and emit hooks (display/telemetry), not persistence.
+        // The local `result` string is display/telemetry only; persistence
+        // (including `is_error`) flows through the `ToolCallRecord`s.
         let result: String = match emit
             .on_tool_call(
                 &tool_name,
@@ -97,31 +94,21 @@ where
             )
             .await,
         )?;
-        // Project-hook output (pre-tool gating context + post-tool side
-        // effects) accumulates in the EmitHook across the two hook calls
-        // above. Drain it now and fold it into the record the next
-        // projection reads back, so the model sees the injected context on
-        // this tool's result. The local `result` string is display-only
-        // (see comment above); persistence flows through `records`.
+        // Fold hook output into the persisted record, not the display-only
+        // `result` string: persistence flows through `records`.
         let injections = emit.drain_hook_injections();
         if !injections.is_empty() {
-            if let Some(record) = records.get_mut(records_before) {
+            if let Some(record) = records.last_mut() {
                 for injection in injections {
                     append_to_record_result(&mut record.result, &injection);
                 }
             }
         }
-        // The tool result row is persisted by the caller via
-        // record_step_tool_messages and read back by the next
-        // projection — there is no in-memory side-channel.
     }
     Ok(StepToolResults { records })
 }
 
-/// Append a project-hook injection to a persisted tool result. The result is
-/// a `serde_json::Value`: a plain string is concatenated with a blank-line
-/// separator; a structured value is coerced to its display string first, so
-/// the injected context survives projection as readable text.
+/// Append a project-hook injection to a tool result, coercing it to a string.
 fn append_to_record_result(result: &mut serde_json::Value, injection: &str) {
     let mut text = match result.as_str() {
         Some(s) => s.to_string(),
