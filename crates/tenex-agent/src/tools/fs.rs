@@ -63,7 +63,7 @@ fn expand_env_vars(input: &str) -> String {
     out
 }
 
-fn resolve_path(base: &str, path: &str) -> PathBuf {
+pub(crate) fn resolve_path(base: &str, path: &str) -> PathBuf {
     let expanded = expand_env_vars(path);
     let p = Path::new(&expanded);
     if p.is_absolute() {
