@@ -15,8 +15,8 @@ use rusqlite::{params, Connection, OptionalExtension, Row, Transaction, Transact
 use crate::error::{ConversationsError, Result};
 use crate::model::{
     AgentContextState, AttachmentRecord, Completion, CompletionStatus, ConversationRow,
-    DelegationMarker, DelegationStatus, MessageRecord, NewCompletion, NewMessage,
-    NewPromptHistoryEntry, NewToolMessage, PromptHistoryEntry, ToolMessage,
+    DelegationMarker, DelegationStatus, FileSnapshot, MessageRecord, NewCompletion, NewFileSnapshot,
+    NewMessage, NewPromptHistoryEntry, NewToolMessage, PromptHistoryEntry, ToolMessage,
 };
 use crate::schema;
 
@@ -695,6 +695,69 @@ impl ConversationStore {
     }
 
     // ==========================================================================
+    // Agent file snapshots
+    //
+    // Capture the content of a file an agent wrote via `fs_write`, so a later
+    // run of the same agent in the same conversation can diff it against the
+    // current on-disk state and report external modifications. Upsert on
+    // `(conversation_id, agent_pubkey, file_path)` — last write wins — to bound
+    // table growth and ensure the baseline is always the agent's most recent
+    // write of that file.
+    // ==========================================================================
+
+    /// Record (or replace) the snapshot for a file the agent wrote. Upserts on
+    /// `(conversation_id, agent_pubkey, file_path)`.
+    pub fn record_file_snapshot(
+        &self,
+        conversation_id: &str,
+        snapshot: &NewFileSnapshot,
+    ) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO agent_file_snapshots (
+                conversation_id, agent_pubkey, execution_id, file_path,
+                content_hash, content_bytes, size_bytes, recorded_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+             ON CONFLICT(conversation_id, agent_pubkey, file_path) DO UPDATE SET
+                execution_id = excluded.execution_id,
+                content_hash = excluded.content_hash,
+                content_bytes = excluded.content_bytes,
+                size_bytes = excluded.size_bytes,
+                recorded_at = excluded.recorded_at",
+            params![
+                conversation_id,
+                snapshot.agent_pubkey,
+                snapshot.execution_id,
+                snapshot.file_path,
+                snapshot.content_hash,
+                snapshot.content_bytes,
+                snapshot.size_bytes,
+                now_ms(),
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// All file snapshots this agent has written in this conversation, ordered
+    /// by `file_path` for stable rendering.
+    pub fn get_file_snapshots_for_agent(
+        &self,
+        conversation_id: &str,
+        agent_pubkey: &str,
+    ) -> Result<Vec<FileSnapshot>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, conversation_id, agent_pubkey, execution_id, file_path,
+                    content_hash, content_bytes, size_bytes, recorded_at
+               FROM agent_file_snapshots
+              WHERE conversation_id = ?1 AND agent_pubkey = ?2
+              ORDER BY file_path ASC",
+        )?;
+        let rows = stmt
+            .query_map(params![conversation_id, agent_pubkey], row_to_file_snapshot)?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
+    // ==========================================================================
     // Delegation markers
     //
     // Markers track an outgoing delegation's lifecycle in the *parent*
@@ -1357,6 +1420,20 @@ fn row_to_completion(row: &Row<'_>) -> rusqlite::Result<Completion> {
         nostr_event_id: row.get(7)?,
         completed_at: row.get(8)?,
         metadata: parse_optional_json_column(row.get(9)?)?,
+    })
+}
+
+fn row_to_file_snapshot(row: &Row<'_>) -> rusqlite::Result<FileSnapshot> {
+    Ok(FileSnapshot {
+        id: row.get(0)?,
+        conversation_id: row.get(1)?,
+        agent_pubkey: row.get(2)?,
+        execution_id: row.get(3)?,
+        file_path: row.get(4)?,
+        content_hash: row.get(5)?,
+        content_bytes: row.get(6)?,
+        size_bytes: row.get(7)?,
+        recorded_at: row.get(8)?,
     })
 }
 

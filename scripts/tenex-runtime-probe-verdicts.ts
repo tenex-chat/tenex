@@ -16,6 +16,8 @@ import {
     convReminderCompletionText,
     convReminderProbeMessage,
     crossProjectDelegationUserRequest,
+    fileModificationProbeFileName,
+    fileModificationSecondRequest,
     delegationUserRequest,
     delegationWorkerCompletionText,
     extractColorChoice,
@@ -103,6 +105,12 @@ export function evaluate(
     }
     if (name === "same-agent-concurrency") {
         return [...commonVerdicts, ...evaluateSameAgentConcurrency(events, context)];
+    }
+    if (name === "file-modification-tracking") {
+        return [
+            ...commonVerdicts,
+            ...evaluateFileModificationTracking(events, requestRecords, context),
+        ];
     }
     if (name === "mcp-tool-basic") {
         return [...commonVerdicts, ...evaluateMcpTool(events, requestRecords, context)];
@@ -394,6 +402,52 @@ function evaluateRootAgentsMd(
             name: "Agent completed after matching root instruction",
             ok: Boolean(completion),
             detail: "Expected PM completion from the mock response matched on the root AGENTS.md instruction.",
+        },
+    ];
+}
+
+function evaluateFileModificationTracking(
+    events: Event[],
+    requestRecords: MockRequestRecord[],
+    context: EvaluateContext
+): Verdict[] {
+    // The first run must have actually written the file (fs_write tool event).
+    const wroteFile = events.some(
+        (event) =>
+            event.pubkey === context.pmPubkey &&
+            hasTag(event, "tool", "fs_write") &&
+            (tagValue(event, "tool-args") ?? "").includes(fileModificationProbeFileName)
+    );
+
+    // The second run's model request must carry the file-modifications reminder
+    // for probe-file.txt in its system prompt (visible in requestDebug).
+    const secondRunRequest = requestRecords.find(
+        (record) =>
+            record.agent === "pm" &&
+            record.requestDebug.includes(fileModificationSecondRequest) &&
+            record.requestDebug.includes('type="file-modifications"') &&
+            record.requestDebug.includes(fileModificationProbeFileName)
+    );
+    const requestDebug = secondRunRequest?.requestDebug ?? "";
+
+    return [
+        {
+            name: "First run wrote probe-file.txt via fs_write",
+            ok: wroteFile,
+            detail: "Expected an fs_write tool event for probe-file.txt on the first run.",
+        },
+        {
+            name: "Second run prompt contains file-modifications reminder",
+            ok: Boolean(secondRunRequest),
+            detail: "Expected the second PM request system prompt to contain a file-modifications reminder for probe-file.txt.",
+        },
+        {
+            name: "Reminder diff shows original → modified",
+            ok:
+                Boolean(secondRunRequest) &&
+                requestDebug.includes("-original") &&
+                requestDebug.includes("+modified"),
+            detail: "Expected the file-modifications diff to show the original line removed and the modified line added.",
         },
     ];
 }

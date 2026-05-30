@@ -6,8 +6,8 @@ use serde_json::json;
 use tempfile::TempDir;
 use tenex_conversations::model::{AgentContextState, CompletionStatus, ConversationRow};
 use tenex_conversations::{
-    ConversationListFilter, ConversationStore, MessageQuery, NewCompletion, NewMessage,
-    NewPromptHistoryEntry, NewToolMessage, Project,
+    ConversationListFilter, ConversationStore, MessageQuery, NewCompletion, NewFileSnapshot,
+    NewMessage, NewPromptHistoryEntry, NewToolMessage, Project,
 };
 
 fn make_conversation(store: &ConversationStore, id: &str, last_activity: i64) {
@@ -1250,4 +1250,92 @@ fn append_message_serializes_under_concurrent_writers() {
         (n_threads * n_per_thread) as usize,
         "all sequences must be distinct"
     );
+}
+
+#[test]
+fn file_snapshot_upsert_is_last_write_wins() {
+    let store = ConversationStore::open_in_memory().unwrap();
+    store.ensure_conversation("conv-snap").unwrap();
+
+    store
+        .record_file_snapshot(
+            "conv-snap",
+            &NewFileSnapshot {
+                agent_pubkey: "agent-1".into(),
+                execution_id: "exec-1".into(),
+                file_path: "src/foo.rs".into(),
+                content_hash: "hash-v1".into(),
+                content_bytes: Some(b"original\n".to_vec()),
+                size_bytes: 9,
+            },
+        )
+        .unwrap();
+
+    // Second write of the same (conversation, agent, path) replaces the row.
+    store
+        .record_file_snapshot(
+            "conv-snap",
+            &NewFileSnapshot {
+                agent_pubkey: "agent-1".into(),
+                execution_id: "exec-2".into(),
+                file_path: "src/foo.rs".into(),
+                content_hash: "hash-v2".into(),
+                content_bytes: Some(b"updated\n".to_vec()),
+                size_bytes: 8,
+            },
+        )
+        .unwrap();
+
+    let snaps = store
+        .get_file_snapshots_for_agent("conv-snap", "agent-1")
+        .unwrap();
+    assert_eq!(snaps.len(), 1, "upsert must not accumulate duplicate rows");
+    let snap = &snaps[0];
+    assert_eq!(snap.content_hash, "hash-v2");
+    assert_eq!(snap.execution_id, "exec-2");
+    assert_eq!(snap.size_bytes, 8);
+    assert_eq!(snap.content_bytes.as_deref(), Some(b"updated\n".as_slice()));
+
+    // A different agent / different path are independent rows.
+    store
+        .record_file_snapshot(
+            "conv-snap",
+            &NewFileSnapshot {
+                agent_pubkey: "agent-1".into(),
+                execution_id: "exec-3".into(),
+                file_path: "src/bar.rs".into(),
+                content_hash: "hash-bar".into(),
+                content_bytes: None,
+                size_bytes: 70_000,
+            },
+        )
+        .unwrap();
+    store
+        .record_file_snapshot(
+            "conv-snap",
+            &NewFileSnapshot {
+                agent_pubkey: "agent-2".into(),
+                execution_id: "exec-4".into(),
+                file_path: "src/foo.rs".into(),
+                content_hash: "hash-other".into(),
+                content_bytes: Some(b"other\n".to_vec()),
+                size_bytes: 6,
+            },
+        )
+        .unwrap();
+
+    let agent1 = store
+        .get_file_snapshots_for_agent("conv-snap", "agent-1")
+        .unwrap();
+    assert_eq!(agent1.len(), 2, "agent-1 has two distinct files");
+    // Ordered by file_path: bar.rs before foo.rs.
+    assert_eq!(agent1[0].file_path, "src/bar.rs");
+    assert_eq!(agent1[0].content_bytes, None, "oversized stores NULL bytes");
+    assert_eq!(agent1[1].file_path, "src/foo.rs");
+
+    let agent2 = store
+        .get_file_snapshots_for_agent("conv-snap", "agent-2")
+        .unwrap();
+    assert_eq!(agent2.len(), 1);
+    assert_eq!(agent2[0].content_hash, "hash-other");
 }

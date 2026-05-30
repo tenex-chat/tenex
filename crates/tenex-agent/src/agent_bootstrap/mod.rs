@@ -26,6 +26,7 @@ use tenex_supervision::supervisor::Supervisor;
 use crate::cassette::CassetteRecorder;
 use crate::config::{self, ResolvedModel};
 use crate::emit::EmitState;
+use crate::file_modifications::{self, FileSnapshotWriter};
 use crate::hook::EmitHook;
 use crate::injections::MessageInjectionTracker;
 use crate::runtime_state::RuntimeStateHandle;
@@ -419,6 +420,13 @@ pub(crate) async fn build(
         teams.clone(),
         project_root.clone(),
         conv_db_path.clone(),
+        Some(Arc::new(FileSnapshotWriter::new(
+            conv_db_path.clone(),
+            conversation_id.clone(),
+            pubkey_hex.clone(),
+            execution_id.clone(),
+            working_dir.clone(),
+        ))),
     );
 
     let skill_list_tool = SkillListTool::new(skill_ctx.clone());
@@ -474,6 +482,15 @@ pub(crate) async fn build(
     {
         system_prompt.push_str("\n\n");
         system_prompt.push_str(&active_shell_tasks);
+    }
+    if let Some(file_modifications) = file_modifications::render_reminder(
+        &conv_db_path,
+        &conversation_id,
+        &pubkey_hex,
+        &working_dir,
+    ) {
+        system_prompt.push_str("\n\n");
+        system_prompt.push_str(&file_modifications);
     }
 
     let escalation_pubkey = escalation::resolve_escalation_pubkey(&base_dir, &project_agents)

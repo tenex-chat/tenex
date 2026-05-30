@@ -21,7 +21,7 @@ use rusqlite::Connection;
 
 use crate::error::{ConversationsError, Result};
 
-pub const EXPECTED_SCHEMA_VERSION: i64 = 2;
+pub const EXPECTED_SCHEMA_VERSION: i64 = 3;
 
 const MIGRATION_V1: &str = r#"
 CREATE TABLE conversations (
@@ -194,9 +194,30 @@ CREATE INDEX idx_message_attachments_message
     ON message_attachments(message_id);
 "#;
 
+const MIGRATION_V3: &str = r#"
+CREATE TABLE agent_file_snapshots (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    conversation_id TEXT NOT NULL,
+    agent_pubkey    TEXT NOT NULL,
+    execution_id    TEXT NOT NULL,
+    file_path       TEXT NOT NULL,
+    content_hash    TEXT NOT NULL,
+    content_bytes   BLOB,
+    size_bytes      INTEGER NOT NULL,
+    recorded_at     INTEGER NOT NULL,
+    UNIQUE(conversation_id, agent_pubkey, file_path),
+    FOREIGN KEY (conversation_id)
+        REFERENCES conversations(id)
+        ON DELETE CASCADE
+);
+
+CREATE INDEX agent_file_snapshots_lookup
+    ON agent_file_snapshots(conversation_id, agent_pubkey);
+"#;
+
 /// Migrations indexed by target version.
 fn migrations() -> &'static [(i64, &'static str)] {
-    &[(1, MIGRATION_V1), (2, MIGRATION_V2)]
+    &[(1, MIGRATION_V1), (2, MIGRATION_V2), (3, MIGRATION_V3)]
 }
 
 /// Configure pragmas required by the crate. Must run on every connection.

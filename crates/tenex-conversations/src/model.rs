@@ -293,6 +293,38 @@ pub struct Completion {
     pub metadata: Option<serde_json::Value>,
 }
 
+/// One snapshot of a file an agent wrote via `fs_write`, captured at write
+/// time so a later run of the same agent in the same conversation can detect
+/// external modifications. Keyed by `(conversation_id, agent_pubkey,
+/// file_path)` (upsert; last write wins). `file_path` is stored exactly as the
+/// agent passed it to `fs_write` (relative to the working directory), so the
+/// reader re-resolves it against the same working directory it would for a
+/// write. `content_bytes` is the verbatim written bytes when ≤ 50 KB, else
+/// `None`; `content_hash` is always the SHA-256 hex of the full content.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileSnapshot {
+    pub id: i64,
+    pub conversation_id: String,
+    pub agent_pubkey: String,
+    pub execution_id: String,
+    pub file_path: String,
+    pub content_hash: String,
+    pub content_bytes: Option<Vec<u8>>,
+    pub size_bytes: i64,
+    pub recorded_at: i64,
+}
+
+/// Input shape for [`crate::store::ConversationStore::record_file_snapshot`].
+#[derive(Debug, Clone)]
+pub struct NewFileSnapshot {
+    pub agent_pubkey: String,
+    pub execution_id: String,
+    pub file_path: String,
+    pub content_hash: String,
+    pub content_bytes: Option<Vec<u8>>,
+    pub size_bytes: i64,
+}
+
 #[derive(Debug, Clone)]
 pub struct NewCompletion {
     pub root_event_id: Option<String>,

@@ -2,6 +2,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use crate::emit::EmitState;
+use crate::file_modifications::FileSnapshotWriter;
 use crate::runtime_state::RuntimeStateHandle;
 use crate::tools::{TodoItem, TodoStatus};
 use rig_core::agent::{HookAction, ToolCallHookAction};
@@ -54,6 +55,9 @@ pub struct EmitHook {
     /// is emitted by main.rs (with usage from FinalResponse).
     pending: Arc<Mutex<Option<(String, u32)>>>,
     runtime_state: Option<RuntimeStateHandle>,
+    /// Snapshots successful `fs_write` results into the conversation DB so a
+    /// later run of this agent can detect external file modifications.
+    snapshot_writer: Option<Arc<FileSnapshotWriter>>,
 }
 
 impl EmitHook {
@@ -63,6 +67,7 @@ impl EmitHook {
         todos: Arc<Mutex<Vec<TodoItem>>>,
         agent_category: Option<AgentCategory>,
         runtime_state: Option<RuntimeStateHandle>,
+        snapshot_writer: Option<Arc<FileSnapshotWriter>>,
     ) -> Self {
         let (delta_tx, delta_rx) = mpsc::unbounded_channel();
         tokio::spawn(run_delta_buffer(state.clone(), delta_rx));
@@ -75,6 +80,7 @@ impl EmitHook {
             delta_tx,
             pending: Arc::new(Mutex::new(None)),
             runtime_state,
+            snapshot_writer,
         }
     }
 
@@ -221,9 +227,18 @@ impl EmitHook {
         tool_name: &str,
         _tool_call_id: Option<String>,
         _internal_call_id: &str,
-        _args: &str,
+        args: &str,
         result: &str,
     ) -> HookAction {
+        // Snapshot successful `fs_write` results so a later run of this agent
+        // can detect external modifications. `capture` self-gates on the write
+        // success prefix, so blocked/failed writes are ignored.
+        if tool_name == "fs_write" {
+            if let Some(writer) = &self.snapshot_writer {
+                writer.capture(args, result);
+            }
+        }
+
         let is_mcp_error = tool_name.starts_with("mcp__") && result.starts_with("Error: ");
         if !is_mcp_error {
             return HookAction::cont();

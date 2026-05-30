@@ -26,10 +26,12 @@ Opened via `ConversationStore::open(path)` or `ConversationStore::open_in_memory
 ## Public API
 
 `ConversationStore` — the single open handle per project:
-- Read: `list_recent`, `get_conversation`, `root_author_pubkey`, `get_messages`, `get_tool_messages`, `get_prompt_history`, `get_context_state`, `list_completions`
-- Write: `ensure_conversation`, `upsert_conversation`, `update_metadata`, `append_message`, `append_tool_message`, `append_prompt_history_entry`, `upsert_context_state`, `record_completion`
+- Read: `list_recent`, `get_conversation`, `root_author_pubkey`, `get_messages`, `get_tool_messages`, `get_prompt_history`, `get_context_state`, `list_completions`, `get_file_snapshots_for_agent`
+- Write: `ensure_conversation`, `upsert_conversation`, `update_metadata`, `append_message`, `append_tool_message`, `append_prompt_history_entry`, `upsert_context_state`, `record_completion`, `record_file_snapshot`
 
-Key types re-exported from `lib.rs`: `MessageRecord`, `NewMessage`, `NewToolMessage`, `NewPromptHistoryEntry`, `FrozenPromptMessage`, `AgentContextState`, `Completion`, `NewCompletion`, `ConversationListFilter`, `MessageQuery`.
+`record_file_snapshot` upserts on `(conversation_id, agent_pubkey, file_path)` (last write wins): the `agent_file_snapshots` table (v3) captures the content of files an agent wrote via `fs_write`, so a later run of the same agent in the same conversation can diff against the current on-disk state. `file_path` is stored exactly as passed to `fs_write` (relative to the working dir); the reader re-resolves it the same way.
+
+Key types re-exported from `lib.rs`: `MessageRecord`, `NewMessage`, `NewToolMessage`, `NewPromptHistoryEntry`, `FrozenPromptMessage`, `AgentContextState`, `Completion`, `NewCompletion`, `FileSnapshot`, `NewFileSnapshot`, `ConversationListFilter`, `MessageQuery`.
 
 ## How to approach changes
 

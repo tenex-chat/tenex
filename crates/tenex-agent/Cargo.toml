@@ -59,6 +59,7 @@ tracing = "0.1"
 tracing-opentelemetry = "0.32"
 sha2 = "0.10"
 hex = "0.4"
+similar = "2"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 
 [dev-dependencies]
