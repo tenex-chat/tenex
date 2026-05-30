@@ -1,5 +1,6 @@
 import type { Event } from "nostr-tools";
 import type { MockRequestRecord, ScenarioContext } from "./tenex-runtime-probe-scenarios";
+import { waitForStoredMessage } from "./tenex-runtime-probe-conversations";
 
 export const hooksPreToolUserRequest = "run the shell command 'echo hello'";
 export const hooksPreToolBlockReason = "hook-blocked";
@@ -100,15 +101,17 @@ export async function runHooksPreToolProbe(context: ScenarioContext): Promise<vo
         "second PM request carrying the hook block reason"
     );
 
-    await context.waitForObservedEvent(
-        context.events,
-        (event) =>
-            event.kind === 1 &&
-            event.pubkey === context.pmPubkey &&
-            event.content.includes(hooksPreToolFinalText) &&
-            hasTag(event, "status", "completed"),
+    // Use the conversation DB (not the relay subscription) to detect completion —
+    // the relay's ACL defers event delivery to external subscribers.
+    await waitForStoredMessage(
+        context.conversationDbPath,
+        userEvent.id,
+        (message) =>
+            message.authorPubkey === context.pmPubkey &&
+            message.content.includes(hooksPreToolFinalText),
         timeoutMs,
-        "hooks pre-tool final completion"
+        "hooks pre-tool final completion",
+        context.delay
     );
 }
 
