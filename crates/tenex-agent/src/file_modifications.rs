@@ -1,41 +1,22 @@
-//! File-modification tracking for `fs_write`.
-//!
-//! When an agent writes a file via `fs_write`, [`FileSnapshotWriter::capture`]
-//! snapshots the written content (up to [`MAX_SNAPSHOT_BYTES`]) into the
-//! conversation DB, keyed by `(conversation_id, agent_pubkey, file_path)`.
-//!
-//! On a later run of the same agent in the same conversation,
-//! [`render_reminder`] diffs each snapshot against the current on-disk state
-//! and produces a `<system-reminder type="file-modifications">` block listing
-//! every file that changed externally since the agent last wrote it.
-//!
-//! Both sides resolve `file_path` identically (env-var expansion + join against
-//! `working_dir`, matching `tools::fs::resolve_path`) and hash the *bytes read
-//! back from disk* with SHA-256, so capture and compare stay symmetric — a file
-//! the agent wrote and nobody else touched never reports as modified.
+//! File-modification tracking for `fs_write`: snapshot written files, then diff against on-disk state on a later run.
 
 use std::path::{Path, PathBuf};
 
 use sha2::{Digest, Sha256};
 use tenex_conversations::{ConversationStore, FileSnapshot, NewFileSnapshot};
 
-/// Files larger than this are snapshotted by hash + size only (`content_bytes`
-/// is `None`); they can report "modified" but cannot produce an inline diff.
+use crate::tools::fs::resolve_path;
+
+/// Files larger than this store hash + size only; no inline diff.
 const MAX_SNAPSHOT_BYTES: u64 = 50 * 1024;
 
-/// Maximum rendered unified-diff size to inline. Larger diffs collapse to a
-/// summary. Independent of [`MAX_SNAPSHOT_BYTES`].
+/// Diffs larger than this collapse to a summary.
 const MAX_INLINE_DIFF_BYTES: usize = 8 * 1024;
 
-/// The prefix `fs_write` emits on success. Capture is gated on this so blocked
-/// (`skip` reason) and failed (`Error writing …`) tool results never produce a
-/// bogus baseline.
+/// Capture is gated on this prefix so failed/blocked writes never produce a bogus baseline.
 const FS_WRITE_SUCCESS_PREFIX: &str = "Successfully wrote";
 
-/// Captures `fs_write` snapshots into the conversation DB. Holds the addressing
-/// needed to resolve a written path and persist it under the right conversation
-/// + agent. Stateless beyond its configuration; opens the store per capture
-/// (writes are serialized upstream by RAL).
+/// Captures `fs_write` snapshots into the conversation DB.
 pub struct FileSnapshotWriter {
     db_path: PathBuf,
     conversation_id: String,
@@ -61,10 +42,7 @@ impl FileSnapshotWriter {
         }
     }
 
-    /// Snapshot the file an `fs_write` call just wrote. No-op unless `result`
-    /// indicates the write succeeded. `args` is the raw `fs_write` argument
-    /// JSON; its `path` field is resolved against `working_dir` and the file is
-    /// re-read from disk to hash it.
+    /// Snapshot the file an `fs_write` call just wrote; no-op unless the write succeeded.
     pub fn capture(&self, args: &str, result: &str) {
         if !result.starts_with(FS_WRITE_SUCCESS_PREFIX) {
             return;
@@ -115,23 +93,27 @@ impl FileSnapshotWriter {
     }
 }
 
-/// Build the `<system-reminder type="file-modifications">` block for this
-/// agent + conversation, or `None` when no tracked file changed externally.
-///
-/// Opens the conversation DB at `db_path`, reads every snapshot this agent
-/// wrote in this conversation, re-reads each file from disk (resolved against
-/// `working_dir`), and includes only those whose content now differs from the
-/// snapshot hash.
+/// Build the `<system-reminder type="file-modifications">` block for this agent + conversation, or `None` when no tracked file changed externally.
 pub fn render_reminder(
     db_path: &Path,
     conversation_id: &str,
     agent_pubkey: &str,
     working_dir: &str,
 ) -> Option<String> {
-    let store = ConversationStore::open(db_path).ok()?;
-    let snapshots = store
-        .get_file_snapshots_for_agent(conversation_id, agent_pubkey)
-        .ok()?;
+    let store = match ConversationStore::open(db_path) {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::warn!("file_modifications: failed to open conversation DB: {e}");
+            return None;
+        }
+    };
+    let snapshots = match store.get_file_snapshots_for_agent(conversation_id, agent_pubkey) {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::warn!("file_modifications: failed to load file snapshots: {e}");
+            return None;
+        }
+    };
     if snapshots.is_empty() {
         return None;
     }
@@ -157,17 +139,29 @@ pub fn render_reminder(
     Some(out)
 }
 
-/// Render a single `<file-modification>` block for a snapshot whose on-disk
-/// content differs from the recorded hash. Returns `None` when the file is
-/// unchanged or can no longer be read.
+/// Render a single `<file-modification>` block for a snapshot whose on-disk content differs from the recorded hash.
 fn render_file_block(snapshot: &FileSnapshot, working_dir: &str) -> Option<String> {
     let resolved = resolve_path(working_dir, &snapshot.file_path);
-    let current = std::fs::read(&resolved).ok()?;
+    let path = &snapshot.file_path;
+    let current = match std::fs::read(&resolved) {
+        Ok(bytes) => bytes,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Some(format!(
+                "<file-modification path=\"{path}\">\nFile was deleted.\n</file-modification>\n"
+            ));
+        }
+        Err(e) => {
+            tracing::warn!(
+                "file_modifications: cannot read '{}' for diff: {e}",
+                resolved.display()
+            );
+            return None;
+        }
+    };
     if hash_bytes(&current) == snapshot.content_hash {
         return None;
     }
 
-    let path = &snapshot.file_path;
     let body = match snapshot.content_bytes.as_deref() {
         Some(old_bytes) => render_change(old_bytes, &current),
         None => summarize_change(snapshot.size_bytes, current.len() as i64, None),
@@ -215,8 +209,7 @@ fn render_change(old_bytes: &[u8], new_bytes: &[u8]) -> String {
     )
 }
 
-/// A compact size/line-count summary used when an inline diff is unavailable
-/// (binary content, snapshot stored without bytes, or oversized diff).
+/// Compact size/line-count summary used when an inline diff is unavailable.
 fn summarize_change(old_size: i64, new_size: i64, lines: Option<(i64, i64)>) -> String {
     let byte_delta = new_size - old_size;
     let mut summary = match lines {
@@ -231,8 +224,6 @@ fn summarize_change(old_size: i64, new_size: i64, lines: Option<(i64, i64)>) -> 
     summary
 }
 
-/// Parse the `path` field from raw `fs_write` argument JSON. Returns the path
-/// exactly as the agent supplied it (relative to the working directory).
 fn parse_write_path(args: &str) -> Option<String> {
     let value: serde_json::Value = serde_json::from_str(args).ok()?;
     value
@@ -241,68 +232,10 @@ fn parse_write_path(args: &str) -> Option<String> {
         .map(str::to_string)
 }
 
-/// SHA-256 hex of `bytes`.
 fn hash_bytes(bytes: &[u8]) -> String {
     let mut hasher = Sha256::new();
     hasher.update(bytes);
     hex::encode(hasher.finalize())
-}
-
-/// Resolve a `fs_write` path against `working_dir`, mirroring
-/// `tools::fs::resolve_path`: expand `$VAR` / `${VAR}`, then join relative
-/// paths onto `working_dir`. Kept in lockstep with the tool so capture and
-/// compare resolve to the same file.
-fn resolve_path(working_dir: &str, path: &str) -> PathBuf {
-    let expanded = expand_env_vars(path);
-    let p = Path::new(&expanded);
-    if p.is_absolute() {
-        p.to_path_buf()
-    } else {
-        Path::new(working_dir).join(p)
-    }
-}
-
-/// Expand `$VAR` and `${VAR}` using `std::env::var`. Unknown variables are left
-/// verbatim. Mirrors `tools::fs::expand_env_vars` so resolution matches the
-/// `fs_write` tool exactly.
-fn expand_env_vars(input: &str) -> String {
-    let bytes = input.as_bytes();
-    let mut out = String::with_capacity(input.len());
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == b'$' && i + 1 < bytes.len() {
-            if bytes[i + 1] == b'{' {
-                if let Some(end_rel) = bytes[i + 2..].iter().position(|&b| b == b'}') {
-                    let name = std::str::from_utf8(&bytes[i + 2..i + 2 + end_rel]).unwrap_or("");
-                    if !name.is_empty() {
-                        match std::env::var(name) {
-                            Ok(v) => out.push_str(&v),
-                            Err(_) => out.push_str(&input[i..i + 2 + end_rel + 1]),
-                        }
-                        i += 2 + end_rel + 1;
-                        continue;
-                    }
-                }
-            }
-            let start = i + 1;
-            let mut end = start;
-            while end < bytes.len() && (bytes[end].is_ascii_alphanumeric() || bytes[end] == b'_') {
-                end += 1;
-            }
-            if end > start {
-                let name = std::str::from_utf8(&bytes[start..end]).unwrap_or("");
-                match std::env::var(name) {
-                    Ok(v) => out.push_str(&v),
-                    Err(_) => out.push_str(&input[i..end]),
-                }
-                i = end;
-                continue;
-            }
-        }
-        out.push(bytes[i] as char);
-        i += 1;
-    }
-    out
 }
 
 #[cfg(test)]

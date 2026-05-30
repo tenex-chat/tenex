@@ -694,17 +694,6 @@ impl ConversationStore {
         Ok(out)
     }
 
-    // ==========================================================================
-    // Agent file snapshots
-    //
-    // Capture the content of a file an agent wrote via `fs_write`, so a later
-    // run of the same agent in the same conversation can diff it against the
-    // current on-disk state and report external modifications. Upsert on
-    // `(conversation_id, agent_pubkey, file_path)` — last write wins — to bound
-    // table growth and ensure the baseline is always the agent's most recent
-    // write of that file.
-    // ==========================================================================
-
     /// Record (or replace) the snapshot for a file the agent wrote. Upserts on
     /// `(conversation_id, agent_pubkey, file_path)`.
     pub fn record_file_snapshot(
