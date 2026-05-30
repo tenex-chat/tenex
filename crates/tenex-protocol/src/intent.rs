@@ -59,9 +59,12 @@ pub struct DelegationRequest {
     pub recipient_label: String,
     pub request: String,
     pub branch: Option<String>,
-    /// Expected git commit hash on `branch`. Set on cross-host delegations so
-    /// the receiver can sync its worktree to the exact commit the sender
-    /// pushed, eliminating filesystem coupling.
+    /// Expected git commit hash. Set on cross-host delegations so the receiver
+    /// can sync to the exact commit the sender pushed, eliminating filesystem
+    /// coupling. When `branch` is set, the commit is on that branch and the
+    /// receiver syncs its worktree for that branch; when `branch` is absent,
+    /// the commit pins the sender's current branch HEAD and the receiver syncs
+    /// the project root.
     pub commit: Option<String>,
     /// When set, the outbound event carries an e-tag referencing this message,
     /// turning the delegation into a followup rather than a fresh conversation.
@@ -92,8 +95,10 @@ pub enum AskQuestion {
     },
 }
 
-/// Ask a human a structured question. Always p-tags the recipient and ships
-/// `["intent","ask"]`.
+/// Ask a human a structured question. Starts a new conversation root (no
+/// `["e",…]` back to the parent), p-tags the recipient, links to the parent
+/// via `["delegation", parent_root]`, and is marked with `["ask","true"]`
+/// + `["t","ask"]`.
 #[derive(Debug, Clone)]
 pub struct AskIntent {
     pub title: String,

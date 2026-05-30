@@ -95,15 +95,16 @@ pub(super) fn resolve_workspace(
             std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
         });
     let project_root = crate::project_instructions::infer_project_root(&configured_working_dir);
-    let (resolved_working_dir, current_branch) = if envelope_branch.is_some() {
-        tenex_project::resolve_working_dir(&project_root, envelope_branch, envelope_commit)
-    } else {
-        let current = tenex_project::current_branch(&configured_working_dir)
-            .ok()
-            .flatten()
-            .or_else(|| tenex_project::current_branch(&project_root).ok().flatten());
-        (configured_working_dir, current)
-    };
+    let (resolved_working_dir, current_branch) =
+        if envelope_branch.is_some() || envelope_commit.is_some() {
+            tenex_project::resolve_working_dir(&project_root, envelope_branch, envelope_commit)
+        } else {
+            let current = tenex_project::current_branch(&configured_working_dir)
+                .ok()
+                .flatten()
+                .or_else(|| tenex_project::current_branch(&project_root).ok().flatten());
+            (configured_working_dir, current)
+        };
     let working_dir = resolved_working_dir.display().to_string();
     let project_base_path = project_root.display().to_string();
     let root_agents_md = crate::project_instructions::read_root_agents_md(&project_root);

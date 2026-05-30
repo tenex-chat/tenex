@@ -104,9 +104,9 @@ impl DelegateTool {
         }
     }
 
-    /// Pre-flight a remote delegation that names a branch: ensure the branch's
-    /// worktree is clean, push it to `origin`, and return the commit hash to
-    /// pin on the kind:1 event so the receiver can sync to the same state.
+    /// Pre-flight a remote delegation: ensure the branch's worktree is clean,
+    /// push the branch to `origin`, and return the commit hash to pin on the
+    /// kind:1 event so the receiver can sync to the same state.
     ///
     /// Returns a user-facing error message when the worktree is dirty or the
     /// branch is missing locally — both block the delegation.
@@ -134,6 +134,19 @@ impl DelegateTool {
             .map_err(|e| format!("failed to push branch '{branch}' to origin: {e}"))?;
 
         Ok(commit)
+    }
+
+    /// Pre-flight a remote delegation that did not name a branch: pin the
+    /// commit at the project root's current branch HEAD so the receiver can
+    /// sync to it. Returns `Ok(None)` when HEAD is detached (no branch to
+    /// push) so the delegation proceeds without a commit pin.
+    fn prepare_remote_default(&self) -> Result<Option<String>, String> {
+        let Some(branch) = tenex_project::current_branch(&self.project_root)
+            .map_err(|e| format!("failed to read current branch: {e}"))?
+        else {
+            return Ok(None);
+        };
+        self.prepare_remote_branch(&branch).map(Some)
     }
 }
 
@@ -213,15 +226,22 @@ impl Tool for DelegateTool {
             display_name: None,
         };
 
-        // Cross-host coordination: when delegating to a remote agent on a
-        // specific branch, push the branch and pin the commit so the receiver
-        // can fetch + sync to exactly the state we're handing off.
-        let commit = match (recipient_is_local, args.branch.as_deref()) {
-            (false, Some(branch)) => match self.prepare_remote_branch(branch) {
-                Ok(commit) => Some(commit),
+        // Cross-host coordination: push the relevant branch and pin the commit
+        // so the receiver can fetch + sync to exactly the state we're handing
+        // off. When a branch is named, that branch is the source; otherwise we
+        // fall back to the project root's current branch (the "default" the
+        // sender is working on).
+        let commit = if recipient_is_local {
+            None
+        } else {
+            let result = match args.branch.as_deref() {
+                Some(branch) => self.prepare_remote_branch(branch).map(Some),
+                None => self.prepare_remote_default(),
+            };
+            match result {
+                Ok(commit) => commit,
                 Err(msg) => return Ok(format!("Error: {msg}")),
-            },
-            _ => None,
+            }
         };
 
         let ral = self.state.meta.lock().unwrap().ral;

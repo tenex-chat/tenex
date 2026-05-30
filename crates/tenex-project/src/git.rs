@@ -362,17 +362,20 @@ pub fn create_worktree(
 
 /// Resolve the working directory and current branch for an agent startup.
 ///
-/// If `branch_tag` is `None`, the agent runs in the project root and the
-/// current branch is read from there. If `branch_tag` is `Some(branch)`, an
-/// existing worktree for that branch is reused; if none exists, one is created
-/// under `{repo_path}/.worktrees/<sanitized>`. On worktree creation failure
-/// the function falls back to the project root.
+/// If `branch_tag` is `None` and `commit_tag` is `None`, the agent runs in
+/// the project root and the current branch is read from there. If `branch_tag`
+/// is `Some(branch)`, an existing worktree for that branch is reused; if none
+/// exists, one is created under `{repo_path}/.worktrees/<sanitized>`. On
+/// worktree creation failure the function falls back to the project root.
 ///
 /// When `commit_tag` is set alongside `branch_tag`, the worktree is fetched
-/// and synced to that commit (see [`sync_worktree_to_commit`]). Sync failures
-/// — e.g. a dirty worktree, or a commit not reachable on the local remote —
-/// are logged at error level and the worktree is returned as-is; the caller's
-/// environment will surface the divergence to the agent.
+/// and synced to that commit (see [`sync_worktree_to_commit`]). When
+/// `commit_tag` is set without `branch_tag`, the project root itself is
+/// synced to that commit on its current branch — the cross-host fallback for
+/// delegations the sender made from their default working branch. Sync
+/// failures — e.g. a dirty worktree, or a commit not reachable on the local
+/// remote — are logged at error level and the working directory is returned
+/// as-is; the caller's environment will surface the divergence to the agent.
 ///
 /// Returns `(working_directory, current_branch)`.
 pub fn resolve_working_dir(
@@ -382,6 +385,14 @@ pub fn resolve_working_dir(
 ) -> (PathBuf, Option<String>) {
     let Some(branch) = branch_tag else {
         let current = current_branch(project_base).ok().flatten();
+        if let (Some(commit), Some(branch)) = (commit_tag, current.as_deref()) {
+            if let Err(e) = sync_worktree_to_commit(project_base, branch, commit) {
+                tracing::error!(
+                    "failed to sync project root {} to commit {commit}: {e}",
+                    project_base.display()
+                );
+            }
+        }
         return (project_base.to_owned(), current);
     };
 
