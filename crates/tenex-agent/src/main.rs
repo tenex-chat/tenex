@@ -20,6 +20,7 @@ mod mock_llm;
 mod multimodal;
 mod oauth_client;
 mod progress_monitor;
+mod project_hooks;
 mod project_instructions;
 mod provider_request_sanitizer;
 mod runtime_control;

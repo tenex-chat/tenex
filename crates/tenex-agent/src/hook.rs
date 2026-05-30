@@ -3,6 +3,7 @@ use std::time::{Duration, Instant};
 
 use crate::emit::EmitState;
 use crate::file_modifications::FileSnapshotWriter;
+use crate::project_hooks::{PreToolOutcome, ProjectHooksRunner};
 use crate::runtime_state::RuntimeStateHandle;
 use crate::tools::{TodoItem, TodoStatus};
 use rig_core::agent::{HookAction, ToolCallHookAction};
@@ -58,6 +59,13 @@ pub struct EmitHook {
     /// Snapshots successful `fs_write` results into the conversation DB so a
     /// later run of this agent can detect external file modifications.
     snapshot_writer: Option<Arc<FileSnapshotWriter>>,
+    /// Project-local `.tenex-hooks.json` runner. `None` when the workspace
+    /// declares no hooks. Drives `pre-tool` gating and `post-tool` side
+    /// effects.
+    project_hooks: Option<Arc<ProjectHooksRunner>>,
+    /// Context strings produced by project hooks' stdout, awaiting injection
+    /// into the next tool result. Drained per tool call in the turn loop.
+    hook_injections: Arc<Mutex<Vec<String>>>,
 }
 
 impl EmitHook {
@@ -68,6 +76,7 @@ impl EmitHook {
         agent_category: Option<AgentCategory>,
         runtime_state: Option<RuntimeStateHandle>,
         snapshot_writer: Option<Arc<FileSnapshotWriter>>,
+        project_hooks: Option<Arc<ProjectHooksRunner>>,
     ) -> Self {
         let (delta_tx, delta_rx) = mpsc::unbounded_channel();
         tokio::spawn(run_delta_buffer(state.clone(), delta_rx));
@@ -81,7 +90,16 @@ impl EmitHook {
             pending: Arc::new(Mutex::new(None)),
             runtime_state,
             snapshot_writer,
+            project_hooks,
+            hook_injections: Arc::new(Mutex::new(Vec::new())),
         }
+    }
+
+    /// Take all pending project-hook injection strings. Called by the turn
+    /// loop after a tool's `post-tool` hooks fire, so the strings land on the
+    /// tool result the model reads next.
+    pub fn drain_hook_injections(&self) -> Vec<String> {
+        std::mem::take(&mut *self.hook_injections.lock().unwrap())
     }
 
     /// Take the pending final turn content and RAL. Called by main.rs after the
@@ -230,6 +248,14 @@ impl EmitHook {
         args: &str,
         result: &str,
     ) -> HookAction {
+        // Project `post-tool` hooks observe the completed call. The tool has
+        // already run, so they cannot abort it; their stdout queues for
+        // injection into the result the model reads next.
+        if let Some(runner) = &self.project_hooks {
+            let injections = runner.fire_post_tool(tool_name, args, result).await;
+            self.hook_injections.lock().unwrap().extend(injections);
+        }
+
         // Snapshot successful `fs_write` results so a later run of this agent
         // can detect external modifications. `capture` self-gates on the write
         // success prefix, so blocked/failed writes are ignored.
@@ -276,6 +302,18 @@ impl EmitHook {
         );
         let name = tool_name.to_string();
         let args_string = args.to_string();
+
+        // Project hooks gate the call before the supervisor policy runs: a
+        // workspace `.tenex-hooks.json` `pre-tool` hook can block the tool
+        // outright or contribute context for the next LLM call.
+        if let Some(runner) = &self.project_hooks {
+            match runner.fire_pre_tool(tool_name, args).await {
+                PreToolOutcome::Block(reason) => return ToolCallHookAction::skip(reason),
+                PreToolOutcome::Continue { injections } => {
+                    self.hook_injections.lock().unwrap().extend(injections);
+                }
+            }
+        }
 
         let block_reason: Option<String> = self.agent_category.as_ref().and_then(|category| {
             let todos_snapshot = {

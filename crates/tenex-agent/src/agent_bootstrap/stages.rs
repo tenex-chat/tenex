@@ -274,6 +274,26 @@ pub(super) fn open_conversation_store(
     Some(store)
 }
 
+/// Load the workspace's `.tenex-hooks.json` and build a runner. Returns
+/// `None` when the workspace declares no hooks so the EmitHook can skip the
+/// per-tool-call hook path entirely. A malformed config is fatal — a broken
+/// hook file must not silently disable gating the operator configured.
+pub(super) fn load_project_hooks(
+    working_dir: &str,
+) -> anyhow::Result<Option<Arc<crate::project_hooks::ProjectHooksRunner>>> {
+    use anyhow::Context as _;
+    let dir = std::path::Path::new(working_dir);
+    let config = crate::project_hooks::ProjectHooksConfig::load(dir)
+        .with_context(|| format!("loading project hooks from {working_dir}"))?;
+    if config.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(Arc::new(crate::project_hooks::ProjectHooksRunner::new(
+        config,
+        dir.to_path_buf(),
+    ))))
+}
+
 /// Open the project RAG store, falling back to `None` (with a log line) on
 /// open failure.
 pub(super) fn open_rag_store(base_dir: &std::path::Path) -> Option<Arc<RagStore>> {

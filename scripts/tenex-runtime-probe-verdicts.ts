@@ -44,6 +44,7 @@ import { evaluateTodoStop } from "./tenex-runtime-probe-todo-stop";
 import { evaluateLearn, learnCompletionText, learnUserRequest } from "./tenex-runtime-probe-learn";
 import { evaluateRagDocuments, ragSelfUserRequest, ragSelfCompletionText, ragProjectCompletionText } from "./tenex-runtime-probe-rag";
 import { evaluateAsk, askUserRequest, askTitle, askCompletionText } from "./tenex-runtime-probe-ask";
+import { evaluateHooksPreTool } from "./tenex-runtime-probe-hooks";
 
 type Verdict = {
     name: string;
@@ -176,6 +177,9 @@ export function evaluate(
     }
     if (name === "backend-kind1-routing") {
         return [...commonVerdicts, ...evaluateBackendKind1Routing(events, requestRecords, context)];
+    }
+    if (name === "hooks-pre-tool") {
+        return [...commonVerdicts, ...evaluateHooksPreTool(events, requestRecords, context)];
     }
     return [...commonVerdicts, ...evaluateFsReadAdjustment(events, requestRecords, context)];
 }

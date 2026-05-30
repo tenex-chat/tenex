@@ -42,6 +42,11 @@ import {
     askUserRequest,
     runAskProbe,
 } from "./tenex-runtime-probe-ask";
+import {
+    hooksPreToolMockScenario,
+    hooksPreToolPmInstructions,
+    runHooksPreToolProbe,
+} from "./tenex-runtime-probe-hooks";
 
 export const availableScenarios = [
     "delegation-basic",
@@ -68,6 +73,7 @@ export const availableScenarios = [
     "ask-owner",
     "sign-as-user-nip46",
     "backend-kind1-routing",
+    "hooks-pre-tool",
 ] as const;
 
 export type ScenarioName = (typeof availableScenarios)[number];
@@ -267,6 +273,9 @@ export function scenarioProjectDtag(name: ScenarioName): string {
     if (name === "backend-kind1-routing") {
         return "probe-backend-kind1-routing";
     }
+    if (name === "hooks-pre-tool") {
+        return "probe-hooks-pre-tool";
+    }
     return "probe-fs-read-adjustment";
 }
 
@@ -336,6 +345,9 @@ export function pmInstructions(name: ScenarioName): string {
     }
     if (name === "backend-kind1-routing") {
         return "This scenario verifies backend-signed relay routing. Do not call tools. Reply exactly: backend kind1 routed.";
+    }
+    if (name === "hooks-pre-tool") {
+        return hooksPreToolPmInstructions;
     }
     if (name === "file-modification-tracking") {
         return "This scenario verifies file-modification tracking. On the first request, use fs_write to create probe-file.txt with content 'original' and a trailing newline, then confirm you wrote it. On the second request, you will receive a system-reminder of type file-modifications describing external changes; acknowledge that probe-file.txt was modified externally.";
@@ -699,6 +711,9 @@ export function mockScenario(name: ScenarioName): unknown {
     if (name === "ask-owner") {
         return askMockScenario();
     }
+    if (name === "hooks-pre-tool") {
+        return hooksPreToolMockScenario();
+    }
     if (name === "sign-as-user-nip46") {
         return {
             responses: [
@@ -824,6 +839,8 @@ export async function runScenario(name: ScenarioName, context: ScenarioContext):
         await runSignAsUserProbe(context);
     } else if (name === "backend-kind1-routing") {
         await runBackendKind1RoutingProbe(context);
+    } else if (name === "hooks-pre-tool") {
+        await runHooksPreToolProbe(context);
     } else {
         await runFsReadAdjustmentProbe(context);
     }
