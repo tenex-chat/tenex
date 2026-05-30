@@ -48,8 +48,19 @@ pub fn telegram_text_for_event(event: &Event, publish_conversation: bool) -> Opt
         return None;
     }
 
-    // Tag-based discrimination on TextNote events. Order matters: a
-    // delegation event also has the project a-tag, etc.
+    // Tag-based discrimination on TextNote events. Order matters: ask events
+    // carry `["delegation", parent_root]` linking back to their parent, so
+    // they must be classified BEFORE the generic `delegation`-drop rule.
+    if first_tag_value(event, "ask").as_deref() == Some("true") {
+        let title = first_tag_value(event, "title").unwrap_or_default();
+        let context = event.content.clone();
+        return Some(if title.is_empty() {
+            context
+        } else {
+            format!("{title}\n\n{context}")
+        });
+    }
+
     if has_tag_named(event, "delegation") {
         return None;
     }
@@ -58,16 +69,6 @@ pub fn telegram_text_for_event(event: &Event, publish_conversation: bool) -> Opt
     }
     if first_tag_value(event, "context").as_deref() == Some("intervention-review") {
         return None;
-    }
-
-    if first_tag_value(event, "intent").as_deref() == Some("ask") {
-        let title = first_tag_value(event, "title").unwrap_or_default();
-        let context = event.content.clone();
-        return Some(if title.is_empty() {
-            context
-        } else {
-            format!("{title}\n\n{context}")
-        });
     }
 
     if first_tag_value(event, "error").is_some() {

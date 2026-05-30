@@ -5,7 +5,7 @@ use serde_json::json;
 use std::sync::Arc;
 use tenex_protocol::{
     AskIntent, AskQuestion, DelegationIntent, DelegationRequest, Intent, PrincipalKind,
-    PrincipalRef,
+    PrincipalRef, ToolUseIntent,
 };
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -111,7 +111,9 @@ impl Tool for AskTool {
         let mut ctx = self.state.build_ctx(ral);
         ctx.llm_runtime_ms = self.state.take_runtime_delta();
 
-        if let Some(ref esc_pubkey_hex) = self.escalation_pubkey {
+        let args_json = serde_json::to_string(&args).unwrap_or_default();
+
+        let (ask_ref, summary) = if let Some(ref esc_pubkey_hex) = self.escalation_pubkey {
             let pubkey = nostr::PublicKey::from_hex(esc_pubkey_hex)
                 .map_err(|e| AskError(format!("invalid escalation agent pubkey: {e}")))?;
 
@@ -135,63 +137,94 @@ impl Tool for AskTool {
                 }],
             };
 
-            self.state
+            let refs = self
+                .state
                 .channel
                 .send(Intent::Delegation(delegation_intent), &ctx)
                 .await
                 .map_err(|e| AskError(format!("failed to route ask to escalation agent: {e}")))?;
             self.state.mark_pending_external_work();
 
-            return Ok(format!(
+            let ask_ref = refs.into_iter().next().ok_or_else(|| {
+                AskError("escalation delegation produced no event".to_string())
+            })?;
+            let summary = format!(
                 "Question '{}' routed to escalation agent. Stop here — wait for their reply.",
                 args.title
-            ));
-        }
+            );
+            (ask_ref, summary)
+        } else {
+            let pubkey = nostr::PublicKey::from_hex(&self.owner_pubkey)
+                .map_err(|e| AskError(format!("invalid owner pubkey: {e}")))?;
 
-        let pubkey = nostr::PublicKey::from_hex(&self.owner_pubkey)
-            .map_err(|e| AskError(format!("invalid owner pubkey: {e}")))?;
+            let recipient = PrincipalRef::Nostr {
+                pubkey,
+                kind: PrincipalKind::Human,
+                display_name: None,
+            };
 
-        let recipient = PrincipalRef::Nostr {
-            pubkey,
-            kind: PrincipalKind::Human,
-            display_name: None,
+            let questions = args
+                .questions
+                .iter()
+                .map(|q| match q.question_type.as_str() {
+                    "multi_select" => AskQuestion::MultiSelect {
+                        title: q.title.clone(),
+                        prompt: q.prompt.clone(),
+                        options: q.options.clone(),
+                    },
+                    _ => AskQuestion::SingleSelect {
+                        title: q.title.clone(),
+                        prompt: q.prompt.clone(),
+                        suggestions: q.options.clone(),
+                    },
+                })
+                .collect();
+
+            let intent = AskIntent {
+                title: args.title.clone(),
+                context: args.context.clone(),
+                questions,
+                recipient,
+            };
+
+            let refs = self
+                .state
+                .channel
+                .send(Intent::Ask(intent), &ctx)
+                .await
+                .map_err(|e| AskError(format!("failed to emit ask: {e}")))?;
+            self.state.mark_pending_external_work();
+
+            let ask_ref = refs
+                .into_iter()
+                .next()
+                .ok_or_else(|| AskError("ask produced no event".to_string()))?;
+            let summary = format!(
+                "Question '{}' sent to project owner. Stop here — wait for their reply.",
+                args.title
+            );
+            (ask_ref, summary)
         };
 
-        let questions = args
-            .questions
-            .into_iter()
-            .map(|q| match q.question_type.as_str() {
-                "multi_select" => AskQuestion::MultiSelect {
-                    title: q.title,
-                    prompt: q.prompt,
-                    options: q.options,
-                },
-                _ => AskQuestion::SingleSelect {
-                    title: q.title,
-                    prompt: q.prompt,
-                    suggestions: q.options,
-                },
-            })
-            .collect();
-
-        let intent = AskIntent {
-            title: args.title.clone(),
-            context: args.context,
-            questions,
-            recipient,
+        // Delayed tool-use mirrors the delegate pattern: the tool-use event
+        // lives in the parent conversation and `q`-quotes the new ask
+        // conversation root via `referenced_messages`.
+        let tool_use_intent = ToolUseIntent {
+            tool_name: Self::NAME.to_string(),
+            content: String::new(),
+            args_json: Some(args_json),
+            referenced_messages: vec![ask_ref],
+            usage: None,
+            extra_tags: Vec::new(),
         };
-
+        let tool_use_ctx = self.state.build_ctx(ral);
         self.state
             .channel
-            .send(Intent::Ask(intent), &ctx)
+            .send(Intent::ToolUse(tool_use_intent), &tool_use_ctx)
             .await
-            .map_err(|e| AskError(format!("failed to emit ask: {e}")))?;
-        self.state.mark_pending_external_work();
+            .map_err(|e| AskError(format!("failed to emit ask tool-use event: {e}")))?;
 
-        Ok(format!(
-            "Question '{}' sent to project owner. Stop here — wait for their reply.",
-            args.title
-        ))
+        Ok(summary)
     }
 }
 

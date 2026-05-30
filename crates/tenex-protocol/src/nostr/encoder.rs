@@ -170,7 +170,13 @@ fn encode_delegation(
 
 fn encode_ask(intent: &AskIntent, ctx: &EncodingContext) -> Result<EventBuilder, EncodeError> {
     let mut builder = allow_self_addressed(EventBuilder::new(Kind::TextNote, &intent.context));
-    builder = add_conversation_tags(builder, ctx)?;
+
+    // Ask starts a new conversation root: no e-root/e-reply back to the parent.
+    // The parent link is the `delegation` tag, mirroring fresh delegations.
+    if let Some(ConversationRef::Nostr { root_event_id }) = ctx.conversation_root.as_ref() {
+        builder = builder.tag(delegation_parent_tag(root_event_id)?);
+    }
+
     builder = builder.tag(p_tag(&intent.recipient)?);
     builder = builder.tag(tag(["title", &intent.title])?);
 
@@ -198,7 +204,8 @@ fn encode_ask(intent: &AskIntent, ctx: &EncodingContext) -> Result<EventBuilder,
         builder = builder.tag(tag(parts)?);
     }
 
-    builder = builder.tag(tag(["intent", "ask"])?);
+    builder = builder.tag(tag(["ask", "true"])?);
+    builder = builder.tag(tag(["t", "ask"])?);
     builder = add_standard_tags(builder, ctx)?;
     builder = forward_branch_team(builder, ctx)?;
     Ok(builder)

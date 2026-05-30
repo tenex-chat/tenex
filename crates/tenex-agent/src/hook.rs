@@ -253,7 +253,11 @@ impl EmitHook {
     ) -> ToolCallHookAction {
         let emits_delayed_tool_use = matches!(
             tool_name,
-            "delegate" | "delegate_followup" | "self_delegate" | "delegate_crossproject"
+            "delegate"
+                | "delegate_followup"
+                | "self_delegate"
+                | "delegate_crossproject"
+                | "ask"
         );
         let name = tool_name.to_string();
         let args_string = args.to_string();

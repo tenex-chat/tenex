@@ -432,6 +432,98 @@ fn self_ask_keeps_p_tag_when_recipient_equals_signer() {
 }
 
 #[test]
+fn ask_encodes_legacy_shape_with_no_e_tags() {
+    // Mirrors the legacy TS `AgentPublisher.ask` shape:
+    // - No `e` root/reply tags (ask starts a new conversation root)
+    // - `delegation` tag links to the parent conversation
+    // - `ask=true` + `t=ask` markers
+    // - One `question` / `multiselect` tag per question
+    // - No `["intent","ask"]` — that tag belonged to a dead encoder path
+    let ctx = test_ctx();
+    let recipient_keys = Keys::generate();
+    let intent = crate::intent::AskIntent {
+        recipient: PrincipalRef::Nostr {
+            pubkey: recipient_keys.public_key(),
+            kind: PrincipalKind::Human,
+            display_name: None,
+        },
+        title: "Current git commit and remote".into(),
+        context: "background prose".into(),
+        questions: vec![
+            crate::intent::AskQuestion::SingleSelect {
+                title: "Current commit hash".into(),
+                prompt: "What is the current git commit hash?".into(),
+                suggestions: vec!["abc1234".into(), "def5678".into()],
+            },
+            crate::intent::AskQuestion::MultiSelect {
+                title: "Branches to push".into(),
+                prompt: "Which branches should be pushed?".into(),
+                options: vec!["main".into(), "dev".into()],
+            },
+        ],
+    };
+    let builders = NostrEncoder::encode(&Intent::Ask(intent), &ctx).expect("encode");
+    assert_eq!(builders.len(), 1);
+    let tags = signed_tags(builders.into_iter().next().unwrap());
+
+    assert!(
+        !tags.iter().any(|t| t[0] == "e"),
+        "ask must NOT have any e-tag (new conversation root); got tags={tags:?}"
+    );
+    assert!(
+        !tags.iter().any(|t| t[0] == "intent"),
+        "ask must NOT carry an `intent` tag (legacy publish path never emitted one); got tags={tags:?}"
+    );
+
+    assert!(
+        tags.iter().any(|t| t[0] == "delegation"
+            && t.get(1) == Some(&EventId::all_zeros().to_hex())),
+        "ask must carry delegation->parent_root tag; got tags={tags:?}"
+    );
+    assert!(
+        tags.iter().any(|t| t[0] == "ask" && t.get(1).map(String::as_str) == Some("true")),
+        "ask must carry `ask=true` marker; got tags={tags:?}"
+    );
+    assert!(
+        tags.iter().any(|t| t[0] == "t" && t.get(1).map(String::as_str) == Some("ask")),
+        "ask must carry `t=ask` topic tag; got tags={tags:?}"
+    );
+
+    assert!(
+        tags.iter()
+            .any(|t| t[0] == "title" && t.get(1).map(String::as_str) == Some("Current git commit and remote")),
+        "ask must carry the title tag; got tags={tags:?}"
+    );
+
+    let question_tag = tags
+        .iter()
+        .find(|t| t[0] == "question")
+        .expect("ask must carry a question tag");
+    assert_eq!(question_tag.get(1).map(String::as_str), Some("Current commit hash"));
+    assert_eq!(
+        question_tag.get(2).map(String::as_str),
+        Some("What is the current git commit hash?")
+    );
+    assert_eq!(question_tag.get(3).map(String::as_str), Some("abc1234"));
+    assert_eq!(question_tag.get(4).map(String::as_str), Some("def5678"));
+
+    let multi_tag = tags
+        .iter()
+        .find(|t| t[0] == "multiselect")
+        .expect("ask must carry a multiselect tag");
+    assert_eq!(multi_tag.get(1).map(String::as_str), Some("Branches to push"));
+    assert_eq!(
+        multi_tag.get(2).map(String::as_str),
+        Some("Which branches should be pushed?")
+    );
+    assert_eq!(multi_tag.get(3).map(String::as_str), Some("main"));
+    assert_eq!(multi_tag.get(4).map(String::as_str), Some("dev"));
+
+    let p_tag = tags.iter().find(|t| t[0] == "p").expect("ask must carry recipient p-tag");
+    assert_eq!(p_tag.get(1).map(String::as_str), Some(recipient_keys.public_key().to_hex().as_str()));
+}
+
+#[test]
 fn self_delegation_keeps_p_tag_when_recipient_equals_signer() {
     // Self-delegation: the agent emits a delegation whose recipient pubkey is
     // its own pubkey. The encoded event still has to carry the recipient `p`
