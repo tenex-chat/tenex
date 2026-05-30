@@ -321,9 +321,10 @@ pub(super) fn build_shell_env(
 /// Conversation hits are rendered by their real title/summary/participants
 /// (looked up via `conv_store`, with pubkeys resolved to kind:0 names by
 /// `resolver`) rather than transcript snippets, and deduplicated by
-/// conversation so multiple matching chunks collapse to one entry. Other
-/// collections (project/agent notes) render their title and a content
-/// snippet.
+/// conversation so multiple matching chunks collapse to one entry. A hit
+/// whose conversation has no title from the kind:513 metadata projection
+/// is skipped entirely — no transcript-derived fallback. Other collections
+/// (project/agent notes) render their title and a content snippet.
 ///
 /// Always emits a `rag.context_discovery` span so an absent store is
 /// distinguishable from an empty result set in telemetry. Phase counts and
@@ -418,11 +419,9 @@ pub(super) async fn proactive_context_block(
                         continue;
                     }
                     let row = conv_store.and_then(|s| s.get_conversation(cid).ok().flatten());
-                    let title = row
-                        .as_ref()
-                        .and_then(|row| row.title.clone())
-                        .or_else(|| row.as_ref().and_then(|row| first_line(row.last_user_message.as_deref())))
-                        .unwrap_or_else(|| "(untitled conversation)".to_string());
+                    let Some(title) = row.as_ref().and_then(|row| row.title.clone()) else {
+                        continue;
+                    };
                     let short_id: String = cid.chars().take(8).collect();
                     block.push_str(&format!("\n{title} [ id: {short_id} ]\n"));
                     if let Some(summary) = row.as_ref().and_then(|row| row.summary.as_deref()) {
@@ -477,10 +476,3 @@ fn participant_names(
         .collect()
 }
 
-/// First non-empty line of `s`, trimmed and capped at 80 chars — a usable
-/// title fallback for conversations the summarizer hasn't titled yet.
-fn first_line(s: Option<&str>) -> Option<String> {
-    let line = s?.lines().map(str::trim).find(|l| !l.is_empty())?;
-    let truncated: String = line.chars().take(80).collect();
-    Some(truncated)
-}
