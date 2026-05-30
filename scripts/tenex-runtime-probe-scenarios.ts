@@ -404,7 +404,20 @@ export function mockScenario(name: ScenarioName): unknown {
     if (name === "file-modification-tracking") {
         return {
             responses: [
-                // First run (turn 1 of its own process): write the file.
+                // Second run (checked first — more specific): the second user
+                // message is in the history, and the file-modifications reminder
+                // was injected into the system prompt.
+                {
+                    agent: "pm",
+                    turn: 1,
+                    containsAll: [
+                        fileModificationSecondRequest,
+                        "file-modifications",
+                        fileModificationProbeFileName,
+                    ],
+                    content: fileModificationSecondCompletionText,
+                },
+                // First run turn 1: write the file.
                 {
                     agent: "pm",
                     turn: 1,
@@ -420,20 +433,11 @@ export function mockScenario(name: ScenarioName): unknown {
                         },
                     ],
                 },
+                // First run turn 2: acknowledge the write.
                 {
                     agent: "pm",
                     turn: 2,
-                    contains: "Successfully wrote",
                     content: fileModificationFirstCompletionText,
-                },
-                // Second run (a fresh process, so turn resets to 1): the
-                // file-modifications reminder must already be in the system
-                // prompt. Match on it to prove the reminder was injected.
-                {
-                    agent: "pm",
-                    turn: 1,
-                    containsAll: ["file-modifications", fileModificationProbeFileName],
-                    content: fileModificationSecondCompletionText,
                 },
             ],
             defaultContent:
@@ -1401,17 +1405,10 @@ async function runFileModificationTrackingProbe(context: ScenarioContext): Promi
     );
     await Promise.all(context.pool.publish([context.relayUrl], firstEvent));
 
-    // Wait for the fs_write tool event so we know the file exists on disk and
-    // the snapshot was captured before we overwrite it.
-    await context.waitForObservedEvent(
-        context.events,
-        (event) =>
-            event.pubkey === context.pmPubkey &&
-            event.tags.some((tag) => tag[0] === "tool" && tag[1] === "fs_write"),
-        timeoutMs,
-        "fs_write tool event (first run)"
-    );
-    // Wait for the first run's PM completion so the run has fully finished.
+    // Wait for the first run's PM completion — the agent writes the file and
+    // snapshots it before emitting the completion message, so DB completion
+    // implies both the write and the snapshot are done. (Using the conversation
+    // DB avoids the relay's deferred-subscription delivery delay.)
     await waitForStoredMessage(
         context.conversationDbPath,
         firstEvent.id,
@@ -1445,10 +1442,13 @@ async function runFileModificationTrackingProbe(context: ScenarioContext): Promi
         context.userSecret
     );
     await Promise.all(context.pool.publish([context.relayUrl], secondEvent));
+    // The second run belongs to the same conversation (root = firstEvent.id).
     await waitForStoredMessage(
         context.conversationDbPath,
-        secondEvent.id,
-        (message) => message.authorPubkey === context.pmPubkey,
+        firstEvent.id,
+        (message) =>
+            message.authorPubkey === context.pmPubkey &&
+            message.content.includes(fileModificationSecondCompletionText),
         timeoutMs,
         "PM completion (second run)",
         context.delay

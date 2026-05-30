@@ -312,7 +312,7 @@ writeJson(path.join(agentsDir, `${pm.pubkey}.json`), {
     name: "Probe PM",
     slug: "pm",
     nsec: nip19.nsecEncode(pm.secret),
-    category: "orchestrator",
+    category: scenarioName === "file-modification-tracking" ? "generalist" : "orchestrator",
     description: "Delegates probe tasks to workers",
     instructions: pmInstructions(scenarioName),
     ...(scenarioName === "project-membership-reload"
@@ -330,6 +330,8 @@ writeJson(path.join(agentsDir, `${pm.pubkey}.json`), {
             ? { model: llmModelName, skills: ["read-access"] }
             : scenarioName === "sign-as-user-nip46"
             ? { model: llmModelName, skills: ["signer"] }
+            : scenarioName === "file-modification-tracking"
+            ? { model: llmModelName, skills: ["write-access"] }
             : { model: llmModelName },
 });
 writeJson(path.join(agentsDir, `${worker.pubkey}.json`), {

@@ -429,7 +429,8 @@ function evaluateFileModificationTracking(
         (record) =>
             record.agent === "pm" &&
             record.requestDebug.includes(fileModificationSecondRequest) &&
-            record.requestDebug.includes('type="file-modifications"') &&
+            // requestDebug is Rust {:?} format — quotes are backslash-escaped.
+            record.requestDebug.includes('type=\\"file-modifications\\"') &&
             record.requestDebug.includes(fileModificationProbeFileName)
     );
     const requestDebug = secondRunRequest?.requestDebug ?? "";
