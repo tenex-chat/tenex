@@ -405,6 +405,11 @@ pub(crate) async fn build(
         current_branch: current_branch.as_deref(),
     });
 
+    // Load the workspace's project hooks (`.tenex-hooks.json`). A malformed
+    // config is fatal: a broken hook file must not silently disable the
+    // gating the operator configured.
+    let project_hooks = stages::load_project_hooks(&working_dir)?;
+
     let assembly::SupervisorComponents {
         supervisor_ref,
         hook,
@@ -427,6 +432,7 @@ pub(crate) async fn build(
             execution_id.clone(),
             working_dir.clone(),
         ))),
+        project_hooks,
     );
 
     let skill_list_tool = SkillListTool::new(skill_ctx.clone());

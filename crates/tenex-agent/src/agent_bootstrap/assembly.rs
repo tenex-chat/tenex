@@ -149,6 +149,7 @@ pub(super) fn init_supervisor_and_hook(
     project_root: std::path::PathBuf,
     conv_db_path: std::path::PathBuf,
     snapshot_writer: Option<Arc<FileSnapshotWriter>>,
+    project_hooks: Option<Arc<crate::project_hooks::ProjectHooksRunner>>,
 ) -> SupervisorComponents {
     let supervisor = Arc::new(Mutex::new(default_supervisor()));
     let supervisor_ref = supervisor.clone();
@@ -159,6 +160,7 @@ pub(super) fn init_supervisor_and_hook(
         agent_category,
         runtime_state,
         snapshot_writer,
+        project_hooks,
     );
     let allows_delegation = agent_category
         .map(|c| c.allows_delegation())
@@ -245,6 +247,7 @@ mod tests {
             Arc::new(Vec::new()),
             std::path::PathBuf::from("/tmp"),
             std::path::PathBuf::from("/tmp/conv.db"),
+            None,
             None,
         )
     }

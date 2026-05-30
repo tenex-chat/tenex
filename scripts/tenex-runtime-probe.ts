@@ -50,6 +50,7 @@ import {
     writeJson,
 } from "./tenex-runtime-probe-utils";
 import { evaluate } from "./tenex-runtime-probe-verdicts";
+import { hooksPreToolConfig } from "./tenex-runtime-probe-hooks";
 
 type Proc = {
     label: string;
@@ -154,6 +155,14 @@ if (scenarioName === "nested-agents-md") {
     );
     writeFileSync(path.join(workspaceDir, "src", "file.txt"), "src file content\n");
     writeFileSync(path.join(workspaceDir, "src", "nested", "file.txt"), "nested file content\n");
+}
+if (scenarioName === "hooks-pre-tool") {
+    // Seed the workspace's project hooks before the runtime spawns the agent,
+    // so the `.tenex-hooks.json` `pre-tool` hook is loaded on bootstrap.
+    writeFileSync(
+        path.join(workspaceDir, ".tenex-hooks.json"),
+        `${JSON.stringify(hooksPreToolConfig, null, 2)}\n`
+    );
 }
 const mcpProbe =
     scenarioName === "mcp-tool-basic" || scenarioName === "mcp-resource-basic"
