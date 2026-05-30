@@ -280,6 +280,8 @@ pub(super) fn open_conversation_store(
 /// hook file must not silently disable gating the operator configured.
 pub(super) fn load_project_hooks(
     working_dir: &str,
+    session_id: String,
+    prompt: String,
 ) -> anyhow::Result<Option<Arc<crate::project_hooks::ProjectHooksRunner>>> {
     use anyhow::Context as _;
     let dir = std::path::Path::new(working_dir);
@@ -291,6 +293,8 @@ pub(super) fn load_project_hooks(
     Ok(Some(Arc::new(crate::project_hooks::ProjectHooksRunner::new(
         config,
         dir.to_path_buf(),
+        session_id,
+        prompt,
     ))))
 }
 

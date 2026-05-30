@@ -405,10 +405,27 @@ pub(crate) async fn build(
         current_branch: current_branch.as_deref(),
     });
 
+    // Source the "original task" string from the conversation store: the
+    // user-role row whose `nostr_event_id` matches the conversation root
+    // event id. The conversation_id IS the root event id in our
+    // Nostr-rooted conversation model. Fallback to envelope.content if
+    // the conversation root row is not yet materialized (race or fresh
+    // conversation with no prior turn — in which case envelope.content
+    // *is* the root). Reading from storage is what fixes Bug B on
+    // delegation callbacks, where the envelope carries the delegatee's
+    // reply, not the original task.
+    let original_task: String = conv_store
+        .as_ref()
+        .and_then(|store| store.get_message_by_event(&conversation_id).ok().flatten())
+        .map(|row| row.content)
+        .unwrap_or_else(|| envelope.content.clone());
+
     // Load the workspace's project hooks (`.tenex-hooks.json`). A malformed
     // config is fatal: a broken hook file must not silently disable the
-    // gating the operator configured.
-    let project_hooks = stages::load_project_hooks(&working_dir)?;
+    // gating the operator configured. The conversation id and original task
+    // are surfaced to hooks as the Claude Code `session_id` and `prompt`.
+    let project_hooks =
+        stages::load_project_hooks(&working_dir, conversation_id.clone(), original_task.clone())?;
 
     let assembly::SupervisorComponents {
         supervisor_ref,
@@ -598,21 +615,6 @@ pub(crate) async fn build(
                 .collect::<Vec<_>>(),
         )
     };
-
-    // Source the "original task" string from the conversation store: the
-    // user-role row whose `nostr_event_id` matches the conversation root
-    // event id. The conversation_id IS the root event id in our
-    // Nostr-rooted conversation model. Fallback to envelope.content if
-    // the conversation root row is not yet materialized (race or fresh
-    // conversation with no prior turn — in which case envelope.content
-    // *is* the root). Reading from storage is what fixes Bug B on
-    // delegation callbacks, where the envelope carries the delegatee's
-    // reply, not the original task.
-    let original_task: String = conv_store
-        .as_ref()
-        .and_then(|store| store.get_message_by_event(&conversation_id).ok().flatten())
-        .map(|row| row.content)
-        .unwrap_or_else(|| envelope.content.clone());
 
     let execution_id =
         std::env::var("TENEX_EXECUTION_ID").unwrap_or_else(|_| format!("local-{}", std::process::id()));
