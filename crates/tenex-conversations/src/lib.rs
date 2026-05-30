@@ -26,8 +26,9 @@ pub use error::{ConversationsError, Result};
 pub use ids::normalize_project_id;
 pub use model::{
     AgentContextState, AttachmentRecord, Completion, CompletionStatus, DelegationMarker,
-    DelegationStatus, FrozenPromptMessage, MessageRecord, NewCompletion, NewMessage,
-    NewPromptHistoryEntry, NewToolMessage, PromptHistoryEntry, ToolMessage,
+    DelegationStatus, FileSnapshot, FrozenPromptMessage, MessageRecord, NewCompletion,
+    NewFileSnapshot, NewMessage, NewPromptHistoryEntry, NewToolMessage, PromptHistoryEntry,
+    ToolMessage,
 };
 pub use project::Project;
 pub use store::{ConversationListFilter, ConversationStore, MessageQuery};

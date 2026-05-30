@@ -10,6 +10,7 @@ mod context_discovery;
 mod context_rig;
 mod emit;
 mod escalation;
+mod file_modifications;
 mod home;
 mod hook;
 mod identity_resolver;

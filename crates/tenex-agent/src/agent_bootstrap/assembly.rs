@@ -11,6 +11,7 @@ use tenex_supervision::{heuristics::default_supervisor, supervisor::Supervisor, 
 
 use crate::config::AgentConfig;
 use crate::emit::{EmitState, EmitStateArgs};
+use crate::file_modifications::FileSnapshotWriter;
 use crate::hook::EmitHook;
 use crate::runtime_state::RuntimeStateHandle;
 use crate::tools::{DelegateTool, TodoItem};
@@ -147,6 +148,7 @@ pub(super) fn init_supervisor_and_hook(
     teams: Arc<Vec<tenex_project::Team>>,
     project_root: std::path::PathBuf,
     conv_db_path: std::path::PathBuf,
+    snapshot_writer: Option<Arc<FileSnapshotWriter>>,
 ) -> SupervisorComponents {
     let supervisor = Arc::new(Mutex::new(default_supervisor()));
     let supervisor_ref = supervisor.clone();
@@ -156,6 +158,7 @@ pub(super) fn init_supervisor_and_hook(
         todos,
         agent_category,
         runtime_state,
+        snapshot_writer,
     );
     let allows_delegation = agent_category
         .map(|c| c.allows_delegation())
@@ -242,6 +245,7 @@ mod tests {
             Arc::new(Vec::new()),
             std::path::PathBuf::from("/tmp"),
             std::path::PathBuf::from("/tmp/conv.db"),
+            None,
         )
     }
 

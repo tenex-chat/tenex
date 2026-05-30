@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import type { Event, EventTemplate, SimplePool } from "nostr-tools";
 import {
@@ -49,6 +49,7 @@ export const availableScenarios = [
     "delegation-crossproject",
     "same-agent-concurrency",
     "fs-read-adjustment",
+    "file-modification-tracking",
     "mcp-tool-basic",
     "mcp-resource-basic",
     "acp-worker-basic",
@@ -122,6 +123,16 @@ export const signAsUserExplanation =
 export const signAsUserCompletionText = "sign_as_user probe complete";
 export const backendKind1RoutingRequest = "BACKEND_KIND1_ROUTING_PROBE";
 export const backendKind1RoutingCompletionText = "backend kind1 routed";
+export const fileModificationProbeFileName = "probe-file.txt";
+export const fileModificationOriginalContent = "original\n";
+export const fileModificationModifiedContent = "modified\n";
+export const fileModificationFirstRequest =
+    "FILE_MOD_PROBE: write probe-file.txt with the word original.";
+export const fileModificationSecondRequest =
+    "FILE_MOD_PROBE: did anything change in probe-file.txt?";
+export const fileModificationFirstCompletionText = "wrote probe-file.txt";
+export const fileModificationSecondCompletionText =
+    "probe-file.txt was modified externally.";
 
 const colorWords = [
     "red", "blue", "green", "yellow", "purple", "orange", "pink", "black",
@@ -198,6 +209,9 @@ export function scenarioProjectDtag(name: ScenarioName): string {
     }
     if (name === "same-agent-concurrency") {
         return "probe-concurrency";
+    }
+    if (name === "file-modification-tracking") {
+        return "probe-file-modification-tracking";
     }
     if (name === "mcp-tool-basic") {
         return "probe-mcp-tool";
@@ -323,6 +337,9 @@ export function pmInstructions(name: ScenarioName): string {
     if (name === "backend-kind1-routing") {
         return "This scenario verifies backend-signed relay routing. Do not call tools. Reply exactly: backend kind1 routed.";
     }
+    if (name === "file-modification-tracking") {
+        return "This scenario verifies file-modification tracking. On the first request, use fs_write to create probe-file.txt with content 'original' and a trailing newline, then confirm you wrote it. On the second request, you will receive a system-reminder of type file-modifications describing external changes; acknowledge that probe-file.txt was modified externally.";
+    }
     return "Use fs_read one file at a time. If the user corrects the requested total, follow the latest total before finishing.";
 }
 
@@ -369,6 +386,46 @@ export function mockScenario(name: ScenarioName): unknown {
                 },
             ],
             defaultContent: "Probe agent observed the latest event.",
+        };
+    }
+
+    if (name === "file-modification-tracking") {
+        return {
+            responses: [
+                // First run (turn 1 of its own process): write the file.
+                {
+                    agent: "pm",
+                    turn: 1,
+                    contains: fileModificationFirstRequest,
+                    toolCalls: [
+                        {
+                            name: "fs_write",
+                            args: {
+                                path: fileModificationProbeFileName,
+                                content: fileModificationOriginalContent,
+                                description: "write probe file for file-modification tracking",
+                            },
+                        },
+                    ],
+                },
+                {
+                    agent: "pm",
+                    turn: 2,
+                    contains: "Successfully wrote",
+                    content: fileModificationFirstCompletionText,
+                },
+                // Second run (a fresh process, so turn resets to 1): the
+                // file-modifications reminder must already be in the system
+                // prompt. Match on it to prove the reminder was injected.
+                {
+                    agent: "pm",
+                    turn: 1,
+                    containsAll: ["file-modifications", fileModificationProbeFileName],
+                    content: fileModificationSecondCompletionText,
+                },
+            ],
+            defaultContent:
+                "File-modification tracking probe did not match expected runtime state.",
         };
     }
 
@@ -729,6 +786,8 @@ export async function runScenario(name: ScenarioName, context: ScenarioContext):
         await runCrossProjectDelegationProbe(context);
     } else if (name === "same-agent-concurrency") {
         await runSameAgentConcurrencyProbe(context);
+    } else if (name === "file-modification-tracking") {
+        await runFileModificationTrackingProbe(context);
     } else if (name === "mcp-tool-basic") {
         await runMcpToolProbe(context);
     } else if (name === "mcp-resource-basic") {
@@ -1306,6 +1365,77 @@ async function runFsReadAdjustmentProbe(context: ScenarioContext): Promise<void>
     );
     await Promise.all(context.pool.publish([context.relayUrl], correctionEvent));
     await context.delay(Number(process.env.TENEX_PROBE_WAIT_MS ?? 8_000));
+}
+
+async function runFileModificationTrackingProbe(context: ScenarioContext): Promise<void> {
+    const timeoutMs = Number(process.env.TENEX_PROBE_WAIT_MS ?? 15_000);
+
+    // First run: ask the PM to write probe-file.txt. The mock cassette turn 1
+    // issues the fs_write; the EmitHook snapshots the written bytes into the
+    // conversation DB.
+    const firstEvent = context.sign(
+        {
+            kind: 1,
+            created_at: context.now(),
+            content: fileModificationFirstRequest,
+            tags: [["a", context.projectRef]],
+        },
+        context.userSecret
+    );
+    await Promise.all(context.pool.publish([context.relayUrl], firstEvent));
+
+    // Wait for the fs_write tool event so we know the file exists on disk and
+    // the snapshot was captured before we overwrite it.
+    await context.waitForObservedEvent(
+        context.events,
+        (event) =>
+            event.pubkey === context.pmPubkey &&
+            event.tags.some((tag) => tag[0] === "tool" && tag[1] === "fs_write"),
+        timeoutMs,
+        "fs_write tool event (first run)"
+    );
+    // Wait for the first run's PM completion so the run has fully finished.
+    await waitForStoredMessage(
+        context.conversationDbPath,
+        firstEvent.id,
+        (message) =>
+            message.authorPubkey === context.pmPubkey &&
+            message.content.includes(fileModificationFirstCompletionText),
+        timeoutMs,
+        "PM completion (first run)",
+        context.delay
+    );
+
+    // External modification: overwrite the file the agent wrote.
+    const probeFilePath = path.join(
+        context.workspaceDir,
+        fileModificationProbeFileName
+    );
+    writeFileSync(probeFilePath, fileModificationModifiedContent);
+
+    // Second run, same conversation (threaded via the root e-tag). On bootstrap
+    // the agent must see a file-modifications system-reminder for probe-file.txt.
+    const secondEvent = context.sign(
+        {
+            kind: 1,
+            created_at: context.now(),
+            content: fileModificationSecondRequest,
+            tags: [
+                ["e", firstEvent.id, "", "root"],
+                ["p", context.pmPubkey],
+            ],
+        },
+        context.userSecret
+    );
+    await Promise.all(context.pool.publish([context.relayUrl], secondEvent));
+    await waitForStoredMessage(
+        context.conversationDbPath,
+        secondEvent.id,
+        (message) => message.authorPubkey === context.pmPubkey,
+        timeoutMs,
+        "PM completion (second run)",
+        context.delay
+    );
 }
 
 async function runMcpToolProbe(context: ScenarioContext): Promise<void> {
