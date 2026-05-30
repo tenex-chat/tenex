@@ -138,13 +138,25 @@ pub enum PreToolOutcome {
 pub struct ProjectHooksRunner {
     hooks: Vec<HookEntry>,
     working_dir: PathBuf,
+    /// Conversation id, surfaced to hooks as the Claude Code `session_id`.
+    session_id: String,
+    /// The conversation's root user message, surfaced to hooks as the Claude
+    /// Code `prompt`. Stable across re-engagements within the conversation.
+    prompt: String,
 }
 
 impl ProjectHooksRunner {
-    pub fn new(config: ProjectHooksConfig, working_dir: PathBuf) -> Self {
+    pub fn new(
+        config: ProjectHooksConfig,
+        working_dir: PathBuf,
+        session_id: String,
+        prompt: String,
+    ) -> Self {
         Self {
             hooks: config.hooks,
             working_dir,
+            session_id,
+            prompt,
         }
     }
 
@@ -152,7 +164,7 @@ impl ProjectHooksRunner {
     /// blocks the tool call. Hooks that exit 0 with stdout contribute an
     /// injection. A hook that times out is treated as non-blocking.
     pub async fn fire_pre_tool(&self, tool_name: &str, args_json: &str) -> PreToolOutcome {
-        let stdin = pre_tool_stdin(tool_name, args_json);
+        let stdin = self.pre_tool_stdin(tool_name, args_json);
         let mut injections = Vec::new();
         for hook in self.hooks.iter().filter(|h| h.subscribes_to(HookEvent::PreTool)) {
             match self.run_hook(hook, &stdin).await {
@@ -203,7 +215,7 @@ impl ProjectHooksRunner {
         args_json: &str,
         result: &str,
     ) -> Vec<String> {
-        let stdin = post_tool_stdin(tool_name, args_json, result);
+        let stdin = self.post_tool_stdin(tool_name, args_json, result);
         let mut injections = Vec::new();
         for hook in self.hooks.iter().filter(|h| h.subscribes_to(HookEvent::PostTool)) {
             match self.run_hook(hook, &stdin).await {
@@ -286,6 +298,41 @@ impl ProjectHooksRunner {
             Err(_) => HookRun::TimedOut,
         }
     }
+
+    /// Build the `pre-tool` stdin payload. `args_json` is the tool's argument
+    /// string; it is embedded as parsed JSON when valid, else as a JSON string.
+    /// The `session_id`, `cwd`, `transcript_path`, and `prompt` fields make the
+    /// payload Claude Code-compatible; `transcript_path` is always `null`
+    /// because TENEX persists transcripts in SQLite, not a JSONL file.
+    fn pre_tool_stdin(&self, tool_name: &str, args_json: &str) -> String {
+        let payload = serde_json::json!({
+            "event": HookEvent::PreTool.wire_name(),
+            "tool": tool_name,
+            "args": parse_args(args_json),
+            "session_id": self.session_id,
+            "cwd": self.working_dir.to_string_lossy(),
+            "transcript_path": serde_json::Value::Null,
+            "prompt": self.prompt,
+        });
+        payload.to_string()
+    }
+
+    /// Build the `post-tool` stdin payload, carrying the tool's textual result
+    /// alongside the same Claude Code-compatible fields as the `pre-tool`
+    /// payload.
+    fn post_tool_stdin(&self, tool_name: &str, args_json: &str, result: &str) -> String {
+        let payload = serde_json::json!({
+            "event": HookEvent::PostTool.wire_name(),
+            "tool": tool_name,
+            "args": parse_args(args_json),
+            "result": result,
+            "session_id": self.session_id,
+            "cwd": self.working_dir.to_string_lossy(),
+            "transcript_path": serde_json::Value::Null,
+            "prompt": self.prompt,
+        });
+        payload.to_string()
+    }
 }
 
 /// Internal result of running one hook process.
@@ -297,28 +344,6 @@ enum HookRun {
     },
     TimedOut,
     SpawnFailed(String),
-}
-
-/// Build the `pre-tool` stdin payload. `args_json` is the tool's argument
-/// string; it is embedded as parsed JSON when valid, else as a JSON string.
-fn pre_tool_stdin(tool_name: &str, args_json: &str) -> String {
-    let payload = serde_json::json!({
-        "event": HookEvent::PreTool.wire_name(),
-        "tool": tool_name,
-        "args": parse_args(args_json),
-    });
-    payload.to_string()
-}
-
-/// Build the `post-tool` stdin payload, carrying the tool's textual result.
-fn post_tool_stdin(tool_name: &str, args_json: &str, result: &str) -> String {
-    let payload = serde_json::json!({
-        "event": HookEvent::PostTool.wire_name(),
-        "tool": tool_name,
-        "args": parse_args(args_json),
-        "result": result,
-    });
-    payload.to_string()
 }
 
 /// Parse a tool's argument string into JSON. A non-JSON string is wrapped as a
@@ -402,7 +427,12 @@ mod tests {
                 events: vec![HookEvent::PreTool],
             }],
         };
-        let runner = ProjectHooksRunner::new(config, tmp.path().to_path_buf());
+        let runner = ProjectHooksRunner::new(
+            config,
+            tmp.path().to_path_buf(),
+            "test-session".into(),
+            "test prompt".into(),
+        );
 
         let blocked = runner.fire_pre_tool("shell", r#"{"command":"ls"}"#).await;
         // The block reason must surface the hook's stderr, not a generic
@@ -426,7 +456,12 @@ mod tests {
                 events: vec![HookEvent::PreTool],
             }],
         };
-        let runner = ProjectHooksRunner::new(config, tmp.path().to_path_buf());
+        let runner = ProjectHooksRunner::new(
+            config,
+            tmp.path().to_path_buf(),
+            "test-session".into(),
+            "test prompt".into(),
+        );
         match runner.fire_pre_tool("shell", "{}").await {
             PreToolOutcome::Block(reason) => assert!(reason.contains("silent-block")),
             other => panic!("expected block, got {other:?}"),
@@ -443,7 +478,12 @@ mod tests {
                 events: vec![HookEvent::PreTool],
             }],
         };
-        let runner = ProjectHooksRunner::new(config, tmp.path().to_path_buf());
+        let runner = ProjectHooksRunner::new(
+            config,
+            tmp.path().to_path_buf(),
+            "test-session".into(),
+            "test prompt".into(),
+        );
         match runner.fire_pre_tool("shell", "{}").await {
             PreToolOutcome::Block(reason) => assert!(reason.contains("missing")),
             other => panic!("expected block, got {other:?}"),
@@ -460,7 +500,12 @@ mod tests {
                 events: vec![HookEvent::PreTool],
             }],
         };
-        let runner = ProjectHooksRunner::new(config, tmp.path().to_path_buf());
+        let runner = ProjectHooksRunner::new(
+            config,
+            tmp.path().to_path_buf(),
+            "test-session".into(),
+            "test prompt".into(),
+        );
         let outcome = runner.fire_pre_tool("fs_read", r#"{"path":"a"}"#).await;
         assert_eq!(
             outcome,
@@ -480,7 +525,12 @@ mod tests {
                 events: vec![HookEvent::PostTool],
             }],
         };
-        let runner = ProjectHooksRunner::new(config, tmp.path().to_path_buf());
+        let runner = ProjectHooksRunner::new(
+            config,
+            tmp.path().to_path_buf(),
+            "test-session".into(),
+            "test prompt".into(),
+        );
         let injections = runner
             .fire_post_tool("fs_read", r#"{"path":"a"}"#, "file contents")
             .await;
@@ -497,7 +547,12 @@ mod tests {
                 events: vec![HookEvent::PostTool],
             }],
         };
-        let runner = ProjectHooksRunner::new(config, tmp.path().to_path_buf());
+        let runner = ProjectHooksRunner::new(
+            config,
+            tmp.path().to_path_buf(),
+            "test-session".into(),
+            "test prompt".into(),
+        );
         let injections = runner.fire_post_tool("fs_read", "{}", "ok").await;
         assert!(injections.is_empty());
     }
@@ -514,7 +569,12 @@ mod tests {
                 events: vec![HookEvent::PreTool],
             }],
         };
-        let runner = ProjectHooksRunner::new(config, tmp.path().to_path_buf());
+        let runner = ProjectHooksRunner::new(
+            config,
+            tmp.path().to_path_buf(),
+            "test-session".into(),
+            "test prompt".into(),
+        );
         let outcome = runner.fire_pre_tool("shell", r#"{"command":"ls"}"#).await;
         let PreToolOutcome::Continue { injections } = outcome else {
             panic!("expected continue");
@@ -523,5 +583,12 @@ mod tests {
         assert_eq!(payload["event"], "pre-tool");
         assert_eq!(payload["tool"], "shell");
         assert_eq!(payload["args"]["command"], "ls");
+        // Claude Code-compatible fields must be present so tools like
+        // proactive-context can read them. `transcript_path` is always null
+        // because TENEX stores transcripts in SQLite, not a JSONL file.
+        assert_eq!(payload["session_id"], "test-session");
+        assert_eq!(payload["cwd"], tmp.path().to_string_lossy().as_ref());
+        assert_eq!(payload["transcript_path"], serde_json::Value::Null);
+        assert_eq!(payload["prompt"], "test prompt");
     }
 }
