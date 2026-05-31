@@ -1,4 +1,5 @@
-//! Project-local `.tenex-hooks.json` shell commands that fire at `pre-execute`, `pre-tool`, and `post-tool` boundaries.
+//! Project-local `.tenex-hooks.json` shell commands that fire at `pre-execute`,
+//! `pre-tool`, and `post-tool` boundaries.
 
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -16,7 +17,7 @@ const HOOK_TIMEOUT: Duration = Duration::from_secs(30);
 /// File name read from the agent's workspace directory.
 pub const PROJECT_HOOKS_FILE_NAME: &str = ".tenex-hooks.json";
 
-/// Tool-call lifecycle boundary a hook subscribes to.
+/// Agent lifecycle boundary a hook subscribes to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HookEvent {
     PreExecute,
@@ -101,7 +102,7 @@ impl ProjectHooksConfig {
                     "pre-tool" => HookEvent::PreTool,
                     "post-tool" => HookEvent::PostTool,
                     other => anyhow::bail!(
-                        "hook '{}' subscribes to unsupported event '{}'; supported events are 'pre-execute', 'pre-tool' and 'post-tool'",
+                        "hook '{}' subscribes to unsupported event '{}'; supported events are 'pre-execute', 'pre-tool', and 'post-tool'",
                         hook.name,
                         other
                     ),
