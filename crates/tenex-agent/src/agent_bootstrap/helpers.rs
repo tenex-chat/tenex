@@ -315,6 +315,7 @@ pub(super) fn compose_user_message(
     conversation_reminders_text: Option<&str>,
     external_disclosure: Option<&str>,
     remote_agent_disclosure: Option<&str>,
+    reminders: &[String],
 ) -> String {
     let mut msg = envelope_content.to_string();
     if !todo_reminder.is_empty() {
@@ -328,6 +329,9 @@ pub(super) fn compose_user_message(
     }
     if let Some(disclosure) = remote_agent_disclosure {
         msg = format!("{msg}\n\n{disclosure}");
+    }
+    for reminder in reminders {
+        msg = format!("{msg}\n\n{reminder}");
     }
     msg
 }
