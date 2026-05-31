@@ -426,6 +426,9 @@ pub(crate) async fn build(
     // are surfaced to hooks as the Claude Code `session_id` and `prompt`.
     let project_hooks =
         stages::load_project_hooks(&working_dir, conversation_id.clone(), original_task.clone())?;
+    // Clone before the move into init_supervisor_and_hook so we can fire
+    // pre-execute hooks at the end of bootstrap.
+    let hooks_for_bootstrap = project_hooks.clone();
 
     let assembly::SupervisorComponents {
         supervisor_ref,
@@ -514,6 +517,12 @@ pub(crate) async fn build(
     ) {
         system_prompt.push_str("\n\n");
         system_prompt.push_str(&file_modifications);
+    }
+    if let Some(hooks) = &hooks_for_bootstrap {
+        for injection in hooks.fire_pre_execute().await {
+            system_prompt.push_str("\n\n");
+            system_prompt.push_str(&injection);
+        }
     }
 
     let escalation_pubkey = escalation::resolve_escalation_pubkey(&base_dir, &project_agents)
