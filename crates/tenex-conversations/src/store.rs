@@ -746,6 +746,19 @@ impl ConversationStore {
         Ok(rows)
     }
 
+    /// Delete specific file snapshots by their row IDs. Called after a
+    /// file-modification reminder fires so the reminder is not repeated on the
+    /// next run (the text already carries forward in the conversation history).
+    pub fn delete_file_snapshots(&self, ids: &[i64]) -> Result<()> {
+        for id in ids {
+            self.conn.execute(
+                "DELETE FROM agent_file_snapshots WHERE id = ?1",
+                params![id],
+            )?;
+        }
+        Ok(())
+    }
+
     // ==========================================================================
     // Delegation markers
     //
