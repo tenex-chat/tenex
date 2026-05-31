@@ -119,9 +119,11 @@ pub fn render_reminder(
     }
 
     let mut blocks = Vec::new();
+    let mut triggered_ids: Vec<i64> = Vec::new();
     for snapshot in &snapshots {
         if let Some(block) = render_file_block(snapshot, working_dir) {
             blocks.push(block);
+            triggered_ids.push(snapshot.id);
         }
     }
     if blocks.is_empty() {
@@ -136,6 +138,14 @@ pub fn render_reminder(
         out.push_str(&block);
     }
     out.push_str("</system-reminder>");
+
+    // Delete the triggered snapshots so this reminder fires exactly once.
+    // The text is now embedded in the user message and carries forward in the
+    // conversation history; re-generating it would duplicate the information.
+    if let Err(e) = store.delete_file_snapshots(&triggered_ids) {
+        tracing::warn!("file_modifications: failed to clear triggered snapshots: {e}");
+    }
+
     Some(out)
 }
 
@@ -320,6 +330,57 @@ mod tests {
         assert!(reminder.contains("foo.txt"));
         assert!(reminder.contains("-original"));
         assert!(reminder.contains("+modified"));
+
+        // Second call must return None: the reminder text is now embedded in
+        // the conversation history; re-generating it would duplicate information.
+        assert!(
+            render_reminder(&db_path, "conv-1", "agent-1", &dir.path().display().to_string())
+                .is_none(),
+            "reminder must fire only once per modification"
+        );
+    }
+
+    #[test]
+    fn unmodified_snapshot_survives_after_modified_snapshot_clears() {
+        let dir = TempDir::new().unwrap();
+        let (db_path, _store) = open_db(&dir);
+        let modified_file = dir.path().join("changed.txt");
+        let stable_file = dir.path().join("stable.txt");
+        std::fs::write(&modified_file, b"original\n").unwrap();
+        std::fs::write(&stable_file, b"stable\n").unwrap();
+        let w = writer(&dir, &db_path);
+        w.capture(
+            r#"{"path":"changed.txt","content":"original\n"}"#,
+            "Successfully wrote 9 bytes to /x/changed.txt",
+        );
+        w.capture(
+            r#"{"path":"stable.txt","content":"stable\n"}"#,
+            "Successfully wrote 6 bytes to /x/stable.txt",
+        );
+        // Only modify one file externally.
+        std::fs::write(&modified_file, b"changed\n").unwrap();
+
+        let reminder = render_reminder(
+            &db_path,
+            "conv-1",
+            "agent-1",
+            &dir.path().display().to_string(),
+        )
+        .expect("modified file must warn");
+        assert!(reminder.contains("changed.txt"));
+        assert!(!reminder.contains("stable.txt"));
+
+        // Now modify the stable file externally — its snapshot was kept, so it
+        // triggers on the next run.
+        std::fs::write(&stable_file, b"now changed\n").unwrap();
+        let reminder2 = render_reminder(
+            &db_path,
+            "conv-1",
+            "agent-1",
+            &dir.path().display().to_string(),
+        )
+        .expect("second modified file must warn");
+        assert!(reminder2.contains("stable.txt"));
     }
 
     #[test]
