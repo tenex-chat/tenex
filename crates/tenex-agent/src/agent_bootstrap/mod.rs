@@ -314,7 +314,7 @@ pub(crate) async fn build(
     let global_system_prompt = config::read_global_system_prompt(&base_dir);
 
     // Build system prompt
-    let mut system_prompt = assembly::compose_system_prompt(assembly::SystemPromptInputs {
+    let system_prompt = assembly::compose_system_prompt(assembly::SystemPromptInputs {
         agent_config: &agent_config,
         pubkey_hex: &pubkey_hex,
         conversation_id: &conversation_id,
@@ -384,13 +384,6 @@ pub(crate) async fn build(
     } else {
         None
     };
-    let user_message = helpers::compose_user_message(
-        &envelope.content,
-        &todo_reminder,
-        conversation_reminders_text.as_deref(),
-        external_disclosure,
-        remote_agent_disclosure,
-    );
 
     // Shared todo state across tool calls (pre-seeded from persistence).
     let todos: Arc<Mutex<Vec<TodoItem>>> = Arc::new(Mutex::new(initial_todos));
@@ -426,9 +419,7 @@ pub(crate) async fn build(
     // are surfaced to hooks as the Claude Code `session_id` and `prompt`.
     let project_hooks =
         stages::load_project_hooks(&working_dir, conversation_id.clone(), original_task.clone())?;
-    // Clone before the move into init_supervisor_and_hook so we can fire
-    // pre-execute hooks at the end of bootstrap.
-    let hooks_for_bootstrap = project_hooks.clone();
+    let pre_execute_hooks = project_hooks.clone();
 
     let assembly::SupervisorComponents {
         supervisor_ref,
@@ -497,17 +488,19 @@ pub(crate) async fn build(
     )
     .await;
 
+    // Per-turn `<system-reminder>` blocks appended to the *user* message — not
+    // the system prompt — so the system prompt stays byte-stable across
+    // re-engagements and keeps prompt-cache hits (see proactive-context note above).
+    let mut turn_reminders: Vec<String> = Vec::new();
     if let Some(state) = &runtime_state {
         if let Some(active_tools) = state.render_active_tools_reminder() {
-            system_prompt.push_str("\n\n");
-            system_prompt.push_str(&active_tools);
+            turn_reminders.push(active_tools);
         }
     }
     if let Some(active_shell_tasks) =
         render_active_shell_tasks_reminder(&project_id, &conversation_id, &pubkey_hex).await
     {
-        system_prompt.push_str("\n\n");
-        system_prompt.push_str(&active_shell_tasks);
+        turn_reminders.push(active_shell_tasks);
     }
     if let Some(file_modifications) = file_modifications::render_reminder(
         &conv_db_path,
@@ -515,15 +508,26 @@ pub(crate) async fn build(
         &pubkey_hex,
         &working_dir,
     ) {
-        system_prompt.push_str("\n\n");
-        system_prompt.push_str(&file_modifications);
+        turn_reminders.push(file_modifications);
     }
-    if let Some(hooks) = &hooks_for_bootstrap {
-        for injection in hooks.fire_pre_execute().await {
-            system_prompt.push_str("\n\n");
-            system_prompt.push_str(&injection);
+    // Project `pre-execute` hooks fire once before the LLM call. Their stdout is
+    // operator-supplied context; we wrap it in a system-reminder and append to
+    // the user turn.
+    if let Some(runner) = &pre_execute_hooks {
+        for injection in runner.fire_pre_execute().await {
+            turn_reminders.push(format!(
+                "<system-reminder type=\"pre-execute-hook\">\n{injection}\n</system-reminder>"
+            ));
         }
     }
+    let user_message = helpers::compose_user_message(
+        &envelope.content,
+        &todo_reminder,
+        conversation_reminders_text.as_deref(),
+        external_disclosure,
+        remote_agent_disclosure,
+        &turn_reminders,
+    );
 
     let escalation_pubkey = escalation::resolve_escalation_pubkey(&base_dir, &project_agents)
         .filter(|pk| pk != &pubkey_hex);
