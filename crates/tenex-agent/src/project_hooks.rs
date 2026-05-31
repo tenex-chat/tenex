@@ -1,4 +1,4 @@
-//! Project-local `.tenex-hooks.json` shell commands that fire at `pre-tool` and `post-tool` boundaries.
+//! Project-local `.tenex-hooks.json` shell commands that fire at `pre-execute`, `pre-tool`, and `post-tool` boundaries.
 
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -19,6 +19,7 @@ pub const PROJECT_HOOKS_FILE_NAME: &str = ".tenex-hooks.json";
 /// Tool-call lifecycle boundary a hook subscribes to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HookEvent {
+    PreExecute,
     PreTool,
     PostTool,
 }
@@ -28,6 +29,7 @@ impl HookEvent {
     /// Claude Code hook vocabulary.
     fn wire_name(self) -> &'static str {
         match self {
+            HookEvent::PreExecute => "pre-execute",
             HookEvent::PreTool => "pre-tool",
             HookEvent::PostTool => "post-tool",
         }
@@ -95,10 +97,11 @@ impl ProjectHooksConfig {
             let mut events = Vec::with_capacity(hook.events.len());
             for event in &hook.events {
                 let parsed = match event.as_str() {
+                    "pre-execute" => HookEvent::PreExecute,
                     "pre-tool" => HookEvent::PreTool,
                     "post-tool" => HookEvent::PostTool,
                     other => anyhow::bail!(
-                        "hook '{}' subscribes to unsupported event '{}'; supported events are 'pre-tool' and 'post-tool'",
+                        "hook '{}' subscribes to unsupported event '{}'; supported events are 'pre-execute', 'pre-tool' and 'post-tool'",
                         hook.name,
                         other
                     ),
@@ -158,6 +161,44 @@ impl ProjectHooksRunner {
             session_id,
             prompt,
         }
+    }
+
+    /// Fire every `pre-execute` hook in order, once per user-message turn before
+    /// the LLM is called. Non-zero exit, timeout, and spawn failures are warned
+    /// and ignored — pre-execute hooks cannot block the turn.
+    pub async fn fire_pre_execute(&self) -> Vec<String> {
+        let stdin = self.pre_execute_stdin();
+        let mut injections = Vec::new();
+        for hook in self.hooks.iter().filter(|h| h.subscribes_to(HookEvent::PreExecute)) {
+            match self.run_hook(hook, &stdin).await {
+                HookRun::Completed { exit_ok, stdout, stderr: _ } => {
+                    if exit_ok {
+                        if !stdout.is_empty() {
+                            injections.push(stdout);
+                        }
+                    } else {
+                        eprintln!(
+                            "[tenex-agent] warn: pre-execute hook '{}' exited non-zero; pre-execute hooks cannot block, so the failure is ignored",
+                            hook.name
+                        );
+                    }
+                }
+                HookRun::TimedOut => {
+                    eprintln!(
+                        "[tenex-agent] warn: pre-execute hook '{}' timed out after {}s; continuing",
+                        hook.name,
+                        HOOK_TIMEOUT.as_secs()
+                    );
+                }
+                HookRun::SpawnFailed(e) => {
+                    eprintln!(
+                        "[tenex-agent] warn: pre-execute hook '{}' failed to run: {e}; continuing",
+                        hook.name
+                    );
+                }
+            }
+        }
+        injections
     }
 
     /// Fire every `pre-tool` hook in order. The first hook to exit non-zero
@@ -275,8 +316,14 @@ impl ProjectHooksRunner {
         };
 
         if let Some(mut child_stdin) = child.stdin.take() {
-            if let Err(e) = child_stdin.write_all(stdin.as_bytes()).await {
-                return HookRun::SpawnFailed(format!("writing hook stdin: {e}"));
+            match child_stdin.write_all(stdin.as_bytes()).await {
+                Ok(()) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => {
+                    // The child exited before reading all of stdin (e.g. a hook
+                    // that ignores its stdin). This is not a spawn failure — the
+                    // child may have already produced useful output.
+                }
+                Err(e) => return HookRun::SpawnFailed(format!("writing hook stdin: {e}")),
             }
             // Drop closes the pipe so the hook sees EOF.
             drop(child_stdin);
@@ -297,6 +344,20 @@ impl ProjectHooksRunner {
             Ok(Err(e)) => HookRun::SpawnFailed(format!("awaiting hook: {e}")),
             Err(_) => HookRun::TimedOut,
         }
+    }
+
+    /// Build the `pre-execute` stdin payload. No `tool`/`args` fields since no
+    /// tool is being called. `transcript_path` is always `null` (TENEX stores
+    /// transcripts in SQLite, not a JSONL file).
+    fn pre_execute_stdin(&self) -> String {
+        let payload = serde_json::json!({
+            "event": HookEvent::PreExecute.wire_name(),
+            "session_id": self.session_id,
+            "cwd": self.working_dir.to_string_lossy(),
+            "transcript_path": serde_json::Value::Null,
+            "prompt": self.prompt,
+        });
+        payload.to_string()
     }
 
     /// Build the `pre-tool` stdin payload. `args_json` is the tool's argument
@@ -392,11 +453,22 @@ mod tests {
     }
 
     #[test]
-    fn rejects_unsupported_event() {
+    fn accepts_pre_execute_event() {
         let tmp = tempfile::tempdir().unwrap();
         write_config(
             tmp.path(),
             r#"{"hooks":[{"name":"x","command":["true"],"events":["pre-execute"]}]}"#,
+        );
+        let config = ProjectHooksConfig::load(tmp.path()).unwrap();
+        assert!(config.hooks[0].subscribes_to(HookEvent::PreExecute));
+    }
+
+    #[test]
+    fn rejects_unsupported_event() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_config(
+            tmp.path(),
+            r#"{"hooks":[{"name":"x","command":["true"],"events":["on-startup"]}]}"#,
         );
         assert!(ProjectHooksConfig::load(tmp.path()).is_err());
     }
@@ -590,5 +662,51 @@ mod tests {
         assert_eq!(payload["cwd"], tmp.path().to_string_lossy().as_ref());
         assert_eq!(payload["transcript_path"], serde_json::Value::Null);
         assert_eq!(payload["prompt"], "test prompt");
+    }
+
+    #[tokio::test]
+    async fn pre_execute_stdout_becomes_injection() {
+        let tmp = tempfile::tempdir().unwrap();
+        let config = ProjectHooksConfig {
+            hooks: vec![HookEntry {
+                name: "context".into(),
+                command: vec!["sh".into(), "-c".into(), "echo pre-exec-context".into()],
+                events: vec![HookEvent::PreExecute],
+            }],
+        };
+        let runner = ProjectHooksRunner::new(
+            config,
+            tmp.path().to_path_buf(),
+            "test-session".into(),
+            "test prompt".into(),
+        );
+        let injections = runner.fire_pre_execute().await;
+        assert_eq!(injections, vec!["pre-exec-context".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn pre_execute_payload_omits_tool_and_args() {
+        let tmp = tempfile::tempdir().unwrap();
+        let config = ProjectHooksConfig {
+            hooks: vec![HookEntry {
+                name: "echo".into(),
+                command: vec!["cat".into()],
+                events: vec![HookEvent::PreExecute],
+            }],
+        };
+        let runner = ProjectHooksRunner::new(
+            config,
+            tmp.path().to_path_buf(),
+            "test-session".into(),
+            "test prompt".into(),
+        );
+        let injections = runner.fire_pre_execute().await;
+        let payload: serde_json::Value = serde_json::from_str(&injections[0]).unwrap();
+        assert_eq!(payload["event"], "pre-execute");
+        assert!(payload.get("tool").is_none());
+        assert!(payload.get("args").is_none());
+        assert_eq!(payload["session_id"], "test-session");
+        assert_eq!(payload["prompt"], "test prompt");
+        assert_eq!(payload["transcript_path"], serde_json::Value::Null);
     }
 }
